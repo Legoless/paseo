@@ -1,7 +1,14 @@
 import { memo, useMemo, useCallback, useState, type ReactNode } from "react";
-import { Text, View, type ViewStyle } from "react-native";
+import { Pressable, Text, View, type GestureResponderEvent, type ViewStyle } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { CircleAlert, Folder, FolderGit2, Monitor } from "lucide-react-native";
+import {
+  CircleAlert,
+  ChevronDown,
+  ChevronRight,
+  Folder,
+  FolderGit2,
+  Monitor,
+} from "lucide-react-native";
 import { ProjectStatusIndicator } from "@/components/sidebar/project-leading-visual";
 import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
 import {
@@ -40,6 +47,21 @@ const ThemedCircleAlert = withUnistyles(CircleAlert);
 const ThemedMonitor = withUnistyles(Monitor);
 const ThemedFolder = withUnistyles(Folder);
 const ThemedFolderGit2 = withUnistyles(FolderGit2);
+const ThemedChevronDown = withUnistyles(ChevronDown);
+const ThemedChevronRight = withUnistyles(ChevronRight);
+
+/**
+ * The workspace-grouped sidebar's one collapse control. It shares the row's leading slot with
+ * the status indicator: the slot keeps its fixed box, so swapping between the two never moves
+ * the row. `visible` decides which face shows; the slot is a toggle target whenever the
+ * accessory is present. Passed to the row content as scalars (`collapseChevron`,
+ * `collapseChevronVisible`, `onCollapseToggle`) so the memoized content keeps stable props.
+ */
+export interface SidebarWorkspaceCollapseAccessory {
+  chevron: "expand" | "collapse";
+  visible: boolean;
+  onToggle: () => void;
+}
 
 export function SidebarWorkspaceRowFrame({
   workspace,
@@ -100,6 +122,9 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   shortcutNumber = null,
   showShortcutBadge = false,
   reserveIdleStatusIndicatorSpace = true,
+  collapseChevron,
+  collapseChevronVisible = false,
+  onCollapseToggle,
   children,
 }: {
   workspace: SidebarWorkspaceEntry;
@@ -117,6 +142,10 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   showShortcutBadge?: boolean;
   /** Keep the empty leading slot when the workspace has no active status. */
   reserveIdleStatusIndicatorSpace?: boolean;
+  /** Top-level workspace rows only: turns the leading slot into the subtree collapse toggle. */
+  collapseChevron?: "expand" | "collapse";
+  collapseChevronVisible?: boolean;
+  onCollapseToggle?: () => void;
   children?: ReactNode;
 }) {
   const {
@@ -149,11 +178,15 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
             testID={`sidebar-row-project-icon-${workspace.workspaceKey}`}
           />
         ) : (
-          <WorkspaceStatusIndicator
+          <WorkspaceLeadingSlot
             bucket={workspace.statusBucket}
             workspaceKind={workspace.workspaceKind}
             loading={isLoading}
             reserveIdleSpace={reserveIdleStatusIndicatorSpace}
+            collapseChevron={collapseChevron}
+            collapseChevronVisible={collapseChevronVisible}
+            onCollapseToggle={onCollapseToggle}
+            workspaceKey={workspace.workspaceKey}
           />
         )}
         <View style={styles.workspaceContentColumn}>
@@ -164,7 +197,6 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
             <View style={sidebarWorkspaceRowStyles.rowRight}>{children}</View>
           </View>
           <WorkspaceMetaRow
-            currentBranch={workspace.currentBranch}
             projectName={leadingProjectName}
             hostBadge={hostBadge ?? null}
             prHint={workspace.prHint}
@@ -181,6 +213,69 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
     </View>
   );
 });
+
+function WorkspaceLeadingSlot({
+  bucket,
+  workspaceKind,
+  loading = false,
+  reserveIdleSpace = true,
+  collapseChevron,
+  collapseChevronVisible = false,
+  onCollapseToggle,
+  workspaceKey,
+}: {
+  bucket: SidebarWorkspaceEntry["statusBucket"];
+  workspaceKind: SidebarWorkspaceEntry["workspaceKind"];
+  loading?: boolean;
+  reserveIdleSpace?: boolean;
+  collapseChevron?: "expand" | "collapse";
+  collapseChevronVisible?: boolean;
+  onCollapseToggle?: () => void;
+  workspaceKey: string;
+}) {
+  const handlePress = useCallback(
+    (event: GestureResponderEvent) => {
+      // The toggle belongs to the subtree, not the row: pressing it must not navigate.
+      event.stopPropagation();
+      onCollapseToggle?.();
+    },
+    [onCollapseToggle],
+  );
+  const indicator = (
+    <WorkspaceStatusIndicator
+      bucket={bucket}
+      workspaceKind={workspaceKind}
+      loading={loading}
+      reserveIdleSpace={reserveIdleSpace}
+    />
+  );
+  if (!collapseChevron || !onCollapseToggle) {
+    return indicator;
+  }
+  let slotContent: ReactNode = indicator;
+  if (collapseChevronVisible) {
+    slotContent =
+      collapseChevron === "collapse" ? (
+        <ThemedChevronDown size={14} uniProps={foregroundMutedColorMapping} />
+      ) : (
+        <ThemedChevronRight size={14} uniProps={foregroundMutedColorMapping} />
+      );
+  }
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={
+        collapseChevron === "collapse" ? "Collapse workspace" : "Expand workspace"
+      }
+      hitSlop={6}
+      onPress={handlePress}
+      style={styles.workspaceStatusDot}
+      testID={`sidebar-workspace-collapse-toggle-${workspaceKey}`}
+    >
+      {slotContent}
+    </Pressable>
+  );
+}
 
 function WorkspaceStatusIndicator({
   bucket,

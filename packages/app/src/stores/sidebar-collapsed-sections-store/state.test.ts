@@ -6,6 +6,7 @@ import {
   setProjectCollapsed,
   togglePinnedCollapsed,
   toggleProjectCollapsed,
+  toggleWorkspaceCollapsed,
   toggleWorkspaceGroupCollapsed,
 } from "@/stores/sidebar-collapsed-sections-store/state";
 
@@ -13,6 +14,7 @@ function emptyState(): CollapsedProjectsState {
   return {
     collapsedProjectKeys: new Set(),
     collapsedWorkspaceGroupKeys: new Set(),
+    collapsedWorkspaceKeys: new Set(),
     collapsedPinned: false,
   };
 }
@@ -30,18 +32,41 @@ describe("sidebar collapsed projects transitions", () => {
     expect(Array.from(state.collapsedWorkspaceGroupKeys)).toEqual(["running"]);
   });
 
+  it("tracks collapsed workspace keys independently of project and group keys", () => {
+    let state = emptyState();
+
+    state = toggleWorkspaceCollapsed(state, "srv:ws-1");
+    state = toggleWorkspaceCollapsed(state, "srv:ws-2");
+    state = toggleWorkspaceCollapsed(state, "srv:ws-1");
+
+    expect(Array.from(state.collapsedWorkspaceKeys)).toEqual(["srv:ws-2"]);
+    expect(Array.from(state.collapsedProjectKeys)).toEqual([]);
+    expect(Array.from(state.collapsedWorkspaceGroupKeys)).toEqual([]);
+  });
+
   it("serializes collapsed project keys for preference storage", () => {
     const state: CollapsedProjectsState = {
       collapsedProjectKeys: new Set(["project-a", "project-b"]),
       collapsedWorkspaceGroupKeys: new Set(["running"]),
+      collapsedWorkspaceKeys: new Set(["srv:ws-1"]),
       collapsedPinned: true,
     };
 
     expect(serializeCollapsedProjects(state)).toEqual({
       collapsedProjectKeys: ["project-a", "project-b"],
       collapsedWorkspaceGroupKeys: ["running"],
+      collapsedWorkspaceKeys: ["srv:ws-1"],
       collapsedPinned: true,
     });
+  });
+
+  it("restores collapsed workspace keys persisted by a newer build", () => {
+    const restored = mergePersistedCollapsedProjects(
+      { collapsedWorkspaceKeys: ["srv:ws-1", "srv:ws-2"] },
+      emptyState(),
+    );
+
+    expect(Array.from(restored.collapsedWorkspaceKeys)).toEqual(["srv:ws-1", "srv:ws-2"]);
   });
 
   it("toggles and restores the pinned section collapse flag", () => {
@@ -68,6 +93,9 @@ describe("sidebar collapsed projects transitions", () => {
     expect(mergePersistedCollapsedProjects(undefined, currentState)).toBe(currentState);
     expect(mergePersistedCollapsedProjects({}, currentState)).toBe(currentState);
     expect(mergePersistedCollapsedProjects({ collapsedProjectKeys: [] }, currentState)).toBe(
+      currentState,
+    );
+    expect(mergePersistedCollapsedProjects({ collapsedWorkspaceKeys: [] }, currentState)).toBe(
       currentState,
     );
   });

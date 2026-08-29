@@ -44,6 +44,18 @@ function workspaceDescriptor(input: {
     statusEnteredAt: input.statusEnteredAt ?? null,
     diffStat: null,
     scripts: [],
+    members: [
+      {
+        projectId: input.projectId ?? "project-1",
+        projectDisplayName: input.projectDisplayName ?? "Project 1",
+        projectCustomName: null,
+        projectRootPath: "/repo/main",
+        workspaceDirectory: `/repo/main/${input.id}`,
+        workspaceKind: "worktree",
+        worktreeSlug: null,
+        branch: null,
+      },
+    ],
   };
 }
 

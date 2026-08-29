@@ -22,6 +22,7 @@ import type {
   SessionOutboundMessage,
   WorkspaceDescriptorPayload,
   WorkspaceCreateRequest,
+  WorkspaceMemberAddRequest,
 } from "@getpaseo/protocol/messages";
 import { DaemonClient } from "./daemon-client.js";
 import type {
@@ -116,6 +117,8 @@ export type PaseoWorkspaceCreateOptions = Omit<WorkspaceCreateRequest, "type" | 
   requestId?: string;
 };
 
+export type PaseoWorkspaceMemberAddSource = WorkspaceMemberAddRequest["source"];
+
 export interface PaseoWorkspaceArchiveResult {
   requestId: string;
   workspaceId: string;
@@ -168,6 +171,18 @@ export interface PaseoWorkspaceActions {
     workspace: string | PaseoWorkspaceHandle,
     requestId?: string,
   ): Promise<PaseoWorkspaceArchiveResult>;
+  /** Adds a project membership to the workspace and returns the fresh descriptor. */
+  addWorkspaceMember(
+    workspace: string | PaseoWorkspaceHandle,
+    source: PaseoWorkspaceMemberAddSource,
+    requestId?: string,
+  ): Promise<PaseoWorkspace>;
+  /** Removes one project membership (by directory) and returns the fresh descriptor. */
+  removeWorkspaceMember(
+    workspace: string | PaseoWorkspaceHandle,
+    cwd: string,
+    requestId?: string,
+  ): Promise<PaseoWorkspace>;
   /**
    * Local event subscription over the low-level driver's workspace_update stream.
    * The returned function only removes this SDK listener.
@@ -473,6 +488,28 @@ export function createPaseoApi(daemonClient: DaemonClient): PaseoApi {
       },
       archive: (workspace, requestId) =>
         daemonClient.archiveWorkspace(resolveWorkspaceId(workspace), requestId),
+      addWorkspaceMember: async (workspace, source, requestId) => {
+        const result = await daemonClient.addWorkspaceMember(
+          resolveWorkspaceId(workspace),
+          source,
+          requestId,
+        );
+        if (result.error || !result.workspace) {
+          throw new Error(result.error ?? "The daemon did not add the workspace member");
+        }
+        return result.workspace;
+      },
+      removeWorkspaceMember: async (workspace, cwd, requestId) => {
+        const result = await daemonClient.removeWorkspaceMember(
+          resolveWorkspaceId(workspace),
+          cwd,
+          requestId,
+        );
+        if (result.error || !result.workspace) {
+          throw new Error(result.error ?? "The daemon did not remove the workspace member");
+        }
+        return result.workspace;
+      },
       subscribe: (handler) =>
         daemonClient.on("workspace_update", (message) => {
           handler(message.payload);

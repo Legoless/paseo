@@ -21,6 +21,18 @@ const baseWorkspace: WorkspaceDescriptor = {
   statusEnteredAt: null,
   diffStat: null,
   scripts: [],
+  members: [
+    {
+      projectId: "/repo",
+      projectDisplayName: "Repo",
+      projectCustomName: null,
+      projectRootPath: "/repo",
+      workspaceDirectory: "/repo/worktree",
+      workspaceKind: "worktree",
+      worktreeSlug: null,
+      branch: null,
+    },
+  ],
 };
 
 function workspace(input?: Partial<WorkspaceDescriptor>): WorkspaceDescriptor {

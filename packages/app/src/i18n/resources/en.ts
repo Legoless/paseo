@@ -615,6 +615,9 @@ export const en = {
         changes: "Changes",
         files: "Files",
       },
+      projectPicker: {
+        selectProject: "Select project",
+      },
       toasts: {
         copyFailed: "Copy failed",
         agentIdCopiedLabel: "Agent ID",

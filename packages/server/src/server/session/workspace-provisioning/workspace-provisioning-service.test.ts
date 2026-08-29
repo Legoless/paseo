@@ -718,3 +718,198 @@ test.each(["missing", "archived"] as const)(
     expect(await projectRegistry.list()).toEqual(previousProject ? [previousProject] : []);
   },
 );
+
+test("addWorkspaceMember appends a directory member with its own project", async () => {
+  const primaryDir = path.join(tmpDir, "primary");
+  const memberDir = path.join(tmpDir, "member");
+  gitRoots.add(memberDir);
+  const workspace = await provisioning.createWorkspaceForDirectory(primaryDir);
+
+  const updated = await provisioning.addWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    source: { kind: "directory", path: memberDir },
+  });
+
+  expect(updated.workspaceId).toBe(workspace.workspaceId);
+  // Scalar fields keep mirroring the primary member.
+  expect(updated).toMatchObject({ cwd: primaryDir, projectId: workspace.projectId });
+  expect(updated.members).toHaveLength(2);
+  expect(updated.members?.[0]).toMatchObject({ cwd: primaryDir, projectId: workspace.projectId });
+  expect(updated.members?.[1]).toMatchObject({
+    cwd: memberDir,
+    kind: "local_checkout",
+    branch: "main",
+    worktreeRoot: memberDir,
+  });
+  expect(updated.members?.[1].projectId).not.toBe(workspace.projectId);
+  expect(await projectRegistry.list()).toHaveLength(2);
+
+  const reloaded = new FileBackedWorkspaceRegistry(
+    path.join(tmpDir, "projects", "workspaces.json"),
+    logger,
+  );
+  await reloaded.initialize();
+  expect((await reloaded.get(workspace.workspaceId))?.members).toHaveLength(2);
+});
+
+test("addWorkspaceMember reuses an existing project by exact root", async () => {
+  const primaryDir = path.join(tmpDir, "primary");
+  const memberDir = path.join(tmpDir, "member");
+  const workspace = await provisioning.createWorkspaceForDirectory(primaryDir);
+  const memberProject = await provisioning.findOrCreateProjectForDirectory(memberDir);
+
+  const updated = await provisioning.addWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    source: { kind: "directory", path: memberDir },
+  });
+
+  expect(updated.members?.[1].projectId).toBe(memberProject.projectId);
+  expect(await projectRegistry.list()).toHaveLength(2);
+});
+
+test("addWorkspaceMember honors an explicit projectId", async () => {
+  const primaryDir = path.join(tmpDir, "primary");
+  const memberDir = path.join(tmpDir, "member");
+  const workspace = await provisioning.createWorkspaceForDirectory(primaryDir);
+  const project = await provisioning.findOrCreateProjectForDirectory(path.join(tmpDir, "shared"));
+
+  const updated = await provisioning.addWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    source: { kind: "directory", path: memberDir, projectId: project.projectId },
+  });
+
+  expect(updated.members?.[1]).toMatchObject({ cwd: memberDir, projectId: project.projectId });
+  expect(await projectRegistry.list()).toHaveLength(2);
+});
+
+test("addWorkspaceMember rejects a member cwd the workspace already holds", async () => {
+  const primaryDir = path.join(tmpDir, "primary");
+  const memberDir = path.join(tmpDir, "member");
+  const workspace = await provisioning.createWorkspaceForDirectory(primaryDir);
+  await provisioning.addWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    source: { kind: "directory", path: memberDir },
+  });
+
+  await expect(
+    provisioning.addWorkspaceMember({
+      workspaceId: workspace.workspaceId,
+      source: { kind: "directory", path: `${memberDir}${path.sep}` },
+    }),
+  ).rejects.toMatchObject({
+    code: "duplicate_member",
+  } satisfies Partial<WorkspaceProvisioningError>);
+  await expect(
+    provisioning.addWorkspaceMember({
+      workspaceId: workspace.workspaceId,
+      source: { kind: "directory", path: primaryDir },
+    }),
+  ).rejects.toMatchObject({
+    code: "duplicate_member",
+  } satisfies Partial<WorkspaceProvisioningError>);
+
+  expect((await workspaceRegistry.get(workspace.workspaceId))?.members).toHaveLength(2);
+});
+
+test("addWorkspaceMember classifies unknown and archived workspaces", async () => {
+  await expect(
+    provisioning.addWorkspaceMember({
+      workspaceId: "missing",
+      source: { kind: "directory", path: path.join(tmpDir, "member") },
+    }),
+  ).rejects.toMatchObject({
+    code: "workspace_not_found",
+  } satisfies Partial<WorkspaceProvisioningError>);
+
+  const workspace = await provisioning.createWorkspaceForDirectory(path.join(tmpDir, "primary"));
+  await workspaceRegistry.archive(workspace.workspaceId, ARCHIVED_AT);
+  await expect(
+    provisioning.addWorkspaceMember({
+      workspaceId: workspace.workspaceId,
+      source: { kind: "directory", path: path.join(tmpDir, "member") },
+    }),
+  ).rejects.toMatchObject({
+    code: "archived_workspace",
+  } satisfies Partial<WorkspaceProvisioningError>);
+});
+
+test("removeWorkspaceMember drops a non-primary member and keeps the scalars", async () => {
+  const primaryDir = path.join(tmpDir, "primary");
+  const memberDir = path.join(tmpDir, "member");
+  const workspace = await provisioning.createWorkspaceForDirectory(primaryDir);
+  await provisioning.addWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    source: { kind: "directory", path: memberDir },
+  });
+
+  const updated = await provisioning.removeWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    cwd: memberDir,
+  });
+
+  expect(updated.members).toHaveLength(1);
+  expect(updated.members?.[0]).toMatchObject({ cwd: primaryDir, projectId: workspace.projectId });
+  expect(updated).toMatchObject({ cwd: primaryDir, projectId: workspace.projectId });
+});
+
+test("removeWorkspaceMember re-mirrors the scalars when the primary member leaves", async () => {
+  const primaryDir = path.join(tmpDir, "primary");
+  const memberDir = path.join(tmpDir, "member");
+  const workspace = await provisioning.createWorkspaceForDirectory(primaryDir);
+  const withMember = await provisioning.addWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    source: { kind: "directory", path: memberDir },
+  });
+  const secondProjectId = withMember.members?.[1].projectId;
+
+  const updated = await provisioning.removeWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    cwd: primaryDir,
+  });
+
+  expect(updated.members).toHaveLength(1);
+  expect(updated.members?.[0]).toMatchObject({ cwd: memberDir, projectId: secondProjectId });
+  expect(updated).toMatchObject({ cwd: memberDir, projectId: secondProjectId });
+
+  const reloaded = new FileBackedWorkspaceRegistry(
+    path.join(tmpDir, "projects", "workspaces.json"),
+    logger,
+  );
+  await reloaded.initialize();
+  expect(await reloaded.get(workspace.workspaceId)).toMatchObject({
+    cwd: memberDir,
+    projectId: secondProjectId,
+  });
+});
+
+test("removeWorkspaceMember refuses to strip the last member", async () => {
+  const workspace = await provisioning.createWorkspaceForDirectory(path.join(tmpDir, "primary"));
+
+  await expect(
+    provisioning.removeWorkspaceMember({
+      workspaceId: workspace.workspaceId,
+      cwd: path.join(tmpDir, "primary"),
+    }),
+  ).rejects.toMatchObject({ code: "last_member" } satisfies Partial<WorkspaceProvisioningError>);
+
+  expect((await workspaceRegistry.get(workspace.workspaceId))?.cwd).toBe(
+    path.join(tmpDir, "primary"),
+  );
+});
+
+test("removeWorkspaceMember rejects a cwd the workspace does not hold", async () => {
+  const workspace = await provisioning.createWorkspaceForDirectory(path.join(tmpDir, "primary"));
+  await provisioning.addWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    source: { kind: "directory", path: path.join(tmpDir, "member") },
+  });
+
+  await expect(
+    provisioning.removeWorkspaceMember({
+      workspaceId: workspace.workspaceId,
+      cwd: path.join(tmpDir, "stranger"),
+    }),
+  ).rejects.toMatchObject({
+    code: "member_not_found",
+  } satisfies Partial<WorkspaceProvisioningError>);
+});

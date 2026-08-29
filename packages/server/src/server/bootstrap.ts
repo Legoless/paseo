@@ -140,6 +140,7 @@ import type { PaseoToolRuntimeContext } from "./agent/tools/types.js";
 import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import { bootstrapWorkspaceRegistries } from "./workspace-registry-bootstrap.js";
 import { WorkspaceReconciliationService } from "./workspace-reconciliation-service.js";
+import { workspaceMembers } from "./workspace-registry-model.js";
 import {
   FileBackedProjectRegistry,
   FileBackedWorkspaceRegistry,
@@ -1008,6 +1009,13 @@ export async function createPaseoDaemon(
         worktreeRoot: workspace.worktreeRoot,
         isPaseoOwnedWorktree: workspace.isPaseoOwnedWorktree,
         mainRepoRoot: workspace.mainRepoRoot,
+        members: workspaceMembers(workspace).map((member) => ({
+          cwd: member.cwd,
+          kind: member.kind,
+          worktreeRoot: member.worktreeRoot,
+          isPaseoOwnedWorktree: member.isPaseoOwnedWorktree,
+          mainRepoRoot: member.mainRepoRoot,
+        })),
       }));
   };
   const markWorkspaceArchivingExternal = (workspaceIds: Iterable<string>, archivingAt: string) => {

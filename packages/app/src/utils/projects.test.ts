@@ -36,6 +36,18 @@ function workspace(id: string, projectId: string, root: string): WorkspaceDescri
     archivingAt: null,
     diffStat: null,
     scripts: [],
+    members: [
+      {
+        projectId,
+        projectDisplayName: "acme/app",
+        projectCustomName: null,
+        projectRootPath: root,
+        workspaceDirectory: root,
+        workspaceKind: "local_checkout",
+        worktreeSlug: null,
+        branch: null,
+      },
+    ],
   };
 }
 

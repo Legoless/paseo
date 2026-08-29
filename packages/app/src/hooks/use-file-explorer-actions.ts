@@ -46,10 +46,15 @@ function normalizeWorkspaceValue(value: string | null | undefined): string | nul
 
 export function buildWorkspaceExplorerStateKey(scope: FileExplorerWorkspaceScope): string | null {
   const normalizedWorkspaceId = normalizeWorkspaceValue(scope.workspaceId);
-  if (normalizedWorkspaceId) {
-    return `workspace:${normalizedWorkspaceId}`;
-  }
   const normalizedWorkspaceRoot = normalizeWorkspaceValue(scope.workspaceRoot);
+  if (normalizedWorkspaceId) {
+    // The root is part of the key so two project members of one workspace keep
+    // separate tree and expansion state. Single-member workspaces key on their
+    // primary cwd, so their state carries over unchanged.
+    return normalizedWorkspaceRoot
+      ? `workspace:${normalizedWorkspaceId}:${normalizedWorkspaceRoot}`
+      : `workspace:${normalizedWorkspaceId}`;
+  }
   if (!normalizedWorkspaceRoot) {
     return null;
   }

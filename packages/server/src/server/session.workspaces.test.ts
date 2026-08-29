@@ -46,7 +46,10 @@ import type { WorkspaceGitRuntimeSnapshot } from "./workspace-git-service.js";
 import type { GeneratedWorkspaceName } from "./worktree-branch-name-generator.js";
 import { WorkspaceAutoName } from "./workspace-auto-name.js";
 import type { ForgeService } from "../services/forge-service.js";
-import { createNoopWorkspaceGitService } from "./test-utils/workspace-git-service-stub.js";
+import {
+  createNoGitWorkspaceRuntimeSnapshot,
+  createNoopWorkspaceGitService,
+} from "./test-utils/workspace-git-service-stub.js";
 import { deriveProjectKey } from "./project-key.js";
 import {
   asSessionLogger,
@@ -1060,6 +1063,237 @@ test("create_agent_request keeps requested child cwd when grouped under an exist
       status: "agent_created",
       agent: { cwd: child },
     });
+  } finally {
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+function createMultiMemberAgentIntentHarness(input: {
+  primary: string;
+  member: string;
+  workdir: string;
+}): {
+  session: TestSession;
+  agentManager: AgentManager;
+  emitted: SessionOutboundMessage[];
+} {
+  const logger = {
+    child: () => logger,
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  };
+  const agentStorage = new AgentStorage(
+    path.join(input.workdir, "agents"),
+    asSessionLogger(logger),
+  );
+  const agentManager = new AgentManager({
+    clients: { codex: new CreateAgentTestClient() },
+    registry: agentStorage,
+    logger: asSessionLogger(logger),
+    idFactory: () => "00000000-0000-4000-8000-000000000552",
+  });
+  const projectRegistry = new FileBackedProjectRegistry(
+    path.join(input.workdir, "projects.json"),
+    asSessionLogger(logger),
+  );
+  const workspaceRegistry = new FileBackedWorkspaceRegistry(
+    path.join(input.workdir, "workspaces.json"),
+    asSessionLogger(logger),
+  );
+  const workspaceGitService = createNoopWorkspaceGitService();
+
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    new Session({
+      clientId: "test-client",
+      serverId: "test-server",
+      scopes: ["*"],
+      appVersion: null,
+      onMessage: (message) => emitted.push(message),
+      logger: asSessionLogger(logger),
+      downloadTokenStore: asDownloadTokenStore(),
+      pushNotifications: asPushNotifications(),
+      paseoHome: path.join(input.workdir, "paseo-home"),
+      agentManager,
+      agentStorage,
+      projectRegistry,
+      workspaceRegistry,
+      scheduleService: asScheduleService(),
+      checkoutDiffManager: asCheckoutDiffManager({
+        subscribe: async () => ({
+          initial: { cwd: input.primary, files: [], error: null },
+          unsubscribe: () => {},
+        }),
+        scheduleRefreshForCwd: () => {},
+        onWorkspaceStateMayHaveChanged: () => {},
+        invalidateForge: () => {},
+        getMetrics: () => ({
+          checkoutDiffTargetCount: 0,
+          checkoutDiffSubscriptionCount: 0,
+          checkoutDiffWatcherCount: 0,
+          checkoutDiffFallbackRefreshTargetCount: 0,
+        }),
+        dispose: () => {},
+      }),
+      workspaceGitService,
+      daemonConfigStore: asDaemonConfigStore({
+        get: () => ({ mcp: { injectIntoAgents: false }, providers: {} }),
+        onChange: () => () => {},
+      }),
+      mcpBaseUrl: null,
+      stt: null,
+      tts: null,
+      providerSnapshotManager: createProviderSnapshotManagerStub().manager,
+      terminalManager: null,
+    }),
+  );
+
+  return { session, agentManager, emitted };
+}
+
+async function seedMultiMemberWorkspace(input: {
+  workdir: string;
+  primary: string;
+  member: string;
+}): Promise<void> {
+  const logger = {
+    child: () => logger,
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  };
+  const projectRegistry = new FileBackedProjectRegistry(
+    path.join(input.workdir, "projects.json"),
+    asSessionLogger(logger),
+  );
+  const workspaceRegistry = new FileBackedWorkspaceRegistry(
+    path.join(input.workdir, "workspaces.json"),
+    asSessionLogger(logger),
+  );
+  await projectRegistry.upsert(
+    createPersistedProjectRecord({
+      projectId: "proj-primary",
+      rootPath: input.primary,
+      kind: "git",
+      displayName: "primary",
+      createdAt: "2026-05-07T00:00:00.000Z",
+      updatedAt: "2026-05-07T00:00:00.000Z",
+    }),
+  );
+  await projectRegistry.upsert(
+    createPersistedProjectRecord({
+      projectId: "proj-member",
+      rootPath: input.member,
+      kind: "non_git",
+      displayName: "member",
+      createdAt: "2026-05-07T00:00:00.000Z",
+      updatedAt: "2026-05-07T00:00:00.000Z",
+    }),
+  );
+  await workspaceRegistry.upsert(
+    createPersistedWorkspaceRecord({
+      workspaceId: "ws-multi",
+      projectId: "proj-primary",
+      cwd: input.primary,
+      kind: "local_checkout",
+      displayName: "primary",
+      branch: "main",
+      worktreeRoot: input.primary,
+      createdAt: "2026-05-07T00:00:00.000Z",
+      updatedAt: "2026-05-07T00:00:00.000Z",
+      members: [
+        {
+          projectId: "proj-primary",
+          cwd: input.primary,
+          kind: "local_checkout",
+          displayName: "primary",
+          branch: "main",
+          worktreeRoot: input.primary,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+        {
+          projectId: "proj-member",
+          cwd: input.member,
+          kind: "directory",
+          displayName: "member",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
+    }),
+  );
+}
+
+test("create_agent_request honors a config cwd that matches a workspace member", async () => {
+  const workdir = mkdtempSync(path.join(tmpdir(), "paseo-create-agent-member-cwd-"));
+  try {
+    const primary = path.join(workdir, "primary");
+    const member = path.join(workdir, "member");
+    mkdirSync(member, { recursive: true });
+    mkdirSync(primary, { recursive: true });
+    await seedMultiMemberWorkspace({ workdir, primary, member });
+    const { session, agentManager, emitted } = createMultiMemberAgentIntentHarness({
+      primary,
+      member,
+      workdir,
+    });
+
+    await session.handleMessage({
+      type: "create_agent_request",
+      requestId: "req-create-on-member",
+      workspaceId: "ws-multi",
+      config: { provider: "codex", cwd: member },
+      attachments: [],
+    });
+
+    const [createdAgent] = agentManager.listAgents();
+    expect(createdAgent?.workspaceId).toBe("ws-multi");
+    expect(createdAgent?.cwd).toBe(member);
+    expect(findByType(emitted, "status")?.payload).toMatchObject({
+      status: "agent_created",
+      agent: { cwd: member },
+    });
+  } finally {
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("create_agent_request forces the primary cwd when the config cwd matches no member", async () => {
+  const workdir = mkdtempSync(path.join(tmpdir(), "paseo-create-agent-stranger-cwd-"));
+  try {
+    const primary = path.join(workdir, "primary");
+    const member = path.join(workdir, "member");
+    const stranger = path.join(workdir, "stranger");
+    mkdirSync(stranger, { recursive: true });
+    mkdirSync(primary, { recursive: true });
+    await seedMultiMemberWorkspace({ workdir, primary, member });
+    const { session, agentManager } = createMultiMemberAgentIntentHarness({
+      primary,
+      member,
+      workdir,
+    });
+
+    await session.handleMessage({
+      type: "create_agent_request",
+      requestId: "req-create-on-stranger",
+      workspaceId: "ws-multi",
+      config: { provider: "codex", cwd: stranger },
+      attachments: [],
+    });
+
+    const [createdAgent] = agentManager.listAgents();
+    expect(createdAgent?.workspaceId).toBe("ws-multi");
+    expect(createdAgent?.cwd).toBe(primary);
   } finally {
     rmSync(workdir, { recursive: true, force: true });
   }
@@ -8274,6 +8508,555 @@ test("workspace.title.set.request returns accepted=false when workspace is not f
     title: null,
   });
   expect(response?.payload.error).toBeTruthy();
+});
+
+const MEMBER_CWD = path.resolve("/tmp/member-repo");
+
+function createMemberTestRegistries(options?: { withMember?: boolean; memberCwd?: string }): {
+  projects: Map<string, PersistedProjectRecord>;
+  workspaces: Map<string, PersistedWorkspaceRecord>;
+  apply: (session: TestSession) => void;
+} {
+  const memberCwd = options?.memberCwd ?? MEMBER_CWD;
+  const primaryProject = createPersistedProjectRecord({
+    projectId: "proj-1",
+    rootPath: REPO_CWD,
+    kind: "git",
+    displayName: "repo",
+    createdAt: "2026-03-01T12:00:00.000Z",
+    updatedAt: "2026-03-01T12:00:00.000Z",
+  });
+  const memberProject = createPersistedProjectRecord({
+    projectId: "proj-2",
+    rootPath: memberCwd,
+    kind: "git",
+    displayName: "member-repo",
+    createdAt: "2026-03-01T12:00:00.000Z",
+    updatedAt: "2026-03-01T12:00:00.000Z",
+  });
+  const projects = new Map(
+    [primaryProject, ...(options?.withMember ? [memberProject] : [])].map((project) => [
+      project.projectId,
+      project,
+    ]),
+  );
+  const workspace = createPersistedWorkspaceRecord({
+    workspaceId: "ws-1",
+    projectId: primaryProject.projectId,
+    cwd: REPO_CWD,
+    kind: "local_checkout",
+    displayName: "main",
+    branch: "main",
+    worktreeRoot: REPO_CWD,
+    createdAt: "2026-03-01T12:00:00.000Z",
+    updatedAt: "2026-03-01T12:00:00.000Z",
+    ...(options?.withMember
+      ? {
+          members: [
+            {
+              projectId: primaryProject.projectId,
+              cwd: REPO_CWD,
+              kind: "local_checkout" as const,
+              displayName: "main",
+              branch: "main",
+              worktreeRoot: REPO_CWD,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+            {
+              projectId: memberProject.projectId,
+              cwd: memberCwd,
+              kind: "local_checkout" as const,
+              displayName: "feature/member",
+              branch: "feature/member",
+              worktreeRoot: memberCwd,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
+        }
+      : {}),
+  });
+  const workspaces = new Map([[workspace.workspaceId, workspace]]);
+  let projectSeq = 0;
+
+  return {
+    projects,
+    workspaces,
+    apply: (session) => {
+      session.projectRegistry.get = async (id: string) => projects.get(id) ?? null;
+      session.projectRegistry.list = async () => Array.from(projects.values());
+      session.projectRegistry.upsert = async (record) => {
+        const project = record as PersistedProjectRecord;
+        projects.set(project.projectId, project);
+      };
+      session.projectRegistry.remove = async (id: string) => {
+        projects.delete(id);
+      };
+      session.projectRegistry.getOrCreateActiveByRoot = async (input) => {
+        const existing = Array.from(projects.values()).find(
+          (project) => !project.archivedAt && project.rootPath === input.rootPath,
+        );
+        if (existing) return existing;
+        const created = createPersistedProjectRecord({
+          projectId: `proj-new-${(projectSeq += 1)}`,
+          rootPath: input.rootPath,
+          kind: input.kind,
+          displayName: input.displayName,
+          createdAt: input.timestamp,
+          updatedAt: input.timestamp,
+        });
+        projects.set(created.projectId, created);
+        return created;
+      };
+      session.workspaceRegistry.list = async () => Array.from(workspaces.values());
+      session.workspaceRegistry.get = async (id: string) => workspaces.get(id) ?? null;
+      session.workspaceRegistry.update = async (id, updater) => {
+        const existing = workspaces.get(id);
+        if (!existing) return null;
+        const updated = updater(existing);
+        workspaces.set(id, updated);
+        return updated;
+      };
+      session.workspaceRegistry.upsert = async (record) => {
+        const next = record as PersistedWorkspaceRecord;
+        workspaces.set(next.workspaceId, next);
+      };
+      session.workspaceRegistry.archive = async (id: string, archivedAt: string) => {
+        const existing = workspaces.get(id);
+        if (existing) {
+          workspaces.set(id, { ...existing, archivedAt, updatedAt: archivedAt });
+        }
+      };
+    },
+  };
+}
+
+function createMemberGitService(): ReturnType<typeof createNoopWorkspaceGitService> {
+  return createNoopWorkspaceGitService({
+    getCheckout: async (cwd: string) => {
+      if (cwd === MEMBER_CWD) {
+        return {
+          cwd,
+          isGit: true,
+          currentBranch: "feature/member",
+          remoteUrl: null,
+          worktreeRoot: MEMBER_CWD,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        };
+      }
+      return {
+        cwd,
+        isGit: true,
+        currentBranch: "main",
+        remoteUrl: null,
+        worktreeRoot: REPO_CWD,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      };
+    },
+  });
+}
+
+function activateWorkspaceUpdatesSubscription(session: TestSession): void {
+  session.workspaceUpdatesSubscription = {
+    subscriptionId: "sub-workspaces",
+    filter: {},
+    isBootstrapping: false,
+    lastEmittedByWorkspaceId: new Map(),
+    pendingUpdatesByWorkspaceId: new Map(),
+  };
+}
+
+test("workspace.member.add.request appends a member and emits the descriptor with members", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({
+      onMessage: (message) => emitted.push(message),
+      workspaceGitService: createMemberGitService(),
+    }),
+  );
+  const registries = createMemberTestRegistries();
+  registries.apply(session);
+  activateWorkspaceUpdatesSubscription(session);
+
+  await session.handleMessage({
+    type: "workspace.member.add.request",
+    workspaceId: "ws-1",
+    source: { kind: "directory", path: MEMBER_CWD },
+    requestId: "req-member-add",
+  });
+
+  const response = findByType(emitted, "workspace.member.add.response");
+  expect(response?.payload.error).toBeNull();
+  expect(response?.payload.workspace?.id).toBe("ws-1");
+  expect(response?.payload.workspace?.members).toHaveLength(2);
+  expect(response?.payload.workspace?.members?.[0]).toMatchObject({
+    projectId: "proj-1",
+    projectDisplayName: "repo",
+    projectRootPath: REPO_CWD,
+    workspaceDirectory: REPO_CWD,
+    workspaceKind: "local_checkout",
+    branch: "main",
+  });
+  expect(response?.payload.workspace?.members?.[1]).toMatchObject({
+    projectRootPath: MEMBER_CWD,
+    workspaceDirectory: MEMBER_CWD,
+    workspaceKind: "local_checkout",
+    branch: "feature/member",
+    worktreeSlug: null,
+    projectCustomName: null,
+  });
+  expect(response?.payload.workspace?.members?.[1].projectId).not.toBe("proj-1");
+
+  const persisted = registries.workspaces.get("ws-1");
+  expect(persisted?.members).toHaveLength(2);
+  // Scalar fields keep mirroring the primary member.
+  expect(persisted).toMatchObject({ cwd: REPO_CWD, projectId: "proj-1" });
+
+  const update = findByType(emitted, "workspace_update");
+  expect(update?.payload).toMatchObject({ kind: "upsert", workspace: { id: "ws-1" } });
+  if (update?.payload.kind === "upsert") {
+    expect(update.payload.workspace.members).toHaveLength(2);
+  }
+});
+
+test("workspace.member.add.request reuses an existing project for a known root", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({
+      onMessage: (message) => emitted.push(message),
+      workspaceGitService: createMemberGitService(),
+    }),
+  );
+  const registries = createMemberTestRegistries({ withMember: false });
+  registries.projects.set(
+    "proj-existing",
+    createPersistedProjectRecord({
+      projectId: "proj-existing",
+      rootPath: MEMBER_CWD,
+      kind: "git",
+      displayName: "member-repo",
+      createdAt: "2026-03-01T12:00:00.000Z",
+      updatedAt: "2026-03-01T12:00:00.000Z",
+    }),
+  );
+  registries.apply(session);
+
+  await session.handleMessage({
+    type: "workspace.member.add.request",
+    workspaceId: "ws-1",
+    source: { kind: "directory", path: MEMBER_CWD },
+    requestId: "req-member-add-existing",
+  });
+
+  const response = findByType(emitted, "workspace.member.add.response");
+  expect(response?.payload.error).toBeNull();
+  expect(response?.payload.workspace?.members?.[1]).toMatchObject({
+    projectId: "proj-existing",
+    projectDisplayName: "member-repo",
+  });
+});
+
+test("workspace.member.add.request rejects a duplicate member directory", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({
+      onMessage: (message) => emitted.push(message),
+      workspaceGitService: createMemberGitService(),
+    }),
+  );
+  createMemberTestRegistries({ withMember: true }).apply(session);
+
+  await session.handleMessage({
+    type: "workspace.member.add.request",
+    workspaceId: "ws-1",
+    source: { kind: "directory", path: MEMBER_CWD },
+    requestId: "req-member-add-duplicate",
+  });
+
+  const response = findByType(emitted, "workspace.member.add.response");
+  expect(response?.payload).toMatchObject({
+    requestId: "req-member-add-duplicate",
+    workspace: null,
+    errorCode: "duplicate_member",
+  });
+  expect(response?.payload.error).toBeTruthy();
+});
+
+test("workspace.member.add.request reports a missing directory", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({ onMessage: (message) => emitted.push(message) }),
+  );
+  createMemberTestRegistries().apply(session);
+  session.filesystem.isDirectory = async () => false;
+
+  await session.handleMessage({
+    type: "workspace.member.add.request",
+    workspaceId: "ws-1",
+    source: { kind: "directory", path: "/tmp/definitely-not-here" },
+    requestId: "req-member-add-missing-dir",
+  });
+
+  const response = findByType(emitted, "workspace.member.add.response");
+  expect(response?.payload).toMatchObject({
+    requestId: "req-member-add-missing-dir",
+    workspace: null,
+    errorCode: "directory_not_found",
+  });
+  expect(response?.payload.error).toContain("Directory not found");
+});
+
+test("workspace.member.remove.request strips a member and emits the updated descriptor", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({ onMessage: (message) => emitted.push(message) }),
+  );
+  const registries = createMemberTestRegistries({ withMember: true });
+  registries.apply(session);
+  activateWorkspaceUpdatesSubscription(session);
+
+  await session.handleMessage({
+    type: "workspace.member.remove.request",
+    workspaceId: "ws-1",
+    cwd: MEMBER_CWD,
+    requestId: "req-member-remove",
+  });
+
+  const response = findByType(emitted, "workspace.member.remove.response");
+  expect(response?.payload.error).toBeNull();
+  expect(response?.payload.workspace?.members).toHaveLength(1);
+  expect(response?.payload.workspace?.members?.[0]).toMatchObject({
+    projectId: "proj-1",
+    workspaceDirectory: REPO_CWD,
+  });
+  expect(registries.workspaces.get("ws-1")?.members).toHaveLength(1);
+  expect(registries.workspaces.get("ws-1")).toMatchObject({ cwd: REPO_CWD, projectId: "proj-1" });
+  expect(findByType(emitted, "workspace_update")?.payload).toMatchObject({
+    kind: "upsert",
+    workspace: { id: "ws-1" },
+  });
+});
+
+test("workspace.member.remove.request re-mirrors scalars when the primary member leaves", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({ onMessage: (message) => emitted.push(message) }),
+  );
+  const registries = createMemberTestRegistries({ withMember: true });
+  registries.apply(session);
+  activateWorkspaceUpdatesSubscription(session);
+
+  await session.handleMessage({
+    type: "workspace.member.remove.request",
+    workspaceId: "ws-1",
+    cwd: REPO_CWD,
+    requestId: "req-member-remove-primary",
+  });
+
+  const response = findByType(emitted, "workspace.member.remove.response");
+  expect(response?.payload.error).toBeNull();
+  expect(response?.payload.workspace).toMatchObject({
+    projectId: "proj-2",
+    workspaceDirectory: MEMBER_CWD,
+  });
+  expect(response?.payload.workspace?.members).toHaveLength(1);
+  expect(registries.workspaces.get("ws-1")).toMatchObject({ cwd: MEMBER_CWD, projectId: "proj-2" });
+});
+
+test("workspace.member.remove.request refuses to remove the last member", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({ onMessage: (message) => emitted.push(message) }),
+  );
+  createMemberTestRegistries().apply(session);
+
+  await session.handleMessage({
+    type: "workspace.member.remove.request",
+    workspaceId: "ws-1",
+    cwd: REPO_CWD,
+    requestId: "req-member-remove-last",
+  });
+
+  const response = findByType(emitted, "workspace.member.remove.response");
+  expect(response?.payload).toMatchObject({
+    requestId: "req-member-remove-last",
+    workspace: null,
+    errorCode: "last_member",
+  });
+  expect(response?.payload.error).toBeTruthy();
+});
+
+test("workspace.member.remove.request refuses while an active agent runs on the member directory", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({
+      onMessage: (message) => emitted.push(message),
+      agentStorage: {
+        listByWorkspace: async () => [
+          { id: "agent-member", cwd: MEMBER_CWD, workspaceId: "ws-1", archivedAt: null },
+          {
+            id: "agent-archived",
+            cwd: MEMBER_CWD,
+            workspaceId: "ws-1",
+            archivedAt: "2026-03-02T00:00:00.000Z",
+          },
+        ],
+      },
+    }),
+  );
+  createMemberTestRegistries({ withMember: true }).apply(session);
+
+  await session.handleMessage({
+    type: "workspace.member.remove.request",
+    workspaceId: "ws-1",
+    cwd: MEMBER_CWD,
+    requestId: "req-member-remove-agents",
+  });
+
+  const response = findByType(emitted, "workspace.member.remove.response");
+  expect(response?.payload).toMatchObject({
+    requestId: "req-member-remove-agents",
+    workspace: null,
+    errorCode: "member_has_active_agents",
+  });
+});
+
+test("workspace.member.remove.request refuses while a live terminal runs on the member directory", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const memberCwd = mkdtempSync(path.join(tmpdir(), "paseo-member-terminal-"));
+  const terminalManager = createTerminalManager();
+  terminalManagers.push(terminalManager);
+  const session = asTestSession(
+    createSessionForWorkspaceTests({
+      onMessage: (message) => emitted.push(message),
+      terminalManager,
+    }),
+  );
+  createMemberTestRegistries({ withMember: true, memberCwd }).apply(session);
+  await terminalManager.createTerminal({ cwd: memberCwd, workspaceId: "ws-1" });
+
+  try {
+    await session.handleMessage({
+      type: "workspace.member.remove.request",
+      workspaceId: "ws-1",
+      cwd: memberCwd,
+      requestId: "req-member-remove-terminals",
+    });
+
+    const response = findByType(emitted, "workspace.member.remove.response");
+    expect(response?.payload).toMatchObject({
+      requestId: "req-member-remove-terminals",
+      workspace: null,
+      errorCode: "member_has_live_terminals",
+    });
+  } finally {
+    rmSync(memberCwd, { recursive: true, force: true });
+  }
+});
+
+test("project.remove.request strips a non-primary membership instead of archiving the workspace", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({ onMessage: (message) => emitted.push(message) }),
+  );
+  const registries = createMemberTestRegistries({ withMember: true });
+  registries.apply(session);
+  activateWorkspaceUpdatesSubscription(session);
+
+  await session.handleMessage({
+    type: "project.remove.request",
+    projectId: "proj-2",
+    requestId: "req-project-remove-member",
+  });
+
+  const response = findByType(emitted, "project.remove.response");
+  expect(response?.payload).toMatchObject({
+    requestId: "req-project-remove-member",
+    projectId: "proj-2",
+    accepted: true,
+    removedWorkspaceIds: [],
+    error: null,
+  });
+  const workspace = registries.workspaces.get("ws-1");
+  expect(workspace?.archivedAt).toBeNull();
+  expect(workspace?.members).toHaveLength(1);
+  expect(workspace?.members?.[0]).toMatchObject({ projectId: "proj-1", cwd: REPO_CWD });
+  expect(registries.projects.has("proj-2")).toBe(false);
+});
+
+test("project.remove.request archives the workspace when its primary project is removed", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({ onMessage: (message) => emitted.push(message) }),
+  );
+  const registries = createMemberTestRegistries({ withMember: true });
+  registries.apply(session);
+  activateWorkspaceUpdatesSubscription(session);
+
+  await session.handleMessage({
+    type: "project.remove.request",
+    projectId: "proj-1",
+    requestId: "req-project-remove-primary",
+  });
+
+  const response = findByType(emitted, "project.remove.response");
+  expect(response?.payload).toMatchObject({
+    requestId: "req-project-remove-primary",
+    projectId: "proj-1",
+    accepted: true,
+    removedWorkspaceIds: ["ws-1"],
+    error: null,
+  });
+  expect(registries.workspaces.get("ws-1")?.archivedAt).not.toBeNull();
+  expect(registries.projects.has("proj-1")).toBe(false);
+});
+
+test("workspace member descriptors carry per-member diffStat and prefer the snapshot branch", async () => {
+  const noGitSnapshot = createNoGitWorkspaceRuntimeSnapshot(MEMBER_CWD);
+  const liveMemberSnapshot: WorkspaceGitRuntimeSnapshot = {
+    ...noGitSnapshot,
+    git: {
+      ...noGitSnapshot.git,
+      isGit: true,
+      currentBranch: "feature/live",
+      diffStat: { additions: 12, deletions: 3 },
+    },
+  };
+  const session = asTestSession(
+    createSessionForWorkspaceTests({
+      workspaceGitService: createNoopWorkspaceGitService({
+        peekSnapshot: (cwd: string) => (cwd === MEMBER_CWD ? liveMemberSnapshot : null),
+      }),
+    }),
+  );
+  createMemberTestRegistries({ withMember: true }).apply(session);
+
+  const result = await session.listFetchWorkspacesEntries({
+    type: "fetch_workspaces_request",
+    requestId: "req-member-diffstat",
+  });
+
+  expect(result.entries).toHaveLength(1);
+  const members = (result.entries[0] as Record<string, unknown>).members as Array<
+    Record<string, unknown>
+  >;
+  // No snapshot for the primary directory: persisted branch, null diffStat.
+  expect(members[0]).toMatchObject({
+    workspaceDirectory: REPO_CWD,
+    branch: "main",
+    diffStat: null,
+  });
+  // The member with a live snapshot gets its diffStat and the fresher branch.
+  expect(members[1]).toMatchObject({
+    workspaceDirectory: MEMBER_CWD,
+    branch: "feature/live",
+    diffStat: { additions: 12, deletions: 3 },
+  });
 });
 
 function createSessionWithTerminalManager(options: {

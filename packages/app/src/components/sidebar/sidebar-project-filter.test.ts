@@ -80,4 +80,32 @@ describe("filterWorkspacesByProjects", () => {
   test("keeps nothing for a project with no workspaces", () => {
     expect(filtered(["gamma"])).toEqual([]);
   });
+
+  test("matches a workspace when any member project is pinned", () => {
+    const memberViewKeys = new Map<string, readonly string[]>([
+      ["host:one", ["alpha", "beta"]],
+      ["host:two", ["alpha"]],
+    ]);
+    const filteredBy = (projectFilters: string[]) =>
+      filterWorkspacesByProjects({
+        workspaces,
+        projectFilters,
+        projectViewKeysByWorkspaceKey: memberViewKeys,
+      }).map((entry) => entry.workspaceId);
+
+    expect(filteredBy(["beta"])).toEqual(["one", "three"]);
+    expect(filteredBy(["alpha"])).toEqual(["one", "two"]);
+    expect(filteredBy(["gamma"])).toEqual([]);
+  });
+
+  test("falls back to the placement project when member keys are unknown", () => {
+    const filteredBy = (projectFilters: string[]) =>
+      filterWorkspacesByProjects({
+        workspaces,
+        projectFilters,
+        projectViewKeysByWorkspaceKey: new Map(),
+      }).map((entry) => entry.workspaceId);
+
+    expect(filteredBy(["alpha"])).toEqual(["one", "two"]);
+  });
 });

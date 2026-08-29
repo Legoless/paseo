@@ -1,6 +1,5 @@
 import { Text } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { DiffStat } from "@/components/diff-stat";
 import type { SidebarWorkspaceEntry } from "@/hooks/use-sidebar-workspaces-list";
 import { useAppSettings } from "@/hooks/use-settings";
 import type { SidebarWorkspaceTrailing } from "@/hooks/use-settings";
@@ -14,7 +13,11 @@ export type { SidebarWorkspaceTrailing };
  * no matter which one is showing.
  *
  * "none" exists because the slot is the only thing competing with the title for width, and
- * a user who never reads the diff would rather have the characters.
+ * a user who never reads the timestamp would rather have the characters.
+ *
+ * The "diff" choice renders nothing here: workspace rows keep only their notification,
+ * title, and identity — the diff lives on the agent rows under each member project, where
+ * this same preference gates it.
  */
 export function useSidebarWorkspaceTrailing(): SidebarWorkspaceTrailing {
   const {
@@ -31,7 +34,6 @@ export function hasSidebarWorkspaceTrailing({
   workspace: SidebarWorkspaceEntry;
   trailing: SidebarWorkspaceTrailing;
 }): boolean {
-  if (trailing === "diff") return workspace.diffStat !== null;
   if (trailing === "timestamp") return workspace.statusEnteredAt !== null;
   return false;
 }
@@ -43,11 +45,6 @@ export function SidebarWorkspaceTrailingContent({
   workspace: SidebarWorkspaceEntry;
   trailing: SidebarWorkspaceTrailing;
 }) {
-  if (trailing === "diff" && workspace.diffStat) {
-    return (
-      <DiffStat additions={workspace.diffStat.additions} deletions={workspace.diffStat.deletions} />
-    );
-  }
   if (trailing === "timestamp" && workspace.statusEnteredAt) {
     return <WorkspaceTimestamp enteredAt={workspace.statusEnteredAt} />;
   }

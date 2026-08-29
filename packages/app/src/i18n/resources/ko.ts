@@ -619,6 +619,9 @@ export const ko: TranslationResources = {
         changes: "변경 사항",
         files: "파일",
       },
+      projectPicker: {
+        selectProject: "프로젝트 선택",
+      },
       toasts: {
         copyFailed: "복사 실패",
         agentIdCopiedLabel: "에이전트 ID",

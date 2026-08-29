@@ -7,6 +7,7 @@ import { writeJsonFileAtomic } from "./atomic-file.js";
 import { areEquivalentPaths } from "../utils/path.js";
 import {
   generateProjectId,
+  workspaceMemberFromScalars,
   type PersistedProjectKind,
   type PersistedWorkspaceKind,
 } from "./workspace-registry-model.js";
@@ -40,36 +41,17 @@ const PersistedProjectRecordSchema = z.object({
   archivedAt: z.string().nullable(),
 });
 
-const PersistedWorkspaceRecordSchema = z.object({
-  workspaceId: z.string(),
+export const PersistedWorkspaceMemberSchema = z.object({
   projectId: z.string(),
   cwd: z.string(),
   kind: z.enum(["local_checkout", "worktree", "directory"]),
   displayName: z.string(),
-  // User-set title layered over the derived displayName. In Model B the title is
-  // the workspace identity; branch/directory are backing metadata. Reconciliation
-  // never touches this. Null means "use the derived displayName".
-  title: z
-    .string()
-    .nullable()
-    .optional()
-    .transform((value) => value ?? null),
-  // The worktree's git branch. Decoupled from displayName/title by construction:
-  // displayName holds the human name (title), branch holds the git branch. Only
-  // worktree workspaces carry a branch; directory/local_checkout leave it null.
   branch: z
     .string()
     .nullable()
     .optional()
     .transform((value) => value ?? null),
-  // Exact checkout/worktree root backing cwd. This differs from cwd when the
-  // selected project is a subdirectory inside a repository. Persist it so
-  // archive and recovery do not need the directory to still exist in order to
-  // recover placement.
   worktreeRoot: z.string().nullable().default(null),
-  // The base branch the worktree was created from (normalized like worktree.json's
-  // baseRefName). Only worktree workspaces carry a base branch; checkout-branch
-  // worktrees and directory/local_checkout workspaces leave it null.
   baseBranch: z
     .string()
     .nullable()
@@ -77,27 +59,79 @@ const PersistedWorkspaceRecordSchema = z.object({
     .transform((value) => value ?? null),
   isPaseoOwnedWorktree: z.boolean().default(false),
   mainRepoRoot: z.string().nullable().default(null),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  archivedAt: z.string().nullable(),
-  // COMPAT(autoArchivedChangeRequestUrl): added in v0.2.6, remove optional parsing after 2027-01-31.
-  // Records the merged change request whose automatic archive was consumed.
-  autoArchivedChangeRequestUrl: z
-    .string()
-    .nullable()
-    .optional()
-    .transform((value) => value ?? null),
-  pinnedAt: z
-    .string()
-    .nullable()
-    .optional()
-    .transform((value) => value ?? null),
-  labels: z.array(z.string()).optional(),
 });
+
+const PersistedWorkspaceRecordSchema = z
+  .object({
+    workspaceId: z.string(),
+    projectId: z.string(),
+    cwd: z.string(),
+    kind: z.enum(["local_checkout", "worktree", "directory"]),
+    displayName: z.string(),
+    // User-set title layered over the derived displayName. In Model B the title is
+    // the workspace identity; branch/directory are backing metadata. Reconciliation
+    // never touches this. Null means "use the derived displayName".
+    title: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    // The worktree's git branch. Decoupled from displayName/title by construction:
+    // displayName holds the human name (title), branch holds the git branch. Only
+    // worktree workspaces carry a branch; directory/local_checkout leave it null.
+    branch: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    // Exact checkout/worktree root backing cwd. This differs from cwd when the
+    // selected project is a subdirectory inside a repository. Persist it so
+    // archive and recovery do not need the directory to still exist in order to
+    // recover placement.
+    worktreeRoot: z.string().nullable().default(null),
+    // The base branch the worktree was created from (normalized like worktree.json's
+    // baseRefName). Only worktree workspaces carry a base branch; checkout-branch
+    // worktrees and directory/local_checkout workspaces leave it null.
+    baseBranch: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    isPaseoOwnedWorktree: z.boolean().default(false),
+    mainRepoRoot: z.string().nullable().default(null),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    archivedAt: z.string().nullable(),
+    // COMPAT(autoArchivedChangeRequestUrl): added in v0.2.6, remove optional parsing after 2027-01-31.
+    // Records the merged change request whose automatic archive was consumed.
+    autoArchivedChangeRequestUrl: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    pinnedAt: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    labels: z.array(z.string()).optional(),
+    // COMPAT(workspaceMembers): added in v0.7.0, remove optional after 2027-02-28.
+    members: z.array(PersistedWorkspaceMemberSchema).optional(),
+  })
+  // The scalar fields are the source of truth for the primary member: existing
+  // write paths (reconciliation, recovery, bootstrap) only ever update scalars,
+  // so the primary member is re-derived from them on every parse. Writers that
+  // change which member is primary must re-mirror the scalars first (see
+  // workspaceScalarsFromPrimaryMember).
+  .transform((record) => {
+    if (!record.members || record.members.length === 0) return record;
+    return { ...record, members: [workspaceMemberFromScalars(record), ...record.members.slice(1)] };
+  });
+
+export type PersistedWorkspaceMember = z.infer<typeof PersistedWorkspaceMemberSchema>;
 
 export type PersistedProjectRecord = z.infer<typeof PersistedProjectRecordSchema>;
 export type PersistedWorkspaceRecord = z.infer<typeof PersistedWorkspaceRecordSchema>;
-
 export interface WorkspaceMutation {
   kind: "upsert" | "archive" | "remove";
   workspaceId: string;
@@ -674,6 +708,7 @@ export function createPersistedWorkspaceRecord(input: {
   autoArchivedChangeRequestUrl?: string | null;
   pinnedAt?: string | null;
   labels?: string[];
+  members?: PersistedWorkspaceMember[];
 }): PersistedWorkspaceRecord {
   return PersistedWorkspaceRecordSchema.parse({
     ...input,

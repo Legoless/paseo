@@ -538,4 +538,67 @@ describe("workspace registries", () => {
       pinnedAt: "2026-03-03T00:00:00.000Z",
     });
   });
+
+  test("keeps the primary member mirrored from the scalar fields across mutation paths", async () => {
+    await workspaceRegistry.initialize();
+    const secondaryMember = {
+      projectId: "proj-2",
+      cwd: "/tmp/other",
+      kind: "directory" as const,
+      displayName: "other",
+      branch: null,
+      worktreeRoot: null,
+      baseBranch: null,
+      isPaseoOwnedWorktree: false,
+      mainRepoRoot: null,
+    };
+    await workspaceRegistry.upsert(
+      createPersistedWorkspaceRecord({
+        workspaceId: "ws-members",
+        projectId: "proj-1",
+        cwd: "/tmp/repo",
+        kind: "local_checkout",
+        displayName: "main",
+        branch: "main",
+        worktreeRoot: "/tmp/repo",
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+        members: [
+          {
+            projectId: "proj-1",
+            cwd: "/tmp/repo",
+            kind: "local_checkout",
+            displayName: "main",
+            branch: "main",
+            worktreeRoot: "/tmp/repo",
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+          secondaryMember,
+        ],
+      }),
+    );
+
+    // A scalar-only write (what reconciliation does) re-syncs the primary member.
+    await workspaceRegistry.update("ws-members", (record) => ({
+      ...record,
+      branch: "renamed-branch",
+      updatedAt: "2026-03-02T00:00:00.000Z",
+    }));
+
+    const reloadedRegistry = new FileBackedWorkspaceRegistry(
+      path.join(tmpDir, "projects", "workspaces.json"),
+      logger,
+    );
+    await reloadedRegistry.initialize();
+    const record = await reloadedRegistry.get("ws-members");
+    expect(record?.branch).toBe("renamed-branch");
+    expect(record?.members?.[0]).toMatchObject({
+      projectId: "proj-1",
+      cwd: "/tmp/repo",
+      branch: "renamed-branch",
+    });
+    expect(record?.members?.[1]).toEqual(secondaryMember);
+  });
 });

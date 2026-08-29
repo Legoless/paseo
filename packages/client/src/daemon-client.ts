@@ -102,6 +102,7 @@ import type {
   PaseoConfigRaw,
   PaseoConfigRevision,
   WorkspaceCreateRequest,
+  WorkspaceMemberAddRequest,
   WorkspaceRecoveryState,
   PluginListItem,
   PluginLogEntry,
@@ -430,6 +431,14 @@ type CreatePaseoWorktreePayload = Extract<
 type WorkspaceCreatePayload = Extract<
   SessionOutboundMessage,
   { type: "workspace.create.response" }
+>["payload"];
+type WorkspaceMemberAddPayload = Extract<
+  SessionOutboundMessage,
+  { type: "workspace.member.add.response" }
+>["payload"];
+type WorkspaceMemberRemovePayload = Extract<
+  SessionOutboundMessage,
+  { type: "workspace.member.remove.response" }
 >["payload"];
 type FileExplorerPayload = FileExplorerResponse["payload"];
 export type FileExplorerDirectoryPayload = NonNullable<FileExplorerPayload["directory"]>;
@@ -4204,6 +4213,38 @@ export class DaemonClient {
           : {}),
       },
       responseType: "workspace.create.response",
+    });
+  }
+
+  async addWorkspaceMember(
+    workspaceId: string,
+    source: WorkspaceMemberAddRequest["source"],
+    requestId?: string,
+  ): Promise<WorkspaceMemberAddPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "workspace.member.add.request",
+        workspaceId,
+        source,
+      },
+      responseType: "workspace.member.add.response",
+    });
+  }
+
+  async removeWorkspaceMember(
+    workspaceId: string,
+    cwd: string,
+    requestId?: string,
+  ): Promise<WorkspaceMemberRemovePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "workspace.member.remove.request",
+        workspaceId,
+        cwd,
+      },
+      responseType: "workspace.member.remove.response",
     });
   }
 

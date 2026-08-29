@@ -622,6 +622,9 @@ export const fr: TranslationResources = {
         changes: "Changements",
         files: "Fichiers",
       },
+      projectPicker: {
+        selectProject: "Sélectionner un projet",
+      },
       toasts: {
         copyFailed: "Échec de la copie",
         agentIdCopiedLabel: "AgentID",

@@ -340,6 +340,8 @@ initializing → idle ⇄ running
 
 Two workspaces can share the same `cwd` (e.g. a `directory` workspace and a `local_checkout` workspace on the same folder, or several workspaces opened against one checkout). Model B keeps these distinct: they share everything the directory determines, but nothing the workspace owns. The right-sidebar surfaces split cleanly along this line, and the split is enforced purely by **what each piece of state is keyed by**.
 
+One workspace can also span several directories: its `members` list holds one workspace project per `cwd` (the scalar `cwd`/`projectId` mirror the primary member; see [data-model.md](data-model.md#5-workspace-registry)). Nothing about the keying split changes — directory-backed surfaces follow whichever member `cwd` a pane is pointed at, so one workspace can show two projects' diffs side by side, while workspace-owned state stays shared across the whole workspace.
+
 **Directory-backed (shared by same-`cwd` workspaces) — keyed by `(serverId, cwd)`, never by `workspaceId`:**
 
 | Surface                 | Key                                                      | Source                                                  |

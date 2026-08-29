@@ -485,6 +485,92 @@ test("workspace handles keep identity and refresh snapshots through existing dri
   await client.close();
 });
 
+test("workspace member add and remove use the dotted member RPCs", async () => {
+  const { client, ws } = await connectClient();
+  const workspaceWithMembers = createWorkspace({
+    members: [
+      {
+        projectId: "project_sdk",
+        projectDisplayName: "SDK",
+        projectCustomName: null,
+        projectRootPath: "/repo/sdk",
+        workspaceDirectory: "/repo/sdk",
+        workspaceKind: "directory",
+        worktreeSlug: null,
+        branch: null,
+      },
+      {
+        projectId: "project_two",
+        projectDisplayName: "Two",
+        projectCustomName: null,
+        projectRootPath: "/repo/two",
+        workspaceDirectory: "/repo/two",
+        workspaceKind: "local_checkout",
+        worktreeSlug: null,
+        branch: "feature/two",
+      },
+    ],
+  });
+
+  const addPromise = client.workspaces.addWorkspaceMember("workspace_sdk", {
+    kind: "directory",
+    path: "/repo/two",
+  });
+  const addRequest = parseSentSessionMessage(ws.sent.at(-1));
+  expect(addRequest).toMatchObject({
+    type: "workspace.member.add.request",
+    workspaceId: "workspace_sdk",
+    source: { kind: "directory", path: "/repo/two" },
+  });
+  ws.message(
+    sessionMessage({
+      type: "workspace.member.add.response",
+      payload: {
+        requestId: addRequest.requestId,
+        workspace: workspaceWithMembers,
+        error: null,
+      },
+    }),
+  );
+  await expect(addPromise).resolves.toEqual(workspaceWithMembers);
+
+  const removePromise = client.workspaces.removeWorkspaceMember("workspace_sdk", "/repo/two");
+  const removeRequest = parseSentSessionMessage(ws.sent.at(-1));
+  expect(removeRequest).toMatchObject({
+    type: "workspace.member.remove.request",
+    workspaceId: "workspace_sdk",
+    cwd: "/repo/two",
+  });
+  ws.message(
+    sessionMessage({
+      type: "workspace.member.remove.response",
+      payload: {
+        requestId: removeRequest.requestId,
+        workspace: createWorkspace(),
+        error: null,
+      },
+    }),
+  );
+  await expect(removePromise).resolves.toEqual(createWorkspace());
+
+  const guardPromise = client.workspaces.removeWorkspaceMember("workspace_sdk", "/repo/sdk");
+  const guardRequest = parseSentSessionMessage(ws.sent.at(-1));
+  ws.message(
+    sessionMessage({
+      type: "workspace.member.remove.response",
+      payload: {
+        requestId: guardRequest.requestId,
+        workspace: null,
+        error: "Cannot remove the last member of workspace workspace_sdk",
+        errorCode: "last_member",
+      },
+    }),
+  );
+  await expect(guardPromise).rejects.toThrow("last member");
+
+  await client.close();
+});
+
 test("plugin-shaped PR workspace create and agent create use the existing daemon RPCs", async () => {
   const { client, ws } = await connectClient();
   const createdWorkspace = createWorkspace({ id: "workspace_fresh", name: "Issue 42" });

@@ -82,6 +82,10 @@ import { ComposerToolbarGlyph } from "@/composer/agent-controls/glyph";
 import { AgentControlTrigger } from "@/composer/agent-controls/control";
 import { CompactModelSheet } from "@/composer/agent-controls/model-sheet";
 import {
+  DraftProjectPicker,
+  type DraftProjectPickerValue,
+} from "@/composer/agent-controls/project-picker";
+import {
   useAgentProfileEditor,
   useAgentProfilePicker,
   type AgentProfileApplyTarget,
@@ -130,6 +134,7 @@ interface ControlledAgentControlsProps {
   modeControl?: AgentModeControlValue | null;
   modelSelectorServerId?: string | null;
   isCompactLayout?: boolean;
+  projectPicker?: DraftProjectPickerValue | null;
 }
 
 export interface DraftAgentControlsProps {
@@ -158,6 +163,7 @@ export interface DraftAgentControlsProps {
   disabled?: boolean;
   modelSelectorServerId?: string | null;
   isCompactLayout?: boolean;
+  projectPicker?: DraftProjectPickerValue | null;
 }
 
 interface AgentControlsProps {
@@ -244,19 +250,22 @@ function resolveHasAnyControl({
   thinkingOptions,
   features,
   hasMode,
+  hasProjectPicker,
 }: {
   providerOptions: AgentControlOption[] | undefined;
   canSelectModel: boolean;
   thinkingOptions: AgentControlOption[] | undefined;
   features: AgentFeature[] | undefined;
   hasMode: boolean;
+  hasProjectPicker?: boolean;
 }) {
   return (
     Boolean(providerOptions?.length) ||
     canSelectModel ||
     Boolean(thinkingOptions?.length) ||
     Boolean(features?.length) ||
-    hasMode
+    hasMode ||
+    hasProjectPicker === true
   );
 }
 
@@ -500,6 +509,7 @@ function ControlledAgentControls({
   modeControl,
   modelSelectorServerId = null,
   isCompactLayout,
+  projectPicker = null,
 }: ControlledAgentControlsProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
@@ -546,6 +556,7 @@ function ControlledAgentControls({
     thinkingOptions,
     features,
     hasMode: modeControl !== null && modeControl !== undefined,
+    hasProjectPicker: projectPicker !== null,
   });
   const featureControls = useMemo(
     () =>
@@ -732,6 +743,7 @@ function ControlledAgentControls({
   return (
     <ComposerControlLayoutProvider value={layoutContextValue}>
       <View style={styles.container} onLayout={handleLayout}>
+        {projectPicker ? <DraftProjectPicker picker={projectPicker} disabled={disabled} /> : null}
         {!isCompact ? (
           <DesktopAgentControlsContent
             provider={provider}
@@ -1833,6 +1845,7 @@ export function DraftAgentControls({
   disabled = false,
   modelSelectorServerId = null,
   isCompactLayout,
+  projectPicker = null,
 }: DraftAgentControlsProps) {
   const mappedThinkingOptions = useMemo<AgentControlOption[]>(() => {
     return toThinkingControlOptions(thinkingOptions);
@@ -1921,6 +1934,7 @@ export function DraftAgentControls({
         modeControl={modeControl}
         modelSelectorServerId={modelSelectorServerId}
         isCompactLayout={isCompactLayout}
+        projectPicker={projectPicker}
       />
     </>
   );

@@ -4,7 +4,7 @@ import type {
   ProjectCheckoutLitePayload,
   ProjectPlacementPayload,
 } from "@getpaseo/protocol/messages";
-import type { PersistedWorkspaceRecord } from "./workspace-registry.js";
+import type { PersistedWorkspaceMember, PersistedWorkspaceRecord } from "./workspace-registry.js";
 
 export type PersistedProjectKind = "git" | "non_git";
 export type PersistedWorkspaceKind = "local_checkout" | "worktree" | "directory";
@@ -37,6 +37,73 @@ export function deriveWorkspaceDisplayName(input: {
 
   const segments = input.cwd.replace(/\\/g, "/").split("/").filter(Boolean);
   return segments[segments.length - 1] ?? input.cwd;
+}
+
+/** Scalar placement fields that always mirror the workspace's primary member. */
+export interface WorkspaceScalarMirror {
+  projectId: string;
+  cwd: string;
+  kind: PersistedWorkspaceKind;
+  displayName: string;
+  branch: string | null;
+  worktreeRoot: string | null;
+  baseBranch: string | null;
+  isPaseoOwnedWorktree: boolean;
+  mainRepoRoot: string | null;
+}
+
+/**
+ * Builds the member view of the scalar placement fields. The scalar fields are
+ * the primary member's source of truth, so this is both the implicit member of
+ * a legacy record and the value the primary member is synced to on every write.
+ */
+export function workspaceMemberFromScalars(
+  record: WorkspaceScalarMirror,
+): PersistedWorkspaceMember {
+  return {
+    projectId: record.projectId,
+    cwd: record.cwd,
+    kind: record.kind,
+    displayName: record.displayName,
+    branch: record.branch,
+    worktreeRoot: record.worktreeRoot,
+    baseBranch: record.baseBranch,
+    isPaseoOwnedWorktree: record.isPaseoOwnedWorktree,
+    mainRepoRoot: record.mainRepoRoot,
+  };
+}
+
+/**
+ * Returns the workspace's project memberships. Records persisted before
+ * cross-project workspaces carry no `members` list; they read as a single
+ * implicit member derived from the scalar fields.
+ */
+export function workspaceMembers(record: PersistedWorkspaceRecord): PersistedWorkspaceMember[] {
+  if (record.members && record.members.length > 0) {
+    return record.members;
+  }
+  return [workspaceMemberFromScalars(record)];
+}
+
+/**
+ * Builds the scalar-mirror fields from a primary member. Writers that change
+ * which member is primary (member removal, membership reorder) must apply
+ * these to the record's scalar fields in the same write.
+ */
+export function workspaceScalarsFromPrimaryMember(
+  member: PersistedWorkspaceMember,
+): WorkspaceScalarMirror {
+  return {
+    projectId: member.projectId,
+    cwd: member.cwd,
+    kind: member.kind,
+    displayName: member.displayName,
+    branch: member.branch,
+    worktreeRoot: member.worktreeRoot,
+    baseBranch: member.baseBranch,
+    isPaseoOwnedWorktree: member.isPaseoOwnedWorktree,
+    mainRepoRoot: member.mainRepoRoot,
+  };
 }
 
 export type PersistedWorkspacePlacement = Pick<

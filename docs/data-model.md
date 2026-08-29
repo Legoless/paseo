@@ -437,13 +437,13 @@ workspace together with its owning project.
 
 **Path:** `$PASEO_HOME/projects/workspaces.json`
 
-Array of workspace records. A workspace is a specific working directory within a project.
+Array of workspace records. A workspace is a named container holding one or more workspace projects (members); each member is a specific working directory within a project.
 
 | Field                          | Type                                            | Description                                                                                                                                                                                   |
 | ------------------------------ | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `workspaceId`                  | `string`                                        | Opaque stable identifier (`wks_<hex>`), generated independently of the directory. MUST NOT be treated as a path; compare by exact equality. Use the `cwd` field for directory access.         |
-| `projectId`                    | `string`                                        | FK to Project.projectId; the workspace's stable project membership                                                                                                                            |
-| `cwd`                          | `string`                                        | Exact execution directory selected for agents, files, scripts, and setup                                                                                                                      |
+| `projectId`                    | `string`                                        | FK to Project.projectId; mirrors the primary member's project                                                                                                                                 |
+| `cwd`                          | `string`                                        | Primary member's exact execution directory; the default for agents, files, scripts, and setup                                                                                                 |
 | `kind`                         | `"local_checkout" \| "worktree" \| "directory"` | Mutable checkout classification                                                                                                                                                               |
 | `displayName`                  | `string`                                        | The human name (the generated/derived title). Decoupled from `branch` by construction.                                                                                                        |
 | `title`                        | `string \| null`                                | User-set name override layered over `displayName`. Null means "use `displayName`".                                                                                                            |
@@ -458,6 +458,13 @@ Array of workspace records. A workspace is a specific working directory within a
 | `autoArchivedChangeRequestUrl` | `string \| null`                                | Change request whose merged state triggered auto-archive. Restore replaces it with the current merged change request, when present, so repeated snapshots cannot archive the workspace again. |
 | `labels`                       | `string[]?`                                     | Normalized display names assigned from this host's shared label catalog. Missing means unlabelled.                                                                                            |
 | `pinnedAt`                     | `string \| null` (ISO 8601)                     | Pinned-to-top-of-sidebar timestamp; null means "not pinned"                                                                                                                                   |
+| `members`                      | `WorkspaceProject[]?`                           | Ordered project placements (below). Missing or empty means one implicit member derived from the scalar fields. COMPAT(workspaceMembers): added in v0.7.0.                                     |
+
+### Workspace projects (members)
+
+Each member carries the placement fields the record carries scalar: `projectId`, `cwd`, `kind`, `displayName`, `branch`, `worktreeRoot`, `baseBranch`, `isPaseoOwnedWorktree`, `mainRepoRoot`. The first member is primary: the scalar fields and the primary member always carry the same values, whichever side a write lands on, because older daemons and clients read only the scalars. `workspaceMembers()` in `packages/server/src/server/workspace-registry-model.ts` is the read path; it derives the implicit member when the field is absent, so existing files need no migration.
+
+Agents bind to the workspace by `workspaceId` and run in any member `cwd` (default: the primary's). Archive tears down every member — agents and terminals by `workspaceId`, each member's Paseo-owned worktree by its own placement facts. Removing a project strips non-primary memberships from workspaces and archives a workspace only when its last member disappears.
 
 > **Opaque-ID invariant:** `workspaceId` is opaque identity, never a filesystem path. Filesystem and git operations take `cwd`/`workspaceDirectory` only — never the id. A compatibility-only first-materialization bootstrap still groups pre-registry agent records by path and Git remote so existing installs retain their legacy records. That grouping never runs against a live registry, and its keys are not runtime project or workspace identity.
 

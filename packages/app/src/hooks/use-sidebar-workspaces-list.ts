@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
-import { useCreateFlowStore } from "@/stores/create-flow-store";
+import {
+  buildSidebarWorkspaceGroupModel,
+  preserveSidebarWorkspaceGroupModelIdentity,
+  type SidebarWorkspaceGroupModel,
+  type SidebarWorkspaceGroupSession,
+} from "@/projects/workspace-groups";
 import { useSessionStore } from "@/stores/session-store";
 import { useWorkspaceDirectoryServerIds } from "@/stores/session-store-hooks";
-import { workspaceEqualityFns } from "@/stores/session-store-hooks/selectors";
 import { useHostProjects } from "@/projects/host-projects";
 import { getHostRuntimeStore, useHostRegistryLoaded, useHosts } from "@/runtime/host-runtime";
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
@@ -14,6 +18,7 @@ import {
   createSidebarWorkspaceEntry,
   deriveProjectStatusBucket,
   deriveSidebarLoadingState,
+  prependMissingOrderKeys,
   type ProjectStatusSession,
   type SidebarProjectEntry,
   type SidebarWorkspaceEntry,
@@ -26,58 +31,24 @@ export {
   applyStoredOrdering,
   buildSidebarProjectsFromHostProjects,
   buildSidebarProjectsFromStructure,
+  compareSidebarWorkspacePlacements,
   createSidebarWorkspaceEntry,
   buildSidebarWorkspacePlacementModel,
   computeSidebarOrderUpdates,
   deriveProjectStatusBucket,
   deriveSidebarLoadingState,
   shouldShowSidebarHostLabels,
+  prependMissingOrderKeys,
   type SidebarLoadingState,
   type SidebarOrderUpdates,
   type SidebarStatusWorkspacePlacement,
   type SidebarWorkspacePlacement,
   type SidebarWorkspacePlacementModel,
+  type ProjectStatusSession,
   type SidebarProjectEntry,
   type SidebarStateBucket,
   type SidebarWorkspaceEntry,
 } from "./sidebar-workspaces-view-model";
-
-/**
- * Aggregate status for a project's workspaces, for the collapsed project row.
- *
- * `SidebarProjectEntry` is structural — it carries workspace identity but no status — and
- * `ProjectBlock` is memoized on that stable reference, so the row can't learn about a
- * child's status without its own subscription. Returns a primitive, so status churn in a
- * project only re-renders the row when the aggregate actually moves.
- *
- * Pass `enabled: false` while the project is expanded: the child rows show their own dots
- * and the selector is pure cost.
- */
-export function useSidebarProjectStatusBucket(input: {
-  workspaces: readonly SidebarWorkspacePlacement[];
-  enabled: boolean;
-}): SidebarStateBucket | null {
-  const { workspaces, enabled } = input;
-  const pendingCreateAttempts = useStoreWithEqualityFn(
-    useCreateFlowStore,
-    (state) => state.pendingByDraftId,
-    workspaceEqualityFns.deep,
-  );
-
-  const selector = useCallback(
-    (state: { sessions: Record<string, ProjectStatusSession | undefined> }) => {
-      if (!enabled) return null;
-      return deriveProjectStatusBucket({
-        workspaces,
-        sessions: state.sessions,
-        pendingCreateAttempts,
-      });
-    },
-    [enabled, pendingCreateAttempts, workspaces],
-  );
-
-  return useStoreWithEqualityFn(useSessionStore, selector, Object.is);
-}
 
 const EMPTY_ORDER: string[] = [];
 const EMPTY_PROJECTS: SidebarProjectEntry[] = [];
@@ -135,6 +106,9 @@ export function useSidebarWorkspacesList(options?: {
   }, [allServerIds, hostRegistryLoaded, reconcileHostFilters]);
 
   const persistedProjectOrder = useSidebarOrderStore((state) => state.projectOrder ?? EMPTY_ORDER);
+  const persistedWorkspaceOrder = useSidebarOrderStore(
+    (state) => state.workspaceOrder ?? EMPTY_ORDER,
+  );
 
   const directoryServerIds = useWorkspaceDirectoryServerIds(serverIds);
 
@@ -173,6 +147,19 @@ export function useSidebarWorkspacesList(options?: {
     }
   }, [persistedProjectOrder, projects]);
 
+  // New workspaces enter the flat order ahead of the dragged one, matching the recency-first
+  // behavior the per-project lists had. The stored list accumulates keys for workspaces a
+  // filter currently hides; pruning happens against the visible set at drag time instead.
+  useEffect(() => {
+    const nextWorkspaceOrder = prependMissingOrderKeys({
+      currentOrder: persistedWorkspaceOrder,
+      visibleKeys: workspacePlacements.map((workspace) => workspace.workspaceKey),
+    });
+    if (nextWorkspaceOrder !== persistedWorkspaceOrder) {
+      useSidebarOrderStore.getState().setTopLevelWorkspaceOrder(nextWorkspaceOrder);
+    }
+  }, [persistedWorkspaceOrder, workspacePlacements]);
+
   const refreshAll = useCallback(() => {
     if (!isActive) return;
     for (const serverId of serverIds) {
@@ -199,4 +186,91 @@ export function useSidebarWorkspacesList(options?: {
     ...loadingState,
     refreshAll,
   };
+}
+
+const EMPTY_GROUP_SESSIONS: SidebarWorkspaceGroupSession[] = [];
+const EMPTY_GROUP_MODEL: SidebarWorkspaceGroupModel = {
+  sectionsByWorkspaceKey: new Map(),
+  memberIconTargets: [],
+};
+
+interface SidebarWorkspaceGroupSessionState {
+  sessions: Record<
+    string,
+    Pick<SidebarWorkspaceGroupSession, "workspaces" | "agents" | "projects"> | undefined
+  >;
+}
+
+function selectGroupSessions(
+  sessions: SidebarWorkspaceGroupSessionState["sessions"],
+  serverIds: readonly string[],
+): SidebarWorkspaceGroupSession[] {
+  const selected: SidebarWorkspaceGroupSession[] = [];
+  for (const serverId of serverIds) {
+    const session = sessions[serverId];
+    if (!session) continue;
+    selected.push({
+      serverId,
+      workspaces: session.workspaces,
+      agents: session.agents,
+      projects: session.projects,
+    });
+  }
+  return selected;
+}
+
+function areGroupSessionsEqual(
+  left: readonly SidebarWorkspaceGroupSession[],
+  right: readonly SidebarWorkspaceGroupSession[],
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    const leftSession = left[index];
+    const rightSession = right[index];
+    if (
+      !leftSession ||
+      !rightSession ||
+      leftSession.serverId !== rightSession.serverId ||
+      leftSession.workspaces !== rightSession.workspaces ||
+      leftSession.agents !== rightSession.agents ||
+      leftSession.projects !== rightSession.projects
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * The member/project rows and agent rows under each top-level workspace. Subscribes to the
+ * per-server workspace, agent, and project maps in one shot — per-row subscriptions would
+ * multiply against every workspace on every visible host. While the sidebar is retained but
+ * inactive the last model is kept and the subscription goes quiet.
+ */
+export function useSidebarWorkspaceGroupSections(input: {
+  placements: readonly SidebarWorkspacePlacement[];
+  enabled?: boolean;
+}): SidebarWorkspaceGroupModel {
+  const enabled = input.enabled !== false;
+  const serverIds = useMemo(
+    () => Array.from(new Set(input.placements.map((placement) => placement.serverId))),
+    [input.placements],
+  );
+  const sessions = useStoreWithEqualityFn(
+    useSessionStore,
+    (state) => (enabled ? selectGroupSessions(state.sessions, serverIds) : EMPTY_GROUP_SESSIONS),
+    areGroupSessionsEqual,
+  );
+  const previousModelRef = useRef<SidebarWorkspaceGroupModel>(EMPTY_GROUP_MODEL);
+  return useMemo(() => {
+    if (!enabled || sessions.length === 0) {
+      return previousModelRef.current;
+    }
+    const next = buildSidebarWorkspaceGroupModel({ sessions });
+    const model = preserveSidebarWorkspaceGroupModelIdentity(previousModelRef.current, next);
+    previousModelRef.current = model;
+    return model;
+  }, [enabled, sessions]);
 }

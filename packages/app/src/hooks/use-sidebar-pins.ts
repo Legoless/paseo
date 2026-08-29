@@ -1,10 +1,7 @@
 import { useMemo, useRef } from "react";
 import { shallow } from "zustand/shallow";
 import { useStoreWithEqualityFn } from "zustand/traditional";
-import type {
-  SidebarProjectEntry,
-  SidebarWorkspacePlacement,
-} from "@/hooks/use-sidebar-workspaces-list";
+import type { SidebarWorkspacePlacement } from "@/hooks/use-sidebar-workspaces-list";
 import { applyStoredOrdering } from "@/hooks/sidebar-workspaces-view-model";
 import { useSessionStore } from "@/stores/session-store";
 
@@ -15,39 +12,25 @@ export interface PinnedSidebarKeys {
 }
 
 export interface PinnedSidebarGroups {
-  // Individually pinned chats, hoisted into the Pinned section and removed from their
-  // project below. Most recently pinned first.
+  // Individually pinned chats, hoisted into the Pinned section and removed from the
+  // workspace list below. Most recently pinned first.
   pinnedChats: SidebarWorkspacePlacement[];
-  // Everything else, with pinned chats removed. Feeds the draggable project list.
-  unpinnedProjects: SidebarProjectEntry[];
-}
-
-function projectWithoutPinnedWorkspaces(
-  project: SidebarProjectEntry,
-  pinnedWorkspaceKeys: ReadonlySet<string>,
-): SidebarProjectEntry {
-  const workspaces = project.workspaces.filter(
-    (workspace) => !pinnedWorkspaceKeys.has(workspace.workspaceKey),
-  );
-  // Keep the project even when every chat moved to Pinned. The project row owns
-  // its settings and new-workspace actions; chats are not its ownership boundary.
-  return workspaces.length === project.workspaces.length ? project : { ...project, workspaces };
+  // Everything else. Feeds the workspace-grouped list's top-level rows.
+  unpinnedWorkspaces: SidebarWorkspacePlacement[];
 }
 
 function buildPinnedSidebarKeys(
-  projects: SidebarProjectEntry[],
+  workspaces: readonly SidebarWorkspacePlacement[],
   workspaceMaps: ReadonlyMap<string, ReadonlyMap<string, { pinnedAt?: string | null }>>,
 ): PinnedSidebarKeys {
   const pinnedWorkspaceKeys: string[] = [];
   const pinnedAtByKey: Record<string, string> = {};
 
-  for (const project of projects) {
-    for (const placement of project.workspaces) {
-      const workspace = workspaceMaps.get(placement.serverId)?.get(placement.workspaceId);
-      if (workspace?.pinnedAt) {
-        pinnedWorkspaceKeys.push(placement.workspaceKey);
-        pinnedAtByKey[placement.workspaceKey] = workspace.pinnedAt;
-      }
+  for (const placement of workspaces) {
+    const workspace = workspaceMaps.get(placement.serverId)?.get(placement.workspaceId);
+    if (workspace?.pinnedAt) {
+      pinnedWorkspaceKeys.push(placement.workspaceKey);
+      pinnedAtByKey[placement.workspaceKey] = workspace.pinnedAt;
     }
   }
   return { pinnedWorkspaceKeys, pinnedAtByKey };
@@ -69,19 +52,16 @@ function arePinnedSidebarKeysEqual(left: PinnedSidebarKeys, right: PinnedSidebar
   return true;
 }
 
-export function usePinnedSidebarKeys(projects: SidebarProjectEntry[]): PinnedSidebarKeys {
+export function usePinnedSidebarKeys(
+  workspaces: readonly SidebarWorkspacePlacement[],
+): PinnedSidebarKeys {
   const previousKeysRef = useRef<PinnedSidebarKeys>({
     pinnedWorkspaceKeys: [],
     pinnedAtByKey: {},
   });
   const serverIds = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          projects.flatMap((project) => project.workspaces.map((workspace) => workspace.serverId)),
-        ),
-      ),
-    [projects],
+    () => Array.from(new Set(workspaces.map((workspace) => workspace.serverId))),
+    [workspaces],
   );
   const workspaceMaps = useStoreWithEqualityFn(
     useSessionStore,
@@ -100,37 +80,36 @@ export function usePinnedSidebarKeys(projects: SidebarProjectEntry[]): PinnedSid
         workspaceMapByServerId.set(serverId, workspaceMap);
       }
     }
-    const nextKeys = buildPinnedSidebarKeys(projects, workspaceMapByServerId);
+    const nextKeys = buildPinnedSidebarKeys(workspaces, workspaceMapByServerId);
     if (arePinnedSidebarKeysEqual(previousKeysRef.current, nextKeys)) {
       return previousKeysRef.current;
     }
     previousKeysRef.current = nextKeys;
     return nextKeys;
-  }, [projects, serverIds, workspaceMaps]);
+  }, [workspaces, serverIds, workspaceMaps]);
 }
 
 // Splits the sidebar into a dedicated Pinned section (chats) and the regular list below.
 // Pinned chats are ordered most-recently-pinned first.
 export function splitPinnedSidebarGroups(input: {
-  projects: SidebarProjectEntry[];
+  workspaces: readonly SidebarWorkspacePlacement[];
   keys: PinnedSidebarKeys;
   pinnedWorkspaceOrder: string[];
 }): PinnedSidebarGroups {
-  const { projects, keys, pinnedWorkspaceOrder } = input;
+  const { workspaces, keys, pinnedWorkspaceOrder } = input;
   if (keys.pinnedWorkspaceKeys.length === 0) {
-    return { pinnedChats: [], unpinnedProjects: projects };
+    return { pinnedChats: [], unpinnedWorkspaces: [...workspaces] };
   }
   const pinnedWorkspaceKeySet = new Set(keys.pinnedWorkspaceKeys);
   const pinnedChats: SidebarWorkspacePlacement[] = [];
-  const unpinnedProjects: SidebarProjectEntry[] = [];
+  const unpinnedWorkspaces: SidebarWorkspacePlacement[] = [];
 
-  for (const project of projects) {
-    for (const workspace of project.workspaces) {
-      if (pinnedWorkspaceKeySet.has(workspace.workspaceKey)) {
-        pinnedChats.push(workspace);
-      }
+  for (const workspace of workspaces) {
+    if (pinnedWorkspaceKeySet.has(workspace.workspaceKey)) {
+      pinnedChats.push(workspace);
+    } else {
+      unpinnedWorkspaces.push(workspace);
     }
-    unpinnedProjects.push(projectWithoutPinnedWorkspaces(project, pinnedWorkspaceKeySet));
   }
 
   pinnedChats.sort((a, b) =>
@@ -145,6 +124,6 @@ export function splitPinnedSidebarGroups(input: {
       storedOrder: pinnedWorkspaceOrder,
       getKey: (workspace) => workspace.workspaceKey,
     }),
-    unpinnedProjects,
+    unpinnedWorkspaces,
   };
 }

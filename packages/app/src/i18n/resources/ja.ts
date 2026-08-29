@@ -622,6 +622,9 @@ export const ja: TranslationResources = {
         changes: "変更",
         files: "ファイル",
       },
+      projectPicker: {
+        selectProject: "プロジェクトを選択",
+      },
       toasts: {
         copyFailed: "コピーに失敗しました",
         agentIdCopiedLabel: "エージェントID",

@@ -20,7 +20,6 @@ const LABELS: WorkspaceLabelDefinition[] = [{ name: "Urgent", color: "red" }];
 
 function select(overrides: Partial<Parameters<typeof selectMetaRowItems>[0]> = {}) {
   return selectMetaRowItems({
-    currentBranch: "feature/sidebar-badges",
     projectName: "Paseo",
     hasHostBadge: true,
     prHint: PR_HINT,
@@ -35,10 +34,9 @@ function select(overrides: Partial<Parameters<typeof selectMetaRowItems>[0]> = {
 const kinds = (items: ReturnType<typeof selectMetaRowItems>) => items.map((item) => item.kind);
 
 describe("selectMetaRowItems", () => {
-  it("puts the enabled branch and project badges first", () => {
-    const visible = { ...DEFAULT_SIDEBAR_ROW_ITEMS, branch: true, project: true };
+  it("puts the enabled project badge first", () => {
+    const visible = { ...DEFAULT_SIDEBAR_ROW_ITEMS, project: true };
     expect(kinds(select({ visible }))).toEqual([
-      "branch",
       "project",
       "host",
       "changeRequest",
@@ -56,7 +54,6 @@ describe("selectMetaRowItems", () => {
     expect(
       kinds(
         select({
-          currentBranch: null,
           projectName: null,
           hasHostBadge: false,
           prHint: null,
@@ -67,15 +64,20 @@ describe("selectMetaRowItems", () => {
     ).toEqual([]);
   });
 
-  it("only draws identity badges when enabled and available", () => {
-    const visible = { ...DEFAULT_SIDEBAR_ROW_ITEMS, branch: true, project: true };
-    expect(kinds(select({ currentBranch: null, projectName: null, visible }))).toEqual([
+  it("only draws the identity badge when enabled and available", () => {
+    const visible = { ...DEFAULT_SIDEBAR_ROW_ITEMS, project: true };
+    expect(kinds(select({ projectName: null, visible }))).toEqual([
       "host",
       "changeRequest",
       "checks",
       "services",
       "labels",
     ]);
+  });
+
+  it("never draws a branch — branches render on the agent rows now", () => {
+    const visible = { ...DEFAULT_SIDEBAR_ROW_ITEMS, branch: true, project: true };
+    expect(kinds(select({ visible }))).not.toContain("branch");
   });
 
   it("carries every label as one item, so the line keeps one separator however many there are", () => {

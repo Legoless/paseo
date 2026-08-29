@@ -65,6 +65,7 @@ import {
   pathBaseName,
   type AddProjectMethodId,
 } from "@/add-project-flow/options";
+import { addWorkspaceMemberCompletion } from "@/add-project-flow/add-workspace-member";
 import {
   buildProjectPickerOptions,
   type ProjectPickerOption,
@@ -91,6 +92,7 @@ import {
 import { useHostFeatureMap } from "@/runtime/host-features";
 import { useSessionStore } from "@/stores/session-store";
 import { useRecommendedProjectPaths } from "@/stores/session-store-hooks";
+import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import type { AddProjectFlowRequest } from "@/stores/add-project-flow-store";
 import type { Theme } from "@/styles/theme";
 import { shortenPath } from "@/utils/shorten-path";
@@ -206,12 +208,12 @@ function pageHostId(page: AddProjectPage): string | null {
   return page.kind === "host" ? null : page.hostId;
 }
 
-function pageTitle(page: AddProjectPage): string {
+function pageTitle(page: AddProjectPage, targetsWorkspace: boolean): string {
   switch (page.kind) {
     case "host":
       return "Choose host";
     case "method":
-      return "Add project";
+      return targetsWorkspace ? "Add project to workspace" : "Add project";
     case "directory-search":
       return "Search for directory";
     case "github-search":
@@ -328,6 +330,7 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
   // COMPAT(projectCreateDirectory): added in v0.1.108, remove gate after 2027-01-15.
   const createDirectoryByHost = useHostFeatureMap(hostIds, "projectCreateDirectory");
   const localServerId = useLocalDaemonServerId();
+  const targetWorkspace = request.targetWorkspace ?? null;
   const availableHosts = useMemo<AddProjectHost[]>(
     () =>
       hosts.flatMap((host) => {
@@ -358,9 +361,18 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
       stableProjectIdentityByHost,
     ],
   );
+  // A workspace-targeted flow is locked to the workspace's host: with a single
+  // candidate the model skips the host page and Back closes instead of switching.
+  const flowHosts = useMemo(
+    () =>
+      targetWorkspace
+        ? availableHosts.filter((host) => host.serverId === targetWorkspace.serverId)
+        : availableHosts,
+    [availableHosts, targetWorkspace],
+  );
   const [state, setState] = useState(() =>
     openAddProjectFlow({
-      hosts: availableHosts,
+      hosts: flowHosts,
       ...(request.preferredHostId ? { preferredHostId: request.preferredHostId } : {}),
     }),
   );
@@ -384,9 +396,9 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
 
   useEffect(() => {
     setState((current) =>
-      applyAvailableAddProjectHosts(current, availableHosts, request.preferredHostId),
+      applyAvailableAddProjectHosts(current, flowHosts, request.preferredHostId),
     );
-  }, [availableHosts, request.preferredHostId]);
+  }, [flowHosts, request.preferredHostId]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 250);
@@ -462,6 +474,15 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
     [onClose],
   );
 
+  const closeAndOpenTargetWorkspace = useCallback(() => {
+    if (!targetWorkspace) return;
+    onClose();
+    navigateToWorkspace({
+      serverId: targetWorkspace.serverId,
+      workspaceId: targetWorkspace.workspaceId,
+    });
+  }, [onClose, targetWorkspace]);
+
   const openAddedProject = useCallback(
     async (path: string, sourceKind: "directory-search" | "method") => {
       if (!hostId || submissionInFlightRef.current) return;
@@ -470,6 +491,21 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
         setPageStatus(current, sourceKind, { isSubmitting: true, error: null }),
       );
       try {
+        if (targetWorkspace) {
+          const completion = await addWorkspaceMemberCompletion({
+            client,
+            workspaceId: targetWorkspace.workspaceId,
+            path,
+          });
+          if (completion.ok) {
+            closeAndOpenTargetWorkspace();
+            return;
+          }
+          setState((current) =>
+            setPageStatus(current, sourceKind, { isSubmitting: false, error: completion.message }),
+          );
+          return;
+        }
         const result = await openProject(path);
         if (result.ok) {
           openNewWorkspaceForProject(hostId, result.project);
@@ -492,7 +528,14 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
         submissionInFlightRef.current = false;
       }
     },
-    [hostId, openNewWorkspaceForProject, openProject],
+    [
+      client,
+      closeAndOpenTargetWorkspace,
+      hostId,
+      openNewWorkspaceForProject,
+      openProject,
+      targetWorkspace,
+    ],
   );
 
   const browse = useCallback(async () => {
@@ -554,6 +597,24 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
         );
         if (result.ok) {
           lastCloneParentByHost.set(locationPage.hostId, parentPath);
+          if (targetWorkspace) {
+            const completion = await addWorkspaceMemberCompletion({
+              client,
+              workspaceId: targetWorkspace.workspaceId,
+              path: result.project.projectRootPath,
+            });
+            if (completion.ok) {
+              closeAndOpenTargetWorkspace();
+              return;
+            }
+            setState((current) =>
+              setPageStatus(current, "github-location", {
+                isSubmitting: false,
+                error: completion.message,
+              }),
+            );
+            return;
+          }
           openNewWorkspaceForProject(locationPage.hostId, result.project);
           return;
         }
@@ -574,7 +635,13 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
         submissionInFlightRef.current = false;
       }
     },
-    [cloneGithubProject, openNewWorkspaceForProject],
+    [
+      client,
+      cloneGithubProject,
+      closeAndOpenTargetWorkspace,
+      openNewWorkspaceForProject,
+      targetWorkspace,
+    ],
   );
   const rows = useMemo<FlowRowOption[]>(() => {
     if (page.kind === "host") {
@@ -740,6 +807,24 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
         upsertProject,
         setHasHydratedWorkspaces,
       });
+      if (targetWorkspace) {
+        const completion = await addWorkspaceMemberCompletion({
+          client,
+          workspaceId: targetWorkspace.workspaceId,
+          path: payload.project.projectRootPath,
+        });
+        if (completion.ok) {
+          closeAndOpenTargetWorkspace();
+          return;
+        }
+        setState((current) =>
+          setPageStatus(current, "new-directory-name", {
+            isSubmitting: false,
+            error: completion.message,
+          }),
+        );
+        return;
+      }
       openNewWorkspaceForProject(page.hostId, payload.project);
     } catch {
       setState((current) =>
@@ -751,7 +836,15 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
     } finally {
       submissionInFlightRef.current = false;
     }
-  }, [client, openNewWorkspaceForProject, page, setHasHydratedWorkspaces, upsertProject]);
+  }, [
+    client,
+    closeAndOpenTargetWorkspace,
+    openNewWorkspaceForProject,
+    page,
+    setHasHydratedWorkspaces,
+    targetWorkspace,
+    upsertProject,
+  ]);
 
   const submitActive = useCallback(() => {
     if (page.kind === "new-directory-name") {
@@ -852,7 +945,7 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
               {state.pages.length > 1 ? <FlowBackButton onPress={handleBack} /> : null}
               <View style={styles.titleGroup} testID="add-project-flow-title">
                 <Text style={styles.title} numberOfLines={1}>
-                  {pageTitle(page)}
+                  {pageTitle(page, targetWorkspace !== null)}
                 </Text>
                 {host ? (
                   <Text style={styles.hostContext} numberOfLines={1}>
