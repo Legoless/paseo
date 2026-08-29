@@ -24,6 +24,18 @@ const workspace: WorkspaceDescriptor = {
   archivingAt: null,
   diffStat: null,
   scripts: [],
+  members: [
+    {
+      projectId: "project",
+      projectDisplayName: "Project",
+      projectCustomName: null,
+      projectRootPath: "/repo",
+      workspaceDirectory: "/repo",
+      workspaceKind: "local_checkout",
+      worktreeSlug: null,
+      branch: null,
+    },
+  ],
 };
 
 function setDiffStat(diffStat: WorkspaceDescriptor["diffStat"]): void {

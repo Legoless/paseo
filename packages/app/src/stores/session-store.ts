@@ -104,6 +104,20 @@ export interface Agent {
   projectPlacement?: ProjectPlacementPayload | null;
 }
 
+export interface WorkspaceMemberDescriptor {
+  projectId: string;
+  projectDisplayName: string;
+  projectCustomName: string | null;
+  projectRootPath: string;
+  workspaceDirectory: string;
+  workspaceKind: WorkspaceDescriptorPayload["workspaceKind"];
+  worktreeSlug: string | null;
+  branch: string | null;
+  // Optional so hand-built fixtures can omit it; normalization always sets it
+  // (null when the daemon has no live diff for the member directory).
+  diffStat?: { additions: number; deletions: number } | null;
+}
+
 export interface WorkspaceDescriptor {
   id: string;
   projectId: string;
@@ -128,6 +142,12 @@ export interface WorkspaceDescriptor {
   githubRuntime?: WorkspaceDescriptorPayload["githubRuntime"];
   forge?: WorkspaceDescriptorPayload["forge"];
   project?: ProjectPlacementPayload;
+  /**
+   * Project placements inside this workspace, primary first. Always non-empty after
+   * normalization — the implicit single member is synthesized when the daemon omits
+   * the field. The scalar project and workspaceDirectory fields mirror the primary member.
+   */
+  members: WorkspaceMemberDescriptor[];
 }
 
 export function normalizeWorkspaceDescriptor(
@@ -166,7 +186,54 @@ export function normalizeWorkspaceDescriptor(
     githubRuntime: payload.githubRuntime,
     forge: payload.forge,
     project: payload.project,
+    members: normalizeWorkspaceMembers(payload),
   };
+}
+
+export function normalizeWorkspaceMembers(
+  payload: Pick<
+    WorkspaceDescriptorPayload,
+    | "members"
+    | "projectId"
+    | "projectDisplayName"
+    | "projectCustomName"
+    | "projectRootPath"
+    | "workspaceDirectory"
+    | "workspaceKind"
+    | "worktreeSlug"
+    | "gitRuntime"
+    | "diffStat"
+  >,
+): WorkspaceMemberDescriptor[] {
+  const wire = payload.members ?? [];
+  if (wire.length > 0) {
+    return wire.map((member) => ({
+      projectId: member.projectId,
+      projectDisplayName: member.projectDisplayName,
+      projectCustomName: member.projectCustomName ?? null,
+      projectRootPath: member.projectRootPath,
+      workspaceDirectory: normalizeWorkspacePath(member.workspaceDirectory) ?? "",
+      workspaceKind: member.workspaceKind,
+      worktreeSlug: member.worktreeSlug ?? null,
+      branch: member.branch ?? null,
+      diffStat: member.diffStat ?? null,
+    }));
+  }
+  // COMPAT(workspaceMultiProject): daemons before v0.7.0 omit members; synthesize the
+  // implicit single member from the scalar placement fields.
+  return [
+    {
+      projectId: payload.projectId,
+      projectDisplayName: payload.projectDisplayName,
+      projectCustomName: payload.projectCustomName ?? null,
+      projectRootPath: payload.projectRootPath,
+      workspaceDirectory: normalizeWorkspacePath(payload.workspaceDirectory) ?? "",
+      workspaceKind: payload.workspaceKind,
+      worktreeSlug: payload.worktreeSlug ?? null,
+      branch: payload.gitRuntime?.currentBranch ?? null,
+      diffStat: payload.diffStat ?? null,
+    },
+  ];
 }
 
 export interface ProjectDescriptor {

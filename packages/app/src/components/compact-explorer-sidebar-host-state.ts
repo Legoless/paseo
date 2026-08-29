@@ -15,6 +15,8 @@ interface ResolveCompactExplorerSidebarHostModelInput {
   selection: ActiveWorkspaceSelection | null;
   workspace: WorkspaceDescriptor | null;
   isGit: boolean;
+  /** Selected project member's cwd in multi-project workspaces; falls back to the primary. */
+  selectedWorkspaceRoot?: string | null;
 }
 
 function trimNonEmpty(value: string | null | undefined): string | null {
@@ -51,6 +53,7 @@ export function resolveCompactExplorerSidebarHostModel(
     workspaceId,
     persistenceKey,
     workspaceRoot:
+      trimNonEmpty(input.selectedWorkspaceRoot) ??
       trimNonEmpty(input.workspace?.workspaceDirectory) ??
       previousForSelection?.workspaceRoot ??
       "",

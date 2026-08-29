@@ -621,6 +621,9 @@ export const ptBR: TranslationResources = {
         changes: "Alterações",
         files: "Arquivos",
       },
+      projectPicker: {
+        selectProject: "Selecionar projeto",
+      },
       toasts: {
         copyFailed: "Falha ao copiar",
         agentIdCopiedLabel: "ID do agente",

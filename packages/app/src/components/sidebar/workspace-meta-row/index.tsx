@@ -2,7 +2,7 @@ import { Fragment, useCallback, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Pressable, Text, View, type GestureResponderEvent } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { ExternalLink, Folder, GitBranch, Globe } from "lucide-react-native";
+import { ExternalLink, Folder, Globe } from "lucide-react-native";
 import {
   workspaceLabelKey,
   type WorkspaceLabelDefinition,
@@ -36,7 +36,6 @@ const META_ICON_SIZE = HOST_BADGE_ICON_SIZE;
 
 const ThemedExternalLink = withUnistyles(ExternalLink);
 const ThemedFolder = withUnistyles(Folder);
-const ThemedGitBranch = withUnistyles(GitBranch);
 const ThemedGlobe = withUnistyles(Globe);
 
 /** Stable identity so a row without labels doesn't re-select its items on every render. */
@@ -61,14 +60,12 @@ const dangerMapping = (theme: Theme) => ({ color: theme.colors.statusDanger });
  * read first, and it stays the same height as the rest of the line.
  */
 export function WorkspaceMetaRow({
-  currentBranch,
   projectName,
   hostBadge,
   prHint,
   serviceSummary,
   labels = EMPTY_LABELS,
 }: {
-  currentBranch: string | null;
   projectName: string | null;
   hostBadge: HostBadgeModel | null;
   prHint: PrHint | null;
@@ -77,7 +74,6 @@ export function WorkspaceMetaRow({
 }) {
   const { rowItems, checksDisplay } = useSidebarMetaPreferences();
   const items = selectMetaRowItems({
-    currentBranch,
     projectName,
     hasHostBadge: hostBadge !== null,
     prHint,
@@ -111,11 +107,8 @@ function MetaItemNode({
   /** First on the line, so this item's ink sets the rail the title above it already uses. */
   leading: boolean;
 }): ReactNode {
-  if (item.kind === "branch") {
-    return <IdentityItem kind="branch" name={item.name} />;
-  }
   if (item.kind === "project") {
-    return <IdentityItem kind="project" name={item.name} />;
+    return <IdentityItem name={item.name} />;
   }
   if (item.kind === "host") {
     return hostBadge ? <HostBadge badge={hostBadge} /> : null;
@@ -132,12 +125,11 @@ function MetaItemNode({
   return <ServiceItem summary={item.summary} />;
 }
 
-function IdentityItem({ kind, name }: { kind: "branch" | "project"; name: string }) {
-  const Icon = kind === "branch" ? ThemedGitBranch : ThemedFolder;
+function IdentityItem({ name }: { name: string }) {
   return (
-    <View style={styles.identityItem} testID={`sidebar-workspace-${kind}`}>
+    <View style={styles.identityItem} testID="sidebar-workspace-project">
       <View style={styles.identityIcon}>
-        <Icon size={META_ICON_SIZE} uniProps={mutedMapping} />
+        <ThemedFolder size={META_ICON_SIZE} uniProps={mutedMapping} />
       </View>
       <Text style={styles.identityText} numberOfLines={1}>
         {name}

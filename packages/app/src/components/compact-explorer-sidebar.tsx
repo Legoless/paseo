@@ -33,6 +33,7 @@ import { usePullRequestPanelAvailability } from "@/panels/pull-request-availabil
 import { PullRequestContent } from "@/panels/pull-request";
 import { useAddFileToChat } from "@/panels/use-add-file-to-chat";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
+import { WorkspaceProjectPicker } from "@/components/workspace-project-picker";
 import {
   SIDEBAR_RESIZE_ACTIVATION_OFFSET,
   SIDEBAR_RESIZE_FAIL_OFFSET,
@@ -339,6 +340,7 @@ function ExplorerSidebarContent({
 
   return (
     <View style={styles.sidebarContent} pointerEvents="auto">
+      <WorkspaceProjectPicker serverId={serverId} workspaceId={workspaceId ?? null} />
       {/* Header with tabs and close button */}
       <WindowChromeSafeArea
         placement="inline"

@@ -17,6 +17,7 @@ import { usePaneContext } from "@/panels/pane-context";
 import { definePanel, type PanelDescriptor, type PanelPresentation } from "@/panels/panel-registry";
 import { useAddFileToChat } from "@/panels/use-add-file-to-chat";
 import { useWorkspaceDirectory } from "@/stores/session-store-hooks";
+import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selection-store";
 import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 import { defaultChangesState, changesStateSchema } from "@/panels/changes/state";
 import { usePanelState } from "@/panels/use-panel-state";
@@ -90,7 +91,8 @@ function ChangesPanel() {
     usePaneContext();
   const [changesState, setChangesState] = usePanelState(changesStateSchema, defaultChangesState);
   const { preferences } = useChangesPreferences();
-  const cwd = useWorkspaceDirectory(serverId, workspaceId);
+  const primaryCwd = useWorkspaceDirectory(serverId, workspaceId);
+  const { cwd: selectedCwd } = useSelectedWorkspaceProject(serverId, workspaceId);
   const isActive = useRetainedPanelActive();
   const { addFile, canAddToChat } = useAddFileToChat({ serverId, workspaceId });
   invariant(
@@ -98,6 +100,9 @@ function ChangesPanel() {
     "ChangesPanel requires working_diff or changes_tree target",
   );
   const isTree = target.kind === "changes_tree";
+  // The explorer tree follows the workspace's selected project; a working_diff pane
+  // stays on the primary directory it was opened for.
+  const cwd = isTree ? (selectedCwd ?? primaryCwd) : primaryCwd;
 
   const handleOpenFile = useCallback(
     (path: string) => openPreferredTarget({ kind: "file", path }, isTree ? "diffs" : "diffFiles"),

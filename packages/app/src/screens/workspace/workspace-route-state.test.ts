@@ -18,6 +18,18 @@ function createWorkspaceDescriptor(): WorkspaceDescriptor {
     scripts: [],
     archivingAt: null,
     statusEnteredAt: null,
+    members: [
+      {
+        projectId: "project-1",
+        projectDisplayName: "Project",
+        projectCustomName: null,
+        projectRootPath: "/repo/project",
+        workspaceDirectory: "/repo/project",
+        workspaceKind: "local_checkout",
+        worktreeSlug: null,
+        branch: null,
+      },
+    ],
   };
 }
 

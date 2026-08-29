@@ -617,6 +617,9 @@ export const zhCN: TranslationResources = {
         changes: "变更",
         files: "文件",
       },
+      projectPicker: {
+        selectProject: "选择项目",
+      },
       toasts: {
         copyFailed: "复制失败",
         agentIdCopiedLabel: "Agent ID",

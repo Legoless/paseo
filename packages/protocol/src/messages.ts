@@ -2525,6 +2525,28 @@ export const WorkspaceClearAttentionRequestSchema = z.object({
   requestId: z.string(),
 });
 
+// Adds a project membership to an existing workspace. The source discriminates
+// how the member is placed; phase 1 supports existing local directories only.
+export const WorkspaceMemberAddRequestSchema = z.object({
+  type: z.literal("workspace.member.add.request"),
+  workspaceId: z.string(),
+  source: z.object({
+    kind: z.literal("directory"),
+    // Path of the existing checkout/directory backing the new member.
+    path: z.string(),
+    projectId: z.string().optional(),
+  }),
+  requestId: z.string(),
+});
+
+// Removes one project membership from a workspace, identified by its directory.
+export const WorkspaceMemberRemoveRequestSchema = z.object({
+  type: z.literal("workspace.member.remove.request"),
+  workspaceId: z.string(),
+  cwd: z.string(),
+  requestId: z.string(),
+});
+
 // Highlighted diff token schema
 // Note: style can be a compound class name (e.g., "heading meta") from the syntax highlighter
 const HighlightTokenSchema = z.object({
@@ -3112,6 +3134,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ArchiveWorkspaceRequestSchema,
   WorkspaceCreateRequestSchema,
   WorkspaceClearAttentionRequestSchema,
+  WorkspaceMemberAddRequestSchema,
+  WorkspaceMemberRemoveRequestSchema,
   FileExplorerRequestSchema,
   FileSubscribeRequestSchema,
   FileUnsubscribeRequestSchema,
@@ -3396,6 +3420,8 @@ export const ServerInfoStatusPayloadSchema = z
         checkoutRefresh: z.boolean().optional(),
         // COMPAT(workspaceMultiplicity): added in v0.1.97, drop the gate when floor >= v0.1.97
         workspaceMultiplicity: z.boolean().optional(),
+        // COMPAT(workspaceMultiProject): added in v0.7.0, remove gate after 2027-02-28.
+        workspaceMultiProject: z.boolean().optional(),
         // COMPAT(projectRemove): added in v0.1.97, drop the gate when floor >= v0.1.97.
         projectRemove: z.boolean().optional(),
         // COMPAT(projectAdd): added in v0.1.97, drop the gate when floor >= v0.1.97.
@@ -3736,6 +3762,31 @@ export const WorkspaceGitHubRuntimePayloadSchema = z
   .optional()
   .nullable();
 
+// One project membership of a workspace. A workspace holds 1..N members; the
+// descriptor's scalar project/placement fields mirror the primary (first)
+// member so old clients keep working unchanged.
+export const WorkspaceMemberPayloadSchema = z.object({
+  projectId: z.string(),
+  projectDisplayName: z.string(),
+  projectCustomName: z.string().nullable(),
+  projectRootPath: z.string(),
+  workspaceDirectory: z.string(),
+  // COMPAT(workspaces): keep legacy directory workspace kind parseable.
+  workspaceKind: z.enum(["directory", "local_checkout", "checkout", "worktree"]),
+  // Present only for Paseo-owned worktrees; this is the basename of their root directory.
+  worktreeSlug: z.string().nullable(),
+  branch: z.string().nullable(),
+  // COMPAT(workspaceMemberDiffStat): added in v0.7.0, remove optional after 2027-02-28.
+  // Live working-tree diff of the member directory; null when no git snapshot exists.
+  diffStat: z
+    .object({
+      additions: z.number(),
+      deletions: z.number(),
+    })
+    .nullable()
+    .optional(),
+});
+
 export const WorkspaceDescriptorPayloadSchema = z
   .object({
     id: z.string(),
@@ -3768,6 +3819,10 @@ export const WorkspaceDescriptorPayloadSchema = z
     pinnedAt: z.string().nullable().optional(),
     // COMPAT(workspaceLabels): added in v0.5.0, remove optional after 2027-08-14.
     labels: z.array(z.string()).optional(),
+    // COMPAT(workspaceMembers): added in v0.7.0, remove optional after 2027-02-28.
+    // Project memberships of this workspace. Absent means a single implicit
+    // member derived from the scalar project/placement fields.
+    members: z.array(WorkspaceMemberPayloadSchema).optional(),
     archivingAt: z.string().nullable().optional().default(null),
     status: WorkspaceStateBucketSchema,
     // Best-effort workspace status entry timestamp. Old daemons omit the
@@ -4522,6 +4577,28 @@ export const WorkspaceClearAttentionResponseSchema = z.object({
     ),
     success: z.boolean(),
     error: z.string().nullable(),
+  }),
+});
+
+export const WorkspaceMemberAddResponseSchema = z.object({
+  type: z.literal("workspace.member.add.response"),
+  payload: z.object({
+    requestId: z.string(),
+    // The fresh workspace descriptor including the new membership; null on error.
+    workspace: WorkspaceDescriptorPayloadSchema.nullable(),
+    error: z.string().nullable(),
+    errorCode: z.string().optional(),
+  }),
+});
+
+export const WorkspaceMemberRemoveResponseSchema = z.object({
+  type: z.literal("workspace.member.remove.response"),
+  payload: z.object({
+    requestId: z.string(),
+    // The fresh workspace descriptor after the membership was stripped; null on error.
+    workspace: WorkspaceDescriptorPayloadSchema.nullable(),
+    error: z.string().nullable(),
+    errorCode: z.string().optional(),
   }),
 });
 
@@ -6354,6 +6431,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ClearAgentAttentionResponseMessageSchema,
   WorkspaceCreateResponseSchema,
   WorkspaceClearAttentionResponseSchema,
+  WorkspaceMemberAddResponseSchema,
+  WorkspaceMemberRemoveResponseSchema,
   SendAgentMessageResponseMessageSchema,
   SetVoiceModeResponseMessageSchema,
   DaemonGetStatusResponseSchema,
@@ -6505,6 +6584,7 @@ export type ProjectCheckoutLitePayload = z.infer<typeof ProjectCheckoutLitePaylo
 export type ProjectPlacementPayload = z.infer<typeof ProjectPlacementPayloadSchema>;
 export type WorkspaceStateBucket = z.infer<typeof WorkspaceStateBucketSchema>;
 export type WorkspaceDescriptorPayload = z.infer<typeof WorkspaceDescriptorPayloadSchema>;
+export type WorkspaceMemberPayload = z.infer<typeof WorkspaceMemberPayloadSchema>;
 export type WorkspaceProjectDescriptorPayload = z.infer<
   typeof WorkspaceProjectDescriptorPayloadSchema
 >;
@@ -6588,6 +6668,10 @@ export type WorkspaceRecoveryRestoreResponse = z.infer<
 >;
 export type WorkspaceCreateRequest = z.infer<typeof WorkspaceCreateRequestSchema>;
 export type WorkspaceCreateResponse = z.infer<typeof WorkspaceCreateResponseSchema>;
+export type WorkspaceMemberAddRequest = z.infer<typeof WorkspaceMemberAddRequestSchema>;
+export type WorkspaceMemberAddResponse = z.infer<typeof WorkspaceMemberAddResponseSchema>;
+export type WorkspaceMemberRemoveRequest = z.infer<typeof WorkspaceMemberRemoveRequestSchema>;
+export type WorkspaceMemberRemoveResponse = z.infer<typeof WorkspaceMemberRemoveResponseSchema>;
 export type ProjectRenameResponsePayload = z.infer<typeof ProjectRenameResponsePayloadSchema>;
 export type ProjectRemoveResponsePayload = z.infer<typeof ProjectRemoveResponsePayloadSchema>;
 export type WaitForFinishResponseMessage = z.infer<typeof WaitForFinishResponseMessageSchema>;

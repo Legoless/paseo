@@ -6,6 +6,7 @@ import {
   Archive,
   CircleCheck,
   Copy,
+  FolderPlus,
   MoreVertical,
   Pencil,
   Pin,
@@ -57,6 +58,7 @@ const ThemedCircleCheck = withUnistyles(CircleCheck);
 const ThemedPin = withUnistyles(Pin);
 const ThemedPinOff = withUnistyles(PinOff);
 const ThemedTag = withUnistyles(Tag);
+const ThemedFolderPlus = withUnistyles(FolderPlus);
 
 const copyLeadingIcon = <ThemedCopy size={14} uniProps={foregroundMutedColorMapping} />;
 const renameLeadingIcon = <ThemedPencil size={14} uniProps={foregroundMutedColorMapping} />;
@@ -66,6 +68,7 @@ const markAsReadLeadingIcon = (
 const archiveLeadingIcon = <ThemedArchive size={14} uniProps={foregroundMutedColorMapping} />;
 const pinLeadingIcon = <ThemedPin size={14} uniProps={foregroundMutedColorMapping} />;
 const unpinLeadingIcon = <ThemedPinOff size={14} uniProps={foregroundMutedColorMapping} />;
+const addProjectLeadingIcon = <ThemedFolderPlus size={14} uniProps={foregroundMutedColorMapping} />;
 
 function renderTriggerIcon({ hovered }: { hovered?: boolean }) {
   return (
@@ -85,6 +88,7 @@ export interface SidebarWorkspaceMenuProps {
   onCopyBranchName?: () => void;
   onRename?: () => void;
   onMarkAsRead?: () => void;
+  onAddProject?: () => void;
   onArchive: () => void;
   archiveLabel?: string;
   archiveStatus?: "idle" | "pending" | "success";
@@ -132,6 +136,7 @@ function SidebarWorkspaceMenuItems({
   onCopyBranchName,
   onRename,
   onMarkAsRead,
+  onAddProject,
   onArchive,
   archiveLabel,
   archiveStatus,
@@ -203,6 +208,16 @@ function SidebarWorkspaceMenuItems({
           {isPinned ? t("sidebar.workspace.actions.unpin") : t("sidebar.workspace.actions.pin")}
         </WorkspaceMenuItem>
       ) : null}
+      {onAddProject ? (
+        <WorkspaceMenuItem
+          surface={surface}
+          testID={`sidebar-workspace-menu-add-project-${workspaceKey}`}
+          leading={addProjectLeadingIcon}
+          onSelect={onAddProject}
+        >
+          Add project…
+        </WorkspaceMenuItem>
+      ) : null}
       {serverId && workspaceId ? (
         <DropdownMenuSubTrigger
           id={WORKSPACE_LABEL_PAGE_ID}
@@ -243,6 +258,7 @@ export function SidebarWorkspaceMenu({
   onCopyBranchName,
   onRename,
   onMarkAsRead,
+  onAddProject,
   onArchive,
   archiveLabel,
   archiveStatus,
@@ -288,6 +304,7 @@ export function SidebarWorkspaceMenu({
           onCopyBranchName={onCopyBranchName}
           onRename={onRename}
           onMarkAsRead={onMarkAsRead}
+          onAddProject={onAddProject}
           onArchive={onArchive}
           archiveLabel={archiveLabel}
           archiveStatus={archiveStatus}
@@ -320,6 +337,7 @@ export function SidebarWorkspaceContextMenu({
   onCopyBranchName,
   onRename,
   onMarkAsRead,
+  onAddProject,
   onArchive,
   archiveLabel,
   archiveStatus,
@@ -399,6 +417,7 @@ export function SidebarWorkspaceContextMenu({
           onCopyBranchName={onCopyBranchName}
           onRename={onRename}
           onMarkAsRead={onMarkAsRead}
+          onAddProject={onAddProject}
           onArchive={onArchive}
           archiveLabel={archiveLabel}
           archiveStatus={archiveStatus}

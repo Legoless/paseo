@@ -480,6 +480,21 @@ export function shouldShowSidebarHostLabels(projects: SidebarProjectEntry[]): bo
   return serverIds.size >= 2;
 }
 
+/**
+ * The flat workspace list's fallback order when no drag order is stored: the same name sort the
+ * per-project lists used, applied across hosts. `applyStoredOrdering` treats this as the
+ * baseline and keeps unlisted (new) workspaces in it.
+ */
+export function compareSidebarWorkspacePlacements(
+  left: SidebarWorkspacePlacement,
+  right: SidebarWorkspacePlacement,
+): number {
+  return (
+    left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }) ||
+    left.workspaceKey.localeCompare(right.workspaceKey)
+  );
+}
+
 export function applyStoredOrdering<T>(input: {
   items: T[];
   storedOrder: string[];

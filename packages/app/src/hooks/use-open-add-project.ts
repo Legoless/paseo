@@ -1,5 +1,11 @@
-import { useAddProjectFlowStore } from "@/stores/add-project-flow-store";
+import {
+  useAddProjectFlowStore,
+  type AddProjectFlowTargetWorkspace,
+} from "@/stores/add-project-flow-store";
 
-export function useOpenAddProject(): (preferredHostId?: string) => void {
+export function useOpenAddProject(): (
+  preferredHostId?: string,
+  options?: { targetWorkspace?: AddProjectFlowTargetWorkspace },
+) => void {
   return useAddProjectFlowStore((state) => state.open);
 }

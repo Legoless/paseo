@@ -791,6 +791,120 @@ describe("archiveByScope", () => {
     expect(result.removedDirectory).toBe(true);
     expect(existsSync(worktree.worktreePath)).toBe(false);
   });
+
+  test("workspace scope removes a Paseo-owned worktree held by a non-primary member", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "member-worktree");
+    const workspaceId = "ws-multi-member";
+
+    const result = await archiveByScope(
+      createArchiveDeps({
+        paseoHome,
+        activeWorkspaces: [
+          {
+            workspaceId,
+            cwd: repoDir,
+            kind: "local_checkout",
+            members: [
+              {
+                cwd: repoDir,
+                kind: "local_checkout",
+                worktreeRoot: repoDir,
+                isPaseoOwnedWorktree: false,
+                mainRepoRoot: null,
+              },
+              {
+                cwd: worktree.worktreePath,
+                kind: "worktree",
+                worktreeRoot: worktree.worktreePath,
+                isPaseoOwnedWorktree: true,
+                mainRepoRoot: repoDir,
+              },
+            ],
+          },
+        ],
+      }),
+      {
+        scope: { kind: "workspace", workspaceId },
+        requestId: "req-multi-member",
+      },
+    );
+
+    assertArchiveResult(result, {
+      archivedWorkspaceIds: [workspaceId],
+      removedDirectory: true,
+    });
+    // The member's Paseo-owned worktree is gone; the primary's plain checkout stays.
+    expect(existsSync(worktree.worktreePath)).toBe(false);
+    expect(existsSync(repoDir)).toBe(true);
+  });
+
+  test("workspace scope keeps a worktree still referenced by another workspace's member", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "shared-member-worktree");
+    const primaryDir = path.join(tempDir, "primary");
+    mkdirSync(primaryDir, { recursive: true });
+
+    const deps = createArchiveDeps({
+      paseoHome,
+      activeWorkspaces: [
+        {
+          workspaceId: "ws-owner",
+          cwd: worktree.worktreePath,
+          kind: "worktree",
+          worktreeRoot: worktree.worktreePath,
+          isPaseoOwnedWorktree: true,
+          mainRepoRoot: repoDir,
+        },
+        {
+          workspaceId: "ws-holder",
+          cwd: primaryDir,
+          kind: "directory",
+          members: [
+            {
+              cwd: primaryDir,
+              kind: "directory",
+              worktreeRoot: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+            {
+              cwd: worktree.worktreePath,
+              kind: "worktree",
+              worktreeRoot: worktree.worktreePath,
+              isPaseoOwnedWorktree: true,
+              mainRepoRoot: repoDir,
+            },
+          ],
+        },
+      ],
+    });
+
+    const first = await archiveByScope(deps, {
+      scope: { kind: "workspace", workspaceId: "ws-owner" },
+      requestId: "req-shared-member-owner",
+    });
+
+    assertArchiveResult(first, {
+      archivedWorkspaceIds: ["ws-owner"],
+      removedDirectory: false,
+    });
+    // ws-holder still references the worktree through its non-primary member.
+    expect(existsSync(worktree.worktreePath)).toBe(true);
+
+    const second = await archiveByScope(deps, {
+      scope: { kind: "workspace", workspaceId: "ws-holder" },
+      requestId: "req-shared-member-holder",
+    });
+
+    assertArchiveResult(second, {
+      archivedWorkspaceIds: ["ws-holder"],
+      removedDirectory: true,
+    });
+    expect(existsSync(worktree.worktreePath)).toBe(false);
+  });
 });
 
 describe("resolveWorkspaceIdAtPath", () => {

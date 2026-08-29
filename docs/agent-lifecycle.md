@@ -65,7 +65,7 @@ the marker. Closing a tab sets that client's label to `false`. Any `true` client
 open. Detach clears the parent and every open-tab label. The surviving child therefore becomes a
 normal root agent immediately, and closing its still-open tab archives it.
 
-Runtime ownership is resolved from explicit workspace ID and caller context, never from `cwd`. Workspace creation is a separate operation with `local | worktree` isolation; agent creation only selects an existing workspace.
+Runtime ownership is resolved from explicit workspace ID and caller context, never from `cwd`. Workspace creation is a separate operation with `local | worktree` isolation; agent creation only selects an existing workspace, plus one of its workspace projects when the workspace spans several. The agent runs in that project's `cwd` for the rest of its life.
 
 Users can also detach an existing subagent from the subagents track. Detach is deliberately a manual lifecycle gesture, not an agent-facing MCP tool. It removes the parent and open-tab lifecycle labels: it does not stop, archive, move, or restart the agent. The agent keeps its current `cwd` and `workspaceId`, leaves the former parent's track, and behaves like a root agent for tab close, workspace activity, and future parent archive.
 

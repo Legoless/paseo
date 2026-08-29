@@ -18,6 +18,18 @@ const workspace: WorkspaceDescriptor = {
   archivingAt: null,
   diffStat: { additions: 12, deletions: 3 },
   scripts: [],
+  members: [
+    {
+      projectId: "project-1",
+      projectDisplayName: "Paseo",
+      projectCustomName: null,
+      projectRootPath: "/repo/paseo",
+      workspaceDirectory: "/repo/paseo/review",
+      workspaceKind: "worktree",
+      worktreeSlug: null,
+      branch: null,
+    },
+  ],
 };
 
 const agent: Agent = {

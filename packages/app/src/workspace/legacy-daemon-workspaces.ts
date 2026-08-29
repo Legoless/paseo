@@ -13,7 +13,7 @@ import type {
   ProjectDescriptor,
   WorkspaceDescriptor,
 } from "@/stores/session-store";
-import { useSessionStore } from "@/stores/session-store";
+import { normalizeWorkspaceMembers, useSessionStore } from "@/stores/session-store";
 import {
   buildAgentDirectoryState,
   replaceFetchedAgentDirectory,
@@ -315,7 +315,7 @@ function createLegacyWorkspace(
   const projectRootPath =
     normalizeWorkspacePath(checkout.mainRepoRoot ?? checkout.worktreeRoot ?? checkout.cwd) ??
     workspaceDirectory;
-  return {
+  const workspace: Omit<WorkspaceDescriptor, "members"> = {
     id: workspaceDirectory,
     projectId: entry.project.projectKey,
     projectDisplayName: entry.project.projectName,
@@ -344,6 +344,10 @@ function createLegacyWorkspace(
       : null,
     githubRuntime: null,
     project: entry.project,
+  };
+  return {
+    ...workspace,
+    members: normalizeWorkspaceMembers(workspace),
   };
 }
 

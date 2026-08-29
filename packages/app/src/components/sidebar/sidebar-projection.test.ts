@@ -4,7 +4,7 @@ import type {
   SidebarWorkspaceEntry,
   SidebarWorkspacePlacement,
 } from "@/hooks/use-sidebar-workspaces-list";
-import { buildSidebarProjection } from "./sidebar-projection";
+import { buildSidebarProjection, type SidebarProjectionInput } from "./sidebar-projection";
 
 function makeWorkspace(
   id: string,
@@ -66,16 +66,19 @@ function makeProject(
 function projectionInput(options?: {
   groupMode?: "project" | "status";
   pinnedCollapsed?: boolean;
-}) {
+  topLevelWorkspaceOrder?: string[];
+}): SidebarProjectionInput {
   const pinned = makeWorkspace("pinned", "running");
   const unpinned = makeWorkspace("unpinned", "needs_input");
   return {
+    workspaces: [pinned.placement, unpinned.placement],
     projects: [makeProject([pinned.placement, unpinned.placement])],
     pinnedKeys: {
       pinnedWorkspaceKeys: [pinned.placement.workspaceKey],
       pinnedAtByKey: { [pinned.placement.workspaceKey]: "2026-07-12T12:00:00.000Z" },
     },
     pinnedWorkspaceOrder: [],
+    topLevelWorkspaceOrder: options?.topLevelWorkspaceOrder ?? [],
     workspaceEntriesByKey: new Map([
       [pinned.entry.workspaceKey, pinned.entry],
       [unpinned.entry.workspaceKey, unpinned.entry],
@@ -83,7 +86,6 @@ function projectionInput(options?: {
     projectNamesByViewKey: new Map([["project", "Project"]]),
     groupMode: options?.groupMode ?? ("project" as const),
     pinnedCollapsed: options?.pinnedCollapsed ?? false,
-    collapsedProjectKeys: new Set<string>(),
     collapsedWorkspaceGroupKeys: new Set<string>(),
   };
 }
@@ -92,11 +94,12 @@ function projectionInput(options?: {
  * Two projects, one workspace each, both labelled — so every grouping mode puts rows from more
  * than one project on screen, and a mode that asked for fewer icons than it renders would show it.
  */
-function twoProjectInput(groupMode: "project" | "status") {
+function twoProjectInput(groupMode: "project" | "status"): SidebarProjectionInput {
   const first = makeWorkspace("first", "running", ["Urgent"], "project");
   const second = makeWorkspace("second", "needs_input", ["Backend"], "other-project");
   return {
     ...projectionInput({ groupMode }),
+    workspaces: [first.placement, second.placement],
     projects: [makeProject([first.placement]), makeProject([second.placement], "other-project")],
     pinnedKeys: { pinnedWorkspaceKeys: [], pinnedAtByKey: {} },
     workspaceEntriesByKey: new Map([
@@ -119,7 +122,7 @@ describe("buildSidebarProjection", () => {
       const covered = new Set(projection.projectIconTargets.map((target) => target.projectViewKey));
 
       // Every leading visual the sidebar can paint from this projection: pinned rows, grouped
-      // rows, project headers and the rows under them.
+      // rows, and the top-level workspace rows.
       const renderedProjectViewKeys = new Set<string>();
       for (const entry of projection.pinnedGroups.pinnedChats) {
         renderedProjectViewKeys.add(entry.projectViewKey);
@@ -127,9 +130,8 @@ describe("buildSidebarProjection", () => {
       for (const group of projection.workspaceGroups) {
         for (const entry of group.rows) renderedProjectViewKeys.add(entry.projectViewKey);
       }
-      for (const project of projection.pinnedGroups.unpinnedProjects) {
-        renderedProjectViewKeys.add(project.viewKey);
-        for (const entry of project.workspaces) renderedProjectViewKeys.add(entry.projectViewKey);
+      for (const entry of projection.topLevelWorkspaces) {
+        renderedProjectViewKeys.add(entry.projectViewKey);
       }
 
       expect([...renderedProjectViewKeys].sort()).toEqual(["other-project", "project"]);
@@ -137,17 +139,52 @@ describe("buildSidebarProjection", () => {
     });
   }
 
-  it("uses one pin-aware projection for project rows and shortcut order", () => {
+  it("hoists pinned chats out of the top-level workspace rows", () => {
     const projection = buildSidebarProjection(projectionInput());
 
     expect(projection.pinnedGroups.pinnedChats.map((entry) => entry.workspaceId)).toEqual([
       "pinned",
     ]);
-    const remainingProject = projection.pinnedGroups.unpinnedProjects[0];
-    expect(remainingProject?.workspaces.map((entry) => entry.workspaceId)).toEqual(["unpinned"]);
+    expect(projection.topLevelWorkspaces.map((entry) => entry.workspaceId)).toEqual(["unpinned"]);
     expect(projection.shortcutModel.shortcutTargets).toEqual([
       { serverId: "srv", workspaceId: "pinned" },
       { serverId: "srv", workspaceId: "unpinned" },
+    ]);
+  });
+
+  it("sorts top-level workspaces by name when no drag order is stored", () => {
+    const input = projectionInput();
+    const alpha = makeWorkspace("alpha");
+    const beta = makeWorkspace("beta");
+    input.workspaces = [beta.placement, alpha.placement];
+    input.pinnedKeys = { pinnedWorkspaceKeys: [], pinnedAtByKey: {} };
+
+    const projection = buildSidebarProjection(input);
+
+    expect(projection.topLevelWorkspaces.map((entry) => entry.workspaceId)).toEqual([
+      "alpha",
+      "beta",
+    ]);
+  });
+
+  it("applies the stored drag order to the top-level workspaces", () => {
+    const input = projectionInput({
+      topLevelWorkspaceOrder: ["srv:beta", "srv:alpha"],
+    });
+    const alpha = makeWorkspace("alpha");
+    const beta = makeWorkspace("beta");
+    input.workspaces = [alpha.placement, beta.placement];
+    input.pinnedKeys = { pinnedWorkspaceKeys: [], pinnedAtByKey: {} };
+
+    const projection = buildSidebarProjection(input);
+
+    expect(projection.topLevelWorkspaces.map((entry) => entry.workspaceId)).toEqual([
+      "beta",
+      "alpha",
+    ]);
+    expect(projection.shortcutModel.shortcutTargets).toEqual([
+      { serverId: "srv", workspaceId: "beta" },
+      { serverId: "srv", workspaceId: "alpha" },
     ]);
   });
 

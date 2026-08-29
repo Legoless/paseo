@@ -4,10 +4,13 @@ import {
   generateWorkspaceId,
   initialWorkspacePlacement,
   reconcileWorkspacePlacement,
+  workspaceMembers,
+  workspaceScalarsFromPrimaryMember,
 } from "../../workspace-registry-model.js";
 import {
   createPersistedWorkspaceRecord,
   type PersistedProjectRecord,
+  type PersistedWorkspaceMember,
   type PersistedWorkspaceRecord,
   type ProjectRegistry,
   type WorkspaceRegistry,
@@ -46,6 +49,20 @@ export interface CreateWorktreeWorkspaceInput {
   expectsInitialAgent?: boolean;
 }
 
+export interface AddWorkspaceMemberInput {
+  workspaceId: string;
+  source: {
+    kind: "directory";
+    path: string;
+    projectId?: string;
+  };
+}
+
+export interface RemoveWorkspaceMemberInput {
+  workspaceId: string;
+  cwd: string;
+}
+
 export interface WorkspaceProvisioningService {
   runInImportWorkspace<T>(
     input: ImportWorkspaceInput,
@@ -66,20 +83,27 @@ export interface WorkspaceProvisioningService {
   ensureWorkspaceRecordUnarchived(
     workspace: PersistedWorkspaceRecord,
   ): Promise<PersistedWorkspaceRecord>;
+  addWorkspaceMember(input: AddWorkspaceMemberInput): Promise<PersistedWorkspaceRecord>;
+  removeWorkspaceMember(input: RemoveWorkspaceMemberInput): Promise<PersistedWorkspaceRecord>;
 }
 
-export type WorkspaceProvisioningErrorCode = "unknown_project" | "archived_project";
+export type WorkspaceProvisioningErrorCode =
+  | "unknown_project"
+  | "archived_project"
+  | "workspace_not_found"
+  | "archived_workspace"
+  | "duplicate_member"
+  | "member_not_found"
+  | "last_member"
+  | "member_has_active_agents"
+  | "member_has_live_terminals";
 
 export class WorkspaceProvisioningError extends Error {
   constructor(
     readonly code: WorkspaceProvisioningErrorCode,
-    projectId: string,
+    message: string,
   ) {
-    super(
-      code === "unknown_project"
-        ? `Unknown project: ${projectId}`
-        : `Archived project: ${projectId}`,
-    );
+    super(message);
     this.name = "WorkspaceProvisioningError";
   }
 }
@@ -177,8 +201,10 @@ export function createWorkspaceProvisioningService(deps: {
 
   async function requireActiveProject(projectId: string): Promise<PersistedProjectRecord> {
     const project = await projectRegistry.get(projectId);
-    if (!project) throw new WorkspaceProvisioningError("unknown_project", projectId);
-    if (project.archivedAt) throw new WorkspaceProvisioningError("archived_project", projectId);
+    if (!project)
+      throw new WorkspaceProvisioningError("unknown_project", `Unknown project: ${projectId}`);
+    if (project.archivedAt)
+      throw new WorkspaceProvisioningError("archived_project", `Archived project: ${projectId}`);
     return project;
   }
 
@@ -438,6 +464,120 @@ export function createWorkspaceProvisioningService(deps: {
     return refreshed;
   }
 
+  async function addWorkspaceMember(
+    input: AddWorkspaceMemberInput,
+  ): Promise<PersistedWorkspaceRecord> {
+    const workspace = await workspaceRegistry.get(input.workspaceId);
+    if (!workspace) {
+      throw new WorkspaceProvisioningError(
+        "workspace_not_found",
+        `Unknown workspace: ${input.workspaceId}`,
+      );
+    }
+    if (workspace.archivedAt) {
+      throw new WorkspaceProvisioningError(
+        "archived_workspace",
+        `Archived workspace: ${input.workspaceId}`,
+      );
+    }
+    const normalizedCwd = resolve(input.source.path);
+    // Fast-path guard ahead of the git/project side effects; the updater below
+    // repeats it under the registry's mutation queue.
+    if (
+      workspaceMembers(workspace).some((candidate) =>
+        areEquivalentPaths(candidate.cwd, normalizedCwd),
+      )
+    ) {
+      throw new WorkspaceProvisioningError(
+        "duplicate_member",
+        `Workspace ${input.workspaceId} already has a member at ${normalizedCwd}`,
+      );
+    }
+    const checkout = await workspaceGitService.getCheckout(normalizedCwd);
+    const project = input.source.projectId
+      ? await refreshProjectKind(
+          await requireActiveProject(input.source.projectId),
+          normalizedCwd,
+          checkout,
+        )
+      : await findOrCreateProjectForDirectory(normalizedCwd);
+    const member: PersistedWorkspaceMember = {
+      projectId: project.projectId,
+      ...initialWorkspacePlacement({ source: "checkout", cwd: normalizedCwd, checkout }),
+    };
+    const timestamp = new Date().toISOString();
+    const updated = await workspaceRegistry.update(input.workspaceId, (current) => {
+      if (current.archivedAt) {
+        throw new WorkspaceProvisioningError(
+          "archived_workspace",
+          `Archived workspace: ${input.workspaceId}`,
+        );
+      }
+      const members = workspaceMembers(current);
+      if (members.some((candidate) => areEquivalentPaths(candidate.cwd, normalizedCwd))) {
+        throw new WorkspaceProvisioningError(
+          "duplicate_member",
+          `Workspace ${input.workspaceId} already has a member at ${normalizedCwd}`,
+        );
+      }
+      return { ...current, members: [...members, member], updatedAt: timestamp };
+    });
+    if (!updated) {
+      throw new WorkspaceProvisioningError(
+        "workspace_not_found",
+        `Unknown workspace: ${input.workspaceId}`,
+      );
+    }
+    return updated;
+  }
+
+  async function removeWorkspaceMember(
+    input: RemoveWorkspaceMemberInput,
+  ): Promise<PersistedWorkspaceRecord> {
+    const normalizedCwd = resolve(input.cwd);
+    const timestamp = new Date().toISOString();
+    const updated = await workspaceRegistry.update(input.workspaceId, (current) => {
+      if (current.archivedAt) {
+        throw new WorkspaceProvisioningError(
+          "archived_workspace",
+          `Archived workspace: ${input.workspaceId}`,
+        );
+      }
+      const members = workspaceMembers(current);
+      const remaining = members.filter(
+        (candidate) => !areEquivalentPaths(candidate.cwd, normalizedCwd),
+      );
+      if (remaining.length === members.length) {
+        throw new WorkspaceProvisioningError(
+          "member_not_found",
+          `Workspace ${input.workspaceId} has no member at ${normalizedCwd}`,
+        );
+      }
+      if (remaining.length === 0) {
+        throw new WorkspaceProvisioningError(
+          "last_member",
+          `Cannot remove the last member of workspace ${input.workspaceId}`,
+        );
+      }
+      const removedWasPrimary = areEquivalentPaths(members[0].cwd, normalizedCwd);
+      return {
+        ...current,
+        // The schema syncs the primary member from the scalar fields on every
+        // write, so a primary change must re-mirror the scalars in the same update.
+        ...(removedWasPrimary ? workspaceScalarsFromPrimaryMember(remaining[0]) : {}),
+        members: remaining,
+        updatedAt: timestamp,
+      };
+    });
+    if (!updated) {
+      throw new WorkspaceProvisioningError(
+        "workspace_not_found",
+        `Unknown workspace: ${input.workspaceId}`,
+      );
+    }
+    return updated;
+  }
+
   return {
     runInImportWorkspace,
     findOrCreateWorkspaceForDirectory,
@@ -446,5 +586,7 @@ export function createWorkspaceProvisioningService(deps: {
     createWorkspaceForWorktree,
     findOrCreateProjectForDirectory,
     ensureWorkspaceRecordUnarchived,
+    addWorkspaceMember,
+    removeWorkspaceMember,
   };
 }

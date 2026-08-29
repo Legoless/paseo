@@ -45,9 +45,10 @@ import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import { canCreateWorktreeForProjectKind } from "@/projects/host-projects";
 import { useHostFeature } from "@/runtime/host-features";
 import {
-  type SidebarProjectEntry,
   type SidebarWorkspaceEntry,
+  type SidebarWorkspacePlacement,
 } from "@/hooks/use-sidebar-workspaces-list";
+import type { SidebarWorkspaceSection } from "@/projects/workspace-groups";
 import { useSidebarModel } from "@/components/sidebar/sidebar-model";
 import type { PinnedSidebarGroups } from "@/hooks/use-sidebar-pins";
 import { RetainedPanelActivity } from "@/components/retained-panel";
@@ -86,8 +87,10 @@ interface SidebarSharedProps {
   theme: SidebarTheme;
   workspaceGroups: SidebarWorkspaceGroup[];
   projectIconTargets: SidebarProjectIconTarget[];
+  memberIconTargets: SidebarProjectIconTarget[];
   pinnedGroups: PinnedSidebarGroups;
-  projects: SidebarProjectEntry[];
+  topLevelWorkspaces: SidebarWorkspacePlacement[];
+  sectionsByWorkspaceKey: ReadonlyMap<string, SidebarWorkspaceSection>;
   hasProjectsBeforeFilter: boolean;
   hasActiveProjectFilter: boolean;
   workspaceEntriesByKey: ReadonlyMap<string, SidebarWorkspaceEntry>;
@@ -95,9 +98,9 @@ interface SidebarSharedProps {
   isRevalidating: boolean;
   isManualRefresh: boolean;
   groupMode: SidebarGroupMode;
-  collapsedProjectKeys: ReadonlySet<string>;
+  collapsedWorkspaceKeys: ReadonlySet<string>;
   shortcutIndexByWorkspaceKey: Map<string, number>;
-  toggleProjectCollapsed: (projectViewKey: string) => void;
+  toggleWorkspaceCollapsed: (workspaceKey: string) => void;
   handleRefresh: () => void;
   handleOpenProject: () => void;
   handleHome: () => void;
@@ -143,7 +146,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
 
   const {
-    projects,
     hasProjectsBeforeFilter,
     resolvedProjectFilters,
     workspaceEntriesByKey,
@@ -151,10 +153,12 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     isRevalidating,
     refreshAll,
     workspaceGroups,
+    topLevelWorkspaces,
+    workspaceGroupSections,
     projectIconTargets,
     pinnedGroups,
-    collapsedProjectKeys,
-    toggleProjectCollapsed,
+    collapsedWorkspaceKeys,
+    toggleWorkspaceCollapsed,
     groupMode,
     shortcutModel,
   } = useSidebarModel();
@@ -251,8 +255,10 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     theme,
     workspaceGroups,
     projectIconTargets,
+    memberIconTargets: workspaceGroupSections.memberIconTargets,
     pinnedGroups,
-    projects,
+    topLevelWorkspaces,
+    sectionsByWorkspaceKey: workspaceGroupSections.sectionsByWorkspaceKey,
     hasProjectsBeforeFilter,
     hasActiveProjectFilter: resolvedProjectFilters.length > 0,
     workspaceEntriesByKey,
@@ -260,9 +266,9 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     isRevalidating,
     isManualRefresh,
     groupMode,
-    collapsedProjectKeys,
+    collapsedWorkspaceKeys,
     shortcutIndexByWorkspaceKey,
-    toggleProjectCollapsed,
+    toggleWorkspaceCollapsed,
     handleRefresh,
     labels,
     newWorkspaceKeys,
@@ -607,8 +613,10 @@ function MobileSidebar({
   theme,
   workspaceGroups,
   projectIconTargets,
+  memberIconTargets,
   pinnedGroups,
-  projects,
+  topLevelWorkspaces,
+  sectionsByWorkspaceKey,
   hasProjectsBeforeFilter,
   hasActiveProjectFilter,
   workspaceEntriesByKey,
@@ -616,9 +624,9 @@ function MobileSidebar({
   isRevalidating,
   isManualRefresh,
   groupMode,
-  collapsedProjectKeys,
+  collapsedWorkspaceKeys,
   shortcutIndexByWorkspaceKey,
-  toggleProjectCollapsed,
+  toggleWorkspaceCollapsed,
   handleRefresh,
   newWorkspaceKeys,
   handleOpenProject,
@@ -721,14 +729,16 @@ function MobileSidebar({
           <SidebarAgentListSkeleton />
         ) : (
           <SidebarWorkspaceList
-            collapsedProjectKeys={collapsedProjectKeys}
-            onToggleProjectCollapsed={toggleProjectCollapsed}
+            collapsedWorkspaceKeys={collapsedWorkspaceKeys}
+            onToggleWorkspaceCollapsed={toggleWorkspaceCollapsed}
             shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
             groupMode={groupMode}
             workspaceGroups={workspaceGroups}
             projectIconTargets={projectIconTargets}
+            memberIconTargets={memberIconTargets}
             pinnedGroups={pinnedGroups}
-            projects={projects}
+            topLevelWorkspaces={topLevelWorkspaces}
+            sectionsByWorkspaceKey={sectionsByWorkspaceKey}
             hasProjectsBeforeFilter={hasProjectsBeforeFilter}
             hasActiveProjectFilter={hasActiveProjectFilter}
             workspaceEntriesByKey={workspaceEntriesByKey}
@@ -760,8 +770,10 @@ function DesktopSidebar({
   theme,
   workspaceGroups,
   projectIconTargets,
+  memberIconTargets,
   pinnedGroups,
-  projects,
+  topLevelWorkspaces,
+  sectionsByWorkspaceKey,
   hasProjectsBeforeFilter,
   hasActiveProjectFilter,
   workspaceEntriesByKey,
@@ -769,9 +781,9 @@ function DesktopSidebar({
   isRevalidating,
   isManualRefresh,
   groupMode,
-  collapsedProjectKeys,
+  collapsedWorkspaceKeys,
   shortcutIndexByWorkspaceKey,
-  toggleProjectCollapsed,
+  toggleWorkspaceCollapsed,
   handleRefresh,
   newWorkspaceKeys,
   handleOpenProject,
@@ -928,14 +940,16 @@ function DesktopSidebar({
           <SidebarAgentListSkeleton />
         ) : (
           <SidebarWorkspaceList
-            collapsedProjectKeys={collapsedProjectKeys}
-            onToggleProjectCollapsed={toggleProjectCollapsed}
+            collapsedWorkspaceKeys={collapsedWorkspaceKeys}
+            onToggleWorkspaceCollapsed={toggleWorkspaceCollapsed}
             shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
             groupMode={groupMode}
             workspaceGroups={workspaceGroups}
             projectIconTargets={projectIconTargets}
+            memberIconTargets={memberIconTargets}
             pinnedGroups={pinnedGroups}
-            projects={projects}
+            topLevelWorkspaces={topLevelWorkspaces}
+            sectionsByWorkspaceKey={sectionsByWorkspaceKey}
             hasProjectsBeforeFilter={hasProjectsBeforeFilter}
             hasActiveProjectFilter={hasActiveProjectFilter}
             workspaceEntriesByKey={workspaceEntriesByKey}

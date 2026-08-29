@@ -3,12 +3,18 @@ import { z } from "zod";
 export interface CollapsedProjectsState {
   collapsedProjectKeys: Set<string>;
   collapsedWorkspaceGroupKeys: Set<string>;
+  /**
+   * The workspace-grouped sidebar's one collapse level: a workspace key
+   * (`serverId:workspaceId`) collapses that workspace's whole member/agent subtree.
+   */
+  collapsedWorkspaceKeys: Set<string>;
   collapsedPinned: boolean;
 }
 
 export interface PersistedCollapsedProjects {
   collapsedProjectKeys?: string[];
   collapsedWorkspaceGroupKeys?: string[];
+  collapsedWorkspaceKeys?: string[];
   collapsedStatusGroupKeys?: string[];
   collapsedPinned?: boolean;
 }
@@ -17,6 +23,7 @@ export const PersistedCollapsedProjectsSchema: z.ZodType<PersistedCollapsedProje
   z.strictObject({
     collapsedProjectKeys: z.array(z.string()).optional(),
     collapsedWorkspaceGroupKeys: z.array(z.string()).optional(),
+    collapsedWorkspaceKeys: z.array(z.string()).optional(),
     // COMPAT(sidebarWorkspaceGroupCollapse): added in v0.4.0, remove after 2027-02-14.
     collapsedStatusGroupKeys: z.array(z.string()).optional(),
     collapsedPinned: z.boolean().optional(),
@@ -52,6 +59,19 @@ export function toggleWorkspaceGroupCollapsed(
   return { ...state, collapsedWorkspaceGroupKeys: next };
 }
 
+export function toggleWorkspaceCollapsed(
+  state: CollapsedProjectsState,
+  workspaceKey: string,
+): CollapsedProjectsState {
+  const next = new Set(state.collapsedWorkspaceKeys);
+  if (next.has(workspaceKey)) {
+    next.delete(workspaceKey);
+  } else {
+    next.add(workspaceKey);
+  }
+  return { ...state, collapsedWorkspaceKeys: next };
+}
+
 export function setProjectCollapsed(
   state: CollapsedProjectsState,
   projectKey: string,
@@ -69,11 +89,13 @@ export function setProjectCollapsed(
 export function serializeCollapsedProjects(state: CollapsedProjectsState): {
   collapsedProjectKeys: string[];
   collapsedWorkspaceGroupKeys: string[];
+  collapsedWorkspaceKeys: string[];
   collapsedPinned: boolean;
 } {
   return {
     collapsedProjectKeys: Array.from(state.collapsedProjectKeys),
     collapsedWorkspaceGroupKeys: Array.from(state.collapsedWorkspaceGroupKeys),
+    collapsedWorkspaceKeys: Array.from(state.collapsedWorkspaceKeys),
     collapsedPinned: state.collapsedPinned,
   };
 }
@@ -95,10 +117,14 @@ export function mergePersistedCollapsedProjects<S extends CollapsedProjectsState
       persisted.collapsedStatusGroupKeys ??
       Array.from(current.collapsedWorkspaceGroupKeys),
   );
+  const restoredWorkspaces = deserializeCollapsedKeys(
+    persisted.collapsedWorkspaceKeys ?? Array.from(current.collapsedWorkspaceKeys),
+  );
   const restoredPinned = persisted.collapsedPinned ?? current.collapsedPinned;
   if (
     areSetsEqual(current.collapsedProjectKeys, restoredProjects) &&
     areSetsEqual(current.collapsedWorkspaceGroupKeys, restoredWorkspaceGroups) &&
+    areSetsEqual(current.collapsedWorkspaceKeys, restoredWorkspaces) &&
     current.collapsedPinned === restoredPinned
   ) {
     return current;
@@ -107,6 +133,7 @@ export function mergePersistedCollapsedProjects<S extends CollapsedProjectsState
     ...current,
     collapsedProjectKeys: restoredProjects,
     collapsedWorkspaceGroupKeys: restoredWorkspaceGroups,
+    collapsedWorkspaceKeys: restoredWorkspaces,
     collapsedPinned: restoredPinned,
   };
 }

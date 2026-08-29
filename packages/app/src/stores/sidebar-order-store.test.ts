@@ -20,6 +20,7 @@ describe("migrateSidebarOrderState", () => {
       workspaceOrderByProject: {
         "project-a": ["host-a:main", "host-a:feature", "host-b:main"],
       },
+      workspaceOrder: [],
     });
   });
 
@@ -29,5 +30,31 @@ describe("migrateSidebarOrderState", () => {
     });
 
     expect(migrated.pinnedWorkspaceOrder).toEqual(["host-a:one", "host-b:two"]);
+  });
+
+  it("defaults the flat workspace order when the persisted state predates it", () => {
+    const migrated = migrateSidebarOrderState({
+      projectOrder: ["project-a"],
+      workspaceOrderByProject: { "project-a": ["srv:ws-1"] },
+    });
+
+    expect(migrated.workspaceOrder).toEqual([]);
+  });
+
+  it("restores the flat workspace order and normalizes its keys", () => {
+    const migrated = migrateSidebarOrderState({
+      workspaceOrder: ["srv:ws-1", " srv:ws-2 ", "srv:ws-1", ""],
+    });
+
+    expect(migrated.workspaceOrder).toEqual(["srv:ws-1", "srv:ws-2"]);
+  });
+
+  it("rejects malformed persisted state wholesale", () => {
+    expect(migrateSidebarOrderState({ workspaceOrder: [42] })).toEqual({
+      projectOrder: [],
+      pinnedWorkspaceOrder: [],
+      workspaceOrderByProject: {},
+      workspaceOrder: [],
+    });
   });
 });

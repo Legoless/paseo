@@ -4,6 +4,7 @@ import { StyleSheet } from "react-native-unistyles";
 import { RetainedPanel } from "@/components/retained-panel";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import type { TabDropPreview } from "@/components/split-container-tab-drop-preview";
+import { WorkspaceProjectPicker } from "@/components/workspace-project-picker";
 import { ExplorerSidebarTabRail } from "@/screens/workspace/explorer-sidebar-tab-rail";
 import { WorkspacePanelHost } from "@/screens/workspace/workspace-panel-host";
 import { deriveWorkspacePaneState } from "@/screens/workspace/workspace-pane-state";
@@ -104,6 +105,10 @@ export function ExplorerSidebarDock({
             />
             <View pointerEvents="none" style={styles.tabRailDivider} />
           </WindowChromeSafeArea>
+          <WorkspaceProjectPicker
+            serverId={normalizedServerId}
+            workspaceId={normalizedWorkspaceId}
+          />
           <View style={styles.content}>
             <WorkspacePanelHost
               paneId={pane.id}

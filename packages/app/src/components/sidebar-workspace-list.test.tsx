@@ -96,6 +96,18 @@ function workspace(input: {
     archivingAt: null,
     diffStat: null,
     scripts: input.scripts ?? [],
+    members: [
+      {
+        projectId: input.projectId,
+        projectDisplayName: input.projectDisplayName,
+        projectCustomName: null,
+        projectRootPath: `/repo/${input.projectId}`,
+        workspaceDirectory: `/repo/${input.projectId}/${input.id}`,
+        workspaceKind: input.name === "main" ? "local_checkout" : "worktree",
+        worktreeSlug: null,
+        branch: null,
+      },
+    ],
   };
 }
 

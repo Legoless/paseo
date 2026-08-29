@@ -8,6 +8,8 @@ import {
   generateProjectId,
   initialWorkspacePlacement,
   reconcileWorkspacePlacement,
+  workspaceMembers,
+  workspaceScalarsFromPrimaryMember,
 } from "./workspace-registry-model.js";
 import { createPersistedWorkspaceRecord } from "./workspace-registry.js";
 
@@ -152,6 +154,105 @@ describe("workspace placement", () => {
       worktreeRoot: "/repo-feature",
       isPaseoOwnedWorktree: true,
       mainRepoRoot: "/repo",
+    });
+  });
+});
+
+describe("workspace members", () => {
+  const primaryMember = {
+    projectId: "project-one",
+    cwd: "/repo",
+    kind: "local_checkout" as const,
+    displayName: "main",
+    branch: "main",
+    worktreeRoot: "/repo",
+    baseBranch: null,
+    isPaseoOwnedWorktree: false,
+    mainRepoRoot: null,
+  };
+  const secondaryMember = {
+    projectId: "project-two",
+    cwd: "/other",
+    kind: "directory" as const,
+    displayName: "other",
+    branch: null,
+    worktreeRoot: null,
+    baseBranch: null,
+    isPaseoOwnedWorktree: false,
+    mainRepoRoot: null,
+  };
+
+  test("derives a single implicit member from the scalar fields of a legacy record", () => {
+    const record = createPersistedWorkspaceRecord({
+      workspaceId: "workspace-one",
+      projectId: primaryMember.projectId,
+      cwd: primaryMember.cwd,
+      kind: primaryMember.kind,
+      displayName: primaryMember.displayName,
+      branch: primaryMember.branch,
+      worktreeRoot: primaryMember.worktreeRoot,
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+    });
+
+    expect(record.members).toBeUndefined();
+    expect(workspaceMembers(record)).toEqual([primaryMember]);
+  });
+
+  test("returns the explicit members when the record carries them", () => {
+    const record = createPersistedWorkspaceRecord({
+      workspaceId: "workspace-one",
+      projectId: primaryMember.projectId,
+      cwd: primaryMember.cwd,
+      kind: primaryMember.kind,
+      displayName: primaryMember.displayName,
+      branch: primaryMember.branch,
+      worktreeRoot: primaryMember.worktreeRoot,
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+      members: [primaryMember, secondaryMember],
+    });
+
+    expect(workspaceMembers(record)).toEqual([primaryMember, secondaryMember]);
+  });
+
+  test("re-derives the primary member from the scalar fields on every write", () => {
+    // A write that only updates scalars (reconciliation, recovery) must keep
+    // the persisted primary member in sync with them.
+    const record = createPersistedWorkspaceRecord({
+      workspaceId: "workspace-one",
+      projectId: primaryMember.projectId,
+      cwd: primaryMember.cwd,
+      kind: primaryMember.kind,
+      displayName: primaryMember.displayName,
+      branch: "renamed-branch",
+      worktreeRoot: primaryMember.worktreeRoot,
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+      members: [primaryMember, secondaryMember],
+    });
+
+    expect(record.members).toEqual([
+      { ...primaryMember, branch: "renamed-branch" },
+      secondaryMember,
+    ]);
+    expect(workspaceMembers(record)).toEqual([
+      { ...primaryMember, branch: "renamed-branch" },
+      secondaryMember,
+    ]);
+  });
+
+  test("builds the scalar-mirror fields from a primary member", () => {
+    expect(workspaceScalarsFromPrimaryMember(secondaryMember)).toEqual({
+      projectId: "project-two",
+      cwd: "/other",
+      kind: "directory",
+      displayName: "other",
+      branch: null,
+      worktreeRoot: null,
+      baseBranch: null,
+      isPaseoOwnedWorktree: false,
+      mainRepoRoot: null,
     });
   });
 });

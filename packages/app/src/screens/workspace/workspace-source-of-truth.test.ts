@@ -28,6 +28,18 @@ function createWorkspaceDescriptor(input: Partial<WorkspaceDescriptor> = {}): Wo
     statusEnteredAt: null,
     ...input,
     archivingAt: input.archivingAt ?? null,
+    members: [
+      {
+        projectId: input.projectId ?? "remote:github.com/getpaseo/paseo",
+        projectDisplayName: input.projectDisplayName ?? "getpaseo/paseo",
+        projectCustomName: input.projectCustomName ?? null,
+        projectRootPath: input.projectRootPath ?? "/repo/main",
+        workspaceDirectory: input.workspaceDirectory ?? "/repo/main",
+        workspaceKind: input.workspaceKind ?? "local_checkout",
+        worktreeSlug: input.worktreeSlug ?? null,
+        branch: null,
+      },
+    ],
   };
 }
 

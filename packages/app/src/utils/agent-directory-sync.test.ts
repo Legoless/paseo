@@ -334,6 +334,18 @@ describe("replaceFetchedAgentDirectory", () => {
             archivingAt: null,
             diffStat: null,
             scripts: [],
+            members: [
+              {
+                projectId: "project",
+                projectDisplayName: "Project",
+                projectCustomName: null,
+                projectRootPath: "/repo",
+                workspaceDirectory: "/repo",
+                workspaceKind: "worktree",
+                worktreeSlug: null,
+                branch: null,
+              },
+            ],
           },
         ],
       ]),

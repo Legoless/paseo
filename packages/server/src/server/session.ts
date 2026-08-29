@@ -21,6 +21,7 @@ import {
   type ProjectPlacementPayload,
   type WorkspaceSetupSnapshot,
   type WorkspaceDescriptorPayload,
+  type WorkspaceMemberPayload,
 } from "./messages.js";
 import type {
   TerminalManager,
@@ -134,6 +135,7 @@ import {
   checkoutLiteFromGitSnapshot,
   checkoutFromPersistedWorkspacePlacement,
   deriveWorkspaceDisplayName,
+  workspaceMembers,
 } from "./workspace-registry-model.js";
 import { resolveWorkspaceIdForPath } from "./resolve-workspace-id-for-path.js";
 import {
@@ -200,7 +202,7 @@ import {
   matchesAgentUpdatesFilter,
   type AgentUpdatesService,
 } from "./session/agent-updates/agent-updates-service.js";
-import { expandTilde } from "../utils/path.js";
+import { expandTilde, areEquivalentPaths } from "../utils/path.js";
 import {
   searchDirectoryEntries,
   WORKSPACE_SEARCH_HIDDEN_DIRECTORIES,
@@ -2441,6 +2443,7 @@ export class Session {
     }
   }
 
+  // eslint-disable-next-line complexity
   private dispatchWorkspaceAndProjectMessage(
     msg: SessionInboundMessage,
   ): Promise<void> | undefined {
@@ -2484,6 +2487,10 @@ export class Session {
         return this.handleWorkspaceTitleSetRequest(msg.workspaceId, msg.title, msg.requestId);
       case "workspace.pin.set.request":
         return this.handleWorkspacePinSetRequest(msg.workspaceId, msg.pinned, msg.requestId);
+      case "workspace.member.add.request":
+        return this.handleWorkspaceMemberAddRequest(msg);
+      case "workspace.member.remove.request":
+        return this.handleWorkspaceMemberRemoveRequest(msg);
       default:
         return undefined;
     }
@@ -3138,12 +3145,18 @@ export class Session {
     try {
       const project = await this.projectRegistry.get(projectId);
       const resolvedProjectId = project?.projectId ?? projectId;
-      const projectWorkspaces = (await this.workspaceRegistry.list()).filter(
-        (workspace) => workspace.projectId === resolvedProjectId,
+      const affectedWorkspaces = (await this.workspaceRegistry.list()).filter((workspace) =>
+        workspaceMembers(workspace).some((member) => member.projectId === resolvedProjectId),
       );
-      const activeWorkspaceIds = projectWorkspaces
-        .filter((workspace) => !workspace.archivedAt)
+      // Workspaces whose PRIMARY member is the removed project keep today's
+      // behavior: they are archived with the project. Workspaces that hold the
+      // project as a non-primary member only lose that membership.
+      const activeWorkspaceIds = affectedWorkspaces
+        .filter((workspace) => !workspace.archivedAt && workspace.projectId === resolvedProjectId)
         .map((workspace) => workspace.workspaceId);
+      const stripTargets = affectedWorkspaces.filter(
+        (workspace) => !workspace.archivedAt && workspace.projectId !== resolvedProjectId,
+      );
 
       if (activeWorkspaceIds.length > 0) {
         this.markWorkspaceArchiving(activeWorkspaceIds, new Date().toISOString());
@@ -3151,6 +3164,7 @@ export class Session {
       }
 
       const removedWorkspaceIds: string[] = [];
+      const strippedWorkspaceIds: string[] = [];
       try {
         for (const workspaceId of activeWorkspaceIds) {
           await archiveWorkspaceContents(
@@ -3165,6 +3179,19 @@ export class Session {
           );
           await this.archiveWorkspaceRecord(workspaceId);
           removedWorkspaceIds.push(workspaceId);
+        }
+
+        for (const workspace of stripTargets) {
+          const membershipCwds = workspaceMembers(workspace)
+            .filter((member) => member.projectId === resolvedProjectId)
+            .map((member) => member.cwd);
+          for (const cwd of membershipCwds) {
+            await this.workspaceProvisioning.removeWorkspaceMember({
+              workspaceId: workspace.workspaceId,
+              cwd,
+            });
+          }
+          strippedWorkspaceIds.push(workspace.workspaceId);
         }
 
         await this.projectRegistry.remove(resolvedProjectId);
@@ -3186,8 +3213,8 @@ export class Session {
       const updateIds =
         removedWorkspaceIds.length > 0
           ? removedWorkspaceIds
-          : [projectWorkspaces[0]?.workspaceId ?? projectId];
-      await this.emitWorkspaceUpdatesForWorkspaceIds(updateIds, {
+          : [affectedWorkspaces[0]?.workspaceId ?? projectId];
+      await this.emitWorkspaceUpdatesForWorkspaceIds([...updateIds, ...strippedWorkspaceIds], {
         removedProjectId: projectId,
       });
 
@@ -3343,6 +3370,119 @@ export class Session {
         },
       });
       emitResponse(false, null, getErrorMessageOr(error, "Failed to pin workspace"));
+    }
+  }
+
+  private async handleWorkspaceMemberAddRequest(
+    request: Extract<SessionInboundMessage, { type: "workspace.member.add.request" }>,
+  ): Promise<void> {
+    const { workspaceId, requestId } = request;
+    this.sessionLogger.info({ workspaceId, requestId }, "session: workspace.member.add.request");
+
+    try {
+      const cwd = expandTilde(request.source.path);
+      const directoryExists = await this.filesystem.isDirectory(cwd).catch(() => false);
+      if (!directoryExists) {
+        this.emit({
+          type: "workspace.member.add.response",
+          payload: {
+            requestId,
+            workspace: null,
+            error: `Directory not found: ${cwd}`,
+            errorCode: "directory_not_found",
+          },
+        });
+        return;
+      }
+
+      const workspace = await this.workspaceProvisioning.addWorkspaceMember({
+        workspaceId,
+        source: { kind: "directory", path: cwd, projectId: request.source.projectId },
+      });
+      const descriptor = await this.describeWorkspaceRecord(workspace);
+      this.emit({
+        type: "workspace.member.add.response",
+        payload: { requestId, workspace: descriptor, error: null },
+      });
+      await this.emitWorkspaceUpdatesForWorkspaceIds([workspaceId]);
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, workspaceId, requestId },
+        "session: workspace.member.add.request error",
+      );
+      this.emit({
+        type: "workspace.member.add.response",
+        payload: {
+          requestId,
+          workspace: null,
+          error: getErrorMessageOr(error, "Failed to add workspace member"),
+          ...(error instanceof WorkspaceProvisioningError ? { errorCode: error.code } : {}),
+        },
+      });
+    }
+  }
+
+  private async handleWorkspaceMemberRemoveRequest(
+    request: Extract<SessionInboundMessage, { type: "workspace.member.remove.request" }>,
+  ): Promise<void> {
+    const { workspaceId, requestId } = request;
+    this.sessionLogger.info({ workspaceId, requestId }, "session: workspace.member.remove.request");
+
+    try {
+      const workspace = await this.workspaceRegistry.get(workspaceId);
+      if (!workspace || workspace.archivedAt) {
+        throw new WorkspaceProvisioningError(
+          "workspace_not_found",
+          `Unknown workspace: ${workspaceId}`,
+        );
+      }
+
+      const cwd = resolve(expandTilde(request.cwd));
+      const member = workspaceMembers(workspace).find((candidate) =>
+        areEquivalentPaths(candidate.cwd, cwd),
+      );
+      if (member) {
+        const blockingAgent = (await this.agentStorage.listByWorkspace(workspaceId)).find(
+          (record) => !record.archivedAt && areEquivalentPaths(record.cwd, member.cwd),
+        );
+        if (blockingAgent) {
+          throw new WorkspaceProvisioningError(
+            "member_has_active_agents",
+            `Workspace ${workspaceId} has an active agent at ${member.cwd}`,
+          );
+        }
+        const liveTerminals = this.terminalManager
+          ? await this.terminalManager.getTerminals(member.cwd, { workspaceId })
+          : [];
+        if (liveTerminals.length > 0) {
+          throw new WorkspaceProvisioningError(
+            "member_has_live_terminals",
+            `Workspace ${workspaceId} has a live terminal at ${member.cwd}`,
+          );
+        }
+      }
+
+      const updated = await this.workspaceProvisioning.removeWorkspaceMember({ workspaceId, cwd });
+      const descriptor = await this.describeWorkspaceRecord(updated);
+      this.emit({
+        type: "workspace.member.remove.response",
+        payload: { requestId, workspace: descriptor, error: null },
+      });
+      await this.emitWorkspaceUpdatesForWorkspaceIds([workspaceId]);
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, workspaceId, requestId },
+        "session: workspace.member.remove.request error",
+      );
+      this.emit({
+        type: "workspace.member.remove.response",
+        payload: {
+          requestId,
+          workspace: null,
+          error: getErrorMessageOr(error, "Failed to remove workspace member"),
+          ...(error instanceof WorkspaceProvisioningError ? { errorCode: error.code } : {}),
+        },
+      });
     }
   }
 
@@ -3628,7 +3768,13 @@ export class Session {
         if (!workspace || workspace.archivedAt) {
           throw new Error(`Workspace ${workspaceId} not found`);
         }
-        return { workspaceId, cwd: workspace.cwd };
+        // An explicit cwd that matches one of the workspace's member directories
+        // places the agent on that member; anything else keeps the legacy
+        // force-to-primary behavior.
+        const member = workspaceMembers(workspace).find((candidate) =>
+          areEquivalentPaths(candidate.cwd, config.cwd),
+        );
+        return { workspaceId, cwd: member?.cwd ?? workspace.cwd };
       },
       createWorkspace: async () => ({
         workspaceId: await this.workspaceProvisioning.resolveOrCreateWorkspaceIdForCreateAgent({
@@ -4839,6 +4985,8 @@ export class Session {
         ? basename(workspace.worktreeRoot)
         : undefined;
 
+    const members = await this.buildWorkspaceMemberPayloads(workspace, resolvedProjectRecord);
+
     return {
       id: workspace.workspaceId,
       projectId: workspace.projectId,
@@ -4856,6 +5004,7 @@ export class Session {
       title: workspace.title,
       pinnedAt: workspace.pinnedAt,
       ...(workspace.labels && workspace.labels.length > 0 ? { labels: workspace.labels } : {}),
+      members,
       archivingAt: null,
       status: "done",
       statusEnteredAt: null,
@@ -4868,6 +5017,43 @@ export class Session {
           }
         : {}),
     };
+  }
+
+  // Resolves the wire projection of every workspace membership. Project display
+  // facts come from the project registry per member; the primary member's
+  // project record is usually already in hand from the descriptor build. Git
+  // display facts (branch, diff) come from the member's own peeked snapshot when
+  // one exists — a live snapshot is fresher than the persisted placement, which
+  // remains the fallback.
+  private async buildWorkspaceMemberPayloads(
+    workspace: PersistedWorkspaceRecord,
+    primaryProjectRecord?: PersistedProjectRecord | null,
+  ): Promise<WorkspaceMemberPayload[]> {
+    return Promise.all(
+      workspaceMembers(workspace).map(async (member) => {
+        const projectRecord =
+          member.projectId === workspace.projectId && primaryProjectRecord !== undefined
+            ? primaryProjectRecord
+            : await this.projectRegistry.get(member.projectId);
+        const snapshot = this.workspaceGitService.peekSnapshot(member.cwd);
+        return {
+          projectId: member.projectId,
+          projectDisplayName: projectRecord
+            ? resolveProjectDisplayName(projectRecord)
+            : member.projectId,
+          projectCustomName: projectRecord?.customName ?? null,
+          projectRootPath: projectRecord?.rootPath ?? member.cwd,
+          workspaceDirectory: member.cwd,
+          workspaceKind: member.kind,
+          worktreeSlug:
+            member.isPaseoOwnedWorktree && member.worktreeRoot
+              ? basename(member.worktreeRoot)
+              : null,
+          branch: snapshot?.git.currentBranch ?? member.branch,
+          diffStat: snapshot?.git.diffStat ?? null,
+        };
+      }),
+    );
   }
 
   private buildWorkspaceGitRuntimePayload(
@@ -4928,6 +5114,7 @@ export class Session {
     result: CreatePaseoWorktreeResult,
   ): Promise<WorkspaceDescriptorPayload> {
     const projectRecord = await this.projectRegistry.get(result.workspace.projectId);
+    const members = await this.buildWorkspaceMemberPayloads(result.workspace, projectRecord);
     return {
       id: result.workspace.workspaceId,
       projectId: result.workspace.projectId,
@@ -4950,6 +5137,7 @@ export class Session {
       ...(result.workspace.labels && result.workspace.labels.length > 0
         ? { labels: result.workspace.labels }
         : {}),
+      members,
       archivingAt: null,
       status: "done",
       statusEnteredAt: result.workspace.createdAt,
@@ -5193,6 +5381,13 @@ export class Session {
         worktreeRoot: workspace.worktreeRoot,
         isPaseoOwnedWorktree: workspace.isPaseoOwnedWorktree,
         mainRepoRoot: workspace.mainRepoRoot,
+        members: workspaceMembers(workspace).map((member) => ({
+          cwd: member.cwd,
+          kind: member.kind,
+          worktreeRoot: member.worktreeRoot,
+          isPaseoOwnedWorktree: member.isPaseoOwnedWorktree,
+          mainRepoRoot: member.mainRepoRoot,
+        })),
       }));
   }
 

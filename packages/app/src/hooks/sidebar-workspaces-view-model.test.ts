@@ -35,6 +35,18 @@ function workspaceWithForge(forge: string | undefined, prUrl: string): Workspace
     diffStat: null,
     scripts: [],
     forge,
+    members: [
+      {
+        projectId: "proj",
+        projectDisplayName: "repo",
+        projectCustomName: null,
+        projectRootPath: "/repo",
+        workspaceDirectory: "/repo",
+        workspaceKind: "worktree",
+        worktreeSlug: null,
+        branch: null,
+      },
+    ],
     githubRuntime: {
       featuresEnabled: true,
       pullRequest: {
@@ -163,6 +175,18 @@ function workspace(input: {
     archivingAt: null,
     diffStat: null,
     scripts: [],
+    members: [
+      {
+        projectId: input.projectId,
+        projectDisplayName: input.projectDisplayName,
+        projectCustomName: null,
+        projectRootPath: `/repo/${input.projectId}`,
+        workspaceDirectory: `/repo/${input.projectId}/${input.id}`,
+        workspaceKind: input.name === "main" ? "local_checkout" : "worktree",
+        worktreeSlug: null,
+        branch: null,
+      },
+    ],
   };
 }
 

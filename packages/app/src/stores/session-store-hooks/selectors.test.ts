@@ -49,6 +49,18 @@ function createWorkspace(
     statusEnteredAt: null,
     diffStat: input.diffStat ?? null,
     scripts: input.scripts ?? [],
+    members: [
+      {
+        projectId: input.projectId ?? "project-1",
+        projectDisplayName: input.projectDisplayName ?? "Project 1",
+        projectCustomName: input.projectCustomName ?? null,
+        projectRootPath: input.projectRootPath ?? "/repo",
+        workspaceDirectory: input.workspaceDirectory ?? "/repo",
+        workspaceKind: input.workspaceKind ?? "local_checkout",
+        worktreeSlug: input.worktreeSlug ?? null,
+        branch: null,
+      },
+    ],
   };
 }
 

@@ -1,8 +1,12 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, type LayoutChangeEvent } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
-import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
+import {
+  useActiveWorkspaceSelection,
+  type ActiveWorkspaceSelection,
+} from "@/stores/navigation-active-workspace-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
+import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selection-store";
 import {
   CompactExplorerSidebar,
   NativeExplorerSidebarDock,
@@ -46,11 +50,19 @@ function CompactExplorerOpenGestureSurface({
   );
 }
 
+function useSelectedExplorerWorkspaceRoot(
+  selection: ActiveWorkspaceSelection | null,
+): string | null {
+  return useSelectedWorkspaceProject(selection?.serverId ?? null, selection?.workspaceId ?? null)
+    .cwd;
+}
+
 function useActiveCompactExplorerSidebarModel(
   enabled: boolean,
 ): CompactExplorerSidebarHostModel | null {
   const selection = useActiveWorkspaceSelection();
   const workspace = useWorkspace(selection?.serverId ?? null, selection?.workspaceId ?? null);
+  const selectedWorkspaceRoot = useSelectedExplorerWorkspaceRoot(selection);
   const isExplorerOpen = usePanelStore(selectIsCompactFileExplorerOpen);
   const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
   const client = useHostRuntimeClient(selection?.serverId ?? "");
@@ -62,7 +74,7 @@ function useActiveCompactExplorerSidebarModel(
     isRouteFocused: enabled && selection !== null,
     normalizedServerId: selection?.serverId ?? "",
     normalizedWorkspaceId: selection?.workspaceId ?? "",
-    workspaceDirectory: workspace?.workspaceDirectory || null,
+    workspaceDirectory: selectedWorkspaceRoot,
   });
   const resolvedModel = useMemo(
     () =>
@@ -71,8 +83,9 @@ function useActiveCompactExplorerSidebarModel(
         selection,
         workspace,
         isGit: checkoutQuery.data?.isGit ?? false,
+        selectedWorkspaceRoot,
       }),
-    [checkoutQuery.data?.isGit, isExplorerOpen, selection, workspace],
+    [checkoutQuery.data?.isGit, isExplorerOpen, selection, selectedWorkspaceRoot, workspace],
   );
 
   useEffect(() => {

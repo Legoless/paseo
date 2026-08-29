@@ -22,6 +22,18 @@ function createWorkspace(
     statusEnteredAt: null,
     diffStat: input.diffStat ?? null,
     scripts: input.scripts ?? [],
+    members: [
+      {
+        projectId: input.projectId ?? "project-1",
+        projectDisplayName: input.projectDisplayName ?? "Project 1",
+        projectCustomName: input.projectCustomName ?? null,
+        projectRootPath: input.projectRootPath ?? "/repo",
+        workspaceDirectory: input.workspaceDirectory ?? "/repo",
+        workspaceKind: input.workspaceKind ?? "local_checkout",
+        worktreeSlug: input.worktreeSlug ?? null,
+        branch: null,
+      },
+    ],
   };
 }
 
@@ -102,5 +114,29 @@ describe("resolveCompactExplorerSidebarHostModel", () => {
       workspaceRoot: "/repo/current",
       isGit: true,
     });
+  });
+
+  it("prefers the selected project member root over the primary workspace directory", () => {
+    const result = resolveCompactExplorerSidebarHostModel({
+      previous: null,
+      selection: { serverId: "server-1", workspaceId: "workspace-a" },
+      workspace: createWorkspace({ id: "workspace-a", workspaceDirectory: "/repo/current" }),
+      isGit: true,
+      selectedWorkspaceRoot: "/repo/other-project",
+    });
+
+    expect(result?.workspaceRoot).toBe("/repo/other-project");
+  });
+
+  it("falls back to the primary workspace directory when the selection is empty", () => {
+    const result = resolveCompactExplorerSidebarHostModel({
+      previous: null,
+      selection: { serverId: "server-1", workspaceId: "workspace-a" },
+      workspace: createWorkspace({ id: "workspace-a", workspaceDirectory: "/repo/current" }),
+      isGit: true,
+      selectedWorkspaceRoot: "  ",
+    });
+
+    expect(result?.workspaceRoot).toBe("/repo/current");
   });
 });

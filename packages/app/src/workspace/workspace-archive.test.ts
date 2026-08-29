@@ -44,6 +44,18 @@ function workspace(input?: Partial<WorkspaceDescriptor>): WorkspaceDescriptor {
     diffStat: null,
     scripts: [],
     ...input,
+    members: [
+      {
+        projectId: input?.projectId ?? "project-1",
+        projectDisplayName: input?.projectDisplayName ?? "Project",
+        projectCustomName: input?.projectCustomName ?? null,
+        projectRootPath: input?.projectRootPath ?? "/repo/project",
+        workspaceDirectory: input?.workspaceDirectory ?? "/repo/project/workspace-1",
+        workspaceKind: input?.workspaceKind ?? "worktree",
+        worktreeSlug: input?.worktreeSlug ?? null,
+        branch: null,
+      },
+    ],
   };
 }
 

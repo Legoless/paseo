@@ -617,6 +617,9 @@ export const ar: TranslationResources = {
         changes: "التغييرات",
         files: "ملفات",
       },
+      projectPicker: {
+        selectProject: "اختيار المشروع",
+      },
       toasts: {
         copyFailed: "فشل النسخ",
         agentIdCopiedLabel: "AgentID",

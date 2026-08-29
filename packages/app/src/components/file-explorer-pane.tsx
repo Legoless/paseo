@@ -63,6 +63,7 @@ import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useIsLocalDaemon } from "@/hooks/use-is-local-daemon";
 import { buildWorkspaceExplorerStateKey } from "@/hooks/use-file-explorer-actions";
 import { usePanelStore, type ExpandedPathsUpdate, type SortOption } from "@/stores/panel-store";
+import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selection-store";
 import { buildAbsoluteExplorerPath } from "@/utils/explorer-paths";
 import { isHiddenExplorerPath } from "@/file-explorer/visibility";
 import {
@@ -416,7 +417,13 @@ export function FileExplorerPane({
   const { t } = useTranslation();
   const isCompact = useIsCompactFormFactor();
 
-  const normalizedWorkspaceRoot = useMemo(() => workspaceRoot.trim(), [workspaceRoot]);
+  // Multi-project workspaces explorer-switch which member feeds the tree; the
+  // selection store falls back to the primary member, which matches the prop.
+  const selectedProject = useSelectedWorkspaceProject(serverId, workspaceId ?? null);
+  const normalizedWorkspaceRoot = useMemo(
+    () => (selectedProject.cwd ?? workspaceRoot).trim(),
+    [selectedProject.cwd, workspaceRoot],
+  );
   const workspaceStateKey = useMemo(
     () =>
       buildWorkspaceExplorerStateKey({

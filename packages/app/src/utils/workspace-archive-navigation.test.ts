@@ -1,11 +1,26 @@
 import type { Href } from "expo-router";
 import { describe, expect, it } from "vitest";
 import { buildWorkspaceArchiveRedirectRoute } from "@/utils/workspace-archive-navigation";
-import type { WorkspaceDescriptor } from "@/stores/session-store";
+import type { WorkspaceDescriptor, WorkspaceMemberDescriptor } from "@/stores/session-store";
 import {
   redirectIfArchivingActiveWorkspace,
   type RedirectIfArchivingActiveWorkspaceDeps,
 } from "@/utils/workspace-archive-redirect";
+
+function workspaceMember(
+  input: Partial<WorkspaceDescriptor> & Pick<WorkspaceDescriptor, "id">,
+): WorkspaceMemberDescriptor {
+  return {
+    projectId: input.projectId ?? "project-1",
+    projectDisplayName: input.projectDisplayName ?? "Project",
+    projectCustomName: input.projectCustomName ?? null,
+    projectRootPath: input.projectRootPath ?? "/repo",
+    workspaceDirectory: input.workspaceDirectory ?? input.projectRootPath ?? "/repo",
+    workspaceKind: input.workspaceKind ?? "worktree",
+    worktreeSlug: input.worktreeSlug ?? null,
+    branch: null,
+  };
+}
 
 function workspace(
   input: Partial<WorkspaceDescriptor> & Pick<WorkspaceDescriptor, "id">,
@@ -24,6 +39,7 @@ function workspace(
     statusEnteredAt: null,
     diffStat: input.diffStat ?? null,
     scripts: input.scripts ?? [],
+    members: [workspaceMember(input)],
   };
 }
 

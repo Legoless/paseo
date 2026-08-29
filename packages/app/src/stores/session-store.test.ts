@@ -9,8 +9,24 @@ import {
   selectAgentTimelineState,
   useSessionStore,
   type WorkspaceDescriptor,
+  type WorkspaceMemberDescriptor,
 } from "./session-store";
 import type { StreamItem } from "../types/stream";
+
+function createWorkspaceMember(
+  input: Partial<WorkspaceDescriptor> & Pick<WorkspaceDescriptor, "id">,
+): WorkspaceMemberDescriptor {
+  return {
+    projectId: input.projectId ?? "project-1",
+    projectDisplayName: input.projectDisplayName ?? "Project 1",
+    projectCustomName: input.projectCustomName ?? null,
+    projectRootPath: input.projectRootPath ?? "/repo",
+    workspaceDirectory: input.workspaceDirectory ?? "/repo",
+    workspaceKind: input.workspaceKind ?? "local_checkout",
+    worktreeSlug: input.worktreeSlug ?? null,
+    branch: null,
+  };
+}
 
 function createWorkspace(
   input: Partial<WorkspaceDescriptor> & Pick<WorkspaceDescriptor, "id">,
@@ -30,6 +46,7 @@ function createWorkspace(
     archivingAt: input.archivingAt ?? null,
     diffStat: input.diffStat ?? null,
     scripts: input.scripts ?? [],
+    members: [createWorkspaceMember(input)],
   };
 }
 

@@ -622,6 +622,9 @@ export const ru: TranslationResources = {
         changes: "Изменения",
         files: "Файлы",
       },
+      projectPicker: {
+        selectProject: "Выбрать проект",
+      },
       toasts: {
         copyFailed: "Не удалось скопировать",
         agentIdCopiedLabel: "ID агента",
