@@ -28,6 +28,7 @@ function workspace(input: {
     projectName: input.projectKey ?? "Project",
     workspaceDirectory: input.workspaceDirectory,
     workspaceDirectoryLabel: input.workspaceDirectory,
+    projectCount: 1,
     projectKind: "git",
     workspaceKind: "checkout",
     name: input.name,

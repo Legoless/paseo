@@ -408,6 +408,8 @@ export const en = {
     },
     hoverCard: {
       scriptsAccessibility: "Workspace scripts",
+      openTabs: "Open tabs: {{count}}",
+      projects: "Projects: {{count}}",
       copyPath: "Copy path",
       copyBranchName: "Copy branch name",
       copied: "Copied",
@@ -1128,6 +1130,7 @@ export const en = {
         openFolder: "Open in file manager",
         openFolderFailed: "Couldn't open folder",
         remove: "Remove project",
+        removeFromWorkspace: "Remove from workspace",
         removing: "Removing...",
       },
       confirmations: {
@@ -1197,6 +1200,17 @@ export const en = {
         hostDisconnected: "Host is not connected",
         hideFailed: "Failed to hide workspace",
         archiveFailed: "Failed to archive workspace",
+      },
+    },
+    agent: {
+      actions: {
+        menu: "Agent actions",
+        open: "Open agent",
+        archive: "Archive agent",
+      },
+      confirmations: {
+        archiveTitle: "Archive agent?",
+        archiveMessage: "This agent will be archived.",
       },
     },
   },

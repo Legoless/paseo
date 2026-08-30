@@ -410,6 +410,8 @@ export const ar: TranslationResources = {
     },
     hoverCard: {
       scriptsAccessibility: "البرامج النصية Workspace",
+      openTabs: "علامات التبويب المفتوحة: {{count}}",
+      projects: "المشاريع: {{count}}",
       copyPath: "نسخ المسار",
       copyBranchName: "نسخ اسم الفرع",
       copied: "تم النسخ",
@@ -1119,6 +1121,7 @@ export const ar: TranslationResources = {
         openFolder: "Open in file manager",
         openFolderFailed: "Couldn't open folder",
         remove: "إزالة المشروع",
+        removeFromWorkspace: "إزالة من مساحة العمل",
         removing: "جارٍ الإزالة...",
       },
       confirmations: {
@@ -1188,6 +1191,17 @@ export const ar: TranslationResources = {
         hostDisconnected: "Host غير متصل",
         hideFailed: "فشل في إخفاء مساحة العمل",
         archiveFailed: "فشل في أرشفة مساحة العمل",
+      },
+    },
+    agent: {
+      actions: {
+        menu: "إجراءات الوكيل",
+        open: "فتح الوكيل",
+        archive: "أرشفة الوكيل",
+      },
+      confirmations: {
+        archiveTitle: "أرشفة الوكيل؟",
+        archiveMessage: "سيتم أرشفة هذا الوكيل.",
       },
     },
   },

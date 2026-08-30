@@ -12,6 +12,7 @@ function workspace(workspaceId: string, projectViewKey: string): SidebarWorkspac
     projectRootPath: `/repo/${projectViewKey}`,
     workspaceDirectory: `/repo/${projectViewKey}/${workspaceId}`,
     workspaceDirectoryLabel: workspaceId,
+    projectCount: 1,
     projectKind: "git",
     workspaceKind: "worktree",
     name: workspaceId,

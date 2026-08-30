@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { act } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { WorkspaceScriptPayload } from "@getpaseo/protocol/messages";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +12,19 @@ import { createProjectViewKey } from "@/projects/workspace-structure";
 
 vi.hoisted(() => {
   (globalThis as unknown as { __DEV__: boolean }).__DEV__ = false;
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: vi.fn().mockImplementation(() => ({
+      matches: false,
+      media: "",
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
 });
 
 const pathnameState = vi.hoisted(() => ({
@@ -43,6 +56,9 @@ import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { defaultHostAppearance } from "@/hosts/appearance";
+import { SidebarWorkspaceMenu } from "@/components/sidebar/sidebar-workspace-menu";
+import { WorkspaceMemberMenuItems } from "@/components/sidebar/workspace-member-menu";
+import type { SidebarWorkspaceMemberRow } from "@/projects/workspace-groups";
 
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
@@ -51,6 +67,75 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
     removeItem: vi.fn().mockResolvedValue(undefined),
   },
 }));
+
+vi.mock("@/components/ui/context-menu", () => {
+  const ReactMock = require("react") as typeof import("react");
+  const StubItem = ({ children, testID }: { children?: React.ReactNode; testID?: string }) =>
+    ReactMock.createElement("button", { "data-testid": testID, type: "button" }, children);
+  return {
+    ContextMenu: ({ children }: { children: React.ReactNode }) => children,
+    ContextMenuContent: ({ children, testID }: { children: React.ReactNode; testID?: string }) =>
+      ReactMock.createElement("div", { "data-testid": testID }, children),
+    ContextMenuItem: StubItem,
+    ContextMenuTrigger: StubItem,
+    ContextMenuSeparator: () => null,
+  };
+});
+
+vi.mock("@/components/ui/dropdown-menu", () => {
+  const ReactMock = require("react") as typeof import("react");
+  const StubItem = ({ children, testID }: { children?: React.ReactNode; testID?: string }) =>
+    ReactMock.createElement("button", { "data-testid": testID, type: "button" }, children);
+  return {
+    DropdownMenu: ({ children }: { children: React.ReactNode }) => children,
+    DropdownMenuContent: ({ children, testID }: { children: React.ReactNode; testID?: string }) =>
+      ReactMock.createElement("div", { "data-testid": testID }, children),
+    DropdownMenuItem: StubItem,
+    DropdownMenuTrigger: StubItem,
+    DropdownMenuSubTrigger: StubItem,
+    DropdownMenuSeparator: () => null,
+  };
+});
+
+vi.mock("@/workspace/open-in-file-manager/menu-item", () => {
+  const ReactMock = require("react") as typeof import("react");
+  return {
+    OpenInFileManagerMenuItem: ({ testID }: { testID?: string }) =>
+      ReactMock.createElement("div", { "data-testid": testID }),
+  };
+});
+
+vi.mock("@/workspace-labels/picker", () => ({
+  WORKSPACE_LABEL_PAGE_ID: "workspaceLabels",
+  useWorkspaceLabelMenuPages: () => [],
+}));
+
+vi.mock("expo-clipboard", () => ({
+  setStringAsync: vi.fn(),
+}));
+
+vi.mock("@/contexts/toast-context", () => ({
+  useToast: () => ({
+    error: vi.fn(),
+    copied: vi.fn(),
+    info: vi.fn(),
+    success: vi.fn(),
+  }),
+}));
+
+const testMember: SidebarWorkspaceMemberRow = {
+  memberKey: "test-wk#/repo/project-a/main",
+  projectId: "project-a",
+  projectName: "Project A",
+  workspaceDirectory: "/repo/project-a/main",
+  workspaceDirectoryLabel: "main",
+  branch: "main",
+  diffStat: null,
+  isPrimary: true,
+  agents: [],
+};
+
+const testMemberNoBranch: SidebarWorkspaceMemberRow = { ...testMember, branch: null };
 
 const SERVER_ID = "sidebar-render-count";
 
@@ -449,5 +534,89 @@ describe("sidebar workspace render isolation", () => {
       "b-one": 1,
       "b-two": 1,
     });
+  });
+});
+
+describe("sidebar workspace menu items", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("workspace menu no longer includes project/directory actions", () => {
+    render(<SidebarWorkspaceMenu workspaceKey="test-wk" onArchive={vi.fn()} open />);
+
+    expect(screen.queryByText("Copy path")).toBeNull();
+    expect(screen.queryByText("Copy branch name")).toBeNull();
+    expect(screen.queryByText("Open in file manager")).toBeNull();
+    expect(screen.getByTestId("sidebar-workspace-menu-archive-test-wk")).toBeTruthy();
+  });
+
+  it("member menu includes copy path, copy branch, open folder, and remove", () => {
+    render(
+      <WorkspaceMemberMenuItems
+        member={testMember}
+        serverId={SERVER_ID}
+        surface="context"
+        canRemove
+        onCopyPath={vi.fn()}
+        onCopyBranchName={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByTestId("sidebar-member-menu-copy-path-test-wk#/repo/project-a/main"),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("sidebar-member-menu-copy-branch-test-wk#/repo/project-a/main"),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("sidebar-member-menu-open-folder-test-wk#/repo/project-a/main"),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("sidebar-member-menu-remove-test-wk#/repo/project-a/main"),
+    ).toBeTruthy();
+  });
+
+  it("member menu keeps copy actions but hides remove when removal is not allowed", () => {
+    render(
+      <WorkspaceMemberMenuItems
+        member={testMember}
+        serverId={SERVER_ID}
+        surface="context"
+        canRemove={false}
+        onCopyPath={vi.fn()}
+        onCopyBranchName={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByTestId("sidebar-member-menu-copy-path-test-wk#/repo/project-a/main"),
+    ).toBeTruthy();
+    expect(
+      screen.queryByTestId("sidebar-member-menu-remove-test-wk#/repo/project-a/main"),
+    ).toBeNull();
+  });
+
+  it("member menu hides copy branch when the member has no branch", () => {
+    render(
+      <WorkspaceMemberMenuItems
+        member={testMemberNoBranch}
+        serverId={SERVER_ID}
+        surface="context"
+        canRemove
+        onCopyPath={vi.fn()}
+        onCopyBranchName={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByTestId("sidebar-member-menu-copy-branch-test-wk#/repo/project-a/main"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("sidebar-member-menu-copy-path-test-wk#/repo/project-a/main"),
+    ).toBeTruthy();
   });
 });

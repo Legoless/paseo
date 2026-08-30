@@ -9,6 +9,7 @@ import {
   pinWorkspaceFromSidebar,
 } from "../support/helpers/sidebar";
 import { seedWorkspace } from "../support/helpers/seed-client";
+import { seedMockAgentWorkspace } from "../support/helpers/mock-agent";
 import { expectWorkspaceHeader } from "../support/helpers/workspace-ui";
 import { getServerId } from "../support/helpers/server-id";
 import { projectEquivalenceViewKey } from "../support/helpers/project-view-key";
@@ -52,14 +53,25 @@ async function openWorkspaceHoverCard(page: import("@playwright/test").Page, wor
   const row = await waitForSidebarWorkspace(page, workspaceId);
   await row.hover();
 
-  const hoverCard = page.getByRole("menu", { name: "Workspace scripts" });
+  const hoverCard = page.getByTestId("workspace-hover-card");
+  await expect(hoverCard).toBeVisible({ timeout: 30_000 });
+  return hoverCard;
+}
+
+async function openAgentHoverCard(page: import("@playwright/test").Page, agentId: string) {
+  const row = page.getByTestId(`sidebar-agent-row-${agentId}`);
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  const title = await row.getAttribute("aria-label");
+  if (!title) throw new Error(`Agent row ${agentId} has no accessible label`);
+  await row.hover();
+
+  const hoverCard = page.getByRole("menu", { name: title, exact: true });
   await expect(hoverCard).toBeVisible({ timeout: 30_000 });
   return hoverCard;
 }
 
 interface PaseoOwnedWorktree {
-  projectName: string;
-  workspaceId: string;
+  agentId: string;
   worktreeSlug: string;
 }
 
@@ -82,10 +94,17 @@ async function withPaseoOwnedWorktree(
       throw new Error(created.error ?? "Failed to create Paseo-owned worktree");
     }
     expect(path.basename(created.workspace.workspaceDirectory)).toBe(worktreeSlug);
+    const agent = await project.client.createAgent({
+      provider: "mock",
+      cwd: created.workspace.workspaceDirectory,
+      workspaceId: created.workspace.id,
+      title: "Worktree hover agent",
+      modeId: "load-test",
+      model: "e2e-fast-stream",
+    });
 
     await run({
-      projectName: path.basename(project.repoPath),
-      workspaceId: created.workspace.id,
+      agentId: agent.id,
       worktreeSlug,
     });
   } finally {
@@ -172,28 +191,116 @@ test.describe("Sidebar workspace list", () => {
     }
   });
 
-  test("workspace hover card shows host as metadata", async ({ page }) => {
-    const workspace = await seedWorkspace({ repoPrefix: "sidebar-hover-host-" });
+  test("workspace hover card counts only agent tabs and projects", async ({ page }) => {
+    const workspace = await seedMockAgentWorkspace({
+      repoPrefix: "sidebar-hover-counts-",
+      title: "First counted agent",
+    });
 
     try {
+      const secondAgent = await workspace.client.createAgent({
+        provider: "mock",
+        cwd: workspace.cwd,
+        workspaceId: workspace.workspaceId,
+        title: "Second counted agent",
+        modeId: "load-test",
+        model: "e2e-fast-stream",
+      });
       await gotoAppShell(page);
-      await waitForSidebarProject(page, path.basename(workspace.repoPath));
+      await page.getByTestId(`sidebar-agent-row-${workspace.agentId}`).click();
+      await page.getByTestId(`sidebar-agent-row-${secondAgent.id}`).click();
+      await openFilesPanel(page);
 
       const hoverCard = await openWorkspaceHoverCard(page, workspace.workspaceId);
-      await expect(page.getByTestId("hover-card-workspace-host")).toHaveText("localhost");
-      await expect(hoverCard).not.toContainText(/\b(Online|Connecting|Offline|Error|Idle)\b/);
+      await expect(page.getByTestId("hover-card-workspace-tabs")).toHaveText("Open tabs: 2");
+      await expect(page.getByTestId("hover-card-workspace-projects")).toHaveText("Projects: 1");
+      await expect(hoverCard).not.toContainText("localhost");
     } finally {
       await workspace.cleanup();
     }
   });
 
-  test("Paseo-owned worktree hover card shows the worktree directory name", async ({ page }) => {
-    await withPaseoOwnedWorktree(async ({ projectName, workspaceId, worktreeSlug }) => {
-      await gotoAppShell(page);
-      await waitForSidebarProject(page, projectName);
-      await openWorkspaceHoverCard(page, workspaceId);
+  test("agent hover card shows host as metadata", async ({ page }) => {
+    const workspace = await seedMockAgentWorkspace({
+      repoPrefix: "sidebar-agent-hover-host-",
+      title: "Hover agent",
+    });
 
-      await expect(page.getByTestId("hover-card-workspace-cwd")).toHaveText(worktreeSlug);
+    try {
+      const secondAgent = await workspace.client.createAgent({
+        provider: "mock",
+        cwd: workspace.cwd,
+        workspaceId: workspace.workspaceId,
+        title: "Second hover agent",
+        modeId: "load-test",
+        model: "e2e-fast-stream",
+      });
+      await gotoAppShell(page);
+      const firstHoverCard = await openAgentHoverCard(page, workspace.agentId);
+      await expect(firstHoverCard.getByTestId("hover-card-agent-name")).toHaveText("Hover agent");
+
+      const hoverCard = await openAgentHoverCard(page, secondAgent.id);
+      await expect(hoverCard.getByTestId("hover-card-agent-name")).toHaveText("Second hover agent");
+      await expect(hoverCard.getByTestId("hover-card-agent-host")).toHaveText("localhost");
+      await expect(hoverCard).not.toContainText(/\b(Online|Connecting|Offline|Error|Idle)\b/);
+
+      const memberRow = page.locator('[data-testid^="sidebar-member-row-"]').first();
+      const memberKebab = page.locator('[data-testid^="sidebar-member-kebab-"]').first();
+      await page.mouse.move(800, 500);
+      await memberRow.focus();
+      await expect(memberKebab).toBeVisible();
+      await memberRow.hover();
+      await expect(memberKebab).toBeVisible();
+      const memberRowBox = await memberRow.boundingBox();
+      const memberKebabBox = await memberKebab.boundingBox();
+      expect(memberRowBox).not.toBeNull();
+      expect(memberKebabBox).not.toBeNull();
+      expect(
+        Math.abs(memberRowBox!.x + memberRowBox!.width - memberKebabBox!.x - memberKebabBox!.width),
+      ).toBeLessThanOrEqual(12);
+
+      const agentRow = page.getByTestId(`sidebar-agent-row-${secondAgent.id}`);
+      const agentKebab = page.getByTestId(`sidebar-agent-kebab-${secondAgent.id}`);
+      await page.mouse.move(800, 500);
+      await agentRow.focus();
+      await expect(agentKebab).toBeVisible();
+      await agentRow.hover();
+      await expect(agentKebab).toBeVisible();
+      const agentRowBox = await agentRow.boundingBox();
+      const agentKebabBox = await agentKebab.boundingBox();
+      expect(agentRowBox).not.toBeNull();
+      expect(agentKebabBox).not.toBeNull();
+      expect(
+        Math.abs(agentRowBox!.x + agentRowBox!.width - agentKebabBox!.x - agentKebabBox!.width),
+      ).toBeLessThanOrEqual(12);
+
+      await agentKebab.click();
+      await expect(page.getByTestId(`sidebar-agent-dropdown-${secondAgent.id}`)).toBeVisible();
+      await expect(page.getByTestId(`sidebar-agent-menu-open-${secondAgent.id}`)).toBeVisible();
+      await expect(
+        page.getByTestId(`sidebar-agent-menu-copy-path-${secondAgent.id}`),
+      ).toBeVisible();
+      await expect(
+        page.getByTestId(`sidebar-agent-menu-copy-branch-${secondAgent.id}`),
+      ).toBeVisible();
+      await expect(page.getByTestId(`sidebar-agent-menu-archive-${secondAgent.id}`)).toBeVisible();
+      await expect(page.getByTestId("agent-hover-card")).toHaveCount(0);
+      await page.keyboard.press("Escape");
+
+      await agentRow.click({ button: "right" });
+      await expect(page.getByTestId(`sidebar-agent-context-menu-${secondAgent.id}`)).toBeVisible();
+      await expect(page.getByTestId("agent-hover-card")).toHaveCount(0);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  test("Paseo-owned worktree agent hover card shows the agent directory name", async ({ page }) => {
+    await withPaseoOwnedWorktree(async ({ agentId, worktreeSlug }) => {
+      await gotoAppShell(page);
+      await openAgentHoverCard(page, agentId);
+
+      await expect(page.getByTestId("hover-card-agent-cwd")).toHaveText(worktreeSlug);
     });
   });
 });

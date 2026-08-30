@@ -1,20 +1,29 @@
-import React, { useCallback } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  type PressableStateCallbackType,
-  type ViewStyle,
-} from "react-native";
+import React, { useCallback, useState } from "react";
+import { View, Text, type ViewStyle } from "react-native";
+import { useTranslation } from "react-i18next";
+import * as Clipboard from "expo-clipboard";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { CircleAlert, GitBranch } from "lucide-react-native";
 import { DiffStat } from "@/components/diff-stat";
+import { AgentHoverCard } from "@/components/workspace-hover-card";
 import { StatusRing } from "@/components/status-ring";
 import { useSidebarRowItems } from "@/components/sidebar/display-preferences/model";
 import { useSidebarWorkspaceTrailing } from "@/components/sidebar/workspace-trailing";
 import type { SidebarWorkspaceAgentRow } from "@/projects/workspace-groups";
-import { isWeb as platformIsWeb } from "@/constants/platform";
+import type { PrHint } from "@/git/use-pr-status-query";
+import { isWeb as platformIsWeb, isNative as platformIsNative } from "@/constants/platform";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
+import { useSessionStore } from "@/stores/session-store";
+import { useArchiveAgent } from "@/hooks/use-archive-agent";
+import { useToast } from "@/contexts/toast-context";
+import { confirmDialog } from "@/utils/confirm-dialog";
+import { toErrorMessage } from "@/utils/error-messages";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
+import {
+  WorkspaceAgentKebabMenu,
+  WorkspaceAgentMenuItems,
+} from "@/components/sidebar/workspace-member-menu";
 import type { Theme } from "@/styles/theme";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { getStatusDotColor } from "@/utils/status-dot-color";
@@ -73,6 +82,7 @@ export function WorkspaceAgentRow({
   agent,
   branch,
   diffStat,
+  prHint,
   serverId,
   workspaceId,
   onWorkspacePress,
@@ -81,10 +91,23 @@ export function WorkspaceAgentRow({
   /** The parent member's checkout facts — shared by every agent bucketed under it. */
   branch: string | null;
   diffStat: { additions: number; deletions: number } | null;
+  prHint: PrHint | null;
   serverId: string;
   workspaceId: string;
   onWorkspacePress?: () => void;
 }) {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const { archiveAgent } = useArchiveAgent();
+  const [isHovered, setIsHovered] = useState(false);
+  const [isPressed, setIsPressed] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [isKebabFocused, setIsKebabFocused] = useState(false);
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const [dropdownMenuOpen, setDropdownMenuOpen] = useState(false);
+  const isCompact = useIsCompactFormFactor();
+  const actionsVisible =
+    isHovered || isFocused || isKebabFocused || platformIsNative || isCompact || dropdownMenuOpen;
   const showBranch = useSidebarRowItems().branch && branch !== null;
   const trailing = useSidebarWorkspaceTrailing();
   const showDiff = trailing === "diff" && diffStat !== null;
@@ -96,51 +119,150 @@ export function WorkspaceAgentRow({
       target: { kind: "agent", agentId: agent.agentId },
     });
   }, [onWorkspacePress, serverId, workspaceId, agent.agentId]);
-  const rowStyle = useCallback(
-    ({ hovered = false, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
-      styles.agentRow,
-      hovered && !pressed && styles.agentRowHovered,
-      pressed && styles.agentRowPressed,
-    ],
-    [],
-  );
+  const handleCopyPath = useCallback(() => {
+    void Clipboard.setStringAsync(agent.cwd);
+    toast.copied(t("sidebar.workspace.toasts.pathCopied"));
+  }, [agent.cwd, t, toast]);
+  const handleCopyBranchName = useCallback(() => {
+    if (!branch) return;
+    void Clipboard.setStringAsync(branch);
+    toast.copied(t("sidebar.workspace.toasts.branchNameCopied"));
+  }, [branch, t, toast]);
+  const handlePointerEnter = useCallback(() => setIsHovered(true), []);
+  const handlePointerLeave = useCallback(() => setIsHovered(false), []);
+  const handlePressIn = useCallback(() => setIsPressed(true), []);
+  const handlePressOut = useCallback(() => setIsPressed(false), []);
+  const handleFocus = useCallback(() => setIsFocused(true), []);
+  const handleBlur = useCallback(() => setIsFocused(false), []);
+  const handleKebabFocus = useCallback(() => setIsKebabFocused(true), []);
+  const handleKebabBlur = useCallback(() => setIsKebabFocused(false), []);
+  const rowStyle = [
+    styles.agentRow,
+    isHovered && !isPressed && styles.agentRowHovered,
+    isPressed && styles.agentRowPressed,
+  ];
+
+  const handleArchive = useCallback(async () => {
+    const storedAgent = useSessionStore.getState().sessions[serverId]?.agents.get(agent.agentId);
+    const isRunning = storedAgent?.status === "running";
+    const confirmed = await confirmDialog({
+      title: isRunning
+        ? t("workspace.tabs.confirmations.archiveRunningAgentTitle")
+        : t("sidebar.agent.confirmations.archiveTitle"),
+      message: isRunning
+        ? t("workspace.tabs.confirmations.archiveRunningAgentMessage")
+        : t("sidebar.agent.confirmations.archiveMessage"),
+      confirmLabel: t("agentList.archiveSheet.archive"),
+      cancelLabel: t("common.actions.cancel"),
+      destructive: true,
+    });
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await archiveAgent({ serverId, agentId: agent.agentId });
+    } catch (error) {
+      toast.error(toErrorMessage(error));
+    }
+  }, [agent.agentId, archiveAgent, serverId, t, toast]);
 
   return (
-    <Pressable
-      accessibilityRole={platformIsWeb ? undefined : "button"}
-      accessibilityLabel={agent.title}
-      onPress={handlePress}
-      style={rowStyle}
-      testID={`sidebar-agent-row-${agent.agentId}`}
+    <AgentHoverCard
+      title={agent.title}
+      serverId={serverId}
+      branch={branch}
+      diffStat={diffStat}
+      workspaceDirectory={agent.cwd}
+      workspaceDirectoryLabel={agent.cwdLabel}
+      prHint={prHint}
+      disabled={contextMenuOpen || dropdownMenuOpen}
     >
-      <AgentStatusIndicator bucket={agent.statusBucket} />
-      <Text style={styles.agentTitle} numberOfLines={1}>
-        {agent.title}
-      </Text>
-      {showBranch || showDiff ? (
-        <View style={styles.agentTrailing}>
-          {showBranch ? (
-            <View style={styles.agentBranch} testID={`sidebar-agent-branch-${agent.agentId}`}>
-              <ThemedGitBranch size={12} uniProps={foregroundMutedColorMapping} />
-              <Text style={styles.agentBranchText} numberOfLines={1}>
-                {branch}
-              </Text>
+      <View
+        style={styles.agentRowContainer}
+        onPointerEnter={handlePointerEnter}
+        onPointerLeave={handlePointerLeave}
+      >
+        <ContextMenu open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
+          <ContextMenuTrigger
+            accessibilityRole={platformIsWeb ? undefined : "button"}
+            accessibilityLabel={agent.title}
+            onPress={handlePress}
+            onPressIn={handlePressIn}
+            onPressOut={handlePressOut}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            style={rowStyle}
+            highlightStyle={styles.agentRowPressed}
+            testID={`sidebar-agent-row-${agent.agentId}`}
+          >
+            <AgentStatusIndicator bucket={agent.statusBucket} />
+            <Text style={styles.agentTitle} numberOfLines={1}>
+              {agent.title}
+            </Text>
+            {showBranch || showDiff ? (
+              <View style={styles.agentTrailing}>
+                {showBranch ? (
+                  <View style={styles.agentBranch} testID={`sidebar-agent-branch-${agent.agentId}`}>
+                    <ThemedGitBranch size={12} uniProps={foregroundMutedColorMapping} />
+                    <Text style={styles.agentBranchText} numberOfLines={1}>
+                      {branch}
+                    </Text>
+                  </View>
+                ) : null}
+                {showDiff && diffStat ? (
+                  <DiffStat
+                    additions={diffStat.additions}
+                    deletions={diffStat.deletions}
+                    testID={`sidebar-agent-diff-${agent.agentId}`}
+                  />
+                ) : null}
+              </View>
+            ) : null}
+            <View
+              style={!actionsVisible && styles.agentKebabHidden}
+              pointerEvents={actionsVisible ? "auto" : "none"}
+            >
+              <WorkspaceAgentKebabMenu
+                agent={agent}
+                serverId={serverId}
+                branch={branch}
+                open={dropdownMenuOpen}
+                onOpenChange={setDropdownMenuOpen}
+                onFocus={handleKebabFocus}
+                onBlur={handleKebabBlur}
+                onOpen={handlePress}
+                onCopyPath={handleCopyPath}
+                onCopyBranchName={handleCopyBranchName}
+                onArchive={handleArchive}
+              />
             </View>
-          ) : null}
-          {showDiff && diffStat ? (
-            <DiffStat
-              additions={diffStat.additions}
-              deletions={diffStat.deletions}
-              testID={`sidebar-agent-diff-${agent.agentId}`}
+          </ContextMenuTrigger>
+          <ContextMenuContent
+            align="start"
+            width={220}
+            testID={`sidebar-agent-context-menu-${agent.agentId}`}
+          >
+            <WorkspaceAgentMenuItems
+              agent={agent}
+              serverId={serverId}
+              branch={branch}
+              surface="context"
+              onOpen={handlePress}
+              onCopyPath={handleCopyPath}
+              onCopyBranchName={handleCopyBranchName}
+              onArchive={handleArchive}
             />
-          ) : null}
-        </View>
-      ) : null}
-    </Pressable>
+          </ContextMenuContent>
+        </ContextMenu>
+      </View>
+    </AgentHoverCard>
   );
 }
 
 const styles = StyleSheet.create((theme) => ({
+  agentRowContainer: {
+    position: "relative",
+  },
   // The agent's status dot sits under its member row's title — see the list's indent math.
   agentRow: {
     minHeight: 28,
@@ -159,6 +281,9 @@ const styles = StyleSheet.create((theme) => ({
   },
   agentRowPressed: {
     backgroundColor: theme.colors.surface2,
+  },
+  agentKebabHidden: {
+    opacity: 0,
   },
   agentStatusSlot: {
     width: theme.iconSize.md,

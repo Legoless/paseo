@@ -81,6 +81,21 @@ describe("createSidebarWorkspaceEntry forge threading", () => {
 });
 
 describe("createSidebarWorkspaceEntry workspace directory label", () => {
+  it("carries the workspace's project count", () => {
+    const descriptor = workspaceWithForge(undefined, "https://github.com/acme/repo/pull/42");
+    descriptor.members.push({
+      ...descriptor.members[0]!,
+      projectId: "proj-2",
+      projectDisplayName: "repo-2",
+      projectRootPath: "/repo-2",
+      workspaceDirectory: "/repo-2",
+    });
+
+    const entry = createSidebarWorkspaceEntry({ serverId: "srv", workspace: descriptor });
+
+    expect(entry.projectCount).toBe(2);
+  });
+
   it("uses the daemon-provided slug for a Paseo-owned worktree", () => {
     const descriptor = workspaceWithForge(undefined, "https://github.com/acme/repo/pull/42");
     descriptor.workspaceDirectory = "/worktrees/feature/packages/app";

@@ -1,5 +1,13 @@
-import { useMemo, type ComponentProps, type PropsWithChildren, type ReactNode } from "react";
+import {
+  useCallback,
+  useMemo,
+  type ComponentProps,
+  type PropsWithChildren,
+  type ReactNode,
+} from "react";
+import React from "react";
 import { useTranslation } from "react-i18next";
+import * as Clipboard from "expo-clipboard";
 import { type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
@@ -22,18 +30,14 @@ import type { ShortcutKey } from "@/utils/format-shortcut";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import { Shortcut } from "@/components/ui/shortcut";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { WorkspaceMenuItem } from "@/components/sidebar/workspace-menu-item";
 import { OpenInFileManagerMenuItem } from "@/workspace/open-in-file-manager/menu-item";
+import { useToast } from "@/contexts/toast-context";
+import { Shortcut } from "@/components/ui/shortcut";
 import { resolveSidebarWorkspaceAccessibilityLabel } from "@/components/sidebar/sidebar-workspace-title";
 import {
   workspaceServiceLabelKey,
@@ -60,8 +64,8 @@ const ThemedPinOff = withUnistyles(PinOff);
 const ThemedTag = withUnistyles(Tag);
 const ThemedFolderPlus = withUnistyles(FolderPlus);
 
-const copyLeadingIcon = <ThemedCopy size={14} uniProps={foregroundMutedColorMapping} />;
 const renameLeadingIcon = <ThemedPencil size={14} uniProps={foregroundMutedColorMapping} />;
+const copyLeadingIcon = <ThemedCopy size={14} uniProps={foregroundMutedColorMapping} />;
 const markAsReadLeadingIcon = (
   <ThemedCircleCheck size={14} uniProps={foregroundMutedColorMapping} />
 );
@@ -81,11 +85,11 @@ function renderTriggerIcon({ hovered }: { hovered?: boolean }) {
 
 export interface SidebarWorkspaceMenuProps {
   workspaceKey: string;
+  workspace?: SidebarWorkspaceEntry;
+  includeProjectActions?: boolean;
   serverId?: string;
   workspaceId?: string;
   workspaceLabels?: readonly string[];
-  onCopyPath?: () => void;
-  onCopyBranchName?: () => void;
   onRename?: () => void;
   onMarkAsRead?: () => void;
   onAddProject?: () => void;
@@ -96,7 +100,6 @@ export interface SidebarWorkspaceMenuProps {
   archiveShortcutKeys?: ShortcutKey[][] | null;
   isPinned?: boolean;
   onTogglePin?: () => void;
-  openInFileManagerPath?: string | null;
   /**
    * Lifted so the row that reveals the kebab can keep it mounted while its menu is up. See
    * `useOpenKebabMenuVisibility`.
@@ -107,24 +110,37 @@ export interface SidebarWorkspaceMenuProps {
 
 interface SidebarWorkspaceMenuItemsProps extends Omit<
   SidebarWorkspaceMenuProps,
-  "onArchive" | "open" | "onOpenChange"
+  "onArchive" | "open" | "onOpenChange" | "workspace" | "includeProjectActions"
 > {
+  onCopyPath?: () => void;
+  onCopyBranchName?: () => void;
+  openInFileManagerPath?: string | null;
   onArchive?: () => void;
 }
 
 type MenuSurface = "context" | "dropdown";
 
-function WorkspaceMenuItem({
-  surface,
-  children,
-  ...props
-}: PropsWithChildren<
-  Omit<ComponentProps<typeof DropdownMenuItem>, "children"> & { surface: MenuSurface }
->) {
-  if (surface === "context") {
-    return <ContextMenuItem {...props}>{children}</ContextMenuItem>;
-  }
-  return <DropdownMenuItem {...props}>{children}</DropdownMenuItem>;
+function useWorkspaceProjectMenuActions(
+  workspace: SidebarWorkspaceEntry | undefined,
+  enabled: boolean,
+) {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const handleCopyPath = useCallback(() => {
+    if (!workspace) return;
+    void Clipboard.setStringAsync(workspace.workspaceDirectory);
+    toast.copied(t("sidebar.workspace.toasts.pathCopied"));
+  }, [t, toast, workspace]);
+  const handleCopyBranchName = useCallback(() => {
+    if (!workspace?.currentBranch) return;
+    void Clipboard.setStringAsync(workspace.currentBranch);
+    toast.copied(t("sidebar.workspace.toasts.branchNameCopied"));
+  }, [t, toast, workspace]);
+  return {
+    onCopyPath: enabled && workspace ? handleCopyPath : undefined,
+    onCopyBranchName: enabled && workspace?.currentBranch ? handleCopyBranchName : undefined,
+    openInFileManagerPath: enabled ? workspace?.workspaceDirectory : undefined,
+  };
 }
 
 function SidebarWorkspaceMenuItems({
@@ -134,6 +150,7 @@ function SidebarWorkspaceMenuItems({
   workspaceId,
   onCopyPath,
   onCopyBranchName,
+  openInFileManagerPath,
   onRename,
   onMarkAsRead,
   onAddProject,
@@ -144,7 +161,6 @@ function SidebarWorkspaceMenuItems({
   archiveShortcutKeys,
   isPinned,
   onTogglePin,
-  openInFileManagerPath,
 }: SidebarWorkspaceMenuItemsProps & { surface: MenuSurface }): ReactNode {
   const { t } = useTranslation();
   const archiveTrailing = useMemo(
@@ -229,6 +245,7 @@ function SidebarWorkspaceMenuItems({
       ) : null}
       <OpenInFileManagerMenuItem
         surface={surface}
+        serverId={serverId}
         path={openInFileManagerPath}
         testID={`sidebar-workspace-menu-open-folder-${workspaceKey}`}
       />
@@ -251,11 +268,11 @@ function SidebarWorkspaceMenuItems({
 
 export function SidebarWorkspaceMenu({
   workspaceKey,
+  workspace,
+  includeProjectActions = false,
   serverId,
   workspaceId,
   workspaceLabels,
-  onCopyPath,
-  onCopyBranchName,
   onRename,
   onMarkAsRead,
   onAddProject,
@@ -266,11 +283,11 @@ export function SidebarWorkspaceMenu({
   archiveShortcutKeys,
   isPinned,
   onTogglePin,
-  openInFileManagerPath,
   open,
   onOpenChange,
 }: SidebarWorkspaceMenuProps) {
   const { t } = useTranslation();
+  const projectActions = useWorkspaceProjectMenuActions(workspace, includeProjectActions);
   const workspaceTarget = useMemo<WorkspaceLabelTarget | null>(
     () =>
       serverId && workspaceId ? { serverId, workspaceId, labels: workspaceLabels ?? [] } : null,
@@ -300,8 +317,9 @@ export function SidebarWorkspaceMenu({
           serverId={serverId}
           workspaceId={workspaceId}
           workspaceLabels={workspaceLabels}
-          onCopyPath={onCopyPath}
-          onCopyBranchName={onCopyBranchName}
+          onCopyPath={projectActions.onCopyPath}
+          onCopyBranchName={projectActions.onCopyBranchName}
+          openInFileManagerPath={projectActions.openInFileManagerPath}
           onRename={onRename}
           onMarkAsRead={onMarkAsRead}
           onAddProject={onAddProject}
@@ -312,7 +330,6 @@ export function SidebarWorkspaceMenu({
           archiveShortcutKeys={archiveShortcutKeys}
           isPinned={isPinned}
           onTogglePin={onTogglePin}
-          openInFileManagerPath={openInFileManagerPath}
         />
       </DropdownMenuContent>
     </DropdownMenu>
@@ -333,8 +350,6 @@ export function SidebarWorkspaceContextMenu({
   hostBadgeLabel,
   serviceSummary,
   workspaceKey,
-  onCopyPath,
-  onCopyBranchName,
   onRename,
   onMarkAsRead,
   onAddProject,
@@ -345,7 +360,6 @@ export function SidebarWorkspaceContextMenu({
   archiveShortcutKeys,
   isPinned,
   onTogglePin,
-  openInFileManagerPath,
   accessibilityLabel,
   highlightStyle,
   ...triggerProps
@@ -365,6 +379,7 @@ export function SidebarWorkspaceContextMenu({
     settings: { workspaceTitleSource },
   } = useAppSettings();
   const { t } = useTranslation();
+  const projectActions = useWorkspaceProjectMenuActions(workspace, Boolean(leadingProjectName));
   const pullRequestLabel = workspace.prHint
     ? t("workspace.git.pr.accessibility.pullRequest", {
         number: workspace.prHint.number,
@@ -413,8 +428,9 @@ export function SidebarWorkspaceContextMenu({
           serverId={workspaceTarget.serverId}
           workspaceId={workspaceTarget.workspaceId}
           workspaceLabels={workspaceTarget.labels}
-          onCopyPath={onCopyPath}
-          onCopyBranchName={onCopyBranchName}
+          onCopyPath={projectActions.onCopyPath}
+          onCopyBranchName={projectActions.onCopyBranchName}
+          openInFileManagerPath={projectActions.openInFileManagerPath}
           onRename={onRename}
           onMarkAsRead={onMarkAsRead}
           onAddProject={onAddProject}
@@ -425,7 +441,6 @@ export function SidebarWorkspaceContextMenu({
           archiveShortcutKeys={archiveShortcutKeys}
           isPinned={isPinned}
           onTogglePin={onTogglePin}
-          openInFileManagerPath={openInFileManagerPath}
         />
       </ContextMenuContent>
     </ContextMenu>

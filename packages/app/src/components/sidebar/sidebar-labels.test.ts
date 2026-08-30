@@ -17,6 +17,7 @@ function workspace(
     projectRootPath: "/repo",
     workspaceDirectory: `/repo/${workspaceId}`,
     workspaceDirectoryLabel: workspaceId,
+    projectCount: 1,
     projectKind: "git",
     workspaceKind: "worktree",
     name: workspaceId,

@@ -17,6 +17,7 @@ function workspace(overrides: Partial<SidebarWorkspaceEntry> = {}): SidebarWorks
     projectName: "paseo",
     workspaceDirectory: "/repo",
     workspaceDirectoryLabel: "/repo",
+    projectCount: 1,
     projectKind: "git",
     workspaceKind: "checkout",
     name: "paseo",

@@ -19,6 +19,7 @@ function ws(
     projectRootPath: input.projectRootPath,
     workspaceDirectory: input.workspaceDirectory ?? "",
     workspaceDirectoryLabel: input.workspaceDirectoryLabel ?? "",
+    projectCount: input.projectCount ?? 1,
     projectKind: input.projectKind ?? "git",
     workspaceKind: input.workspaceKind ?? "worktree",
     name: input.name ?? "main",

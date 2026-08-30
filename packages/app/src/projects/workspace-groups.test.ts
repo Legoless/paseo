@@ -212,6 +212,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
     const memberB = section?.members.find((entry) => entry.projectId === "project-b");
     expect(memberA?.agents.map((entry) => entry.agentId)).toEqual(["agent-a"]);
     expect(memberB?.agents.map((entry) => entry.agentId)).toEqual(["agent-b"]);
+    expect(memberA?.agents[0]?.matchesMemberDirectory).toBe(true);
   });
 
   it("carries the member's live diff stat onto its row", () => {
@@ -257,6 +258,9 @@ describe("buildSidebarWorkspaceGroupModel", () => {
     const secondary = section?.members.find((entry) => !entry.isPrimary);
     expect(primary?.projectId).toBe("project-b");
     expect(primary?.agents.map((entry) => entry.agentId)).toEqual(["stray"]);
+    expect(primary?.agents[0]?.cwd).toBe("/somewhere/else");
+    expect(primary?.agents[0]?.cwdLabel).toBe("/somewhere/else");
+    expect(primary?.agents[0]?.matchesMemberDirectory).toBe(false);
     expect(secondary?.agents).toEqual([]);
   });
 

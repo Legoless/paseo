@@ -414,6 +414,8 @@ export const fr: TranslationResources = {
     },
     hoverCard: {
       scriptsAccessibility: "ScriptsWorkspace",
+      openTabs: "Onglets ouverts : {{count}}",
+      projects: "Projets : {{count}}",
       copyPath: "Copier le chemin",
       copyBranchName: "Copier le nom de la branche",
       copied: "Copié",
@@ -1153,6 +1155,7 @@ export const fr: TranslationResources = {
         openFolder: "Open in file manager",
         openFolderFailed: "Couldn't open folder",
         remove: "Supprimer le projet",
+        removeFromWorkspace: "Retirer de l’espace de travail",
         removing: "Suppression...",
       },
       confirmations: {
@@ -1222,6 +1225,17 @@ export const fr: TranslationResources = {
         hostDisconnected: "Hostn'est pas connecté",
         hideFailed: "Échec du masquage de l'espace de travail",
         archiveFailed: "Échec de l'archivage de l'espace de travail",
+      },
+    },
+    agent: {
+      actions: {
+        menu: "Actions de l’agent",
+        open: "Ouvrir l'agent",
+        archive: "Archiver l'agent",
+      },
+      confirmations: {
+        archiveTitle: "Archiver l'agent ?",
+        archiveMessage: "Cet agent sera archivé.",
       },
     },
   },

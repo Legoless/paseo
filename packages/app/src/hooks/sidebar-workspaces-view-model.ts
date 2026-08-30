@@ -38,6 +38,7 @@ export interface SidebarStatusWorkspacePlacement extends SidebarWorkspacePlaceme
 export interface SidebarWorkspaceEntry extends SidebarStatusWorkspacePlacement {
   workspaceDirectory: string;
   workspaceDirectoryLabel: string;
+  projectCount: number;
   // Raw user-set title (null when the name is derived from branch/directory).
   // Prefills the rename input and signals whether a reset is available.
   title: string | null;
@@ -162,6 +163,7 @@ export function createSidebarWorkspaceEntry(input: {
     workspaceDirectory: input.workspace.workspaceDirectory,
     workspaceDirectoryLabel:
       input.workspace.worktreeSlug ?? shortenPath(input.workspace.workspaceDirectory),
+    projectCount: input.workspace.members.length,
     projectKind: input.workspace.projectKind,
     workspaceKind: input.workspace.workspaceKind,
     name: input.workspace.name,

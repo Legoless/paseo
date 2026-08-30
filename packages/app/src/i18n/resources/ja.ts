@@ -414,6 +414,8 @@ export const ja: TranslationResources = {
     },
     hoverCard: {
       scriptsAccessibility: "ワークスペーススクリプト",
+      openTabs: "開いているタブ: {{count}}",
+      projects: "プロジェクト: {{count}}",
       copyPath: "パスをコピー",
       copyBranchName: "ブランチ名をコピー",
       copied: "コピーしました",
@@ -1131,6 +1133,7 @@ export const ja: TranslationResources = {
         openFolder: "Open in file manager",
         openFolderFailed: "Couldn't open folder",
         remove: "プロジェクトを削除",
+        removeFromWorkspace: "ワークスペースから削除",
         removing: "削除中...",
       },
       confirmations: {
@@ -1200,6 +1203,17 @@ export const ja: TranslationResources = {
         hostDisconnected: "ホストが接続されていません",
         hideFailed: "ワークスペースの非表示に失敗しました",
         archiveFailed: "ワークスペースのアーカイブに失敗しました",
+      },
+    },
+    agent: {
+      actions: {
+        menu: "エージェントのアクション",
+        open: "エージェントを開く",
+        archive: "エージェントをアーカイブ",
+      },
+      confirmations: {
+        archiveTitle: "エージェントをアーカイブしますか？",
+        archiveMessage: "このエージェントはアーカイブされます。",
       },
     },
   },

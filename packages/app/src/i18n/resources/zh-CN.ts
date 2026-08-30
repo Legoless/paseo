@@ -410,6 +410,8 @@ export const zhCN: TranslationResources = {
     },
     hoverCard: {
       scriptsAccessibility: "Workspace scripts",
+      openTabs: "打开的标签页：{{count}}",
+      projects: "项目：{{count}}",
       copyPath: "复制路径",
       copyBranchName: "复制分支名称",
       copied: "已复制",
@@ -1110,6 +1112,7 @@ export const zhCN: TranslationResources = {
         openFolder: "Open in file manager",
         openFolderFailed: "Couldn't open folder",
         remove: "移除 project",
+        removeFromWorkspace: "从工作区中移除",
         removing: "正在移除...",
       },
       confirmations: {
@@ -1177,6 +1180,17 @@ export const zhCN: TranslationResources = {
         hostDisconnected: "Host 未连接",
         hideFailed: "隐藏 workspace 失败",
         archiveFailed: "归档工作区失败",
+      },
+    },
+    agent: {
+      actions: {
+        menu: "Agent 操作",
+        open: "打开 Agent",
+        archive: "归档 Agent",
+      },
+      confirmations: {
+        archiveTitle: "归档 Agent？",
+        archiveMessage: "此 Agent 将被归档。",
       },
     },
   },
