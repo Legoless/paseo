@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import React, { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { FolderOpen } from "lucide-react-native";
 import { withUnistyles } from "react-native-unistyles";
@@ -8,8 +8,10 @@ import { getIsElectron } from "@/constants/platform";
 import { useToast } from "@/contexts/toast-context";
 import type { Theme } from "@/styles/theme";
 import { openDesktopTarget, useDesktopOpenTargets } from "@/workspace/desktop-open-targets";
+import { useIsLocalDaemon } from "@/hooks/use-is-local-daemon";
 
 interface OpenInFileManagerMenuItemProps {
+  serverId?: string;
   path?: string | null;
   testID: string;
   surface?: "context" | "dropdown";
@@ -24,6 +26,7 @@ const foregroundMutedColorMapping = (theme: Theme) => ({
 const leadingIcon = <ThemedFolderOpen size={14} uniProps={foregroundMutedColorMapping} />;
 
 export function OpenInFileManagerMenuItem({
+  serverId,
   path,
   testID,
   surface = "dropdown",
@@ -31,9 +34,10 @@ export function OpenInFileManagerMenuItem({
   const { t } = useTranslation();
   const toast = useToast();
   const isElectron = getIsElectron();
+  const isLocalDaemon = useIsLocalDaemon(serverId ?? "");
   const workspacePath = path?.trim() ?? "";
   const { targets } = useDesktopOpenTargets({
-    isLocalExecution: isElectron && workspacePath.length > 0,
+    isLocalExecution: isElectron && isLocalDaemon && workspacePath.length > 0,
   });
   const fileManagerTarget = targets.find((target) => target.kind === "file-manager");
 

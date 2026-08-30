@@ -9,6 +9,19 @@ import type { SidebarWorkspaceAgentRow } from "@/projects/workspace-groups";
 
 vi.hoisted(() => {
   (globalThis as unknown as { __DEV__: boolean }).__DEV__ = false;
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: vi.fn().mockImplementation(() => ({
+      matches: false,
+      media: "",
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
 });
 
 vi.mock("expo-router", () => ({
@@ -25,13 +38,59 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
   },
 }));
 
+vi.mock("expo-clipboard", () => ({
+  setStringAsync: vi.fn(),
+}));
+
+vi.mock("@/components/ui/context-menu", () => {
+  const ReactMock = require("react") as typeof import("react");
+  const StubItem = ({ children, testID }: { children?: React.ReactNode; testID?: string }) =>
+    ReactMock.createElement("button", { "data-testid": testID, type: "button" }, children);
+  return {
+    ContextMenu: ({ children }: { children: React.ReactNode }) => children,
+    ContextMenuContent: ({ children, testID }: { children: React.ReactNode; testID?: string }) =>
+      ReactMock.createElement("div", { "data-testid": testID }, children),
+    ContextMenuItem: StubItem,
+    ContextMenuTrigger: StubItem,
+    ContextMenuSeparator: () => null,
+  };
+});
+
+vi.mock("@/components/ui/dropdown-menu", () => {
+  const ReactMock = require("react") as typeof import("react");
+  const StubItem = ({ children, testID }: { children?: React.ReactNode; testID?: string }) =>
+    ReactMock.createElement("button", { "data-testid": testID, type: "button" }, children);
+  return {
+    DropdownMenu: ({ children }: { children: React.ReactNode }) => children,
+    DropdownMenuContent: () => null,
+    DropdownMenuItem: StubItem,
+    DropdownMenuTrigger: StubItem,
+    DropdownMenuSeparator: () => null,
+  };
+});
+
+vi.mock("@/components/workspace-hover-card", () => ({
+  AgentHoverCard: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 import { WorkspaceAgentRow } from "@/components/sidebar/workspace-agent-row";
 import { APP_SETTINGS_QUERY_KEY, DEFAULT_CLIENT_SETTINGS } from "@/hooks/use-settings/storage";
 import { DEFAULT_SIDEBAR_ROW_ITEMS } from "@/components/sidebar/display-preferences/row-items";
+vi.mock("@/contexts/toast-context", () => ({
+  useToast: () => ({
+    error: vi.fn(),
+    copied: vi.fn(),
+    info: vi.fn(),
+    success: vi.fn(),
+  }),
+}));
 
 const AGENT: SidebarWorkspaceAgentRow = {
   agentId: "agent-1",
   title: "Fix the sidebar",
+  cwd: "/repo/project",
+  cwdLabel: "~/project",
+  matchesMemberDirectory: true,
   statusBucket: "done",
   lastActivityAt: new Date(1_000),
 };
@@ -57,6 +116,7 @@ function renderRow(input: {
         agent={AGENT}
         branch={input.branch ?? null}
         diffStat={input.diffStat ?? null}
+        prHint={null}
         serverId="srv"
         workspaceId="ws-1"
       />
@@ -101,5 +161,12 @@ describe("WorkspaceAgentRow branch and diff", () => {
 
     expect(screen.getByTestId("sidebar-agent-status-done")).toBeTruthy();
     expect(screen.getByText("Fix the sidebar")).toBeTruthy();
+  });
+
+  it("renders the agent context menu with Open agent and Archive agent items", () => {
+    renderRow({});
+
+    expect(screen.getByTestId("sidebar-agent-menu-open-agent-1")).toBeTruthy();
+    expect(screen.getByTestId("sidebar-agent-menu-archive-agent-1")).toBeTruthy();
   });
 });

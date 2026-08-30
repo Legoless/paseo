@@ -26,6 +26,7 @@ function makeWorkspace(
     ...placement,
     workspaceDirectory: "",
     workspaceDirectoryLabel: "",
+    projectCount: 1,
     title: null,
     currentBranch: null,
     statusBucket,

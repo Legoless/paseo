@@ -93,12 +93,7 @@ export function SidebarWorkspaceRowFrame({
   );
 
   return (
-    <WorkspaceHoverCard
-      workspace={workspace}
-      prHint={workspace.prHint}
-      isDragging={isDragging}
-      disabled={contextMenuOpen}
-    >
+    <WorkspaceHoverCard workspace={workspace} isDragging={isDragging} disabled={contextMenuOpen}>
       {children({
         isHovered: isHovered && !contextMenuOpen && !isDragging,
         contextMenuOpen,

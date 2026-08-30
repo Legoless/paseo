@@ -1,13 +1,4 @@
-import {
-  View,
-  Text,
-  Pressable,
-  ScrollView,
-  type GestureResponderEvent,
-  type PressableStateCallbackType,
-  type StyleProp,
-  type ViewStyle,
-} from "react-native";
+import { View, Text, ScrollView, type GestureResponderEvent } from "react-native";
 import { useMutation } from "@tanstack/react-query";
 import { AdaptiveRenameModal } from "@/components/rename-modal";
 import {
@@ -26,13 +17,11 @@ import {
   useActiveWorkspaceSelection,
   type ActiveWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
-import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import type { Theme } from "@/styles/theme";
+import { StyleSheet } from "react-native-unistyles";
 import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
 import { getSidebarRowBackdrop } from "@/components/sidebar/sidebar-row-backdrop";
 import { type GestureType } from "react-native-gesture-handler";
 import * as Clipboard from "expo-clipboard";
-import { ExternalLink, MoreVertical, Trash2 } from "lucide-react-native";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
 import { DraggableList, type DraggableRenderItemInfo } from "./draggable-list";
 import type { DraggableListDragHandleProps } from "./draggable-list.types";
@@ -65,15 +54,9 @@ import {
   type SidebarGroupMode,
 } from "@/stores/sidebar-view-store";
 import { useShowShortcutBadges } from "@/hooks/use-show-shortcut-badges";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { ProjectStatusIndicator } from "@/components/sidebar/project-leading-visual";
 import { useToast } from "@/contexts/toast-context";
-import { getForgePresentation, normalizeForge } from "@/git/forge";
 import { toWorktreeArchiveRisk } from "@/git/worktree-archive-warning";
 import { hasVisibleOrderChanged, mergeWithRemainder } from "@/utils/sidebar-reorder";
 import { SidebarStatusWorkspaceList } from "@/components/sidebar/sidebar-status-list";
@@ -82,6 +65,10 @@ import {
   SidebarWorkspaceContextMenu,
   SidebarWorkspaceMenu,
 } from "@/components/sidebar/sidebar-workspace-menu";
+import {
+  WorkspaceMemberKebabMenu,
+  WorkspaceMemberMenuItems,
+} from "@/components/sidebar/workspace-member-menu";
 import { useLongPressDragInteraction } from "@/components/sidebar/use-long-press-drag-interaction";
 import { PinnedSectionHeader } from "@/components/sidebar/pinned-section-header";
 import { SidebarGroupToggleRow } from "@/components/sidebar/sidebar-group-toggle-row";
@@ -112,27 +99,13 @@ import { useClearWorkspaceAttention } from "@/hooks/use-clear-workspace-attentio
 import type { PrHint } from "@/git/use-pr-status-query";
 import type { SidebarProjectIconTarget } from "@/utils/sidebar-project-row-model";
 import { redirectIfArchivingActiveWorkspace } from "@/utils/sidebar-workspace-archive-redirect";
-import { openExternalUrl } from "@/utils/open-external-url";
-import { requireWorkspaceDirectory } from "@/utils/workspace-directory";
 import { useWorkspaceArchive } from "@/workspace/use-workspace-archive";
 import { isWeb as platformIsWeb, isNative as platformIsNative } from "@/constants/platform";
 import type { HostBadgeModel } from "@/hosts/appearance";
 import { useHostBadges } from "@/hosts/use-host-badges";
 import { useSidebarRowItems } from "@/components/sidebar/display-preferences/model";
-import { PullRequestStateIcon } from "@/git/pull-request-state-icon";
 
 const workspaceKeyExtractor = (workspace: SidebarWorkspacePlacement) => workspace.workspaceKey;
-
-const ThemedExternalLink = withUnistyles(ExternalLink);
-const ThemedMoreVertical = withUnistyles(MoreVertical);
-const ThemedTrash2 = withUnistyles(Trash2);
-
-const foregroundColorMapping = (theme: Theme) => ({
-  color: theme.colors.foreground,
-});
-const foregroundMutedColorMapping = (theme: Theme) => ({
-  color: theme.colors.foregroundMuted,
-});
 
 function isWorkspaceSelected(input: {
   selection: ActiveWorkspaceSelection | null;
@@ -207,8 +180,6 @@ interface WorkspaceRowInnerProps {
   archiveStatus?: "idle" | "pending" | "success";
   archivePendingLabel?: string;
   onArchive?: () => void;
-  onCopyBranchName?: () => void;
-  onCopyPath?: () => void;
   onRename?: () => void;
   onMarkAsRead?: () => void;
   onAddProject?: () => void;
@@ -217,72 +188,6 @@ interface WorkspaceRowInnerProps {
   onTogglePin?: () => void;
   reserveIdleStatusIndicatorSpace?: boolean;
   collapseAccessory?: WorkspaceCollapseToggle;
-}
-
-export function PrBadge({ hint, style }: { hint: PrHint; style?: StyleProp<ViewStyle> }) {
-  const { t } = useTranslation();
-  const [isHovered, setIsHovered] = useState(false);
-
-  const handlePressIn = useCallback((event: GestureResponderEvent) => {
-    event.stopPropagation();
-  }, []);
-
-  const handlePress = useCallback(
-    (event: GestureResponderEvent) => {
-      event.stopPropagation();
-      void openExternalUrl(hint.url);
-    },
-    [hint.url],
-  );
-
-  const handleHoverIn = useCallback(() => setIsHovered(true), []);
-  const handleHoverOut = useCallback(() => setIsHovered(false), []);
-
-  // Callers that place the badge in a list of icon+text rows pass that row's layout in, so the
-  // icon and text land on the same rails as their neighbors instead of on the badge's tighter
-  // inline spacing.
-  const pressableStyle = useCallback(
-    ({ pressed }: PressableStateCallbackType) => [
-      prBadgeStyles.badge,
-      style,
-      pressed && prBadgeStyles.badgePressed,
-    ],
-    [style],
-  );
-
-  const textStyle = isHovered
-    ? [prBadgeStyles.text, prBadgeStyles.textHovered]
-    : prBadgeStyles.text;
-  const presentation = getForgePresentation(normalizeForge(hint.forge));
-
-  return (
-    <Pressable
-      accessibilityRole="link"
-      accessibilityLabel={t("workspace.git.pr.accessibility.pullRequest", {
-        number: hint.number,
-        context: presentation.changeRequestContext,
-      })}
-      hitSlop={4}
-      onPressIn={handlePressIn}
-      onPress={handlePress}
-      onHoverIn={handleHoverIn}
-      onHoverOut={handleHoverOut}
-      style={pressableStyle}
-    >
-      {isHovered ? (
-        <ThemedExternalLink size={12} uniProps={foregroundColorMapping} />
-      ) : (
-        <PullRequestStateIcon state={hint.state} size={12} />
-      )}
-      <Text style={textStyle} numberOfLines={1}>
-        {hint.number}
-      </Text>
-    </Pressable>
-  );
-}
-
-function kebabStyle({ hovered = false }: PressableStateCallbackType & { hovered?: boolean }) {
-  return [styles.kebabButton, hovered && styles.kebabButtonHovered];
 }
 
 function getProjectWorkspaceRowStyle({
@@ -310,39 +215,9 @@ function noop() {}
 /** The collapse toggle before the row resolves hover — `visible` is decided inside the row. */
 type WorkspaceCollapseToggle = Omit<SidebarWorkspaceCollapseAccessory, "visible">;
 
-const prBadgeStyles = StyleSheet.create((theme) => ({
-  badge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-  },
-  badgePressed: {
-    opacity: 0.82,
-  },
-  text: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.normal,
-    lineHeight: 14,
-    color: theme.colors.foregroundMuted,
-  },
-  textHovered: {
-    color: theme.colors.foreground,
-  },
-}));
-
-const trash2LeadingIcon = <ThemedTrash2 size={14} uniProps={foregroundMutedColorMapping} />;
-
-function renderKebabTriggerIcon({ hovered }: { hovered?: boolean }) {
-  return (
-    <ThemedMoreVertical
-      size={14}
-      uniProps={hovered ? foregroundColorMapping : foregroundMutedColorMapping}
-    />
-  );
-}
-
 function WorkspaceRowRightGroup({
   workspace,
+  includeProjectActions,
   backdrop,
   isHovered,
   isTouchPlatform,
@@ -355,14 +230,13 @@ function WorkspaceRowRightGroup({
   archiveShortcutKeys,
   onArchive,
   onMarkAsRead,
-  onCopyBranchName,
-  onCopyPath,
   onRename,
   onAddProject,
   isPinned,
   onTogglePin,
 }: {
   workspace: SidebarWorkspaceEntry;
+  includeProjectActions: boolean;
   backdrop: SidebarSurfaceBackdrop;
   isHovered: boolean;
   isTouchPlatform: boolean;
@@ -375,14 +249,11 @@ function WorkspaceRowRightGroup({
   archiveShortcutKeys?: ShortcutKey[][] | null;
   onArchive?: () => void;
   onMarkAsRead?: () => void;
-  onCopyBranchName?: () => void;
-  onCopyPath?: () => void;
   onRename?: () => void;
   onAddProject?: () => void;
   isPinned?: boolean;
   onTogglePin?: () => void;
 }) {
-  const workspacePath = workspace.workspaceDirectory ?? workspace.projectRootPath;
   const { t } = useTranslation();
   const trailing = useSidebarWorkspaceTrailing();
   const showShortcut = showShortcutBadge && shortcutNumber !== null;
@@ -420,11 +291,11 @@ function WorkspaceRowRightGroup({
               <SidebarWorkspaceMenu
                 {...kebab.menuProps}
                 workspaceKey={workspace.workspaceKey}
+                workspace={workspace}
+                includeProjectActions={includeProjectActions}
                 serverId={workspace.serverId}
                 workspaceId={workspace.workspaceId}
                 workspaceLabels={workspace.labels}
-                onCopyPath={onCopyPath}
-                onCopyBranchName={onCopyBranchName}
                 onRename={onRename}
                 onMarkAsRead={onMarkAsRead}
                 onAddProject={onAddProject}
@@ -435,7 +306,6 @@ function WorkspaceRowRightGroup({
                 archiveShortcutKeys={archiveShortcutKeys}
                 isPinned={isPinned}
                 onTogglePin={onTogglePin}
-                openInFileManagerPath={workspacePath}
               />
             ) : null}
           </SidebarWorkspaceTrailingActionOverlay>
@@ -463,8 +333,6 @@ function WorkspaceRowInner({
   archiveStatus = "idle",
   archivePendingLabel,
   onArchive,
-  onCopyBranchName,
-  onCopyPath,
   onRename,
   onAddProject,
   archiveShortcutKeys,
@@ -541,8 +409,6 @@ function WorkspaceRowInner({
               leadingProjectName={leadingProjectName}
               hostBadgeLabel={hostBadge?.label}
               workspaceKey={workspace.workspaceKey}
-              onCopyPath={onCopyPath}
-              onCopyBranchName={onCopyBranchName}
               onRename={onRename}
               onAddProject={onAddProject}
               onArchive={onArchive}
@@ -552,7 +418,6 @@ function WorkspaceRowInner({
               archiveShortcutKeys={archiveShortcutKeys}
               isPinned={isPinned}
               onTogglePin={onTogglePin}
-              openInFileManagerPath={workspace.workspaceDirectory}
               disabled={isArchiving}
               aria-selected={selected}
               accessibilityRole="button"
@@ -584,6 +449,7 @@ function WorkspaceRowInner({
               >
                 <WorkspaceRowRightGroup
                   workspace={workspace}
+                  includeProjectActions={Boolean(leadingProjectName)}
                   backdrop={backdrop}
                   isHovered={isHovered}
                   isTouchPlatform={isTouchPlatform}
@@ -595,8 +461,6 @@ function WorkspaceRowInner({
                   archivePendingLabel={archivePendingLabel}
                   archiveShortcutKeys={archiveShortcutKeys}
                   onArchive={onArchive}
-                  onCopyBranchName={onCopyBranchName}
-                  onCopyPath={onCopyPath}
                   onRename={onRename}
                   onAddProject={onAddProject}
                   isPinned={isPinned}
@@ -623,7 +487,6 @@ function WorkspaceRowWithMenu({
   drag,
   isDragging,
   dragHandleProps,
-  canCopyBranchName,
   canPin,
   canAddProject,
   onToggleWorkspacePin,
@@ -642,7 +505,6 @@ function WorkspaceRowWithMenu({
   drag: () => void;
   isDragging: boolean;
   dragHandleProps?: DraggableListDragHandleProps;
-  canCopyBranchName: boolean;
   canPin: boolean;
   canAddProject: boolean;
   onToggleWorkspacePin: ToggleSidebarWorkspacePin;
@@ -679,33 +541,6 @@ function WorkspaceRowWithMenu({
     }
     archiveController.archive();
   }, [archiveController, isArchiving]);
-
-  const handleCopyPath = useCallback(() => {
-    let copyTargetDirectory: string;
-    try {
-      copyTargetDirectory = requireWorkspaceDirectory({
-        workspaceId: workspace.workspaceId,
-        workspaceDirectory: workspace.workspaceDirectory,
-      });
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : t("sidebar.workspace.toasts.workspacePathUnavailable"),
-      );
-      return;
-    }
-    void Clipboard.setStringAsync(copyTargetDirectory);
-    toast.copied(t("sidebar.workspace.toasts.pathCopied"));
-  }, [t, toast, workspace.workspaceDirectory, workspace.workspaceId]);
-
-  const handleCopyBranchName = useCallback(() => {
-    if (!workspace.currentBranch) {
-      return;
-    }
-    void Clipboard.setStringAsync(workspace.currentBranch);
-    toast.copied(t("sidebar.workspace.toasts.branchNameCopied"));
-  }, [t, toast, workspace.currentBranch]);
 
   const renameMutation = useMutation({
     mutationFn: async (title: string) => {
@@ -788,8 +623,6 @@ function WorkspaceRowWithMenu({
         archiveStatus={isArchiving ? "pending" : "idle"}
         archivePendingLabel={t("sidebar.workspace.actions.archiving")}
         onArchive={handleArchive}
-        onCopyBranchName={canCopyBranchName ? handleCopyBranchName : undefined}
-        onCopyPath={handleCopyPath}
         onRename={handleOpenRename}
         onMarkAsRead={hasClearableAttention ? handleMarkAsRead : undefined}
         onAddProject={onAddProject}
@@ -821,7 +654,6 @@ interface WorkspaceRowItemProps {
   leadingProjectIconDataUri?: string | null;
   shortcutNumber: number | null;
   showShortcutBadge: boolean;
-  canCopyBranchName: boolean;
   canPin: boolean;
   canAddProject: boolean;
   onToggleWorkspacePin: ToggleSidebarWorkspacePin;
@@ -843,7 +675,6 @@ function WorkspaceRowItem({
   leadingProjectIconDataUri,
   shortcutNumber,
   showShortcutBadge,
-  canCopyBranchName,
   canPin,
   canAddProject,
   onToggleWorkspacePin,
@@ -872,7 +703,6 @@ function WorkspaceRowItem({
       leadingProjectIconDataUri={leadingProjectIconDataUri}
       shortcutNumber={shortcutNumber}
       showShortcutBadge={showShortcutBadge}
-      canCopyBranchName={canCopyBranchName}
       canPin={canPin}
       canAddProject={canAddProject}
       onToggleWorkspacePin={onToggleWorkspacePin}
@@ -916,7 +746,6 @@ function areWorkspaceRowItemPropsEqual(
     previous.leadingProjectIconDataUri === next.leadingProjectIconDataUri &&
     previous.shortcutNumber === next.shortcutNumber &&
     previous.showShortcutBadge === next.showShortcutBadge &&
-    previous.canCopyBranchName === next.canCopyBranchName &&
     previous.canPin === next.canPin &&
     previous.canAddProject === next.canAddProject &&
     previous.onToggleWorkspacePin === next.onToggleWorkspacePin &&
@@ -943,7 +772,6 @@ function WorkspaceRow({
   drag,
   isDragging,
   dragHandleProps,
-  canCopyBranchName,
   canPin,
   canAddProject,
   onToggleWorkspacePin,
@@ -961,7 +789,6 @@ function WorkspaceRow({
   drag: () => void;
   isDragging: boolean;
   dragHandleProps?: DraggableListDragHandleProps;
-  canCopyBranchName: boolean;
   canPin: boolean;
   canAddProject: boolean;
   onToggleWorkspacePin: ToggleSidebarWorkspacePin;
@@ -986,7 +813,6 @@ function WorkspaceRow({
       drag={drag}
       isDragging={isDragging}
       dragHandleProps={dragHandleProps}
-      canCopyBranchName={canCopyBranchName}
       canPin={canPin}
       canAddProject={canAddProject}
       onToggleWorkspacePin={onToggleWorkspacePin}
@@ -996,58 +822,39 @@ function WorkspaceRow({
   );
 }
 
-function WorkspaceMemberKebabMenu({
-  memberKey,
-  onRemove,
-}: {
-  memberKey: string;
-  onRemove: () => void;
-}) {
-  return (
-    <DropdownMenu compactMode="sheet">
-      <DropdownMenuTrigger
-        hitSlop={8}
-        style={kebabStyle}
-        accessibilityRole={platformIsWeb ? undefined : "button"}
-        accessibilityLabel="Project actions"
-        testID={`sidebar-member-kebab-${memberKey}`}
-      >
-        {renderKebabTriggerIcon}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" width={220} sheetTitle="Project actions">
-        <DropdownMenuItem
-          testID={`sidebar-member-menu-remove-${memberKey}`}
-          leading={trash2LeadingIcon}
-          onSelect={onRemove}
-        >
-          Remove from workspace
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 function WorkspaceMemberRow({
   member,
+  serverId,
   iconDataUri,
   canRemove,
   onRemove,
   onPress,
+  onCopyPath,
+  onCopyBranchName,
 }: {
   member: SidebarWorkspaceMemberRow;
+  serverId: string;
   iconDataUri: string | null;
   canRemove: boolean;
   onRemove: () => void;
   onPress: () => void;
+  onCopyPath: () => void;
+  onCopyBranchName: () => void;
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [isKebabFocused, setIsKebabFocused] = useState(false);
   const isCompact = useIsCompactFormFactor();
-  const actionsVisible = isHovered || platformIsNative || isCompact;
+  const actionsVisible = isHovered || isFocused || isKebabFocused || platformIsNative || isCompact;
   const handlePointerEnter = useCallback(() => setIsHovered(true), []);
   const handlePointerLeave = useCallback(() => setIsHovered(false), []);
   const handlePressIn = useCallback(() => setIsPressed(true), []);
   const handlePressOut = useCallback(() => setIsPressed(false), []);
+  const handleFocus = useCallback(() => setIsFocused(true), []);
+  const handleBlur = useCallback(() => setIsFocused(false), []);
+  const handleKebabFocus = useCallback(() => setIsKebabFocused(true), []);
+  const handleKebabBlur = useCallback(() => setIsKebabFocused(false), []);
   const backdrop = getSidebarRowBackdrop({
     isDragging: false,
     isPressed,
@@ -1062,35 +869,62 @@ function WorkspaceMemberRow({
 
   return (
     <View onPointerEnter={handlePointerEnter} onPointerLeave={handlePointerLeave}>
-      <Pressable
-        accessibilityRole={platformIsWeb ? undefined : "button"}
-        accessibilityLabel={member.projectName}
-        onPress={onPress}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        style={rowStyle}
-        testID={`sidebar-member-row-${member.memberKey}`}
-      >
-        <ProjectStatusIndicator
-          iconDataUri={iconDataUri}
-          displayName={member.projectName}
-          projectViewKey={member.memberKey}
-          statusBucket={null}
-          backdrop={backdrop}
-          testID={`sidebar-member-icon-${member.memberKey}`}
-        />
-        <Text style={styles.memberName} numberOfLines={1}>
-          {member.projectName}
-        </Text>
-        {canRemove ? (
+      <ContextMenu>
+        <ContextMenuTrigger
+          accessibilityRole={platformIsWeb ? undefined : "button"}
+          accessibilityLabel={member.projectName}
+          onPress={onPress}
+          onPressIn={handlePressIn}
+          onPressOut={handlePressOut}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          style={rowStyle}
+          highlightStyle={styles.workspaceRowPressed}
+          testID={`sidebar-member-row-${member.memberKey}`}
+        >
+          <ProjectStatusIndicator
+            iconDataUri={iconDataUri}
+            displayName={member.projectName}
+            projectViewKey={member.memberKey}
+            statusBucket={null}
+            backdrop={backdrop}
+            testID={`sidebar-member-icon-${member.memberKey}`}
+          />
+          <Text style={styles.memberName} numberOfLines={1}>
+            {member.projectName}
+          </Text>
           <View
             style={!actionsVisible && styles.kebabButtonHidden}
             pointerEvents={actionsVisible ? "auto" : "none"}
           >
-            <WorkspaceMemberKebabMenu memberKey={member.memberKey} onRemove={onRemove} />
+            <WorkspaceMemberKebabMenu
+              member={member}
+              serverId={serverId}
+              onFocus={handleKebabFocus}
+              onBlur={handleKebabBlur}
+              canRemove={canRemove}
+              onCopyPath={onCopyPath}
+              onCopyBranchName={onCopyBranchName}
+              onRemove={onRemove}
+            />
           </View>
-        ) : null}
-      </Pressable>
+        </ContextMenuTrigger>
+        <ContextMenuContent
+          align="start"
+          width={220}
+          testID={`sidebar-member-context-menu-${member.memberKey}`}
+        >
+          <WorkspaceMemberMenuItems
+            member={member}
+            serverId={serverId}
+            surface="context"
+            canRemove={canRemove}
+            onCopyPath={onCopyPath}
+            onCopyBranchName={onCopyBranchName}
+            onRemove={onRemove}
+          />
+        </ContextMenuContent>
+      </ContextMenu>
     </View>
   );
 }
@@ -1100,6 +934,7 @@ function WorkspaceMemberBlock({
   iconDataUri,
   serverId,
   workspaceId,
+  prHint,
   canRemove,
   onWorkspacePress,
 }: {
@@ -1107,18 +942,46 @@ function WorkspaceMemberBlock({
   iconDataUri: string | null;
   serverId: string;
   workspaceId: string;
+  prHint: PrHint | null;
   canRemove: boolean;
   onWorkspacePress?: () => void;
 }) {
+  const { t } = useTranslation();
+  const toast = useToast();
   const removeWorkspaceMember = useRemoveWorkspaceMember();
+
+  const handleCopyPath = useCallback(() => {
+    void Clipboard.setStringAsync(member.workspaceDirectory);
+    toast.copied(t("sidebar.workspace.toasts.pathCopied"));
+  }, [member.workspaceDirectory, t, toast]);
+
+  const handleCopyBranchName = useCallback(() => {
+    if (!member.branch) {
+      return;
+    }
+    void Clipboard.setStringAsync(member.branch);
+    toast.copied(t("sidebar.workspace.toasts.branchNameCopied"));
+  }, [member.branch, t, toast]);
+
   const handleRemove = useCallback(() => {
+    if (!canRemove) {
+      return;
+    }
     void removeWorkspaceMember({
       client: getHostRuntimeStore().getClient(serverId),
       workspaceId,
       cwd: member.workspaceDirectory,
       projectName: member.projectName,
     });
-  }, [removeWorkspaceMember, serverId, workspaceId, member.workspaceDirectory, member.projectName]);
+  }, [
+    canRemove,
+    member.projectName,
+    member.workspaceDirectory,
+    removeWorkspaceMember,
+    serverId,
+    workspaceId,
+  ]);
+
   const handlePress = useCallback(() => {
     onWorkspacePress?.();
     navigateToWorkspace({ serverId, workspaceId });
@@ -1128,17 +991,21 @@ function WorkspaceMemberBlock({
     <>
       <WorkspaceMemberRow
         member={member}
+        serverId={serverId}
         iconDataUri={iconDataUri}
         canRemove={canRemove}
         onRemove={handleRemove}
         onPress={handlePress}
+        onCopyPath={handleCopyPath}
+        onCopyBranchName={handleCopyBranchName}
       />
       {member.agents.map((agent) => (
         <WorkspaceAgentRow
           key={agent.agentId}
           agent={agent}
-          branch={member.branch}
-          diffStat={member.diffStat ?? null}
+          branch={agent.matchesMemberDirectory ? member.branch : null}
+          diffStat={agent.matchesMemberDirectory ? (member.diffStat ?? null) : null}
+          prHint={agent.matchesMemberDirectory ? prHint : null}
           serverId={serverId}
           workspaceId={workspaceId}
           onWorkspacePress={onWorkspacePress}
@@ -1161,7 +1028,6 @@ function WorkspaceSectionBlock({
   hostBadge,
   shortcutNumber,
   showShortcutBadge,
-  canCopyBranchName,
   canPin,
   canAddProject,
   onToggleWorkspacePin,
@@ -1182,7 +1048,6 @@ function WorkspaceSectionBlock({
   hostBadge?: HostBadgeModel | null;
   shortcutNumber: number | null;
   showShortcutBadge: boolean;
-  canCopyBranchName: boolean;
   canPin: boolean;
   canAddProject: boolean;
   onToggleWorkspacePin: ToggleSidebarWorkspacePin;
@@ -1212,7 +1077,6 @@ function WorkspaceSectionBlock({
         hostBadge={hostBadge}
         shortcutNumber={shortcutNumber}
         showShortcutBadge={showShortcutBadge}
-        canCopyBranchName={canCopyBranchName}
         canPin={canPin}
         canAddProject={canAddProject}
         onToggleWorkspacePin={onToggleWorkspacePin}
@@ -1232,6 +1096,7 @@ function WorkspaceSectionBlock({
               iconDataUri={memberIconByMemberKey.get(member.memberKey) ?? null}
               serverId={placement.serverId}
               workspaceId={placement.workspaceId}
+              prHint={member.isPrimary ? (workspaceEntry?.prHint ?? null) : null}
               canRemove={canRemoveMembers}
               onWorkspacePress={onWorkspacePress}
             />
@@ -1268,7 +1133,6 @@ function areWorkspaceSectionBlockPropsEqual(
     previous.hostBadge === next.hostBadge &&
     previous.shortcutNumber === next.shortcutNumber &&
     previous.showShortcutBadge === next.showShortcutBadge &&
-    previous.canCopyBranchName === next.canCopyBranchName &&
     previous.canPin === next.canPin &&
     previous.canAddProject === next.canAddProject &&
     previous.onToggleWorkspacePin === next.onToggleWorkspacePin &&
@@ -1632,7 +1496,6 @@ function WorkspaceSectionList({
           hostBadge={hostBadgeByServerId.get(item.serverId) ?? null}
           shortcutNumber={shortcutIndexByWorkspaceKey.get(item.workspaceKey) ?? null}
           showShortcutBadge={showShortcutBadges}
-          canCopyBranchName={item.projectKind === "git"}
           canPin={supportsPinningByServerId.get(item.serverId) === true}
           canAddProject={supportsMultiProjectByServerId.get(item.serverId) === true}
           onToggleWorkspacePin={onToggleWorkspacePin}
@@ -1681,7 +1544,6 @@ function WorkspaceSectionList({
           }
           shortcutNumber={shortcutIndexByWorkspaceKey.get(workspace.workspaceKey) ?? null}
           showShortcutBadge={showShortcutBadges}
-          canCopyBranchName={workspace.projectKind === "git"}
           canPin={supportsPinningByServerId.get(workspace.serverId) === true}
           canAddProject={supportsMultiProjectByServerId.get(workspace.serverId) === true}
           onToggleWorkspacePin={onToggleWorkspacePin}
@@ -1844,6 +1706,7 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.base,
     fontWeight: "400",
     minWidth: 0,
+    flex: 1,
     flexShrink: 1,
   },
   workspaceRow: {
@@ -1884,18 +1747,7 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
     flexShrink: 0,
   },
-  kebabButton: {
-    width: 24,
-    height: 24,
-    borderRadius: theme.borderRadius.md,
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
   kebabButtonHidden: {
     opacity: 0,
-  },
-  kebabButtonHovered: {
-    backgroundColor: theme.colors.surface2,
   },
 }));

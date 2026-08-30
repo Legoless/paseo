@@ -413,6 +413,8 @@ export const ru: TranslationResources = {
     },
     hoverCard: {
       scriptsAccessibility: "Скрипты рабочего пространства",
+      openTabs: "Открытые вкладки: {{count}}",
+      projects: "Проекты: {{count}}",
       copyPath: "Копировать путь",
       copyBranchName: "Копировать имя ветки",
       copied: "Скопировано",
@@ -1135,6 +1137,7 @@ export const ru: TranslationResources = {
         openFolder: "Открыть в файловом менеджере",
         openFolderFailed: "Не удалось открыть папку",
         remove: "Удалить проект",
+        removeFromWorkspace: "Удалить из рабочего пространства",
         removing: "Удаление...",
       },
       confirmations: {
@@ -1204,6 +1207,17 @@ export const ru: TranslationResources = {
         hostDisconnected: "Хост не подключён",
         hideFailed: "Не удалось скрыть рабочее пространство",
         archiveFailed: "Не удалось архивировать рабочее пространство",
+      },
+    },
+    agent: {
+      actions: {
+        menu: "Действия агента",
+        open: "Открыть агента",
+        archive: "Архивировать агента",
+      },
+      confirmations: {
+        archiveTitle: "Архивировать агента?",
+        archiveMessage: "Этот агент будет архивирован.",
       },
     },
   },

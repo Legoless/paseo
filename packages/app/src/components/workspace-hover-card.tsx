@@ -19,6 +19,7 @@ import {
   FileDiff,
   Folder,
   GitBranch,
+  PanelsTopLeft,
   Server,
 } from "lucide-react-native";
 import { getForgePresentation, normalizeForge } from "@/git/forge";
@@ -29,11 +30,10 @@ import { Pressable } from "react-native";
 import type { GestureResponderEvent } from "react-native";
 import { Portal } from "@gorhom/portal";
 import { useBottomSheetModalInternal } from "@gorhom/bottom-sheet";
-import type { SidebarWorkspaceEntry } from "@/hooks/use-sidebar-workspaces-list";
 import type { PrHint } from "@/git/use-pr-status-query";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { copyToClipboard } from "@/utils/copy-to-clipboard";
-import { PrBadge } from "@/components/sidebar-workspace-list";
+import { PrBadge } from "@/components/sidebar/pr-badge";
 import { useHoverSafeZone } from "@/hooks/use-hover-safe-zone";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { FloatingSurface } from "@/components/ui/floating";
@@ -47,6 +47,12 @@ import {
 import { formatCheckPresentationCountsLabel } from "@/git/check-presentation-copy";
 import { CheckPresentationIcon, getCheckPresentationTone } from "@/git/check-presentation.view";
 import { buildForgeChecksUrl } from "@/git/forge-url";
+import type { SidebarWorkspaceEntry } from "@/hooks/use-sidebar-workspaces-list";
+import {
+  collectAllPanes,
+  collectAllTabs,
+  useWorkspaceLayoutStore,
+} from "@/stores/workspace-layout-store";
 
 interface Rect {
   x: number;
@@ -98,18 +104,93 @@ const HOVER_CARD_WIDTH = 260;
 
 interface WorkspaceHoverCardProps {
   workspace: SidebarWorkspaceEntry;
-  prHint: PrHint | null;
   isDragging: boolean;
   disabled?: boolean;
 }
 
+interface AgentHoverCardProps {
+  title: string;
+  serverId: string;
+  branch: string | null;
+  diffStat: { additions: number; deletions: number } | null;
+  workspaceDirectory: string;
+  workspaceDirectoryLabel: string;
+  prHint: PrHint | null;
+  disabled?: boolean;
+}
+
+type HoverCardDetails =
+  | {
+      kind: "workspace";
+      title: string;
+      workspaceKey: string;
+      projectCount: number;
+    }
+  | ({ kind: "agent" } & Omit<AgentHoverCardProps, "disabled">);
+
 export function WorkspaceHoverCard({
   workspace,
-  prHint,
   isDragging,
   disabled = false,
   children,
 }: PropsWithChildren<WorkspaceHoverCardProps>): ReactNode {
+  const details = useMemo<Extract<HoverCardDetails, { kind: "workspace" }>>(
+    () => ({
+      kind: "workspace",
+      title: workspace.name,
+      workspaceKey: workspace.workspaceKey,
+      projectCount: workspace.projectCount,
+    }),
+    [workspace.name, workspace.projectCount, workspace.workspaceKey],
+  );
+  return (
+    <HoverCard details={details} isDragging={isDragging} disabled={disabled}>
+      {children}
+    </HoverCard>
+  );
+}
+
+export function AgentHoverCard({
+  title,
+  serverId,
+  branch,
+  diffStat,
+  workspaceDirectory,
+  workspaceDirectoryLabel,
+  prHint,
+  disabled = false,
+  children,
+}: PropsWithChildren<AgentHoverCardProps>): ReactNode {
+  const details = useMemo<Extract<HoverCardDetails, { kind: "agent" }>>(
+    () => ({
+      kind: "agent",
+      title,
+      serverId,
+      branch,
+      diffStat,
+      workspaceDirectory,
+      workspaceDirectoryLabel,
+      prHint,
+    }),
+    [branch, diffStat, prHint, serverId, title, workspaceDirectory, workspaceDirectoryLabel],
+  );
+  return (
+    <HoverCard details={details} disabled={disabled}>
+      {children}
+    </HoverCard>
+  );
+}
+
+function HoverCard({
+  details,
+  isDragging = false,
+  disabled = false,
+  children,
+}: PropsWithChildren<{
+  details: HoverCardDetails;
+  isDragging?: boolean;
+  disabled?: boolean;
+}>): ReactNode {
   const isCompact = useIsCompactFormFactor();
 
   if (!isWeb || isCompact) {
@@ -117,29 +198,26 @@ export function WorkspaceHoverCard({
   }
 
   return (
-    <WorkspaceHoverCardDesktop
-      workspace={workspace}
-      prHint={prHint}
-      isDragging={isDragging}
-      disabled={disabled}
-    >
+    <HoverCardDesktop details={details} isDragging={isDragging} disabled={disabled}>
       {children}
-    </WorkspaceHoverCardDesktop>
+    </HoverCardDesktop>
   );
 }
 
-function WorkspaceHoverCardDesktop({
-  workspace,
-  prHint,
+function HoverCardDesktop({
+  details,
   isDragging,
-  disabled = false,
+  disabled,
   children,
-}: PropsWithChildren<WorkspaceHoverCardProps>): ReactElement {
+}: PropsWithChildren<{
+  details: HoverCardDetails;
+  isDragging: boolean;
+  disabled: boolean;
+}>): ReactElement {
   const triggerRef = useRef<View>(null);
   const contentRef = useRef<View>(null);
   const [open, setOpen] = useState(false);
   const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const triggerHoveredRef = useRef(false);
 
   const clearGraceTimer = useCallback(() => {
     if (graceTimerRef.current) {
@@ -157,7 +235,6 @@ function WorkspaceHoverCardDesktop({
   }, []);
 
   const handleTriggerEnter = useCallback(() => {
-    triggerHoveredRef.current = true;
     clearGraceTimer();
     if (!isDragging && !disabled) {
       setOpen(true);
@@ -165,13 +242,9 @@ function WorkspaceHoverCardDesktop({
   }, [clearGraceTimer, disabled, isDragging]);
 
   const handleTriggerLeave = useCallback(() => {
-    triggerHoveredRef.current = false;
     scheduleClose();
   }, [scheduleClose]);
 
-  // While open, the safe zone covers trigger + content + the bridge between
-  // them. Close only fires when the pointer leaves the safe zone; re-entering
-  // it (including the bridge) cancels the pending close.
   useHoverSafeZone({
     enabled: open,
     triggerRef,
@@ -180,7 +253,6 @@ function WorkspaceHoverCardDesktop({
     onLeaveSafeZone: scheduleClose,
   });
 
-  // Close while another row interaction owns attention.
   useEffect(() => {
     if (isDragging || disabled) {
       clearGraceTimer();
@@ -188,7 +260,6 @@ function WorkspaceHoverCardDesktop({
     }
   }, [clearGraceTimer, disabled, isDragging]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       clearGraceTimer();
@@ -204,29 +275,21 @@ function WorkspaceHoverCardDesktop({
     >
       {children}
       {open ? (
-        <WorkspaceHoverCardContent
-          workspace={workspace}
-          prHint={prHint}
-          triggerRef={triggerRef}
-          contentRef={contentRef}
-        />
+        <HoverCardContent details={details} triggerRef={triggerRef} contentRef={contentRef} />
       ) : null}
     </View>
   );
 }
 
-function WorkspaceHoverCardContent({
-  workspace,
-  prHint,
+function HoverCardContent({
+  details,
   triggerRef,
   contentRef,
 }: {
-  workspace: SidebarWorkspaceEntry;
-  prHint: PrHint | null;
+  details: HoverCardDetails;
   triggerRef: React.RefObject<View | null>;
   contentRef: React.RefObject<View | null>;
 }): ReactElement | null {
-  const { t } = useTranslation();
   const bottomSheetInternal = useBottomSheetModalInternal(true);
   const [triggerRect, setTriggerRect] = useState<Rect | null>(null);
   const [contentSize, setContentSize] = useState<{ width: number; height: number } | null>(null);
@@ -289,63 +352,113 @@ function WorkspaceHoverCardContent({
           collapsable={false}
           onLayout={handleLayout}
           accessibilityRole="menu"
-          accessibilityLabel={t("workspace.hoverCard.scriptsAccessibility")}
-          testID="workspace-hover-card"
+          accessibilityLabel={details.title}
+          testID={details.kind === "workspace" ? "workspace-hover-card" : "agent-hover-card"}
           style={styles.card}
           frameStyle={frameStyle}
         >
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle} testID="hover-card-workspace-name">
-              {workspace.name}
-            </Text>
-          </View>
-          {prHint ? <PrBadge hint={prHint} style={styles.cardInfoRow} /> : null}
-          {workspace.diffStat ? (
-            <View style={styles.cardInfoRow}>
-              <ThemedFileDiff size={12} uniProps={foregroundMutedColorMapping} />
-              <DiffStat
-                additions={workspace.diffStat.additions}
-                deletions={workspace.diffStat.deletions}
-              />
-            </View>
-          ) : null}
-          <HostRow serverId={workspace.serverId} />
-          {workspace.currentBranch ? (
-            <CopyableInfoRow
-              icon={ThemedGitBranch}
-              value={workspace.currentBranch}
-              copyValue={workspace.currentBranch}
-              copyLabel={t("workspace.hoverCard.copyBranchName")}
-              testID="hover-card-workspace-branch"
-            />
-          ) : null}
-          {workspace.workspaceDirectoryLabel ? (
-            <CopyableInfoRow
-              icon={ThemedFolder}
-              value={workspace.workspaceDirectoryLabel}
-              copyValue={workspace.workspaceDirectory}
-              copyLabel={t("workspace.hoverCard.copyPath")}
-              testID="hover-card-workspace-cwd"
-            />
-          ) : null}
-          {prHint?.checks && prHint.checks.length > 0 ? (
-            <>
-              <View style={styles.separator} />
-              <ChecksSummaryPressable
-                checks={prHint.checks}
-                url={prHint.url}
-                forge={prHint.forge}
-              />
-            </>
-          ) : null}
+          {details.kind === "workspace" ? (
+            <WorkspaceHoverCardBody details={details} />
+          ) : (
+            <AgentHoverCardBody details={details} />
+          )}
         </FloatingSurface>
       </View>
     </Portal>
   );
 }
 
+function WorkspaceHoverCardBody({
+  details,
+}: {
+  details: Extract<HoverCardDetails, { kind: "workspace" }>;
+}) {
+  const { t } = useTranslation();
+  const openTabCount = useWorkspaceLayoutStore((state) => {
+    const layout = state.layoutByWorkspace[details.workspaceKey];
+    if (!layout) return 0;
+    const visibleTabIds = new Set(collectAllPanes(layout.root).flatMap((pane) => pane.tabIds));
+    return collectAllTabs(layout.root).filter(
+      (tab) => visibleTabIds.has(tab.tabId) && tab.target.kind === "agent",
+    ).length;
+  });
+  return (
+    <>
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardTitle} testID="hover-card-workspace-name">
+          {details.title}
+        </Text>
+      </View>
+      <InfoRow
+        icon={ThemedPanelsTopLeft}
+        value={t("workspace.hoverCard.openTabs", { count: openTabCount })}
+        testID="hover-card-workspace-tabs"
+      />
+      <InfoRow
+        icon={ThemedFolder}
+        value={t("workspace.hoverCard.projects", { count: details.projectCount })}
+        testID="hover-card-workspace-projects"
+      />
+    </>
+  );
+}
+
+function AgentHoverCardBody({
+  details,
+}: {
+  details: Extract<HoverCardDetails, { kind: "agent" }>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardTitle} testID="hover-card-agent-name">
+          {details.title}
+        </Text>
+      </View>
+      {details.prHint ? <PrBadge hint={details.prHint} style={styles.cardInfoRow} /> : null}
+      {details.diffStat ? (
+        <View style={styles.cardInfoRow}>
+          <ThemedFileDiff size={12} uniProps={foregroundMutedColorMapping} />
+          <DiffStat additions={details.diffStat.additions} deletions={details.diffStat.deletions} />
+        </View>
+      ) : null}
+      <HostRow serverId={details.serverId} />
+      {details.branch ? (
+        <CopyableInfoRow
+          icon={ThemedGitBranch}
+          value={details.branch}
+          copyValue={details.branch}
+          copyLabel={t("workspace.hoverCard.copyBranchName")}
+          testID="hover-card-agent-branch"
+        />
+      ) : null}
+      {details.workspaceDirectory ? (
+        <CopyableInfoRow
+          icon={ThemedFolder}
+          value={details.workspaceDirectoryLabel}
+          copyValue={details.workspaceDirectory}
+          copyLabel={t("workspace.hoverCard.copyPath")}
+          testID="hover-card-agent-cwd"
+        />
+      ) : null}
+      {details.prHint?.checks && details.prHint.checks.length > 0 ? (
+        <>
+          <View style={styles.separator} />
+          <ChecksSummaryPressable
+            checks={details.prHint.checks}
+            url={details.prHint.url}
+            forge={details.prHint.forge}
+          />
+        </>
+      ) : null}
+    </>
+  );
+}
+
 const ThemedGitBranch = withUnistyles(GitBranch);
 const ThemedFolder = withUnistyles(Folder);
+const ThemedPanelsTopLeft = withUnistyles(PanelsTopLeft);
 const ThemedServer = withUnistyles(Server);
 const ThemedFileDiff = withUnistyles(FileDiff);
 
@@ -356,7 +469,7 @@ function HostRow({ serverId }: { serverId: string }): ReactElement | null {
   const host = hosts.find((h) => h.serverId === serverId);
   const label = host?.label?.trim() || serverId;
 
-  return <InfoRow icon={ThemedServer} value={label} testID="hover-card-workspace-host" />;
+  return <InfoRow icon={ThemedServer} value={label} testID="hover-card-agent-host" />;
 }
 
 const ThemedExternalLink = withUnistyles(ExternalLink);

@@ -14,6 +14,7 @@ function workspace(overrides: Partial<SidebarWorkspaceEntry> = {}): SidebarWorks
     name: "ws-1",
     workspaceDirectory: "/repo/ws-1",
     workspaceDirectoryLabel: "ws-1",
+    projectCount: 1,
     title: null,
     currentBranch: null,
     statusBucket: "done",

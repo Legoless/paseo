@@ -414,6 +414,8 @@ export const es: TranslationResources = {
     },
     hoverCard: {
       scriptsAccessibility: "GuionesWorkspace",
+      openTabs: "Pestañas abiertas: {{count}}",
+      projects: "Proyectos: {{count}}",
       copyPath: "Copiar ruta",
       copyBranchName: "Copiar nombre de rama",
       copied: "Copiado",
@@ -1153,6 +1155,7 @@ export const es: TranslationResources = {
         openFolder: "Open in file manager",
         openFolderFailed: "Couldn't open folder",
         remove: "Eliminar proyecto",
+        removeFromWorkspace: "Quitar del espacio de trabajo",
         removing: "Eliminando...",
       },
       confirmations: {
@@ -1222,6 +1225,17 @@ export const es: TranslationResources = {
         hostDisconnected: "Hostno está conectado",
         hideFailed: "No se pudo ocultar el espacio de trabajo",
         archiveFailed: "No se pudo archivar el espacio de trabajo",
+      },
+    },
+    agent: {
+      actions: {
+        menu: "Acciones del agente",
+        open: "Abrir agente",
+        archive: "Archivar agente",
+      },
+      confirmations: {
+        archiveTitle: "¿Archivar agente?",
+        archiveMessage: "Este agente será archivado.",
       },
     },
   },

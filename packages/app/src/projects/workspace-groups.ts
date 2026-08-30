@@ -2,10 +2,14 @@ import type { Agent, ProjectDescriptor, WorkspaceDescriptor } from "@/stores/ses
 import { createProjectIconTarget, type ProjectIconTarget } from "@/projects/icon-target";
 import { deriveSidebarStateBucket, type SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { normalizeWorkspaceOpaqueId, normalizeWorkspacePath } from "@/utils/workspace-identity";
+import { shortenPath } from "@/utils/shorten-path";
 
 export interface SidebarWorkspaceAgentRow {
   agentId: string;
   title: string;
+  cwd: string;
+  cwdLabel: string;
+  matchesMemberDirectory: boolean;
   statusBucket: SidebarStateBucket;
   lastActivityAt: Date;
 }
@@ -16,6 +20,7 @@ export interface SidebarWorkspaceMemberRow {
   projectId: string;
   projectName: string;
   workspaceDirectory: string;
+  workspaceDirectoryLabel: string;
   branch: string | null;
   /** Live diff for the member's directory; null when the daemon has no snapshot for it. */
   diffStat: { additions: number; deletions: number } | null;
@@ -101,6 +106,7 @@ function buildWorkspaceSection(input: {
       projectId: member.projectId,
       projectName: member.projectCustomName ?? member.projectDisplayName,
       workspaceDirectory: member.workspaceDirectory,
+      workspaceDirectoryLabel: member.worktreeSlug ?? shortenPath(member.workspaceDirectory),
       branch: member.branch,
       diffStat: member.diffStat ?? null,
       isPrimary: index === 0,
@@ -108,21 +114,28 @@ function buildWorkspaceSection(input: {
     };
   });
 
-  const bucketByDirectory = new Map<string, SidebarWorkspaceAgentRow[]>();
+  const memberByDirectory = new Map<string, SidebarWorkspaceMemberRow>();
   for (const member of members) {
     const directory = normalizeWorkspacePath(member.workspaceDirectory);
-    if (directory && !bucketByDirectory.has(directory)) {
-      bucketByDirectory.set(directory, member.agents);
+    if (directory && !memberByDirectory.has(directory)) {
+      memberByDirectory.set(directory, member);
     }
   }
-  const primaryBucket = members[0]?.agents ?? null;
+  const primaryMember = members[0] ?? null;
 
   for (const agent of input.agents.values()) {
     if (agent.archivedAt) continue;
     if (normalizeWorkspaceOpaqueId(agent.workspaceId) !== workspaceId) continue;
     const directory = normalizeWorkspacePath(agent.cwd);
-    const bucket = (directory ? bucketByDirectory.get(directory) : undefined) ?? primaryBucket;
-    bucket?.push(createAgentRow(agent));
+    const matchedMember = directory ? memberByDirectory.get(directory) : undefined;
+    const member = matchedMember ?? primaryMember;
+    member?.agents.push(
+      createAgentRow(
+        agent,
+        matchedMember?.workspaceDirectoryLabel ?? shortenPath(agent.cwd),
+        Boolean(matchedMember),
+      ),
+    );
   }
 
   for (const member of members) {
@@ -136,10 +149,17 @@ function buildWorkspaceSection(input: {
   };
 }
 
-function createAgentRow(agent: Agent): SidebarWorkspaceAgentRow {
+function createAgentRow(
+  agent: Agent,
+  cwdLabel: string,
+  matchesMemberDirectory: boolean,
+): SidebarWorkspaceAgentRow {
   return {
     agentId: agent.id,
     title: agent.title?.trim() || "Untitled agent",
+    cwd: agent.cwd,
+    cwdLabel,
+    matchesMemberDirectory,
     statusBucket: deriveSidebarStateBucket({
       status: agent.status,
       pendingPermissionCount: agent.pendingPermissions.length,
@@ -224,6 +244,7 @@ function areMembersEqual(
     left.projectId !== right.projectId ||
     left.projectName !== right.projectName ||
     left.workspaceDirectory !== right.workspaceDirectory ||
+    left.workspaceDirectoryLabel !== right.workspaceDirectoryLabel ||
     left.branch !== right.branch ||
     left.isPrimary !== right.isPrimary ||
     left.agents.length !== right.agents.length
@@ -242,6 +263,9 @@ function areMembersEqual(
       Boolean(rightAgent) &&
       leftAgent.agentId === rightAgent.agentId &&
       leftAgent.title === rightAgent.title &&
+      leftAgent.cwd === rightAgent.cwd &&
+      leftAgent.cwdLabel === rightAgent.cwdLabel &&
+      leftAgent.matchesMemberDirectory === rightAgent.matchesMemberDirectory &&
       leftAgent.statusBucket === rightAgent.statusBucket &&
       leftAgent.lastActivityAt.getTime() === rightAgent.lastActivityAt.getTime()
     );

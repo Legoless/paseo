@@ -411,6 +411,8 @@ export const ko: TranslationResources = {
     },
     hoverCard: {
       scriptsAccessibility: "워크스페이스 스크립트",
+      openTabs: "열린 탭: {{count}}",
+      projects: "프로젝트: {{count}}",
       copyPath: "경로 복사",
       copyBranchName: "브랜치 이름 복사",
       copied: "복사됨",
@@ -1126,6 +1128,7 @@ export const ko: TranslationResources = {
         openFolder: "파일 관리자에서 열기",
         openFolderFailed: "폴더를 열 수 없습니다.",
         remove: "프로젝트 제거",
+        removeFromWorkspace: "워크스페이스에서 제거",
         removing: "제거하는 중...",
       },
       confirmations: {
@@ -1195,6 +1198,17 @@ export const ko: TranslationResources = {
         hostDisconnected: "호스트가 연결되어 있지 않습니다",
         hideFailed: "워크스페이스를 숨기지 못했습니다",
         archiveFailed: "워크스페이스를 보관하지 못했습니다.",
+      },
+    },
+    agent: {
+      actions: {
+        menu: "에이전트 작업",
+        open: "에이전트 열기",
+        archive: "에이전트 보관",
+      },
+      confirmations: {
+        archiveTitle: "에이전트를 보관할까요?",
+        archiveMessage: "이 에이전트가 보관됩니다.",
       },
     },
   },
