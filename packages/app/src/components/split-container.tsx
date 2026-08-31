@@ -27,7 +27,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { View, Text, type LayoutChangeEvent } from "react-native";
-import { GitBranch, PanelRight } from "lucide-react-native";
+import { Ellipsis, GitBranch, PanelRight } from "lucide-react-native";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -36,7 +36,7 @@ import Animated, {
 import { useTranslation } from "react-i18next";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { ResizeHandle } from "@/components/resize-handle";
-import { ToolbarButton } from "@/components/ui/pane-content-toolbar";
+import { PaneContentToolbar, ToolbarButton } from "@/components/ui/pane-content-toolbar";
 import { WorkspaceActions } from "@/git/workspace-actions";
 import { WorkspaceOpenInEditorButton } from "@/workspace/open-in-editor/button";
 import {
@@ -166,18 +166,22 @@ const DEV_BUILD_LABEL = process.env.EXPO_PUBLIC_PASEO_DEV_BUILD_LABEL?.trim() ||
 function PaneProjectTray({
   serverId,
   cwd,
+  commandsOpen,
+  onToggleCommands,
   open,
   onPress,
 }: {
   serverId: string;
   cwd: string | null;
+  commandsOpen: boolean;
+  onToggleCommands: () => void;
   open: boolean;
   onPress: () => void;
 }) {
   const { t } = useTranslation();
   const { theme } = useUnistyles();
   return (
-    <View style={styles.paneProjectTray}>
+    <PaneContentToolbar style={styles.paneProjectTray} testID="pane-project-tray">
       {DEV_BUILD_LABEL ? (
         <View
           pointerEvents="none"
@@ -192,8 +196,19 @@ function PaneProjectTray({
         </View>
       ) : null}
       <View style={styles.paneProjectActions}>
-        {cwd ? <WorkspaceOpenInEditorButton serverId={serverId} cwd={cwd} hideLabels /> : null}
-        {cwd ? <WorkspaceActions serverId={serverId} cwd={cwd} /> : null}
+        {commandsOpen && cwd ? (
+          <WorkspaceOpenInEditorButton serverId={serverId} cwd={cwd} hideLabels />
+        ) : null}
+        {commandsOpen && cwd ? <WorkspaceActions serverId={serverId} cwd={cwd} /> : null}
+        <ToolbarButton
+          label={t("workspace.header.actions.workspaceActions")}
+          selected={commandsOpen}
+          testID="pane-project-commands-toggle"
+          tooltipSide="left"
+          onPress={onToggleCommands}
+        >
+          <Ellipsis size={14} color={theme.colors.foregroundExtraMuted} />
+        </ToolbarButton>
         <ToolbarButton
           label={t(
             open ? "workspace.tabs.explorerSidebar.close" : "workspace.tabs.explorerSidebar.open",
@@ -206,7 +221,7 @@ function PaneProjectTray({
           <PanelRight size={14} color={theme.colors.foregroundExtraMuted} />
         </ToolbarButton>
       </View>
-    </View>
+    </PaneContentToolbar>
   );
 }
 
@@ -1150,6 +1165,7 @@ function SplitPaneView({
   onExitFocusMode,
 }: SplitPaneViewProps) {
   const paneRef = useRef<View | null>(null);
+  const [projectCommandsOpen, setProjectCommandsOpen] = useState(true);
   const stableOnFocusPane = useStableEvent(onFocusPane);
   const paneState = useMemo(
     () =>
@@ -1323,6 +1339,10 @@ function SplitPaneView({
     }
     onToggleExplorerSidebar();
   }, [isExplorerSidebarOpen, isFocused, onFocusPane, onToggleExplorerSidebar, paneId]);
+  const handleToggleProjectCommands = useCallback(
+    () => setProjectCommandsOpen((current) => !current),
+    [],
+  );
   const handleCreateExplorerTab = useCallback(
     () => onCreateNewTab({ paneId: explorerSidebarPane?.id }),
     [explorerSidebarPane?.id, onCreateNewTab],
@@ -1379,24 +1399,28 @@ function SplitPaneView({
 
         <View style={styles.paneBody} onLayout={handlePaneBodyLayout}>
           <View style={styles.paneContent}>
-            <WorkspacePanelHost
-              paneId={pane.id}
-              tabs={paneTabs}
-              activeTabId={activeTabDescriptor?.tabId ?? null}
-              normalizedServerId={normalizedServerId}
-              normalizedWorkspaceId={normalizedWorkspaceId}
-              isWorkspaceFocused={isWorkspaceFocused}
-              isPaneFocused={isFocused}
-              onFocusPane={stableOnFocusPane}
-              buildPaneContentModel={buildPaneContentModel}
-            />
-            <SplitDropZone paneId={pane.id} active={showDropZones} preview={dropPreview} />
             <PaneProjectTray
               serverId={normalizedServerId}
               cwd={paneWorkspaceRoot}
+              commandsOpen={projectCommandsOpen}
+              onToggleCommands={handleToggleProjectCommands}
               open={explorerOpenForPane}
               onPress={handleTogglePaneExplorer}
             />
+            <View style={styles.panePanelContent}>
+              <WorkspacePanelHost
+                paneId={pane.id}
+                tabs={paneTabs}
+                activeTabId={activeTabDescriptor?.tabId ?? null}
+                normalizedServerId={normalizedServerId}
+                normalizedWorkspaceId={normalizedWorkspaceId}
+                isWorkspaceFocused={isWorkspaceFocused}
+                isPaneFocused={isFocused}
+                onFocusPane={stableOnFocusPane}
+                buildPaneContentModel={buildPaneContentModel}
+              />
+              <SplitDropZone paneId={pane.id} active={showDropZones} preview={dropPreview} />
+            </View>
           </View>
           {explorerOpenForPane && explorerSidebarPane && paneWorkspaceRoot ? (
             <>
@@ -1558,20 +1582,21 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
   },
   paneContent: {
-    position: "relative",
     flex: 1,
     minWidth: 0,
     minHeight: 0,
   },
   paneProjectTray: {
-    position: "absolute",
-    top: theme.spacing[2],
-    left: theme.spacing[2],
-    right: theme.spacing[2],
-    zIndex: 10,
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
+  },
+  panePanelContent: {
+    position: "relative",
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
   },
   paneProjectActions: {
     marginLeft: "auto",
