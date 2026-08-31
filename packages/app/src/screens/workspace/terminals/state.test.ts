@@ -87,7 +87,7 @@ describe("workspace terminal state", () => {
       requestId: "existing",
       terminals: [
         listedTerminal("terminal-1"),
-        { id: "terminal-2", name: "terminal-2", title: "terminal-2" },
+        { id: "terminal-2", name: "terminal-2", cwd: "/repo", title: "terminal-2" },
       ],
     });
     expect(removeTerminalFromPayload("terminal-1")(current)).toEqual({

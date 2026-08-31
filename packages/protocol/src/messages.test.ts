@@ -505,3 +505,30 @@ describe("viewed timeline subscription messages", () => {
     });
   });
 });
+
+describe("terminal list project scope", () => {
+  test("accepts cwd on workspace-wide terminal entries and keeps it optional", () => {
+    const base = {
+      type: "list_terminals_response",
+      payload: { requestId: "terminals-1" },
+    } as const;
+    const withCwd = SessionOutboundMessageSchema.parse({
+      ...base,
+      payload: {
+        ...base.payload,
+        terminals: [{ id: "terminal-a", name: "A", cwd: "/project-a" }],
+      },
+    });
+    const withoutCwd = SessionOutboundMessageSchema.parse({
+      ...base,
+      payload: { ...base.payload, terminals: [{ id: "terminal-a", name: "A" }] },
+    });
+
+    expect(withCwd.payload.terminals[0]).toEqual({
+      id: "terminal-a",
+      name: "A",
+      cwd: "/project-a",
+    });
+    expect(withoutCwd.payload.terminals[0]).toEqual({ id: "terminal-a", name: "A" });
+  });
+});

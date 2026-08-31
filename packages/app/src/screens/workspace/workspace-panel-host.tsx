@@ -16,18 +16,21 @@ interface WorkspacePanelHostProps {
   activeTabId: string | null;
   normalizedServerId: string;
   normalizedWorkspaceId: string;
+  workspaceRoot?: string;
   isWorkspaceFocused: boolean;
   isPaneFocused: boolean;
   onFocusPane?: (paneId: string) => void;
   buildPaneContentModel: (input: {
     paneId: string;
     tab: WorkspaceTabDescriptor;
+    workspaceRoot?: string;
   }) => WorkspacePaneContentModel;
 }
 
 interface MountedTabProps {
   tab: WorkspaceTabDescriptor;
   paneId: string;
+  workspaceRoot?: string;
   visible: boolean;
   interactive: boolean;
   isWorkspaceFocused: boolean;
@@ -38,6 +41,7 @@ interface MountedTabProps {
 const MountedTab = memo(function MountedTab({
   tab,
   paneId,
+  workspaceRoot,
   visible,
   interactive,
   isWorkspaceFocused,
@@ -45,8 +49,8 @@ const MountedTab = memo(function MountedTab({
   buildPaneContentModel,
 }: MountedTabProps) {
   const content = useMemo(
-    () => buildPaneContentModel({ paneId, tab }),
-    [buildPaneContentModel, paneId, tab],
+    () => buildPaneContentModel({ paneId, tab, workspaceRoot }),
+    [buildPaneContentModel, paneId, tab, workspaceRoot],
   );
   const handleFocusPane = useCallback(() => onFocusPane?.(paneId), [onFocusPane, paneId]);
   return (
@@ -95,6 +99,7 @@ export function WorkspacePanelHost({
   activeTabId,
   normalizedServerId,
   normalizedWorkspaceId,
+  workspaceRoot,
   isWorkspaceFocused,
   isPaneFocused,
   onFocusPane,
@@ -127,6 +132,7 @@ export function WorkspacePanelHost({
         key={tabId}
         tab={tab}
         paneId={paneId}
+        workspaceRoot={workspaceRoot}
         visible={visible}
         interactive={isPaneFocused && visible}
         isWorkspaceFocused={isWorkspaceFocused}

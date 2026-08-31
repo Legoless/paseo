@@ -325,10 +325,15 @@ export class TerminalSessionController {
   }
 
   private toTerminalInfo(
-    terminal: Pick<TerminalSession, "id" | "name" | "workspaceId" | "getTitle" | "getActivity">,
+    terminal: Pick<
+      TerminalSession,
+      "id" | "name" | "cwd" | "workspaceId" | "getTitle" | "getActivity"
+    >,
+    includeCwd = false,
   ): {
     id: string;
     name: string;
+    cwd?: string;
     workspaceId: string;
     title?: string;
     activity: TerminalActivity | null;
@@ -338,6 +343,7 @@ export class TerminalSessionController {
     return {
       id: terminal.id,
       name: terminal.name,
+      ...(includeCwd ? { cwd: terminal.cwd } : {}),
       workspaceId: terminal.workspaceId,
       ...(title ? { title } : {}),
       activity,
@@ -416,7 +422,7 @@ export class TerminalSessionController {
       const terminals =
         typeof msg.cwd === "string"
           ? await this.getTerminalsForWorkspaceRoot(msg.cwd, msg.workspaceId)
-          : await this.getAllTerminalSessions();
+          : await this.getAllTerminalSessions(msg.workspaceId);
       for (const terminal of terminals) {
         this.ensureExitSubscription(terminal);
       }
@@ -424,7 +430,7 @@ export class TerminalSessionController {
         type: "list_terminals_response",
         payload: {
           ...(msg.cwd ? { cwd: msg.cwd } : {}),
-          terminals: terminals.map((terminal) => this.toTerminalInfo(terminal)),
+          terminals: terminals.map((terminal) => this.toTerminalInfo(terminal, !msg.cwd)),
           requestId: msg.requestId,
         },
       });
@@ -441,7 +447,7 @@ export class TerminalSessionController {
     }
   }
 
-  private async getAllTerminalSessions(): Promise<TerminalSession[]> {
+  private async getAllTerminalSessions(workspaceId?: string): Promise<TerminalSession[]> {
     if (!this.terminalManager) {
       return [];
     }
@@ -450,7 +456,10 @@ export class TerminalSessionController {
     const terminalsByDirectory = await Promise.all(
       directories.map((cwd) => manager.getTerminals(cwd)),
     );
-    return terminalsByDirectory.flat();
+    const terminals = terminalsByDirectory.flat();
+    return workspaceId
+      ? terminals.filter((terminal) => terminal.workspaceId === workspaceId)
+      : terminals;
   }
 
   private async getTerminalsForWorkspaceRoot(

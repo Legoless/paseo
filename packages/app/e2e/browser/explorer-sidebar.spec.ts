@@ -26,6 +26,9 @@ test.describe("Explorer sidebar", () => {
         .count();
 
       const explorer = await ensureExplorerSidebar(page);
+      await expect(
+        page.getByTestId("workspace-pane-main").getByTestId("workspace-explorer-sidebar"),
+      ).toBeVisible();
       await expect(explorer.getByTestId("explorer-sidebar-tab-files")).toBeVisible();
       await expect(explorer.getByTestId("explorer-sidebar-tab-changes_tree")).toBeVisible();
       await expect(explorer.getByTestId("workspace-new-tab-button")).toHaveCount(0);

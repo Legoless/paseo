@@ -13,7 +13,7 @@ describe("terminal-list", () => {
       },
     });
 
-    expect(result).toEqual([{ id: "term-1", name: "Terminal 1" }]);
+    expect(result).toEqual([{ id: "term-1", name: "Terminal 1", cwd: "/tmp/project" }]);
   });
 
   it("appends a created terminal when the id does not already exist", () => {
@@ -28,7 +28,7 @@ describe("terminal-list", () => {
 
     expect(result).toEqual([
       { id: "term-1", name: "Terminal 1" },
-      { id: "term-2", name: "Terminal 2" },
+      { id: "term-2", name: "Terminal 2", cwd: "/tmp/project" },
     ]);
   });
 
@@ -47,7 +47,7 @@ describe("terminal-list", () => {
 
     expect(result).toEqual([
       { id: "term-1", name: "Terminal 1" },
-      { id: "term-2", name: "Renamed Terminal" },
+      { id: "term-2", name: "Renamed Terminal", cwd: "/tmp/project" },
     ]);
   });
 
@@ -62,6 +62,8 @@ describe("terminal-list", () => {
       },
     });
 
-    expect(result).toEqual([{ id: "term-3", name: "Terminal 3", title: "Build Output" }]);
+    expect(result).toEqual([
+      { id: "term-3", name: "Terminal 3", cwd: "/tmp/project", title: "Build Output" },
+    ]);
   });
 });

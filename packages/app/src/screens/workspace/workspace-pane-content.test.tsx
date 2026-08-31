@@ -55,11 +55,16 @@ const agentTab: WorkspaceTabDescriptor = {
   target: { kind: "agent", agentId: "agent-a" },
 };
 
-function buildContent(tab: WorkspaceTabDescriptor = agentTab, host: "main" | "explorer" = "main") {
+function buildContent(
+  tab: WorkspaceTabDescriptor = agentTab,
+  host: "main" | "explorer" = "main",
+  workspaceRoot?: string,
+) {
   return buildWorkspacePaneContentModel({
     tab,
     normalizedServerId: "server-a",
     normalizedWorkspaceId: "workspace-a",
+    workspaceRoot,
     host,
     onOpenTab: vi.fn(),
     onOpenPreferredTarget: vi.fn(),
@@ -141,6 +146,24 @@ describe("WorkspacePaneContent", () => {
     });
 
     expect(snapshots[0]?.paneContextValue.host).toBe("explorer");
+  });
+
+  it("exposes a pane-scoped project root to Explorer content", () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() => {
+      root?.render(
+        <WorkspacePaneContent
+          content={buildContent(agentTab, "explorer", "/project-b")}
+          isPaneFocused
+          isWorkspaceFocused
+        />,
+      );
+    });
+
+    expect(snapshots.at(-1)?.paneContextValue.workspaceRoot).toBe("/project-b");
   });
 
   it("keeps pane content mounted when a draft tab is retargeted in place", () => {

@@ -13,7 +13,7 @@ import { queryClient } from "@/data/query-client";
 import { buildTerminalsQueryKey } from "@/screens/workspace/terminals/state";
 import { usePanelStore } from "@/stores/panel-store";
 import { useSessionStore } from "@/stores/session-store";
-import { useWorkspaceDirectory, useWorkspaceFields } from "@/stores/session-store-hooks";
+import { useWorkspaceFields } from "@/stores/session-store-hooks";
 
 type ListTerminalsPayload = ListTerminalsResponse["payload"];
 
@@ -38,12 +38,22 @@ function useTerminalPanelDescriptor(
 ): PanelDescriptor {
   const { t } = useTranslation();
   const client = useSessionStore((state) => state.sessions[context.serverId]?.client ?? null);
-  const workspaceDirectory = useWorkspaceDirectory(context.serverId, context.workspaceId);
+  const workspaceFields = useWorkspaceFields(
+    context.serverId,
+    context.workspaceId,
+    (workspace) => ({
+      workspaceDirectory: workspace.workspaceDirectory,
+      memberCount: workspace.members.length,
+    }),
+  );
+  const workspaceDirectory = workspaceFields?.workspaceDirectory ?? null;
+  const terminalListRoot =
+    workspaceFields && workspaceFields.memberCount > 1 ? null : workspaceDirectory;
   const terminalsQuery = useQuery(
     {
       queryKey: buildTerminalsQueryKey(
         context.serverId,
-        workspaceDirectory,
+        terminalListRoot,
         context.workspaceId || null,
       ),
       enabled: Boolean(client && workspaceDirectory),
@@ -51,7 +61,7 @@ function useTerminalPanelDescriptor(
         if (!client || !workspaceDirectory) {
           throw new Error("Workspace directory not found");
         }
-        return client.listTerminals(workspaceDirectory, undefined, {
+        return client.listTerminals(terminalListRoot ?? undefined, undefined, {
           workspaceId: context.workspaceId || undefined,
         });
       },
@@ -78,11 +88,34 @@ function useTerminalPanelDescriptor(
 function TerminalPanel() {
   const { serverId, workspaceId, target, openFileInWorkspace } = usePaneContext();
   const { isWorkspaceFocused, isPaneFocused } = usePaneFocus();
+  invariant(target.kind === "terminal", "TerminalPanel requires terminal target");
   const workspaceFields = useWorkspaceFields(serverId, workspaceId, (w) => ({
     workspaceDirectory: w.workspaceDirectory,
     isGitCheckout: w.projectKind === "git",
+    memberCount: w.members.length,
   }));
-  const workspaceDirectory = workspaceFields?.workspaceDirectory || null;
+  const primaryWorkspaceDirectory = workspaceFields?.workspaceDirectory || null;
+  const terminalListRoot =
+    workspaceFields && workspaceFields.memberCount > 1 ? null : primaryWorkspaceDirectory;
+  const terminalsQuery = useQuery(
+    {
+      queryKey: buildTerminalsQueryKey(serverId, terminalListRoot, workspaceId || null),
+      enabled: Boolean(primaryWorkspaceDirectory),
+      queryFn: async (): Promise<ListTerminalsPayload> => {
+        const client = useSessionStore.getState().sessions[serverId]?.client ?? null;
+        if (!client || !primaryWorkspaceDirectory) {
+          throw new Error("Workspace directory not found");
+        }
+        return client.listTerminals(terminalListRoot ?? undefined, undefined, {
+          workspaceId: workspaceId || undefined,
+        });
+      },
+      staleTime: 5_000,
+    },
+    queryClient,
+  );
+  const terminal = terminalsQuery.data?.terminals.find((entry) => entry.id === target.terminalId);
+  const workspaceDirectory = terminal?.cwd ?? primaryWorkspaceDirectory;
   const isGitCheckout = workspaceFields?.isGitCheckout ?? false;
   const openCompactFileExplorer = usePanelStore((state) => state.openCompactFileExplorer);
   const handleOpenFileExplorer = useCallback(() => {
@@ -91,8 +124,6 @@ function TerminalPanel() {
     }
     openCompactFileExplorer({ serverId, cwd: workspaceDirectory, isGit: isGitCheckout });
   }, [isGitCheckout, openCompactFileExplorer, serverId, workspaceDirectory]);
-  invariant(target.kind === "terminal", "TerminalPanel requires terminal target");
-
   if (!workspaceDirectory) {
     return (
       <View style={CENTERED_PADDED_STYLE}>
