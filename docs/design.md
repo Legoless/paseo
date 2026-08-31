@@ -159,7 +159,7 @@ On a narrow desktop route, app navigation yields to the rendered content topolog
 
 Electron window controls are top-corner obstructions, not a compact-layout condition. Rendered surfaces declare which top corners they physically occupy; only those corners receive clearance. Full-window overlays redeclare both corners. A focused split pane owns both corners; if focus restoration temporarily exposes the full split tree, the split boundary reserves one top strip instead of assigning a control rectangle to an arbitrarily narrow leaf. The 720px desktop breakpoint preserves the default 320px sidebar and target 400px center width when the Explorer is closed; it is product policy, not an obstruction gate.
 
-Windows and Linux controls are fixed window chrome, outside scrolling header content. A tab rail that reaches them ends at their obstruction and shows the shared overflow fade. The Explorer toggle stays at the top-right inside each workspace pane's content, so opening and closing the pane-local dock does not move the pointer target.
+Windows and Linux controls are fixed window chrome, outside scrolling header content. A tab rail that reaches them ends at their obstruction and shows the shared overflow fade. The project tray stays inside each workspace pane's content, with the development-build branch label at the top-left and the Explorer toggle at the top-right, so opening and closing the pane-local dock does not move either target.
 
 A new list+detail feature copies the settings shell. A new workspace-shaped feature copies the workspace shell. Inventing a third shape happens in design review, not in a PR.
 

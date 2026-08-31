@@ -27,7 +27,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { View, Text, type LayoutChangeEvent } from "react-native";
-import { PanelRight } from "lucide-react-native";
+import { GitBranch, PanelRight } from "lucide-react-native";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -159,12 +159,26 @@ interface SplitPaneDropData {
 const EMPTY_SPLIT_NODES: SplitNode[] = [];
 const EMPTY_SPLIT_SIZES: number[] = [];
 const EXPLORER_SIDEBAR_RESIZE_GROUP_ID = "explorer-sidebar";
+const DEV_BUILD_LABEL = process.env.EXPO_PUBLIC_PASEO_DEV_BUILD_LABEL?.trim() || null;
 
-function PaneExplorerToggle({ open, onPress }: { open: boolean; onPress: () => void }) {
+function PaneProjectTray({ open, onPress }: { open: boolean; onPress: () => void }) {
   const { t } = useTranslation();
   const { theme } = useUnistyles();
   return (
-    <View style={styles.paneExplorerToggle}>
+    <View style={styles.paneProjectTray}>
+      {DEV_BUILD_LABEL ? (
+        <View
+          pointerEvents="none"
+          style={styles.devBuildBadge}
+          testID="dev-build-label"
+          accessibilityLabel={`Development build: ${DEV_BUILD_LABEL}`}
+        >
+          <GitBranch size={12} color={theme.colors.accentForeground} />
+          <Text numberOfLines={1} ellipsizeMode="tail" style={styles.devBuildBadgeText}>
+            {DEV_BUILD_LABEL}
+          </Text>
+        </View>
+      ) : null}
       <ToolbarButton
         label={t(
           open ? "workspace.tabs.explorerSidebar.close" : "workspace.tabs.explorerSidebar.open",
@@ -172,6 +186,7 @@ function PaneExplorerToggle({ open, onPress }: { open: boolean; onPress: () => v
         selected={open}
         testID="workspace-explorer-toggle"
         tooltipSide="left"
+        style={styles.paneExplorerToggle}
         onPress={onPress}
       >
         <PanelRight size={14} color={theme.colors.foregroundExtraMuted} />
@@ -1361,7 +1376,7 @@ function SplitPaneView({
               buildPaneContentModel={buildPaneContentModel}
             />
             <SplitDropZone paneId={pane.id} active={showDropZones} preview={dropPreview} />
-            <PaneExplorerToggle open={explorerOpenForPane} onPress={handleTogglePaneExplorer} />
+            <PaneProjectTray open={explorerOpenForPane} onPress={handleTogglePaneExplorer} />
           </View>
           {explorerOpenForPane && explorerSidebarPane && paneWorkspaceRoot ? (
             <>
@@ -1528,11 +1543,37 @@ const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
     minHeight: 0,
   },
-  paneExplorerToggle: {
+  paneProjectTray: {
     position: "absolute",
     top: theme.spacing[2],
+    left: theme.spacing[2],
     right: theme.spacing[2],
     zIndex: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+  },
+  paneExplorerToggle: {
+    marginLeft: "auto",
+  },
+  devBuildBadge: {
+    minWidth: 0,
+    maxWidth: "70%",
+    flexShrink: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 2,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.accent,
+  },
+  devBuildBadgeText: {
+    minWidth: 0,
+    flexShrink: 1,
+    color: theme.colors.accentForeground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
   },
   dragOverlayChip: {
     flexDirection: "row",
