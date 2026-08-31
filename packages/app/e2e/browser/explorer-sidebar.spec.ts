@@ -29,6 +29,10 @@ test.describe("Explorer sidebar", () => {
 
       const explorer = await ensureExplorerSidebar(page);
       await expect(mainPane.getByTestId("workspace-explorer-sidebar")).toBeVisible();
+      await expect(explorer.getByTestId("workspace-explorer-toggle")).toBeVisible();
+      await expect(
+        mainPane.getByTestId("pane-project-tray").getByTestId("workspace-explorer-toggle"),
+      ).toHaveCount(0);
       await expect(explorer.getByTestId("explorer-sidebar-tab-files")).toBeVisible();
       await expect(explorer.getByTestId("explorer-sidebar-tab-changes_tree")).toBeVisible();
       await expect(explorer.getByTestId("workspace-new-tab-button")).toHaveCount(0);
@@ -39,7 +43,7 @@ test.describe("Explorer sidebar", () => {
       await explorer.getByTestId("explorer-sidebar-tab-changes_tree").click();
       await expect(explorer.getByTestId("changes-tree-panel")).toBeVisible();
 
-      await page.getByTestId("workspace-explorer-toggle").first().click();
+      await explorer.getByTestId("workspace-explorer-toggle").click();
       await expect(explorerSidebar(page)).toHaveCount(0);
       await expect(mainPane.locator('[data-testid^="workspace-tab-"]')).toHaveCount(mainTabsBefore);
     } finally {
