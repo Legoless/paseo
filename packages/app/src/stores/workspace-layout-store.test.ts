@@ -35,6 +35,7 @@ import {
   normalizeLayout,
   removePaneFromTree,
   removeTabFromTree,
+  selectIsExplorerSidebarVisible,
   stripEphemeralTabsFromLayout,
   type SplitNode,
   type SplitPane,
@@ -1013,6 +1014,7 @@ describe("workspace-layout-store actions", () => {
       hiddenAgentIdsByWorkspace: {},
       focusRestorationByWorkspace: {},
       explorerSidebarPaneIdByWorkspace: {},
+      explorerSidebarOpenByTab: {},
     });
   });
 
@@ -4016,5 +4018,206 @@ describe("workspace-layout-store actions", () => {
     expect(layout).toBe(before);
     expect(findPaneById(layout.root, "main")?.tabIds).toEqual([agentTabId]);
     expect(collectAllPanes(layout.root).map((pane) => pane.id)).toEqual(["main"]);
+  });
+});
+
+describe("per-tab Explorer sidebar visibility", () => {
+  beforeEach(() => {
+    workspaceLayoutIds.reset();
+    workspaceLayoutStore.setState({
+      layoutByWorkspace: {},
+      splitSizesByWorkspace: {},
+      pinnedAgentIdsByWorkspace: {},
+      hiddenAgentIdsByWorkspace: {},
+      focusRestorationByWorkspace: {},
+      explorerSidebarPaneIdByWorkspace: {},
+      explorerSidebarOpenByTab: {},
+    });
+  });
+
+  it("showExplorerSidebar marks active tab open", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    const agentTabId = store.openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "agent-1" },
+      intent: "reveal",
+    });
+    store.showExplorerSidebar(workspaceKey);
+
+    const state = workspaceLayoutStore.getState();
+    expect(selectIsExplorerSidebarVisible(state, workspaceKey)).toBe(true);
+    // The active content tab (agent-1) should have an entry.
+    expect(state.explorerSidebarOpenByTab[workspaceKey]?.[agentTabId!]).toBe(true);
+  });
+
+  it("hides Explorer on another tab in the same pane", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    const tabA = store.openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "agent-a" },
+      intent: "reveal",
+    })!;
+    const tabB = store.openTab({
+      workspaceKey,
+      target: { kind: "draft", draftId: "draft-b" },
+      intent: "reveal",
+    })!;
+    store.showExplorerSidebar(workspaceKey);
+    expect(selectIsExplorerSidebarVisible(workspaceLayoutStore.getState(), workspaceKey)).toBe(
+      true,
+    );
+
+    // tabB is the focused tab when showExplorerSidebar was called — it should be visible.
+    store.focusTab(workspaceKey, tabB);
+    expect(selectIsExplorerSidebarVisible(workspaceLayoutStore.getState(), workspaceKey)).toBe(
+      true,
+    );
+
+    // Focus tabA — tabA does not have an open entry, so Explorer should be hidden.
+    store.focusTab(workspaceKey, tabA);
+    expect(selectIsExplorerSidebarVisible(workspaceLayoutStore.getState(), workspaceKey)).toBe(
+      false,
+    );
+
+    // Reopen Explorer on tabA, then it should be visible there.
+    store.showExplorerSidebar(workspaceKey);
+    expect(selectIsExplorerSidebarVisible(workspaceLayoutStore.getState(), workspaceKey)).toBe(
+      true,
+    );
+  });
+
+  it("hideExplorerSidebar clears only the active tab entry", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    const tabA = store.openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "agent-a" },
+      intent: "reveal",
+    })!;
+    store.showExplorerSidebar(workspaceKey);
+    expect(selectIsExplorerSidebarVisible(workspaceLayoutStore.getState(), workspaceKey)).toBe(
+      true,
+    );
+
+    store.hideExplorerSidebar(workspaceKey);
+    const state = workspaceLayoutStore.getState();
+    expect(selectIsExplorerSidebarVisible(state, workspaceKey)).toBe(false);
+    expect(state.explorerSidebarOpenByTab[workspaceKey]?.[tabA]).toBeUndefined();
+  });
+
+  it("fresh tab defaults closed", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    const tabA = store.openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "agent-a" },
+      intent: "reveal",
+    })!;
+    store.openTab({
+      workspaceKey,
+      target: { kind: "draft", draftId: "draft-b" },
+      intent: "reveal",
+    });
+
+    // Focus a fresh tab — should be closed since it was never shown.
+    store.focusTab(workspaceKey, tabA);
+    expect(selectIsExplorerSidebarVisible(workspaceLayoutStore.getState(), workspaceKey)).toBe(
+      false,
+    );
+  });
+
+  it("focusTab files in the Explorer pane records open for the current content tab", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    const agentTabId = store.openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "agent-1" },
+      intent: "reveal",
+    })!;
+
+    // Focus the Files tab in the Explorer pane (it's always present as a default).
+    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+    const filesTab = collectAllTabs(layout.root).find((t) => t.target.kind === "files");
+    expect(filesTab).toBeTruthy();
+    store.focusTab(workspaceKey, filesTab!.tabId);
+
+    const state = workspaceLayoutStore.getState();
+    expect(selectIsExplorerSidebarVisible(state, workspaceKey)).toBe(true);
+    expect(state.explorerSidebarOpenByTab[workspaceKey]?.[agentTabId]).toBe(true);
+  });
+
+  it("empty workspace toggle works via sentinel key", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    store.showExplorerSidebar(workspaceKey);
+
+    const state = workspaceLayoutStore.getState();
+    expect(selectIsExplorerSidebarVisible(state, workspaceKey)).toBe(true);
+    const workspaceTabIds = Object.keys(state.explorerSidebarOpenByTab[workspaceKey] ?? {});
+    expect(workspaceTabIds.length).toBe(1);
+  });
+
+  it("closeTab that hides Explorer clears the content tab entry", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    const agentTabId = store.openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "agent-1" },
+      intent: "reveal",
+    })!;
+    store.showExplorerSidebar(workspaceKey);
+    expect(
+      workspaceLayoutStore.getState().explorerSidebarOpenByTab[workspaceKey]?.[agentTabId],
+    ).toBe(true);
+
+    // Hide Explorer and verify the entry is cleared.
+    store.hideExplorerSidebar(workspaceKey);
+    const state = workspaceLayoutStore.getState();
+    expect(state.explorerSidebarOpenByTab[workspaceKey]?.[agentTabId]).toBeUndefined();
+    expect(selectIsExplorerSidebarVisible(state, workspaceKey)).toBe(false);
+  });
+
+  it("persistence: partialize prunes map to live tab ids", async () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    const agentTabId = store.openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "agent-1" },
+      intent: "reveal",
+    })!;
+    store.showExplorerSidebar(workspaceKey);
+
+    const partialize = workspaceLayoutStore.persist.getOptions().partialize;
+    const persisted = partialize!(workspaceLayoutStore.getState());
+    // The agent tab is still live, so its entry should be in the pruned map.
+    expect(persisted.explorerSidebarOpenByTab?.[workspaceKey]?.[agentTabId]).toBe(true);
+  });
+
+  it("persistence: merge seeds visible Explorer entry from legacy blob", async () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    const agentTabId = store.openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "agent-1" },
+      intent: "reveal",
+    })!;
+    store.showExplorerSidebar(workspaceKey);
+
+    const merge = workspaceLayoutStore.persist.getOptions().merge;
+    expect(merge).toBeTypeOf("function");
+    // Merge with a persisted blob that has no explorerSidebarOpenByTab key
+    // but has a visible explorer pane (hidden !== true).
+    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+    const persisted: Record<string, unknown> = {
+      layoutByWorkspace: { [workspaceKey]: layout },
+      splitSizesByWorkspace: {},
+      explorerSidebarWidthByWorkspace: {},
+      explorerPaneIdByWorkspace: { [workspaceKey]: "explorer" },
+      sidePaneIdByWorkspace: {},
+    };
+    const merged = merge!(persisted, workspaceLayoutStore.getState());
+    expect(merged.explorerSidebarOpenByTab[workspaceKey]?.[agentTabId]).toBe(true);
   });
 });

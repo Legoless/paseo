@@ -61,7 +61,7 @@ function explorerSidebar(page: Page) {
   return visibleTestId(page, "workspace-explorer-sidebar").first();
 }
 
-async function selectWorkspaceTab(tab: Locator): Promise<void> {
+export async function selectWorkspaceTab(tab: Locator): Promise<void> {
   if ((await tab.getAttribute("aria-selected")) !== "true") {
     // The close action overlays the chip's trailing edge on hover. Click the
     // leading icon area so Playwright does not target that separate control.
