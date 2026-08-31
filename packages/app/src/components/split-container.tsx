@@ -37,6 +37,7 @@ import { useTranslation } from "react-i18next";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { ResizeHandle } from "@/components/resize-handle";
 import { PaneContentToolbar, ToolbarButton } from "@/components/ui/pane-content-toolbar";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { WorkspaceActions } from "@/git/workspace-actions";
 import { WorkspaceOpenInEditorButton } from "@/workspace/open-in-editor/button";
 import {
@@ -95,6 +96,7 @@ import { RenderProfile } from "@/utils/render-profiler";
 import { isNative } from "@/constants/platform";
 import { panelTargetSupportsHost } from "@/plugins/workspace-panels/locations";
 import { resolvePaneProjectRoot } from "@/screens/workspace/pane-project-root";
+import { usePanelStore } from "@/stores/panel-store";
 
 interface SplitContainerProps {
   layout: WorkspaceLayout;
@@ -184,23 +186,24 @@ function PaneExplorerToggle({ open, onPress }: { open: boolean; onPress: () => v
 function PaneProjectTray({
   serverId,
   cwd,
-  commandsOpen,
-  onToggleCommands,
   open,
   onPress,
 }: {
   serverId: string;
   cwd: string | null;
-  commandsOpen: boolean;
-  onToggleCommands: () => void;
   open: boolean;
   onPress: () => void;
 }) {
   const { t } = useTranslation();
   const { theme } = useUnistyles();
+  const visibleActions = usePanelStore((state) => state.paneProjectActions);
+  const toggleAction = usePanelStore((state) => state.togglePaneProjectAction);
+  const toggleBranch = useCallback(() => toggleAction("branch"), [toggleAction]);
+  const toggleEditor = useCallback(() => toggleAction("editor"), [toggleAction]);
+  const toggleGitActions = useCallback(() => toggleAction("gitActions"), [toggleAction]);
   return (
     <PaneContentToolbar style={styles.paneProjectTray} testID="pane-project-tray">
-      {DEV_BUILD_LABEL ? (
+      {DEV_BUILD_LABEL && visibleActions.branch ? (
         <View
           pointerEvents="none"
           style={styles.devBuildBadge}
@@ -214,19 +217,49 @@ function PaneProjectTray({
         </View>
       ) : null}
       <View style={styles.paneProjectActions}>
-        {commandsOpen && cwd ? (
+        {visibleActions.editor && cwd ? (
           <WorkspaceOpenInEditorButton serverId={serverId} cwd={cwd} hideLabels />
         ) : null}
-        {commandsOpen && cwd ? <WorkspaceActions serverId={serverId} cwd={cwd} /> : null}
-        <ToolbarButton
-          label={t("workspace.header.actions.workspaceActions")}
-          selected={commandsOpen}
-          testID="pane-project-commands-toggle"
-          tooltipSide="left"
-          onPress={onToggleCommands}
-        >
-          <Ellipsis size={14} color={theme.colors.foregroundExtraMuted} />
-        </ToolbarButton>
+        {visibleActions.gitActions && cwd ? (
+          <WorkspaceActions serverId={serverId} cwd={cwd} />
+        ) : null}
+        <DropdownMenu>
+          <ToolbarButton
+            kind="menu"
+            label={t("workspace.header.actions.workspaceActions")}
+            testID="pane-project-commands-toggle"
+            tooltipSide="left"
+          >
+            <Ellipsis size={14} color={theme.colors.foregroundExtraMuted} />
+          </ToolbarButton>
+          <DropdownMenuContent align="end" minWidth={180} testID="pane-project-commands-menu">
+            <DropdownMenuItem
+              selected={visibleActions.branch}
+              showSelectedCheck
+              disabled={!DEV_BUILD_LABEL}
+              closeOnSelect={false}
+              onSelect={toggleBranch}
+            >
+              {t("sidebar.display.show.branch")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              selected={visibleActions.editor}
+              showSelectedCheck
+              closeOnSelect={false}
+              onSelect={toggleEditor}
+            >
+              {t("workspace.git.openInEditor.chooseEditor")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              selected={visibleActions.gitActions}
+              showSelectedCheck
+              closeOnSelect={false}
+              onSelect={toggleGitActions}
+            >
+              {t("workspace.git.actions.push.label")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         {!open ? <PaneExplorerToggle open={false} onPress={onPress} /> : null}
       </View>
     </PaneContentToolbar>
@@ -1173,7 +1206,6 @@ function SplitPaneView({
   onExitFocusMode,
 }: SplitPaneViewProps) {
   const paneRef = useRef<View | null>(null);
-  const [projectCommandsOpen, setProjectCommandsOpen] = useState(true);
   const stableOnFocusPane = useStableEvent(onFocusPane);
   const paneState = useMemo(
     () =>
@@ -1347,10 +1379,6 @@ function SplitPaneView({
     }
     onToggleExplorerSidebar();
   }, [isExplorerSidebarOpen, isFocused, onFocusPane, onToggleExplorerSidebar, paneId]);
-  const handleToggleProjectCommands = useCallback(
-    () => setProjectCommandsOpen((current) => !current),
-    [],
-  );
   const handleCreateExplorerTab = useCallback(
     () => onCreateNewTab({ paneId: explorerSidebarPane?.id }),
     [explorerSidebarPane?.id, onCreateNewTab],
@@ -1414,8 +1442,6 @@ function SplitPaneView({
             <PaneProjectTray
               serverId={normalizedServerId}
               cwd={paneWorkspaceRoot}
-              commandsOpen={projectCommandsOpen}
-              onToggleCommands={handleToggleProjectCommands}
               open={explorerOpenForPane}
               onPress={handleTogglePaneExplorer}
             />

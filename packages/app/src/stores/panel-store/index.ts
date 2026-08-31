@@ -13,6 +13,7 @@ import {
   buildToggleFileExplorerPatch,
   clampTreeRailWidth,
   clampSidebarWidth,
+  DEFAULT_PANE_PROJECT_ACTIONS,
   DEFAULT_TREE_RAIL_WIDTH,
   DEFAULT_SIDEBAR_WIDTH,
   MAX_TREE_RAIL_WIDTH,
@@ -24,10 +25,13 @@ import {
   selectIsAgentListOpen,
   selectIsCompactFileExplorerOpen,
   setMobilePanelTarget,
+  togglePaneProjectActionVisibility,
   type DesktopSidebarState,
   type MobilePanelView,
   type MobilePanelSelection,
   type PanelLayoutInput,
+  type PaneProjectAction,
+  type PaneProjectActionVisibility,
   type SortOption,
 } from "./state";
 import { isWeb } from "@/constants/platform";
@@ -79,6 +83,7 @@ export interface PanelState {
   // File panel's tree rail. The changes panel keeps its own flag in
   // `useChangesPreferences`; the two rails open and close independently.
   fileTreeVisible: boolean;
+  paneProjectActions: PaneProjectActionVisibility;
 
   // Actions
   toggleFocusMode: () => void;
@@ -107,6 +112,7 @@ export interface PanelState {
   toggleExplorerShowHiddenFiles: () => void;
   setTreeRailWidth: (width: number) => void;
   toggleFileTreeVisible: () => void;
+  togglePaneProjectAction: (action: PaneProjectAction) => void;
 }
 
 const DEFAULT_DESKTOP_OPEN = isWeb;
@@ -142,6 +148,7 @@ export const usePanelStore = create<PanelState>()(
       explorerShowHiddenFiles: true,
       treeRailWidth: DEFAULT_TREE_RAIL_WIDTH,
       fileTreeVisible: true,
+      paneProjectActions: DEFAULT_PANE_PROJECT_ACTIONS,
 
       toggleFocusMode: () =>
         set((state) => ({
@@ -284,10 +291,14 @@ export const usePanelStore = create<PanelState>()(
         set((state) => ({ explorerShowHiddenFiles: !state.explorerShowHiddenFiles })),
       setTreeRailWidth: (width) => set({ treeRailWidth: clampTreeRailWidth(width) }),
       toggleFileTreeVisible: () => set((state) => ({ fileTreeVisible: !state.fileTreeVisible })),
+      togglePaneProjectAction: (action) =>
+        set((state) => ({
+          paneProjectActions: togglePaneProjectActionVisibility(state.paneProjectActions, action),
+        })),
     }),
     {
       name: "panel-state",
-      version: 16,
+      version: 17,
       storage: createValidatedPersistStorage(AsyncStorage, PanelPersistedStateSchema),
       migrate: (persistedState, version) => migratePanelState(persistedState, version),
       partialize: (state) => ({
@@ -302,6 +313,7 @@ export const usePanelStore = create<PanelState>()(
         explorerShowHiddenFiles: state.explorerShowHiddenFiles,
         treeRailWidth: state.treeRailWidth,
         fileTreeVisible: state.fileTreeVisible,
+        paneProjectActions: state.paneProjectActions,
       }),
     },
   ),
