@@ -91,6 +91,7 @@ import { WorkspaceAgentMenuItems } from "@/components/sidebar/workspace-member-m
 import { APP_SETTINGS_QUERY_KEY, DEFAULT_CLIENT_SETTINGS } from "@/hooks/use-settings/storage";
 import { DEFAULT_SIDEBAR_ROW_ITEMS } from "@/components/sidebar/display-preferences/row-items";
 import { checkoutStatusQueryKey } from "@/git/query-keys";
+import { useWorkspaceLabels } from "@/workspace-labels";
 vi.mock("@/contexts/toast-context", () => ({
   useToast: () => ({
     error: vi.fn(),
@@ -110,14 +111,17 @@ const AGENT: SidebarWorkspaceAgentRow = {
   statusBucket: "done",
   lastActivityAt: new Date(1_000),
 };
+const LABELLED_AGENT: SidebarWorkspaceAgentRow = { ...AGENT, labels: ["Frontend"] };
 
 function renderRow(input: {
   branch?: string | null;
   diffStat?: { additions: number; deletions: number } | null;
   showBranchItem?: boolean;
   trailing?: "diff" | "timestamp" | "none";
+  labelled?: boolean;
 }) {
   const queryClient = new QueryClient();
+  const agent = input.labelled ? LABELLED_AGENT : AGENT;
   queryClient.setQueryData(APP_SETTINGS_QUERY_KEY, {
     ...DEFAULT_CLIENT_SETTINGS,
     sidebarRowItems: {
@@ -135,7 +139,7 @@ function renderRow(input: {
   return render(
     <QueryClientProvider client={queryClient}>
       <WorkspaceAgentRow
-        agent={AGENT}
+        agent={agent}
         diffStat={input.diffStat ?? null}
         prHint={null}
         serverId="srv"
@@ -153,6 +157,20 @@ describe("WorkspaceAgentRow branch and diff", () => {
   it("renders the member's diff under the default trailing preference", () => {
     renderRow({ diffStat: { additions: 12, deletions: 3 } });
 
+    expect(screen.getByTestId("sidebar-agent-diff-agent-1")).toBeTruthy();
+  });
+
+  it("keeps the diff visible when labels render under the title", () => {
+    useWorkspaceLabels.getState().setHost({
+      serverId: "srv",
+      labels: [{ name: "Frontend", color: "red" }],
+      status: "online",
+      error: null,
+    });
+    renderRow({ diffStat: { additions: 12, deletions: 3 }, labelled: true });
+
+    expect(screen.getByTestId("sidebar-agent-title-agent-1")).toBeTruthy();
+    expect(screen.getByTestId("sidebar-agent-labels-agent-1")).toBeTruthy();
     expect(screen.getByTestId("sidebar-agent-diff-agent-1")).toBeTruthy();
   });
 
