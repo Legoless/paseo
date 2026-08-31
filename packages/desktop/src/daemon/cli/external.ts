@@ -3,13 +3,22 @@ import log from "electron-log/main";
 import type { NodeEntrypointInvocation } from "../node-entrypoint-launcher.js";
 import { createNodeEntrypointInvocation } from "../runtime-paths.js";
 import { resolveExternalCliEntrypoint } from "./entrypoints.js";
+import { isNeo, NEO_PASEO_HOME, NEO_PASEO_LISTEN } from "../../variant.js";
 
-function createExternalCliInvocation(args: string[]): NodeEntrypointInvocation {
+function createExternalCliInvocation(
+  args: string[],
+  envOverlay?: Record<string, string>,
+): NodeEntrypointInvocation {
+  const baseEnv = { ...process.env };
+  if (isNeo) {
+    baseEnv.PASEO_HOME = NEO_PASEO_HOME;
+    baseEnv.PASEO_LISTEN = NEO_PASEO_LISTEN;
+  }
   return createNodeEntrypointInvocation({
     entrypoint: resolveExternalCliEntrypoint(),
     argvMode: "node-script",
     args,
-    baseEnv: process.env,
+    baseEnv: { ...baseEnv, ...envOverlay },
   });
 }
 

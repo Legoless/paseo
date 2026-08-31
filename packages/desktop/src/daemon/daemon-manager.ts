@@ -44,6 +44,8 @@ import {
 } from "../integrations/legacy-skill-selection.js";
 import { tailFile } from "../diagnostics/tail-file.js";
 
+import { isNeo, NEO_PASEO_HOME, NEO_PASEO_LISTEN } from "../variant.js";
+
 const DAEMON_LOG_FILENAME = "daemon.log";
 const STARTUP_POLL_INTERVAL_MS = 200;
 const STARTUP_POLL_MAX_ATTEMPTS = 150;
@@ -114,6 +116,7 @@ function parseDesktopDaemonStopReason(
 // ---------------------------------------------------------------------------
 
 function getPaseoHome(): string {
+  if (isNeo) return NEO_PASEO_HOME;
   return resolvePaseoHome(process.env);
 }
 
@@ -404,6 +407,7 @@ async function startDaemon(): Promise<DesktopDaemonStatus> {
       PASEO_DESKTOP_MANAGED: "1",
       PASEO_CLI: getBundledCliShimPath(),
       PASEO_WEB_UI_ENABLED: "false",
+      ...(isNeo ? { PASEO_HOME: NEO_PASEO_HOME, PASEO_LISTEN: NEO_PASEO_LISTEN } : {}),
     },
     stdio: ["ignore", "ignore", "ignore"],
   });
