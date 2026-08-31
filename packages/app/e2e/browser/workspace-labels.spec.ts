@@ -234,6 +234,8 @@ test.describe("Workspace labels", () => {
         color: "red",
       });
       await expect.poll(readAgentLabels.bind(null, seeded)).toEqual(["AgentUrgent"]);
+      const row = page.getByTestId(`sidebar-agent-row-${seeded.agentId}`);
+      await expect(row.getByTestId("workspace-label-chip-AgentUrgent")).toBeVisible();
 
       await openAgentLabels(page, seeded.agentId);
       mutationFailure.failNextAssignment();
@@ -244,7 +246,6 @@ test.describe("Workspace labels", () => {
       await expectAssigned(page, "AgentUrgent", true);
       await page.keyboard.press("Escape");
 
-      const row = page.getByTestId(`sidebar-agent-row-${seeded.agentId}`);
       await row.hover();
       const hoverCard = page.getByRole("menu", { name: "Labelled agent", exact: true });
       await expect(hoverCard.getByText("AgentUrgent", { exact: true })).toBeVisible();
@@ -261,10 +262,13 @@ test.describe("Workspace labels", () => {
       await expect.poll(readAgentLabels.bind(null, seeded)).toEqual(["AgentPriority"]);
       await expectAssigned(page, "AgentPriority", true);
       await expect(labelRow(page, "AgentUrgent")).toHaveCount(0);
+      await expect(row.getByTestId("workspace-label-chip-AgentPriority")).toBeVisible();
+      await expect(row.getByTestId("workspace-label-chip-AgentUrgent")).toHaveCount(0);
 
       await seeded.client.deleteWorkspaceLabel({ name: "AgentPriority" });
       await expect.poll(readAgentLabels.bind(null, seeded)).toEqual([]);
       await expect(labelRow(page, "AgentPriority")).toHaveCount(0);
+      await expect(row.getByTestId("workspace-label-chip-AgentPriority")).toHaveCount(0);
       await page.keyboard.press("Escape");
       await row.hover();
       await expect(hoverCard.getByText("AgentPriority", { exact: true })).toHaveCount(0);

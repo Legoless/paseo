@@ -34,6 +34,7 @@ import {
 import type { Theme } from "@/styles/theme";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { getStatusDotColor } from "@/utils/status-dot-color";
+import { WorkspaceLabelChip } from "@/workspace-labels/chip";
 import {
   STATUS_INDICATOR_ALERT_SIZE,
   STATUS_INDICATOR_FILLED_DOT_SIZE,
@@ -133,6 +134,70 @@ function showAgentActions(input: {
   );
 }
 
+function AgentRowLabels({
+  labels,
+  testID,
+}: {
+  labels: readonly WorkspaceLabelDefinition[];
+  testID: string;
+}) {
+  if (labels.length === 0) return null;
+  return (
+    <View style={styles.agentLabels} testID={testID}>
+      {labels.map((label) => (
+        <WorkspaceLabelChip key={workspaceLabelKey(label.name)} label={label} />
+      ))}
+    </View>
+  );
+}
+
+function AgentTitleLine({
+  title,
+  titleTestID,
+  branch,
+  branchTestID,
+  diffStat,
+  diffTestID,
+  showBranch,
+  showDiff,
+}: {
+  title: string;
+  titleTestID: string;
+  branch: string | null;
+  branchTestID: string;
+  diffStat: { additions: number; deletions: number } | null;
+  diffTestID: string;
+  showBranch: boolean;
+  showDiff: boolean;
+}) {
+  return (
+    <View style={styles.agentTitleLine}>
+      <Text style={styles.agentTitle} numberOfLines={1} testID={titleTestID}>
+        {title}
+      </Text>
+      {showBranch || showDiff ? (
+        <View style={styles.agentTrailing}>
+          {showBranch ? (
+            <View style={styles.agentBranch} testID={branchTestID}>
+              <ThemedGitBranch size={12} uniProps={foregroundMutedColorMapping} />
+              <Text style={styles.agentBranchText} numberOfLines={1}>
+                {branch}
+              </Text>
+            </View>
+          ) : null}
+          {showDiff && diffStat ? (
+            <DiffStat
+              additions={diffStat.additions}
+              deletions={diffStat.deletions}
+              testID={diffTestID}
+            />
+          ) : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 export function WorkspaceNewAgentRow({
   newAgent,
   diffStat,
@@ -193,6 +258,9 @@ export function WorkspaceNewAgentRow({
   );
   const labelPages = useWorkspaceLabelMenuPages(labelTarget);
   const isCompact = useIsCompactFormFactor();
+  const showBranch = useSidebarRowItems().branch && branch !== null;
+  const trailing = useSidebarWorkspaceTrailing();
+  const showDiff = trailing === "diff" && diffStat !== null;
   const actionsVisible = showAgentActions({
     hovered: isHovered,
     focused: isFocused,
@@ -280,9 +348,22 @@ export function WorkspaceNewAgentRow({
             testID={`sidebar-new-agent-row-${newAgent.tabId}`}
           >
             <AgentStatusIndicator bucket="done" />
-            <Text style={styles.agentTitle} numberOfLines={1}>
-              {t("panels.draft.newAgent")}
-            </Text>
+            <View style={styles.agentIdentity}>
+              <AgentTitleLine
+                title={t("panels.draft.newAgent")}
+                titleTestID={`sidebar-new-agent-title-${newAgent.tabId}`}
+                branch={branch}
+                branchTestID={`sidebar-new-agent-branch-${newAgent.tabId}`}
+                diffStat={diffStat}
+                diffTestID={`sidebar-new-agent-diff-${newAgent.tabId}`}
+                showBranch={showBranch}
+                showDiff={showDiff}
+              />
+              <AgentRowLabels
+                labels={labelDefinitions}
+                testID={`sidebar-new-agent-labels-${newAgent.tabId}`}
+              />
+            </View>
             <View
               style={!actionsVisible && styles.agentKebabHidden}
               pointerEvents={actionsVisible ? "auto" : "none"}
@@ -494,28 +575,22 @@ export function WorkspaceAgentRow({
             testID={`sidebar-agent-row-${agent.agentId}`}
           >
             <AgentStatusIndicator bucket={agent.statusBucket} />
-            <Text style={styles.agentTitle} numberOfLines={1}>
-              {agent.title}
-            </Text>
-            {showBranch || showDiff ? (
-              <View style={styles.agentTrailing}>
-                {showBranch ? (
-                  <View style={styles.agentBranch} testID={`sidebar-agent-branch-${agent.agentId}`}>
-                    <ThemedGitBranch size={12} uniProps={foregroundMutedColorMapping} />
-                    <Text style={styles.agentBranchText} numberOfLines={1}>
-                      {branch}
-                    </Text>
-                  </View>
-                ) : null}
-                {showDiff && diffStat ? (
-                  <DiffStat
-                    additions={diffStat.additions}
-                    deletions={diffStat.deletions}
-                    testID={`sidebar-agent-diff-${agent.agentId}`}
-                  />
-                ) : null}
-              </View>
-            ) : null}
+            <View style={styles.agentIdentity}>
+              <AgentTitleLine
+                title={agent.title}
+                titleTestID={`sidebar-agent-title-${agent.agentId}`}
+                branch={branch}
+                branchTestID={`sidebar-agent-branch-${agent.agentId}`}
+                diffStat={diffStat}
+                diffTestID={`sidebar-agent-diff-${agent.agentId}`}
+                showBranch={showBranch}
+                showDiff={showDiff}
+              />
+              <AgentRowLabels
+                labels={labelDefinitions}
+                testID={`sidebar-agent-labels-${agent.agentId}`}
+              />
+            </View>
             <View
               style={!actionsVisible && styles.agentKebabHidden}
               pointerEvents={actionsVisible ? "auto" : "none"}
@@ -611,13 +686,32 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.foregroundExtraMuted,
     opacity: 0.3,
   },
+  agentIdentity: {
+    minWidth: 0,
+    flex: 1,
+    gap: theme.spacing[0.5],
+  },
+  agentTitleLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    minWidth: 0,
+  },
   agentTitle: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,
+    lineHeight: 16,
     minWidth: 0,
     flexShrink: 1,
     flex: 1,
     opacity: 0.86,
+  },
+  agentLabels: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    minWidth: 0,
+    flexShrink: 1,
   },
   // The member's checkout facts, pinned right: the branch the workspace row's meta line used
   // to carry, then the diff badge its trailing slot used to carry. Same glyph size and ink as

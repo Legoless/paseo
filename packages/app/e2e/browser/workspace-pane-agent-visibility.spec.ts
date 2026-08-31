@@ -74,10 +74,17 @@ test.describe("workspace pane agent visibility", () => {
       await page.keyboard.press("Escape");
       await expect(contextMenu).toBeHidden();
 
+      await expect(newAgentRow.getByTestId("workspace-label-chip-Draft")).toBeVisible();
+      const titleBox = await newAgentRow
+        .locator('[data-testid^="sidebar-new-agent-title-"]')
+        .boundingBox();
+      const labelsBox = await newAgentRow
+        .locator('[data-testid^="sidebar-new-agent-labels-"]')
+        .boundingBox();
+      if (!titleBox || !labelsBox) throw new Error("expected labelled agent row geometry");
+      expect(labelsBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
       await newAgentRow.hover();
-      await expect(
-        page.getByTestId("workspace-label-chip-Draft").filter({ visible: true }),
-      ).toBeVisible();
+      await expect(hoverCard.getByTestId("workspace-label-chip-Draft")).toBeVisible();
 
       await page.mouse.move(800, 500);
       await newAgentRow.click({ button: "right" });
