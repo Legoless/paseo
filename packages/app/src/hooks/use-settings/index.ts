@@ -36,6 +36,7 @@ import {
   sanitizeFontFamily,
   saveAppSettings as saveAppSettingsPure,
   type AppSettings,
+  type ExplorerProjectScope,
   type OpenInSidePanePreferences,
   type PullRequestOpenLocation,
   type DesktopSettingsBridge,
@@ -73,6 +74,7 @@ export {
 export type {
   AppSettings,
   AppLanguage,
+  ExplorerProjectScope,
   OpenInSidePanePreferences,
   PullRequestOpenLocation,
   DesktopSettingsBridge,

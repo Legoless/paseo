@@ -12,6 +12,7 @@ describe("pane project root", () => {
   const terminal = tab({ kind: "terminal", terminalId: "terminal-b" });
   const file = tab({ kind: "file", path: "src/index.ts" });
   const input = {
+    scope: "pane" as const,
     primaryCwd: "/primary",
     agentCwdById: new Map([["agent-a", "/project-a"]]),
     terminalCwdById: new Map([["terminal-b", "/project-b"]]),
@@ -27,6 +28,17 @@ describe("pane project root", () => {
     expect(resolvePaneProjectRoot({ ...input, tabs: [file, agent], activeTabId: file.tabId })).toBe(
       "/project-a",
     );
+  });
+
+  it("keeps active-tab scope out of sibling tab projects", () => {
+    expect(
+      resolvePaneProjectRoot({
+        ...input,
+        scope: "tab",
+        tabs: [file, agent],
+        activeTabId: file.tabId,
+      }),
+    ).toBe("/primary");
   });
 
   it("uses a draft's selected project and otherwise falls back to the primary project", () => {

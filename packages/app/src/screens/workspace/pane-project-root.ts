@@ -18,16 +18,20 @@ function targetCwd(
   return null;
 }
 
-/** The active project-bound tab owns the pane; supporting tabs inherit from another bound tab. */
+/** Resolves the project owned by the active tab, with optional pane-group inheritance. */
 export function resolvePaneProjectRoot(input: {
   tabs: WorkspaceTabDescriptor[];
   activeTabId: string | null;
+  scope: "tab" | "pane";
   primaryCwd: string | null;
   agentCwdById: ReadonlyMap<string, string>;
   terminalCwdById: ReadonlyMap<string, string>;
 }): string | null {
   const active = input.tabs.find((tab) => tab.tabId === input.activeTabId) ?? null;
-  const candidates = active ? [active, ...input.tabs.filter((tab) => tab !== active)] : input.tabs;
+  let candidates = active ? [active] : [];
+  if (input.scope === "pane") {
+    candidates = active ? [active, ...input.tabs.filter((tab) => tab !== active)] : input.tabs;
+  }
   for (const tab of candidates) {
     const cwd = targetCwd(tab, input.agentCwdById, input.terminalCwdById)?.trim();
     if (cwd) return cwd;

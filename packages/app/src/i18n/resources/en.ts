@@ -1907,6 +1907,14 @@ export const en = {
       about: "About",
     },
     layout: {
+      workspacePanes: {
+        title: "Workspace panes",
+        explorerProject: {
+          label: "Explorer project",
+          description: "Choose how Files and Changes select a project",
+          options: { tab: "Active tab", pane: "Pane tab group" },
+        },
+      },
       openInSidePane: {
         title: "Open location",
         destinations: {
