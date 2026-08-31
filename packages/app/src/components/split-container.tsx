@@ -27,6 +27,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { View, Text, type LayoutChangeEvent } from "react-native";
+import { PanelRight } from "lucide-react-native";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -35,6 +36,7 @@ import Animated, {
 import { useTranslation } from "react-i18next";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { ResizeHandle } from "@/components/resize-handle";
+import { ToolbarButton } from "@/components/ui/pane-content-toolbar";
 import {
   resolveExplorerSidebarDockSizes,
   resolveExplorerSidebarWidth,
@@ -157,6 +159,26 @@ interface SplitPaneDropData {
 const EMPTY_SPLIT_NODES: SplitNode[] = [];
 const EMPTY_SPLIT_SIZES: number[] = [];
 const EXPLORER_SIDEBAR_RESIZE_GROUP_ID = "explorer-sidebar";
+
+function PaneExplorerToggle({ open, onPress }: { open: boolean; onPress: () => void }) {
+  const { t } = useTranslation();
+  const { theme } = useUnistyles();
+  return (
+    <View style={styles.paneExplorerToggle}>
+      <ToolbarButton
+        label={t(
+          open ? "workspace.tabs.explorerSidebar.close" : "workspace.tabs.explorerSidebar.open",
+        )}
+        selected={open}
+        testID="workspace-explorer-toggle"
+        tooltipSide="left"
+        onPress={onPress}
+      >
+        <PanelRight size={14} color={theme.colors.foregroundExtraMuted} />
+      </ToolbarButton>
+    </View>
+  );
+}
 
 function isWorkspaceTabDragData(data: unknown): data is WorkspaceTabDragData {
   return typeof data === "object" && data !== null && Reflect.get(data, "kind") === "workspace-tab";
@@ -1318,8 +1340,6 @@ function SplitPaneView({
             showPaneMaximizeAction={workspaceHasMultiplePanes && !focusModeEnabled}
             paneMaximized={paneId === maximizedPaneId}
             onTogglePaneMaximized={handleTogglePaneMaximized}
-            explorerSidebarOpen={explorerOpenForPane}
-            onToggleExplorerSidebar={handleTogglePaneExplorer}
             onSplitRight={handleSplitRight}
             onSplitDown={handleSplitDown}
             focusModeEnabled={Boolean(focusModeEnabled)}
@@ -1341,6 +1361,7 @@ function SplitPaneView({
               buildPaneContentModel={buildPaneContentModel}
             />
             <SplitDropZone paneId={pane.id} active={showDropZones} preview={dropPreview} />
+            <PaneExplorerToggle open={explorerOpenForPane} onPress={handleTogglePaneExplorer} />
           </View>
           {explorerOpenForPane && explorerSidebarPane && paneWorkspaceRoot ? (
             <>
@@ -1506,6 +1527,12 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minWidth: 0,
     minHeight: 0,
+  },
+  paneExplorerToggle: {
+    position: "absolute",
+    top: theme.spacing[2],
+    right: theme.spacing[2],
+    zIndex: 10,
   },
   dragOverlayChip: {
     flexDirection: "row",

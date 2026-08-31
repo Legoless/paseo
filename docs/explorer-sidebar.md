@@ -24,8 +24,8 @@ retention, while each shell owns its tabs, focus, dragging, resizing, and shortc
 
 `packages/app/src/workspace-tabs/explorer-sidebar.ts` owns show, hide, toggle, and view selection.
 On desktop, the shell renders inside the focused workspace pane. Every pane has an Explorer toggle
-at the trailing end of its tab rail. The dock starts hidden, uses its own persisted width and resize
-handle, and leaves the workspace header and sibling panes unchanged.
+at the top-right of its content surface. The dock starts hidden, uses its own persisted width and
+resize handle, and leaves the workspace header, tab rail, and sibling panes unchanged.
 
 The dock follows the project bound to the pane's active agent, terminal, or draft. A supporting tab
 inherits another project-bound tab in the same pane. When no tab supplies a project, use the

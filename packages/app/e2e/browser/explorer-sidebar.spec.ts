@@ -20,15 +20,15 @@ test.describe("Explorer sidebar", () => {
     try {
       await gotoWorkspace(page, workspace.workspaceId);
       await waitForWorkspaceTabsVisible(page);
-      const mainTabsBefore = await page
-        .getByTestId("workspace-pane-main")
-        .locator('[data-testid^="workspace-tab-"]')
-        .count();
+      const mainPane = page.getByTestId("workspace-pane-main");
+      const mainTabsBefore = await mainPane.locator('[data-testid^="workspace-tab-"]').count();
+      await expect(mainPane.getByTestId("workspace-explorer-toggle")).toBeVisible();
+      await expect(
+        mainPane.getByTestId("workspace-tabs-row").getByTestId("workspace-explorer-toggle"),
+      ).toHaveCount(0);
 
       const explorer = await ensureExplorerSidebar(page);
-      await expect(
-        page.getByTestId("workspace-pane-main").getByTestId("workspace-explorer-sidebar"),
-      ).toBeVisible();
+      await expect(mainPane.getByTestId("workspace-explorer-sidebar")).toBeVisible();
       await expect(explorer.getByTestId("explorer-sidebar-tab-files")).toBeVisible();
       await expect(explorer.getByTestId("explorer-sidebar-tab-changes_tree")).toBeVisible();
       await expect(explorer.getByTestId("workspace-new-tab-button")).toHaveCount(0);
@@ -41,9 +41,7 @@ test.describe("Explorer sidebar", () => {
 
       await page.getByTestId("workspace-explorer-toggle").first().click();
       await expect(explorerSidebar(page)).toHaveCount(0);
-      await expect(
-        page.getByTestId("workspace-pane-main").locator('[data-testid^="workspace-tab-"]'),
-      ).toHaveCount(mainTabsBefore);
+      await expect(mainPane.locator('[data-testid^="workspace-tab-"]')).toHaveCount(mainTabsBefore);
     } finally {
       await workspace.cleanup();
     }
