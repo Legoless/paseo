@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type ReactElement,
   type ReactNode,
 } from "react";
@@ -112,7 +113,7 @@ import { createWorkspaceBrowser, useBrowserStore } from "@/desktop/browser/store
 import { getDesktopHost } from "@/desktop/host";
 import { buildProviderCommand } from "@/utils/provider-command-templates";
 import { generateDraftId } from "@/stores/draft-keys";
-import { resolveWorkspaceRouteId } from "@/utils/workspace-identity";
+import { normalizeWorkspaceOpaqueId, resolveWorkspaceRouteId } from "@/utils/workspace-identity";
 import { useOpenAgentTabLabels } from "@/subagents/use-open-agent-tab-labels";
 import {
   WorkspaceTabPresentationResolver,
@@ -138,7 +139,6 @@ import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-
 import {
   resolveWorkspaceExplorerToggleOwner,
   WorkspaceExplorerToggle,
-  WorkspaceExplorerSidebarToggle,
   WorkspaceHeaderExplorerToggle,
 } from "@/screens/workspace/workspace-explorer-toggle";
 import { useHasWindowChromeObstruction } from "@/utils/desktop-window";
@@ -191,7 +191,7 @@ import { getIsElectron, isNative, isWeb } from "@/constants/platform";
 import type { SurfaceBackdrop } from "@/styles/surface-backdrop";
 import { buildHostRootRoute, buildSettingsHostRoute } from "@/utils/host-routes";
 import { useWorkspaceTerminals } from "@/screens/workspace/terminals/use-workspace-terminals";
-import type { TerminalProfile } from "@getpaseo/protocol/messages";
+import type { ListTerminalsResponse, TerminalProfile } from "@getpaseo/protocol/messages";
 import {
   WorkspaceHeaderMenuDesktop,
   WorkspaceHeaderMenuMobile,
@@ -212,10 +212,56 @@ const EMPTY_WORKSPACE_SCRIPTS: WorkspaceDescriptor["scripts"] = [];
 const EMPTY_PINNED_AGENT_IDS = new Set<string>();
 const EMPTY_SET = new Set<string>();
 
+function stringMapsEqual(left: ReadonlyMap<string, string>, right: ReadonlyMap<string, string>) {
+  if (left.size !== right.size) return false;
+  for (const [key, value] of left) {
+    if (right.get(key) !== value) return false;
+  }
+  return true;
+}
+
+function selectWorkspaceAgentCwds(
+  state: ReturnType<typeof useSessionStore.getState>,
+  serverId: string,
+  workspaceId: string,
+): Map<string, string> {
+  const session = state.sessions[serverId];
+  const agents = new Map([
+    ...(session?.agentDetails?.entries() ?? []),
+    ...(session?.agents?.entries() ?? []),
+  ]);
+  return new Map(
+    [...agents.values()]
+      .filter((agent) => normalizeWorkspaceOpaqueId(agent.workspaceId) === workspaceId)
+      .map((agent) => [agent.id, agent.cwd] as const),
+  );
+}
+
 function getWorkspaceScripts(
   workspaceDescriptor: WorkspaceDescriptor | null | undefined,
 ): WorkspaceDescriptor["scripts"] {
   return workspaceDescriptor?.scripts ?? EMPTY_WORKSPACE_SCRIPTS;
+}
+
+function getWorkspaceMemberCount(workspace: WorkspaceDescriptor | null): number {
+  return workspace?.members.length ?? 1;
+}
+
+function buildTerminalCwdById(
+  payload: ListTerminalsResponse["payload"] | undefined,
+): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const terminal of payload?.terminals ?? []) {
+    if (terminal.cwd) result.set(terminal.id, terminal.cwd);
+  }
+  return result;
+}
+
+function DesktopFallbackExplorerToggle({
+  visible,
+  ...toggleProps
+}: ComponentProps<typeof WorkspaceHeaderExplorerToggle> & { visible: boolean }) {
+  return visible ? <WorkspaceHeaderExplorerToggle {...toggleProps} /> : null;
 }
 
 interface WorkspaceFileLocationFields {
@@ -1668,6 +1714,11 @@ function WorkspaceScreenContent({
       }),
     workspaceAgentVisibilityEqual,
   );
+  const agentCwdById = useStoreWithEqualityFn(
+    useSessionStore,
+    (state) => selectWorkspaceAgentCwds(state, normalizedServerId, normalizedWorkspaceId),
+    stringMapsEqual,
+  );
 
   const {
     handleTerminalCreated,
@@ -1707,6 +1758,7 @@ function WorkspaceScreenContent({
     normalizedServerId,
     normalizedWorkspaceId,
     workspaceDirectory,
+    workspaceMemberCount: getWorkspaceMemberCount(workspaceDescriptor),
     workspaceScripts,
     hasHydratedWorkspaces,
     isMissingWorkspaceDirectory,
@@ -1716,6 +1768,10 @@ function WorkspaceScreenContent({
     onTerminalCreateQueued: handleTerminalCreateQueued,
     onTerminalCreateFailed: handleTerminalCreateFailed,
   });
+  const terminalCwdById = useMemo(
+    () => buildTerminalCwdById(terminalsQuery.data),
+    [terminalsQuery.data],
+  );
   const { archiveAgent } = useArchiveAgent();
 
   const { checkoutQuery, isCheckoutStatusLoading } = useWorkspaceCheckoutStatus({
@@ -3476,12 +3532,14 @@ function WorkspaceScreenContent({
     (input: {
       tab: WorkspaceTabDescriptor;
       paneId?: string | null;
+      workspaceRoot?: string;
       focusPaneBeforeOpen?: boolean;
     }) =>
       buildWorkspacePaneContentModel({
         tab: input.tab,
         normalizedServerId,
         normalizedWorkspaceId,
+        workspaceRoot: input.workspaceRoot,
         host:
           canRenderDesktopPaneSplits &&
           input.paneId !== null &&
@@ -3625,10 +3683,15 @@ function WorkspaceScreenContent({
   });
 
   const buildDesktopPaneContentModel = useCallback(
-    function buildDesktopPaneContentModel(input: { paneId: string; tab: WorkspaceTabDescriptor }) {
+    function buildDesktopPaneContentModel(input: {
+      paneId: string;
+      tab: WorkspaceTabDescriptor;
+      workspaceRoot?: string;
+    }) {
       return buildPaneContentModel({
         tab: input.tab,
         paneId: input.paneId,
+        workspaceRoot: input.workspaceRoot,
         focusPaneBeforeOpen: true,
       });
     },
@@ -3753,7 +3816,8 @@ function WorkspaceScreenContent({
         {!isMobile && workspaceDirectory ? (
           <>
             <WorkspaceActions serverId={normalizedServerId} cwd={workspaceDirectory} />
-            <WorkspaceHeaderExplorerToggle
+            <DesktopFallbackExplorerToggle
+              visible={!canRenderDesktopPaneSplits}
               owner={explorerToggleOwner}
               onPress={handleToggleExplorerSidebar}
               label={explorerSidebarToggleLabel}
@@ -3778,6 +3842,7 @@ function WorkspaceScreenContent({
     ),
     [
       isMobile,
+      canRenderDesktopPaneSplits,
       workspaceDescriptor,
       normalizedServerId,
       normalizedWorkspaceId,
@@ -3798,25 +3863,6 @@ function WorkspaceScreenContent({
   const showScreenHeader = useMemo(
     () => shouldShowWorkspaceScreenHeader({ isFocusModeEnabled, isMobile }),
     [isFocusModeEnabled, isMobile],
-  );
-  const renderExplorerSidebarHeaderAction = useCallback(
-    () => (
-      <WorkspaceExplorerSidebarToggle
-        owner={explorerToggleOwner}
-        onPress={handleToggleExplorerSidebar}
-        label={explorerSidebarToggleLabel}
-        tooltipLabel={t("workspace.tabs.explorerSidebar.toggle")}
-        tooltipKeys={EXPLORER_TOGGLE_KEYS}
-        accessibilityState={explorerSidebarToggleAccessibilityState}
-      />
-    ),
-    [
-      explorerSidebarToggleAccessibilityState,
-      explorerSidebarToggleLabel,
-      explorerToggleOwner,
-      handleToggleExplorerSidebar,
-      t,
-    ],
   );
   const createTerminalDisabled = useMemo(
     () => createTerminalMutation.isPending || pendingTerminalCreateInput !== null,
@@ -3928,12 +3974,16 @@ function WorkspaceScreenContent({
       <SplitContainer
         layout={workspaceLayout}
         renderMainHeader={renderWorkspaceScreenHeader}
-        renderExplorerSidebarHeaderAction={renderExplorerSidebarHeaderAction}
         focusModeEnabled={desktopFocusModeEnabled}
         onExitFocusMode={toggleFocusMode}
         workspaceKey={persistenceKey}
         normalizedServerId={normalizedServerId}
         normalizedWorkspaceId={normalizedWorkspaceId}
+        primaryWorkspaceRoot={workspaceDirectory}
+        agentCwdById={agentCwdById}
+        terminalCwdById={terminalCwdById}
+        isExplorerSidebarOpen={isExplorerSidebarShowing}
+        onToggleExplorerSidebar={handleToggleExplorerSidebar}
         isWorkspaceFocused={isRouteFocused}
         uiTabs={uiTabs}
         hoveredCloseTabKey={hoveredCloseTabKey}
@@ -3965,12 +4015,16 @@ function WorkspaceScreenContent({
     canRenderDesktopPaneSplits,
     workspaceLayout,
     renderWorkspaceScreenHeader,
-    renderExplorerSidebarHeaderAction,
     persistenceKey,
     desktopFocusModeEnabled,
     toggleFocusMode,
     normalizedServerId,
     normalizedWorkspaceId,
+    workspaceDirectory,
+    agentCwdById,
+    terminalCwdById,
+    isExplorerSidebarShowing,
+    handleToggleExplorerSidebar,
     isRouteFocused,
     uiTabs,
     hoveredCloseTabKey,

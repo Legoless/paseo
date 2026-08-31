@@ -1,10 +1,9 @@
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback, useMemo } from "react";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { RetainedPanel } from "@/components/retained-panel";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import type { TabDropPreview } from "@/components/split-container-tab-drop-preview";
-import { WorkspaceProjectPicker } from "@/components/workspace-project-picker";
 import { ExplorerSidebarTabRail } from "@/screens/workspace/explorer-sidebar-tab-rail";
 import { WorkspacePanelHost } from "@/screens/workspace/workspace-panel-host";
 import { deriveWorkspacePaneState } from "@/screens/workspace/workspace-pane-state";
@@ -13,13 +12,14 @@ import type { WorkspacePaneContentModel } from "@/screens/workspace/workspace-pa
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import type { SplitPane } from "@/stores/workspace-layout-store";
 import type { WorkspaceTab } from "@/workspace-tabs/model";
-import { WindowChromeRegion, WindowChromeSafeArea } from "@/utils/desktop-window";
+import { WindowChromeSafeArea } from "@/utils/desktop-window";
 
 interface ExplorerSidebarDockProps {
   pane: SplitPane;
   uiTabs: WorkspaceTab[];
   normalizedServerId: string;
   normalizedWorkspaceId: string;
+  workspaceRoot: string;
   isWorkspaceFocused: boolean;
   closingTabIds: Set<string>;
   activeDragTabId: string | null;
@@ -32,8 +32,8 @@ interface ExplorerSidebarDockProps {
   buildPaneContentModel: (input: {
     paneId: string;
     tab: WorkspaceTabDescriptor;
+    workspaceRoot?: string;
   }) => WorkspacePaneContentModel;
-  headerAction?: ReactNode;
 }
 
 /** A dock shell over the shared panel host. It owns no workspace-pane capabilities. */
@@ -42,6 +42,7 @@ export function ExplorerSidebarDock({
   uiTabs,
   normalizedServerId,
   normalizedWorkspaceId,
+  workspaceRoot,
   isWorkspaceFocused,
   closingTabIds,
   activeDragTabId,
@@ -52,7 +53,6 @@ export function ExplorerSidebarDock({
   onMoveTabToMain,
   onReorderTabsInPane,
   buildPaneContentModel,
-  headerAction,
 }: ExplorerSidebarDockProps) {
   const paneState = useMemo(() => deriveWorkspacePaneState({ pane, tabs: uiTabs }), [pane, uiTabs]);
   const tabs = useMemo(() => paneState.tabs.map((tab) => tab.descriptor), [paneState.tabs]);
@@ -83,46 +83,40 @@ export function ExplorerSidebarDock({
 
   return (
     <RetainedPanel active>
-      <WindowChromeRegion corners="top-right">
-        <View style={styles.dock} testID="workspace-explorer-sidebar">
-          <WindowChromeSafeArea placement="inline" style={styles.tabRail}>
-            <TitlebarDragRegion />
-            <ExplorerSidebarTabRail
-              paneId={pane.id}
-              tabs={tabItems}
-              normalizedServerId={normalizedServerId}
-              normalizedWorkspaceId={normalizedWorkspaceId}
-              activeDragTabId={activeDragTabId}
-              tabDropPreviewIndex={
-                tabDropPreview?.paneId === pane.id ? tabDropPreview.indicatorIndex : null
-              }
-              onNavigateTab={handleSelectTab}
-              onCloseTab={onCloseTab}
-              onCreateNewTab={onCreateNewTab}
-              onMoveTabToMain={onMoveTabToMain}
-              onReorderTabs={handleReorderTabs}
-              trailingAccessory={headerAction}
-            />
-            <View pointerEvents="none" style={styles.tabRailDivider} />
-          </WindowChromeSafeArea>
-          <WorkspaceProjectPicker
-            serverId={normalizedServerId}
-            workspaceId={normalizedWorkspaceId}
+      <View style={styles.dock} testID="workspace-explorer-sidebar">
+        <WindowChromeSafeArea placement="inline" style={styles.tabRail}>
+          <TitlebarDragRegion />
+          <ExplorerSidebarTabRail
+            paneId={pane.id}
+            tabs={tabItems}
+            normalizedServerId={normalizedServerId}
+            normalizedWorkspaceId={normalizedWorkspaceId}
+            activeDragTabId={activeDragTabId}
+            tabDropPreviewIndex={
+              tabDropPreview?.paneId === pane.id ? tabDropPreview.indicatorIndex : null
+            }
+            onNavigateTab={handleSelectTab}
+            onCloseTab={onCloseTab}
+            onCreateNewTab={onCreateNewTab}
+            onMoveTabToMain={onMoveTabToMain}
+            onReorderTabs={handleReorderTabs}
           />
-          <View style={styles.content}>
-            <WorkspacePanelHost
-              paneId={pane.id}
-              tabs={tabs}
-              activeTabId={activeTabId}
-              normalizedServerId={normalizedServerId}
-              normalizedWorkspaceId={normalizedWorkspaceId}
-              isWorkspaceFocused={isWorkspaceFocused}
-              isPaneFocused
-              buildPaneContentModel={buildPaneContentModel}
-            />
-          </View>
+          <View pointerEvents="none" style={styles.tabRailDivider} />
+        </WindowChromeSafeArea>
+        <View style={styles.content}>
+          <WorkspacePanelHost
+            paneId={pane.id}
+            tabs={tabs}
+            activeTabId={activeTabId}
+            normalizedServerId={normalizedServerId}
+            normalizedWorkspaceId={normalizedWorkspaceId}
+            workspaceRoot={workspaceRoot}
+            isWorkspaceFocused={isWorkspaceFocused}
+            isPaneFocused
+            buildPaneContentModel={buildPaneContentModel}
+          />
         </View>
-      </WindowChromeRegion>
+      </View>
     </RetainedPanel>
   );
 }

@@ -5,7 +5,7 @@ contracts.
 
 | Surface          | Purpose                      | Lifecycle                                  |
 | ---------------- | ---------------------------- | ------------------------------------------ |
-| Explorer sidebar | Files and Changes navigation | Cmd+E shows or hides the dedicated dock    |
+| Explorer sidebar | Files and Changes navigation | Cmd+E toggles the focused pane's dock      |
 | Side pane        | Ordinary workspace content   | Created and closed like any workspace pane |
 
 ## Panel host contract
@@ -23,9 +23,14 @@ retention, while each shell owns its tabs, focus, dragging, resizing, and shortc
 ## Explorer sidebar
 
 `packages/app/src/workspace-tabs/explorer-sidebar.ts` owns show, hide, toggle, and view selection.
-On desktop, the shell is rendered outside the workspace split canvas so it divides the full
-workspace, including the header. It has its own persisted width and resize handle. Main-pane splits
-never read or modify that width.
+On desktop, the shell renders inside the focused workspace pane. Every pane has an Explorer toggle
+at the trailing end of its tab rail. The dock starts hidden, uses its own persisted width and resize
+handle, and leaves the workspace header and sibling panes unchanged.
+
+The dock follows the project bound to the pane's active agent, terminal, or draft. A supporting tab
+inherits another project-bound tab in the same pane. When no tab supplies a project, use the
+workspace's primary project. The Explorer project picker remains on layouts without desktop pane
+splits, where there is one shared Explorer destination.
 
 `packages/app/src/workspace-tabs/open-supporting-view.ts` owns semantic Changes and pull-request
 opens. Compact and wide native layouts select the matching Explorer tab. Desktop Changes opens
@@ -35,16 +40,18 @@ The composer Changes pill is a two-stage desktop action: it first reveals Explor
 routes later presses to the working diff through the shared diff preference.
 
 The persisted layout still contains the Explorer pane so tabs survive reloads. The renderer removes
-that pane from the workspace split tree and docks it separately. Persisted identifiers retain the
-literal `"explorer"` pane id and `explorerPaneIdByWorkspace` key for compatibility.
+that pane from the workspace split tree and mounts its shell inside the focused pane. Persisted
+identifiers retain the literal `"explorer"` pane id and `explorerPaneIdByWorkspace` key for
+compatibility.
 
 The tab rail has no inline add or close controls. Its context menu opens a New Tab launcher and
 toggles the singleton Files and Changes views. Individual tab menus close instances or move
 compatible tabs to main. Explorer tabs can be reordered, but the dock cannot be split. Selecting
 an Explorer tab does not change workspace focus.
 
-Cmd+E shows or hides Explorer without changing its selected view. Compact layouts use the combined
-full-screen Explorer overlay for Changes, Files, and pull requests, and close it after a file opens.
+Cmd+E shows or hides Explorer in the focused pane without changing its selected view. Compact
+layouts use the combined full-screen Explorer overlay for Changes, Files, and pull requests, and
+close it after a file opens.
 Wide native layouts without pane splits use the same combined content in a resizable inline dock;
 opening a file leaves that dock visible. Both presentations keep their selection in the panel store
 and reuse the layout store's per-workspace Explorer width. They do not create a second Explorer

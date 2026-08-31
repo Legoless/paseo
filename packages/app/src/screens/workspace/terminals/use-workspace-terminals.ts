@@ -36,6 +36,7 @@ interface UseWorkspaceTerminalsInput {
   normalizedServerId: string;
   normalizedWorkspaceId: string;
   workspaceDirectory: string | null;
+  workspaceMemberCount: number;
   workspaceScripts: WorkspaceDescriptor["scripts"];
   hasHydratedWorkspaces: boolean;
   isMissingWorkspaceDirectory: boolean;
@@ -54,6 +55,7 @@ export function useWorkspaceTerminals(input: UseWorkspaceTerminalsInput) {
     normalizedServerId,
     normalizedWorkspaceId,
     workspaceDirectory,
+    workspaceMemberCount,
     workspaceScripts,
     hasHydratedWorkspaces,
     isMissingWorkspaceDirectory,
@@ -72,6 +74,7 @@ export function useWorkspaceTerminals(input: UseWorkspaceTerminalsInput) {
     normalizedWorkspaceId || null,
   );
   const terminalCreateCwd = selectedProject.cwd ?? workspaceDirectory;
+  const terminalListRoot = workspaceMemberCount > 1 ? null : workspaceDirectory;
   const [pendingCreateInput, setPendingCreateInput] = useState<PendingTerminalCreateInput | null>(
     null,
   );
@@ -81,8 +84,8 @@ export function useWorkspaceTerminals(input: UseWorkspaceTerminalsInput) {
   );
   const queryKey = useMemo(
     () =>
-      buildTerminalsQueryKey(normalizedServerId, workspaceDirectory, normalizedWorkspaceId || null),
-    [normalizedServerId, normalizedWorkspaceId, workspaceDirectory],
+      buildTerminalsQueryKey(normalizedServerId, terminalListRoot, normalizedWorkspaceId || null),
+    [normalizedServerId, normalizedWorkspaceId, terminalListRoot],
   );
   const paneWorkspaceId = normalizedWorkspaceId || undefined;
 
@@ -91,9 +94,9 @@ export function useWorkspaceTerminals(input: UseWorkspaceTerminalsInput) {
     enabled: canCreateNow,
     pushEvent: "terminals_changed",
     meta: workspaceTerminalsPushRoute({
-      enabled: canCreateNow,
+      enabled: canCreateNow && workspaceMemberCount === 1,
       serverId: normalizedServerId,
-      cwd: workspaceDirectory ?? "",
+      cwd: terminalListRoot ?? "",
       ...(paneWorkspaceId ? { workspaceId: paneWorkspaceId } : {}),
     }),
     queryFn: async () => {
@@ -101,11 +104,11 @@ export function useWorkspaceTerminals(input: UseWorkspaceTerminalsInput) {
         throw new Error(t("workspace.terminal.hostDisconnected"));
       }
       if (paneWorkspaceId) {
-        return await client.listTerminals(workspaceDirectory, undefined, {
+        return await client.listTerminals(terminalListRoot ?? undefined, undefined, {
           workspaceId: paneWorkspaceId,
         });
       }
-      return await client.listTerminals(workspaceDirectory, undefined, {});
+      return await client.listTerminals(terminalListRoot ?? undefined, undefined, {});
     },
   });
   const terminals = useMemo(() => query.data?.terminals ?? [], [query.data]);

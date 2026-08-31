@@ -5964,6 +5964,12 @@ const TerminalInfoSchema = z.object({
   activity: TerminalActivitySchema.nullable().optional(),
 });
 
+// Directory-scoped responses can omit cwd; workspace-wide responses include it so
+// multi-project clients can attach each terminal to the right project.
+const TerminalListInfoSchema = TerminalInfoSchema.omit({ cwd: true }).extend({
+  cwd: z.string().optional(),
+});
+
 export const TerminalCellSchema = z.object({
   char: z.string(),
   fg: z.number().optional(),
@@ -6008,7 +6014,7 @@ export const ListTerminalsResponseSchema = z.object({
   type: z.literal("list_terminals_response"),
   payload: z.object({
     cwd: z.string().optional(),
-    terminals: z.array(TerminalInfoSchema.omit({ cwd: true })),
+    terminals: z.array(TerminalListInfoSchema),
     requestId: z.string(),
   }),
 });

@@ -1795,20 +1795,32 @@ describe("list terminals across directories", () => {
     });
 
     const list = await ctx.client.listTerminals();
+    const workspaceList = await ctx.client.listTerminals(undefined, undefined, {
+      workspaceId: firstCreated.terminal!.workspaceId,
+    });
 
     expect(list).not.toHaveProperty("cwd");
     expect(list.terminals).toEqual(
       expect.arrayContaining([
-        {
+        expect.objectContaining({
           id: firstCreated.terminal!.id,
           name: "first-terminal",
-        },
-        {
+          cwd: cwd1,
+        }),
+        expect.objectContaining({
           id: secondCreated.terminal!.id,
           name: "second-terminal",
-        },
+          cwd: cwd2,
+        }),
       ]),
     );
+    expect(workspaceList.terminals).toEqual([
+      expect.objectContaining({
+        id: firstCreated.terminal!.id,
+        name: "first-terminal",
+        cwd: cwd1,
+      }),
+    ]);
   });
 
   test("lists terminals for specific directory when cwd is provided", async () => {

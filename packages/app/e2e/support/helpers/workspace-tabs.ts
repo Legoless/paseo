@@ -189,12 +189,9 @@ export async function ensureWorkspaceAgentPaneVisible(page: Page): Promise<void>
   if (!(await toggle.isVisible().catch(() => false))) {
     return;
   }
-  const isExpanded = (await toggle.getAttribute("aria-expanded")) === "true";
-  if (isExpanded) {
+  if ((await toggle.getAttribute("aria-label")) === "Close Explorer sidebar") {
     await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-expanded", "false", {
-      timeout: 10_000,
-    });
+    await expect(toggle).toHaveAccessibleName("Open Explorer sidebar", { timeout: 10_000 });
   }
 }
 

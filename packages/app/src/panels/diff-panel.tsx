@@ -87,8 +87,15 @@ function resolveChangesPresentation(
 
 function ChangesPanel() {
   const { t } = useTranslation();
-  const { serverId, workspaceId, tabId, target, openPreferredTarget, openTargetToSide } =
-    usePaneContext();
+  const {
+    serverId,
+    workspaceId,
+    workspaceRoot: paneWorkspaceRoot,
+    tabId,
+    target,
+    openPreferredTarget,
+    openTargetToSide,
+  } = usePaneContext();
   const [changesState, setChangesState] = usePanelState(changesStateSchema, defaultChangesState);
   const { preferences } = useChangesPreferences();
   const primaryCwd = useWorkspaceDirectory(serverId, workspaceId);
@@ -100,9 +107,9 @@ function ChangesPanel() {
     "ChangesPanel requires working_diff or changes_tree target",
   );
   const isTree = target.kind === "changes_tree";
-  // The explorer tree follows the workspace's selected project; a working_diff pane
-  // stays on the primary directory it was opened for.
-  const cwd = isTree ? (selectedCwd ?? primaryCwd) : primaryCwd;
+  // A desktop Explorer follows its owning pane; compact Explorer follows the project picker.
+  // A working_diff pane stays on the primary directory it was opened for.
+  const cwd = isTree ? (paneWorkspaceRoot ?? selectedCwd ?? primaryCwd) : primaryCwd;
 
   const handleOpenFile = useCallback(
     (path: string) => openPreferredTarget({ kind: "file", path }, isTree ? "diffs" : "diffFiles"),

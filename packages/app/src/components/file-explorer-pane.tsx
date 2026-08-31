@@ -401,6 +401,7 @@ interface FileExplorerPaneProps {
   serverId: string;
   workspaceId?: string | null;
   workspaceRoot: string;
+  fixedWorkspaceRoot?: string;
   onOpenFile?: (filePath: string) => void;
   onOpenFileToSide?: (filePath: string) => void;
   onAddToChat?: (path: string) => void;
@@ -410,6 +411,7 @@ export function FileExplorerPane({
   serverId,
   workspaceId,
   workspaceRoot,
+  fixedWorkspaceRoot,
   onOpenFile,
   onOpenFileToSide,
   onAddToChat,
@@ -421,8 +423,8 @@ export function FileExplorerPane({
   // selection store falls back to the primary member, which matches the prop.
   const selectedProject = useSelectedWorkspaceProject(serverId, workspaceId ?? null);
   const normalizedWorkspaceRoot = useMemo(
-    () => (selectedProject.cwd ?? workspaceRoot).trim(),
-    [selectedProject.cwd, workspaceRoot],
+    () => (fixedWorkspaceRoot ?? selectedProject.cwd ?? workspaceRoot).trim(),
+    [fixedWorkspaceRoot, selectedProject.cwd, workspaceRoot],
   );
   const workspaceStateKey = useMemo(
     () =>

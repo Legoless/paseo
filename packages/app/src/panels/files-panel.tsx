@@ -20,8 +20,16 @@ const filesPanelPresentation = {
 
 function FilesPanel() {
   const { t } = useTranslation();
-  const { serverId, workspaceId, target, openPreferredTarget, openTargetToSide } = usePaneContext();
-  const workspaceRoot = useWorkspaceDirectory(serverId, workspaceId);
+  const {
+    serverId,
+    workspaceId,
+    workspaceRoot: paneWorkspaceRoot,
+    target,
+    openPreferredTarget,
+    openTargetToSide,
+  } = usePaneContext();
+  const primaryWorkspaceRoot = useWorkspaceDirectory(serverId, workspaceId);
+  const workspaceRoot = paneWorkspaceRoot ?? primaryWorkspaceRoot;
   const { addFile, canAddToChat } = useAddFileToChat({ serverId, workspaceId });
   invariant(target.kind === "files", "FilesPanel requires files target");
   const onOpenFile = useCallback(
@@ -44,6 +52,7 @@ function FilesPanel() {
       serverId={serverId}
       workspaceId={workspaceId}
       workspaceRoot={workspaceRoot}
+      fixedWorkspaceRoot={paneWorkspaceRoot}
       onOpenFile={onOpenFile}
       onOpenFileToSide={openTargetToSide ? onOpenFileToSide : undefined}
       onAddToChat={canAddToChat ? addFile : undefined}
