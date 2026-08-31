@@ -7,11 +7,13 @@ import {
 import {
   buildOpenFileExplorerPatch,
   buildToggleFileExplorerPatch,
+  DEFAULT_PANE_PROJECT_ACTIONS,
   DEFAULT_TREE_RAIL_WIDTH,
   migratePanelState,
   selectIsAgentListOpen,
   selectIsCompactFileExplorerOpen,
   setMobilePanelTarget,
+  togglePaneProjectActionVisibility,
   type PanelCoreState,
 } from "./state";
 
@@ -147,6 +149,24 @@ describe("panel-store migration", () => {
   it("defaults the file panel tree to open and keeps it closed once closed", () => {
     expect(migratePanelState({}, 15).fileTreeVisible).toBe(true);
     expect(migratePanelState({ fileTreeVisible: false }, 16).fileTreeVisible).toBe(false);
+  });
+
+  it("defaults and preserves pane project action visibility", () => {
+    expect(migratePanelState({}, 16).paneProjectActions).toEqual(DEFAULT_PANE_PROJECT_ACTIONS);
+    expect(
+      migratePanelState(
+        { paneProjectActions: { branch: false, editor: true, gitActions: false } },
+        17,
+      ).paneProjectActions,
+    ).toEqual({ branch: false, editor: true, gitActions: false });
+  });
+
+  it("toggles one pane project action without changing the others", () => {
+    expect(togglePaneProjectActionVisibility(DEFAULT_PANE_PROJECT_ACTIONS, "editor")).toEqual({
+      branch: true,
+      editor: false,
+      gitActions: true,
+    });
   });
 
   it("drops persisted compact panel state so cold starts return to content", () => {

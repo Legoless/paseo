@@ -30,8 +30,8 @@ Desktop development builds put their checkout label at the tray's top-left while
 the top-right. Project-scoped git actions sit immediately left of Explorer. The global sidebar and
 workspace header do not own project work chrome on desktop pane layouts. Open in editor uses the
 same pane project directory, so it opens that checkout or worktree rather than the workspace primary.
-The tray's workspace-actions toggle collapses or reveals Open in editor and git actions per pane;
-the branch label and Explorer toggle remain visible.
+The tray's workspace-actions menu configures the visible controls: development branch label, Open
+in editor, and git actions. The selection persists per device and applies to every pane.
 The tray is a fixed-height row above pane content. Controls becoming ready never cover or shift the
 agent or terminal surface.
 While Explorer is closed, its toggle sits at the main tray's top-right. Opening Explorer moves the

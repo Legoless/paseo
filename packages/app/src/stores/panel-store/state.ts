@@ -20,6 +20,14 @@ export interface DesktopSidebarState {
 }
 
 export type SortOption = "name" | "modified" | "size";
+export type PaneProjectAction = "branch" | "editor" | "gitActions";
+export type PaneProjectActionVisibility = Record<PaneProjectAction, boolean>;
+
+export const DEFAULT_PANE_PROJECT_ACTIONS: PaneProjectActionVisibility = {
+  branch: true,
+  editor: true,
+  gitActions: true,
+};
 
 export const DEFAULT_SIDEBAR_WIDTH = 320;
 export const MIN_SIDEBAR_WIDTH = 200;
@@ -117,6 +125,11 @@ export function buildToggleFileExplorerPatch(
 }
 
 const ExplorerTabSchema = z.enum(["changes", "files", "pr"]);
+const PaneProjectActionsStorageSchema = z.strictObject({
+  branch: z.boolean().optional(),
+  editor: z.boolean().optional(),
+  gitActions: z.boolean().optional(),
+});
 const DesktopSidebarStorageSchema = z.strictObject({
   agentListOpen: z.boolean().optional(),
   focusModeEnabled: z.boolean().optional(),
@@ -139,6 +152,7 @@ export const PanelPersistedStateSchema = z.strictObject({
   desktop: DesktopSidebarStorageSchema.optional(),
   explorerTab: ExplorerTabSchema.optional(),
   explorerTabByCheckout: z.record(z.string(), ExplorerTabSchema).optional(),
+  paneProjectActions: PaneProjectActionsStorageSchema.optional(),
   expandedPathsByWorkspace: z.record(z.string(), z.array(z.string())).optional(),
   // Accepted only so migration can discard the former per-file diff expansion state.
   diffExpandedPathsByWorkspace: z.record(z.string(), z.array(z.string())).optional(),
@@ -155,6 +169,23 @@ export const PanelPersistedStateSchema = z.strictObject({
 });
 
 type MigratablePanelState = z.infer<typeof PanelPersistedStateSchema>;
+
+function resolvePaneProjectActions(
+  current: MigratablePanelState["paneProjectActions"],
+): PaneProjectActionVisibility {
+  return {
+    branch: current?.branch ?? DEFAULT_PANE_PROJECT_ACTIONS.branch,
+    editor: current?.editor ?? DEFAULT_PANE_PROJECT_ACTIONS.editor,
+    gitActions: current?.gitActions ?? DEFAULT_PANE_PROJECT_ACTIONS.gitActions,
+  };
+}
+
+export function togglePaneProjectActionVisibility(
+  current: PaneProjectActionVisibility,
+  action: PaneProjectAction,
+): PaneProjectActionVisibility {
+  return { ...current, [action]: !current[action] };
+}
 
 function migratePanelExplorerTabByCheckout(state: MigratablePanelState, version: number): void {
   if (
@@ -219,6 +250,7 @@ export function migratePanelState(persistedState: unknown, version: number): Mig
   if (!isExplorerTab(state.explorerTab)) {
     state.explorerTab = "changes";
   }
+  state.paneProjectActions = resolvePaneProjectActions(state.paneProjectActions);
   migratePanelExplorerTabByCheckout(state, version);
   if (version < 8) {
     migratePanelDesktopFocusMode(state);
