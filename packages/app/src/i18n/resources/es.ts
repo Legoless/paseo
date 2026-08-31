@@ -1059,6 +1059,8 @@ export const es: TranslationResources = {
       deleteTitle: "¿Eliminar {{name}}?",
       deleteMessage_one: "Esto quita la etiqueta de {{count}} espacio de trabajo en este host.",
       deleteMessage_other: "Esto quita la etiqueta de {{count}} espacios de trabajo en este host.",
+      deleteAgentMessage_one: "También quita la etiqueta de {{count}} agente.",
+      deleteAgentMessage_other: "También quita la etiqueta de {{count}} agentes.",
       offline: "Este host está desconectado.",
       updateHost: "Actualiza este host para gestionar etiquetas.",
     },

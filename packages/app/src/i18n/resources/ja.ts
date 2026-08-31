@@ -1036,6 +1036,8 @@ export const ja: TranslationResources = {
       deleteTitle: "{{name}}を削除しますか？",
       deleteMessage_one: "このホストの{{count}}個のワークスペースからラベルを削除します。",
       deleteMessage_other: "このホストの{{count}}個のワークスペースからラベルを削除します。",
+      deleteAgentMessage_one: "また、{{count}}個のエージェントからラベルを削除します。",
+      deleteAgentMessage_other: "また、{{count}}個のエージェントからラベルを削除します。",
       offline: "このホストはオフラインです。",
       updateHost: "ラベルを管理するにはホストを更新してください。",
     },

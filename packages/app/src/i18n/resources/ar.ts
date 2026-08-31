@@ -1025,6 +1025,8 @@ export const ar: TranslationResources = {
       deleteTitle: "حذف {{name}}؟",
       deleteMessage_one: "سيؤدي هذا إلى إزالة التسمية من {{count}} مساحة عمل على هذا المضيف.",
       deleteMessage_other: "سيؤدي هذا إلى إزالة التسمية من {{count}} مساحات عمل على هذا المضيف.",
+      deleteAgentMessage_one: "سيؤدي أيضًا إلى إزالة التسمية من {{count}} وكيل.",
+      deleteAgentMessage_other: "سيؤدي أيضًا إلى إزالة التسمية من {{count}} وكلاء.",
       offline: "هذا المضيف غير متصل.",
       updateHost: "حدّث هذا المضيف لإدارة التسميات.",
     },

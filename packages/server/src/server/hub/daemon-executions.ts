@@ -301,6 +301,11 @@ export class DaemonExecutions implements HubExecutionAgents {
     if (event.type === "agent_state") {
       return this.projectAgentState(event.agent);
     }
+    if (event.type === "stored_agent_state") {
+      if (!this.isOwnedRecord(event.record)) return null;
+      const snapshot = this.projectRecord(event.record);
+      return { type: "update", ...snapshot };
+    }
     if (event.type !== "agent_stream") {
       return null;
     }
@@ -333,6 +338,12 @@ export class DaemonExecutions implements HubExecutionAgents {
 
   private isOwned(agent: ManagedAgent | null): agent is ManagedAgent & { owner: DaemonAgentOwner } {
     return agent?.owner?.kind === "daemon" && agent.owner.daemonId === this.daemonId;
+  }
+
+  private isOwnedRecord(
+    record: StoredAgentRecord,
+  ): record is StoredAgentRecord & { owner: DaemonAgentOwner } {
+    return record.owner?.kind === "daemon" && record.owner.daemonId === this.daemonId;
   }
 
   private owner(executionId: string): DaemonAgentOwner {

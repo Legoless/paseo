@@ -3,6 +3,10 @@ import { z } from "zod";
 import type { WorkspaceLabelDefinition } from "@getpaseo/protocol/workspace-labels";
 import { WorkspaceLabelDefinitionSchema } from "@getpaseo/protocol/messages";
 import { writeJsonFileAtomic } from "../../atomic-file.js";
+import type {
+  WorkspaceLabelAgentRecord,
+  WorkspaceLabelAgentState,
+} from "../../agent/agent-manager.js";
 import type { PersistedWorkspaceRecord } from "../../workspace-registry.js";
 
 interface WorkspaceLabelCompoundRegistry {
@@ -23,7 +27,19 @@ interface WorkspaceLabelCompoundRegistry {
 interface WorkspaceLabelMutation<TResult> {
   labels: WorkspaceLabelDefinition[];
   workspaceUpdates: PersistedWorkspaceRecord[];
+  agentUpdates: WorkspaceLabelAgentState[];
   result: TResult;
+}
+
+export interface WorkspaceLabelAgentStore {
+  listWorkspaceLabelAgentRecords(): Promise<WorkspaceLabelAgentRecord[]>;
+  holdWorkspaceLabelAgentStates(states: readonly WorkspaceLabelAgentState[]): Promise<void>;
+  replaceWorkspaceLabelAgentStates(
+    states: readonly WorkspaceLabelAgentState[],
+    options?: { publish?: boolean; ignoreMissing?: boolean },
+  ): Promise<void>;
+  releaseWorkspaceLabelAgentStates(agentIds: readonly string[]): Promise<void>;
+  publishWorkspaceLabelAgentStates(agentIds: readonly string[]): Promise<void>;
 }
 
 const WorkspaceLabelWorkspaceStateSchema = z.object({
@@ -31,12 +47,18 @@ const WorkspaceLabelWorkspaceStateSchema = z.object({
   labels: z.array(z.string()).optional(),
   updatedAt: z.string(),
 });
+const WorkspaceLabelAgentStateSchema = z.object({
+  agentId: z.string(),
+  assignments: z.record(z.string(), z.string()),
+});
 const WorkspaceLabelTransactionSchema = z.object({
   phase: z.enum(["prepared", "committed"]),
   beforeLabels: z.array(WorkspaceLabelDefinitionSchema),
   afterLabels: z.array(WorkspaceLabelDefinitionSchema),
   beforeWorkspaces: z.array(WorkspaceLabelWorkspaceStateSchema),
   afterWorkspaces: z.array(WorkspaceLabelWorkspaceStateSchema),
+  beforeAgents: z.array(WorkspaceLabelAgentStateSchema).default([]),
+  afterAgents: z.array(WorkspaceLabelAgentStateSchema).default([]),
 });
 
 type WorkspaceLabelTransaction = z.infer<typeof WorkspaceLabelTransactionSchema>;
@@ -60,6 +82,7 @@ export class WorkspaceLabelCatalogStore {
     private readonly filePath: string,
     private readonly transactionPath: string,
     private readonly workspaces: WorkspaceLabelCompoundRegistry,
+    private readonly agents: WorkspaceLabelAgentStore,
     private readonly writeCatalog: (
       filePath: string,
       labels: readonly WorkspaceLabelDefinition[],
@@ -90,29 +113,39 @@ export class WorkspaceLabelCatalogStore {
     planner: (
       labels: readonly WorkspaceLabelDefinition[],
       workspaces: ReadonlyMap<string, PersistedWorkspaceRecord>,
+      agents: ReadonlyMap<string, WorkspaceLabelAgentRecord>,
     ) => WorkspaceLabelMutation<TResult>,
   ): Promise<TResult> {
     await this.initialize();
     if (this.blocked) throw new WorkspaceLabelStorageUncertainError();
 
+    const agentRecords = new Map(
+      (await this.agents.listWorkspaceLabelAgentRecords()).map((agent) => [agent.agentId, agent]),
+    );
     let mutation!: WorkspaceLabelMutation<TResult>;
     let transaction: WorkspaceLabelTransaction | null = null;
     const result = await this.workspaces
       .commitWorkspaceLabelMutation({
         stage: (workspaces) => {
-          mutation = planner(this.labels, workspaces);
-          transaction = transactionFor(this.labels, mutation, workspaces);
+          mutation = planner(this.labels, workspaces, agentRecords);
+          transaction = transactionFor(this.labels, mutation, workspaces, agentRecords);
           return {
             updates: mutation.workspaceUpdates,
             result: mutation.result,
             forcePersist:
-              mutation.workspaceUpdates.length > 0 || !catalogsEqual(this.labels, mutation.labels),
+              mutation.workspaceUpdates.length > 0 ||
+              mutation.agentUpdates.length > 0 ||
+              !catalogsEqual(this.labels, mutation.labels),
           };
         },
         beforeWorkspaceWrite: async () => {
           if (!transaction) throw new Error("Workspace label transaction was not staged");
           await this.writeTransaction(this.transactionPath, transaction);
+          await this.agents.holdWorkspaceLabelAgentStates(transaction.beforeAgents);
           await this.writeCatalog(this.filePath, transaction.afterLabels);
+          await this.agents.replaceWorkspaceLabelAgentStates(transaction.afterAgents, {
+            publish: false,
+          });
         },
         afterWorkspaceWrite: async () => {
           if (!transaction) throw new Error("Workspace label transaction was not staged");
@@ -128,6 +161,9 @@ export class WorkspaceLabelCatalogStore {
       });
 
     await this.removeTransaction(this.transactionPath).catch(() => undefined);
+    await this.agents
+      .publishWorkspaceLabelAgentStates(mutation.agentUpdates.map((agent) => agent.agentId))
+      .catch(() => undefined);
     return result as TResult;
   }
 
@@ -201,6 +237,7 @@ export class WorkspaceLabelCatalogStore {
     }
     const labels = transaction.beforeLabels;
     const workspaceStates = transaction.beforeWorkspaces;
+    await this.agents.holdWorkspaceLabelAgentStates(transaction.beforeAgents);
     await this.workspaces.commitWorkspaceLabelMutation({
       stage: (workspaces) => ({
         updates: workspaceStates.flatMap((state) => {
@@ -210,13 +247,22 @@ export class WorkspaceLabelCatalogStore {
         result: undefined,
         forcePersist: true,
       }),
-      beforeWorkspaceWrite: () => this.writeCatalog(this.filePath, labels),
+      beforeWorkspaceWrite: async () => {
+        await this.writeCatalog(this.filePath, labels);
+        await this.agents.replaceWorkspaceLabelAgentStates(transaction.beforeAgents, {
+          publish: false,
+          ignoreMissing: true,
+        });
+      },
       afterWorkspaceWrite: () => this.removeTransaction(this.transactionPath),
       afterCommit: () => {
         this.labels = [...labels];
       },
       publish: false,
     });
+    await this.agents.releaseWorkspaceLabelAgentStates(
+      transaction.beforeAgents.map((agent) => agent.agentId),
+    );
   }
 }
 
@@ -224,10 +270,15 @@ function transactionFor<TResult>(
   currentLabels: readonly WorkspaceLabelDefinition[],
   mutation: WorkspaceLabelMutation<TResult>,
   workspaces: ReadonlyMap<string, PersistedWorkspaceRecord>,
+  agents: ReadonlyMap<string, WorkspaceLabelAgentRecord>,
 ): WorkspaceLabelTransaction {
   const beforeWorkspaces = mutation.workspaceUpdates.flatMap((workspace) => {
     const current = workspaces.get(workspace.workspaceId);
     return current ? [workspaceState(current)] : [];
+  });
+  const beforeAgents = mutation.agentUpdates.flatMap((agent) => {
+    const current = agents.get(agent.agentId);
+    return current ? [agentState(current)] : [];
   });
   return {
     phase: "prepared",
@@ -235,6 +286,8 @@ function transactionFor<TResult>(
     afterLabels: mutation.labels.map((label) => ({ ...label })),
     beforeWorkspaces,
     afterWorkspaces: mutation.workspaceUpdates.map(workspaceState),
+    beforeAgents,
+    afterAgents: mutation.agentUpdates.map(agentState),
   };
 }
 
@@ -243,6 +296,13 @@ function workspaceState(workspace: PersistedWorkspaceRecord) {
     workspaceId: workspace.workspaceId,
     ...(workspace.labels ? { labels: [...workspace.labels] } : {}),
     updatedAt: workspace.updatedAt,
+  };
+}
+
+function agentState(agent: WorkspaceLabelAgentRecord | WorkspaceLabelAgentState) {
+  return {
+    agentId: agent.agentId,
+    assignments: { ...agent.assignments },
   };
 }
 

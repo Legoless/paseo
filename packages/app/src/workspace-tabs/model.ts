@@ -33,8 +33,8 @@ export type PluginWorkspaceTabTarget =
     };
 
 export type WorkspaceTabTarget =
-  | { kind: "new_tab" }
-  | { kind: "draft"; draftId: string; setup?: WorkspaceDraftTabSetup }
+  | { kind: "new_tab"; labels?: string[] }
+  | { kind: "draft"; draftId: string; setup?: WorkspaceDraftTabSetup; labels?: string[] }
   | { kind: "agent"; agentId: string }
   | { kind: "provider_subagent"; parentAgentId: string; subagentId: string }
   | { kind: "terminal"; terminalId: string }

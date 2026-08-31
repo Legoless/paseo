@@ -245,46 +245,44 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
 
   async function emitStoredRecord(record: StoredAgentRecord): Promise<AgentSnapshotPayload> {
     const payload = deps.buildStoredAgentPayload(record);
-    const sub = subscription;
-    if (!sub) {
-      return payload;
-    }
-
-    const project = payload.workspaceId
-      ? await deps.buildProjectPlacementForWorkspaceId(payload.workspaceId)
-      : null;
-    if (!project) {
-      bufferOrEmit(
-        sub,
-        sequence(sub, { kind: "remove", agentId: payload.id }, null, null, payload.id),
-      );
-      return payload;
-    }
-
-    const matches = matchesAgentUpdatesFilter({
-      agent: payload,
-      project,
-      filter: sub.filter,
+    await enqueueAgentUpdate(payload.id, async () => {
+      try {
+        const sub = subscription;
+        if (!sub) return;
+        const project = payload.workspaceId
+          ? await deps.buildProjectPlacementForWorkspaceId(payload.workspaceId)
+          : null;
+        if (!project) {
+          bufferOrEmit(
+            sub,
+            sequence(sub, { kind: "remove", agentId: payload.id }, null, null, payload.id),
+          );
+          return;
+        }
+        const matches = matchesAgentUpdatesFilter({
+          agent: payload,
+          project,
+          filter: sub.filter,
+        });
+        bufferOrEmit(
+          sub,
+          sequence(
+            sub,
+            matches
+              ? { kind: "upsert", agent: payload, project }
+              : { kind: "remove", agentId: payload.id },
+            payload,
+            project,
+            payload.id,
+          ),
+        );
+      } catch (error) {
+        deps.logger.error(
+          { err: error, agentId: payload.id },
+          "Failed to emit stored agent update",
+        );
+      }
     });
-    bufferOrEmit(
-      sub,
-      sequence(
-        sub,
-        matches
-          ? {
-              kind: "upsert",
-              agent: payload,
-              project,
-            }
-          : {
-              kind: "remove",
-              agentId: payload.id,
-            },
-        payload,
-        project,
-        payload.id,
-      ),
-    );
     return payload;
   }
 

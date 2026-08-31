@@ -1655,6 +1655,11 @@ export class Session {
           return;
         }
 
+        if (event.type === "stored_agent_state") {
+          void this.agentUpdates.emitStoredRecord(event.record);
+          return;
+        }
+
         if (event.type === "provider_subagent") {
           this.emitProviderSubagentWorkspaceUpdate(event.event);
           if (!this.supports(CLIENT_CAPS.providerSubagents)) {
@@ -2502,6 +2507,8 @@ export class Session {
         return this.handleWorkspaceLabelList(msg);
       case "workspace.label.assignment.set.request":
         return this.handleWorkspaceLabelAssignment(msg);
+      case "agent.label.assignment.set.request":
+        return this.handleAgentLabelAssignment(msg);
       case "workspace.label.update.request":
         return this.handleWorkspaceLabelUpdate(msg);
       case "workspace.label.delete.request":
@@ -5978,6 +5985,20 @@ export class Session {
     }
   }
 
+  private async handleAgentLabelAssignment(
+    request: Extract<SessionInboundMessage, { type: "agent.label.assignment.set.request" }>,
+  ): Promise<void> {
+    try {
+      const result = await this.requireWorkspaceLabels().setAgentAssignment(request);
+      this.emit({
+        type: "agent.label.assignment.set.response",
+        payload: { requestId: request.requestId, ...result },
+      });
+    } catch (error) {
+      this.emitWorkspaceLabelError(request, error);
+    }
+  }
+
   private async handleWorkspaceLabelUpdate(
     request: Extract<SessionInboundMessage, { type: "workspace.label.update.request" }>,
   ): Promise<void> {
@@ -6010,12 +6031,10 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "workspace.label.delete.inspect.request" }>,
   ): Promise<void> {
     try {
-      const affectedWorkspaceCount = await this.requireWorkspaceLabels().countAffectedWorkspaces(
-        request.name,
-      );
+      const affected = await this.requireWorkspaceLabels().inspectDelete(request.name);
       this.emit({
         type: "workspace.label.delete.inspect.response",
-        payload: { requestId: request.requestId, affectedWorkspaceCount },
+        payload: { requestId: request.requestId, ...affected },
       });
     } catch (error) {
       this.emitWorkspaceLabelError(request, error);

@@ -1,4 +1,8 @@
 import {
+  getAgentWorkspaceLabelKey,
+  getAgentWorkspaceLabelNames,
+} from "@getpaseo/protocol/agent-labels";
+import {
   normalizeWorkspaceLabelName,
   workspaceLabelKey,
   type WorkspaceLabelDefinition,
@@ -10,6 +14,10 @@ import {
   type WorkspaceLabelCursor,
 } from "./sequence.js";
 import type { PersistedWorkspaceRecord } from "../../workspace-registry.js";
+import type {
+  WorkspaceLabelAgentRecord,
+  WorkspaceLabelAgentState,
+} from "../../agent/agent-manager.js";
 
 interface AssignmentCommit {
   definition: WorkspaceLabelDefinition;
@@ -20,13 +28,21 @@ interface AssignmentCommit {
 interface UpdateCommit {
   label: WorkspaceLabelDefinition;
   affectedWorkspaceCount: number;
+  affectedAgentCount: number;
   changed: boolean;
   previousName?: string;
 }
 
 interface DeleteCommit {
   affectedWorkspaceCount: number;
+  affectedAgentCount: number;
   deletedName: string | null;
+}
+
+interface AgentAssignmentCommit {
+  definition: WorkspaceLabelDefinition;
+  agentLabels: string[];
+  catalogChanged: boolean;
 }
 
 export class WorkspaceLabelError extends Error {
@@ -35,7 +51,9 @@ export class WorkspaceLabelError extends Error {
       | "label_name_empty"
       | "label_not_found"
       | "label_name_taken"
-      | "workspace_not_found",
+      | "workspace_not_found"
+      | "agent_not_found"
+      | "agent_labels_unavailable",
     message: string,
   ) {
     super(message);
@@ -49,6 +67,7 @@ export class WorkspaceLabelService {
   constructor(
     private readonly catalog: WorkspaceLabelCatalogStore,
     private readonly sequence = new WorkspaceLabelSequence(),
+    public readonly agentLabelsEnabled = false,
   ) {}
 
   async initialize(): Promise<void> {
@@ -111,6 +130,7 @@ export class WorkspaceLabelService {
                 },
               ]
             : [],
+          agentUpdates: [],
           result: { definition, workspaceLabels, catalogChanged },
         };
       });
@@ -118,6 +138,50 @@ export class WorkspaceLabelService {
         this.sequence.publish({ kind: "upsert", label: committed.definition });
       }
       return { label: committed.definition, workspaceLabels: committed.workspaceLabels };
+    });
+  }
+
+  async setAgentAssignment(input: {
+    agentId: string;
+    label: WorkspaceLabelDefinition;
+    assigned: boolean;
+  }): Promise<{ label: WorkspaceLabelDefinition; agentLabels: string[] }> {
+    if (!this.agentLabelsEnabled) {
+      throw new WorkspaceLabelError("agent_labels_unavailable", "Agent labels unavailable");
+    }
+    return this.exclusive(async () => {
+      const name = requireName(input.label.name);
+      const committed = await this.catalog.commit<AgentAssignmentCommit>((catalog, _, agents) => {
+        const agent = agents.get(input.agentId);
+        if (!agent || agent.archivedAt || agent.internal) {
+          throw new WorkspaceLabelError("agent_not_found", "Agent not found");
+        }
+        const key = workspaceLabelKey(name);
+        const existing = catalog.find((label) => workspaceLabelKey(label.name) === key);
+        const definition = existing ?? { name, color: input.label.color };
+        const assignments = updateAgentAssignments(
+          agent.assignments,
+          getAgentWorkspaceLabelKey(definition.name),
+          definition.name,
+          input.assigned,
+        );
+        const catalogChanged = !existing && input.assigned;
+        return {
+          labels: catalogChanged ? [...catalog, definition] : [...catalog],
+          workspaceUpdates: [],
+          agentUpdates:
+            assignments === agent.assignments ? [] : [{ agentId: agent.agentId, assignments }],
+          result: {
+            definition,
+            agentLabels: getAgentWorkspaceLabelNames(assignments),
+            catalogChanged,
+          },
+        };
+      });
+      if (committed.catalogChanged) {
+        this.sequence.publish({ kind: "upsert", label: committed.definition });
+      }
+      return { label: committed.definition, agentLabels: committed.agentLabels };
     });
   }
 
@@ -136,11 +200,15 @@ export class WorkspaceLabelService {
     name: string;
     newName?: string;
     color?: WorkspaceLabelDefinition["color"];
-  }): Promise<{ label: WorkspaceLabelDefinition; affectedWorkspaceCount: number }> {
+  }): Promise<{
+    label: WorkspaceLabelDefinition;
+    affectedWorkspaceCount: number;
+    affectedAgentCount?: number;
+  }> {
     return this.exclusive(async () => {
       const fromKey = workspaceLabelKey(requireName(input.name));
       const newName = input.newName === undefined ? null : requireName(input.newName);
-      const committed = await this.catalog.commit<UpdateCommit>((catalog, workspaces) => {
+      const committed = await this.catalog.commit<UpdateCommit>((catalog, workspaces, agents) => {
         const existing = catalog.find((label) => workspaceLabelKey(label.name) === fromKey);
         if (!existing) throw new WorkspaceLabelError("label_not_found", "Label not found");
         // A label keeping its own key is not colliding with itself, so case-only edits pass.
@@ -159,7 +227,13 @@ export class WorkspaceLabelService {
           return {
             labels: [...catalog],
             workspaceUpdates: [],
-            result: { label: existing, affectedWorkspaceCount: 0, changed: false },
+            agentUpdates: [],
+            result: {
+              label: existing,
+              affectedWorkspaceCount: 0,
+              affectedAgentCount: 0,
+              changed: false,
+            },
           };
         }
         const label = {
@@ -170,12 +244,17 @@ export class WorkspaceLabelService {
         const workspaceUpdates = nameChanged
           ? rewriteAssignments(workspaces, fromKey, label.name)
           : [];
+        const agentUpdates = nameChanged
+          ? rewriteAgentAssignments(agents, fromKey, label.name)
+          : [];
         return {
           labels: catalog.map((candidate) => (candidate === existing ? label : candidate)),
           workspaceUpdates,
+          agentUpdates,
           result: {
             label,
             affectedWorkspaceCount: workspaceUpdates.length,
+            affectedAgentCount: agentUpdates.length,
             changed: true,
             ...(nameChanged ? { previousName: existing.name } : {}),
           },
@@ -191,28 +270,36 @@ export class WorkspaceLabelService {
       return {
         label: committed.label,
         affectedWorkspaceCount: committed.affectedWorkspaceCount,
+        ...(this.agentLabelsEnabled ? { affectedAgentCount: committed.affectedAgentCount } : {}),
       };
     });
   }
 
-  async delete(nameInput: string): Promise<{ affectedWorkspaceCount: number }> {
+  async delete(nameInput: string): Promise<{
+    affectedWorkspaceCount: number;
+    affectedAgentCount?: number;
+  }> {
     return this.exclusive(async () => {
       const key = workspaceLabelKey(requireName(nameInput));
-      const committed = await this.catalog.commit<DeleteCommit>((catalog, workspaces) => {
+      const committed = await this.catalog.commit<DeleteCommit>((catalog, workspaces, agents) => {
         const existing = catalog.find((label) => workspaceLabelKey(label.name) === key);
         if (!existing) {
           return {
             labels: [...catalog],
             workspaceUpdates: [],
-            result: { affectedWorkspaceCount: 0, deletedName: null },
+            agentUpdates: [],
+            result: { affectedWorkspaceCount: 0, affectedAgentCount: 0, deletedName: null },
           };
         }
         const workspaceUpdates = rewriteAssignments(workspaces, key);
+        const agentUpdates = rewriteAgentAssignments(agents, key);
         return {
           labels: catalog.filter((label) => label !== existing),
           workspaceUpdates,
+          agentUpdates,
           result: {
             affectedWorkspaceCount: workspaceUpdates.length,
+            affectedAgentCount: agentUpdates.length,
             deletedName: existing.name,
           },
         };
@@ -220,19 +307,40 @@ export class WorkspaceLabelService {
       if (committed.deletedName) {
         this.sequence.publish({ kind: "remove", name: committed.deletedName });
       }
-      return { affectedWorkspaceCount: committed.affectedWorkspaceCount };
+      return {
+        affectedWorkspaceCount: committed.affectedWorkspaceCount,
+        ...(this.agentLabelsEnabled ? { affectedAgentCount: committed.affectedAgentCount } : {}),
+      };
     });
   }
 
   async countAffectedWorkspaces(nameInput: string): Promise<number> {
-    return this.exclusive(() => {
+    return (await this.inspectDelete(nameInput)).affectedWorkspaceCount;
+  }
+
+  async inspectDelete(nameInput: string): Promise<{
+    affectedWorkspaceCount: number;
+    affectedAgentCount?: number;
+  }> {
+    return this.exclusive(async () => {
       const key = workspaceLabelKey(requireName(nameInput));
-      return this.catalog.commit((catalog, workspaces) => ({
+      const affected = await this.catalog.commit((catalog, workspaces, agents) => ({
         labels: [...catalog],
         workspaceUpdates: [],
-        result: [...workspaces.values()].filter((workspace) => workspaceHasLabel(workspace, key))
-          .length,
+        agentUpdates: [],
+        result: {
+          affectedWorkspaceCount: [...workspaces.values()].filter((workspace) =>
+            workspaceHasLabel(workspace, key),
+          ).length,
+          affectedAgentCount: [...agents.values()].filter((agent) =>
+            Object.hasOwn(agent.assignments, getAgentWorkspaceLabelKey(key)),
+          ).length,
+        },
       }));
+      return {
+        affectedWorkspaceCount: affected.affectedWorkspaceCount,
+        ...(this.agentLabelsEnabled ? { affectedAgentCount: affected.affectedAgentCount } : {}),
+      };
     });
   }
 
@@ -262,6 +370,20 @@ function updateAssignmentLabels(
   return assignedIndex === -1 ? current : current.filter((_, index) => index !== assignedIndex);
 }
 
+function updateAgentAssignments(
+  current: Record<string, string>,
+  key: string,
+  displayName: string,
+  assigned: boolean,
+): Record<string, string> {
+  if (assigned && current[key] === displayName) return current;
+  if (!assigned && !Object.hasOwn(current, key)) return current;
+  const next = { ...current };
+  if (assigned) next[key] = displayName;
+  else delete next[key];
+  return next;
+}
+
 function workspaceHasLabel(workspace: PersistedWorkspaceRecord, key: string): boolean {
   return (workspace.labels ?? []).some((label) => workspaceLabelKey(label) === key);
 }
@@ -286,6 +408,22 @@ function rewriteAssignments(
         updatedAt: now,
       },
     ];
+  });
+}
+
+function rewriteAgentAssignments(
+  agents: ReadonlyMap<string, WorkspaceLabelAgentRecord>,
+  fromKey: string,
+  to?: string,
+): WorkspaceLabelAgentState[] {
+  const source = getAgentWorkspaceLabelKey(fromKey);
+  const destination = to ? getAgentWorkspaceLabelKey(to) : null;
+  return [...agents.values()].flatMap((agent) => {
+    if (!Object.hasOwn(agent.assignments, source)) return [];
+    const assignments = { ...agent.assignments };
+    delete assignments[source];
+    if (destination && to) assignments[destination] = to;
+    return [{ agentId: agent.agentId, assignments }];
   });
 }
 

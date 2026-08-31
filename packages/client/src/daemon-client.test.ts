@@ -4325,6 +4325,54 @@ test("detaches an agent through the namespaced detach RPC", async () => {
   await expect(promise).resolves.toBeUndefined();
 });
 
+test("sets a shared catalog label on an agent", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const promise = client.setAgentLabel({
+    agentId: "agent-one",
+    label: { name: "Urgent", color: "red" },
+    assigned: true,
+    requestId: "request-agent-label",
+  });
+  expect(parseSentFrame(mock.sent[0])).toEqual({
+    type: "agent.label.assignment.set.request",
+    requestId: "request-agent-label",
+    agentId: "agent-one",
+    label: { name: "Urgent", color: "red" },
+    assigned: true,
+  });
+
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "agent.label.assignment.set.response",
+      payload: {
+        requestId: "request-agent-label",
+        label: { name: "Urgent", color: "red" },
+        agentLabels: ["Urgent"],
+      },
+    }),
+  );
+
+  await expect(promise).resolves.toEqual({
+    requestId: "request-agent-label",
+    label: { name: "Urgent", color: "red" },
+    agentLabels: ["Urgent"],
+  });
+});
+
 test("sends active-scoped fetch_agents_request", async () => {
   const logger = createMockLogger();
   const mock = createMockTransport();

@@ -50,6 +50,8 @@ export interface SeedDaemonClient {
     label: { name: string; color: "red" };
     assigned: boolean;
   }): Promise<unknown>;
+  updateWorkspaceLabel(input: { name: string; newName?: string; color?: "red" }): Promise<unknown>;
+  deleteWorkspaceLabel(input: { name: string }): Promise<unknown>;
   listProjects(): Promise<{ projects: SeedProjectDescriptor[] }>;
   createWorkspace(input: {
     source:
@@ -122,6 +124,7 @@ export interface SeedDaemonClient {
         currentModeId: string | null;
         status: string;
         title?: string | null;
+        labels?: Record<string, string>;
       };
     }>;
   }>;

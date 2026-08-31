@@ -9,11 +9,47 @@ import {
 } from "../workspace-registry.js";
 import { createWorkspaceLabelService, type WorkspaceLabelService } from "./index.js";
 import { writeJsonFileAtomic } from "../atomic-file.js";
+import { getAgentWorkspaceLabelKey } from "@getpaseo/protocol/agent-labels";
+import type {
+  WorkspaceLabelAgentRecord,
+  WorkspaceLabelAgentState,
+} from "../agent/agent-manager.js";
+import type { WorkspaceLabelAgentStore } from "./internal/catalog-store.js";
 
 function transactionPhase(transaction: unknown): string | undefined {
   return typeof transaction === "object" && transaction !== null && "phase" in transaction
     ? String(transaction.phase)
     : undefined;
+}
+
+class TestAgentLabelStore implements WorkspaceLabelAgentStore {
+  readonly records = new Map<string, WorkspaceLabelAgentRecord>();
+  readonly publications: string[][] = [];
+  readonly replacementFailures: Array<"before" | "after"> = [];
+
+  async listWorkspaceLabelAgentRecords(): Promise<WorkspaceLabelAgentRecord[]> {
+    return [...this.records.values()];
+  }
+
+  async holdWorkspaceLabelAgentStates(): Promise<void> {}
+
+  async replaceWorkspaceLabelAgentStates(
+    states: readonly WorkspaceLabelAgentState[],
+  ): Promise<void> {
+    const failure = this.replacementFailures.shift();
+    if (failure === "before") throw new Error("agent state unavailable");
+    for (const state of states) {
+      const record = this.records.get(state.agentId);
+      if (record) this.records.set(state.agentId, { ...record, assignments: state.assignments });
+    }
+    if (failure === "after") throw new Error("agent state acknowledgement lost");
+  }
+
+  async publishWorkspaceLabelAgentStates(agentIds: readonly string[]): Promise<void> {
+    if (agentIds.length > 0) this.publications.push([...agentIds]);
+  }
+
+  async releaseWorkspaceLabelAgentStates(): Promise<void> {}
 }
 
 describe("workspace labels", () => {
@@ -82,6 +118,112 @@ describe("workspace labels", () => {
     expect(persisted.snapshot.labels).toEqual([{ name: "Needs review", color: "sky" }]);
     persisted.unsubscribe();
     initial.unsubscribe();
+  });
+
+  test("assigns catalog labels to agents and rewrites them on rename and delete", async () => {
+    const agents = new TestAgentLabelStore();
+    agents.records.set("agent-one", {
+      agentId: "agent-one",
+      assignments: {},
+      archivedAt: null,
+      internal: false,
+    });
+    const agentLabels = createWorkspaceLabelService({
+      paseoHome: join(paseoHome, "agents"),
+      workspaceRegistry: registry,
+      agentStore: agents,
+    });
+
+    await expect(
+      agentLabels.setAgentAssignment({
+        agentId: "agent-one",
+        label: { name: " Needs  review ", color: "sky" },
+        assigned: true,
+      }),
+    ).resolves.toEqual({
+      label: { name: "Needs review", color: "sky" },
+      agentLabels: ["Needs review"],
+    });
+    expect(agents.records.get("agent-one")?.assignments).toEqual({
+      [getAgentWorkspaceLabelKey("Needs review")]: "Needs review",
+    });
+    expect(agents.publications).toEqual([["agent-one"]]);
+
+    await expect(
+      agentLabels.update({ name: "needs review", newName: "Priority" }),
+    ).resolves.toMatchObject({ affectedWorkspaceCount: 0, affectedAgentCount: 1 });
+    expect(await agentLabels.inspectDelete("priority")).toEqual({
+      affectedWorkspaceCount: 0,
+      affectedAgentCount: 1,
+    });
+    expect(agents.records.get("agent-one")?.assignments).toEqual({
+      [getAgentWorkspaceLabelKey("Priority")]: "Priority",
+    });
+
+    const current = agents.records.get("agent-one");
+    if (!current) throw new Error("agent fixture missing");
+    agents.records.set("agent-one", {
+      ...current,
+      archivedAt: "2026-08-30T00:00:00.000Z",
+    });
+    await expect(
+      agentLabels.setAgentAssignment({
+        agentId: "agent-one",
+        label: { name: "Other", color: "red" },
+        assigned: true,
+      }),
+    ).rejects.toMatchObject({ code: "agent_not_found" });
+    await expect(agentLabels.delete("Priority")).resolves.toEqual({
+      affectedWorkspaceCount: 0,
+      affectedAgentCount: 1,
+    });
+    expect(agents.records.get("agent-one")?.assignments).toEqual({});
+  });
+
+  test("recovers an interrupted agent rename from the prepared journal before publishing", async () => {
+    const home = join(paseoHome, "agent-recovery");
+    const agents = new TestAgentLabelStore();
+    agents.records.set("agent-one", {
+      agentId: "agent-one",
+      assignments: {},
+      archivedAt: null,
+      internal: false,
+    });
+    const interrupted = createWorkspaceLabelService({
+      paseoHome: home,
+      workspaceRegistry: registry,
+      agentStore: agents,
+    });
+    await interrupted.setAgentAssignment({
+      agentId: "agent-one",
+      label: { name: "Urgent", color: "red" },
+      assigned: true,
+    });
+    agents.publications.length = 0;
+    agents.replacementFailures.push("after", "before");
+
+    await expect(interrupted.update({ name: "Urgent", newName: "Priority" })).rejects.toMatchObject(
+      { code: "workspace_label_storage_uncertain" },
+    );
+    expect(agents.publications).toEqual([]);
+
+    const recoveredRegistry = new FileBackedWorkspaceRegistry(
+      join(paseoHome, "projects", "workspaces.json"),
+      createTestLogger(),
+    );
+    const recovered = createWorkspaceLabelService({
+      paseoHome: home,
+      workspaceRegistry: recoveredRegistry,
+      agentStore: agents,
+    });
+    await recovered.initialize();
+    expect(agents.records.get("agent-one")?.assignments).toEqual({
+      [getAgentWorkspaceLabelKey("Urgent")]: "Urgent",
+    });
+    expect(agents.publications).toEqual([]);
+    const subscription = await recovered.subscribe({ onChange: () => undefined });
+    expect(subscription.snapshot.labels).toEqual([{ name: "Urgent", color: "red" }]);
+    subscription.unsubscribe();
   });
 
   test("catches up one catalog change and falls back to a coherent snapshot", async () => {

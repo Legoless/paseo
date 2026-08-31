@@ -63,6 +63,7 @@ function agent(input: {
   pendingPermissions?: Agent["pendingPermissions"];
   requiresAttention?: boolean;
   attentionReason?: Agent["attentionReason"];
+  labels?: Agent["labels"];
 }): Agent {
   return {
     serverId: "srv",
@@ -87,7 +88,7 @@ function agent(input: {
     archivedAt: input.archivedAt ?? null,
     requiresAttention: input.requiresAttention,
     attentionReason: input.attentionReason,
-    labels: {},
+    labels: input.labels ?? {},
   };
 }
 
@@ -150,12 +151,10 @@ describe("buildSidebarWorkspaceGroupModel", () => {
     expect(section?.members.map((entry) => entry.projectId)).toEqual(["project-a", "project-b"]);
     expect(section?.members[0]).toMatchObject({
       projectName: "Project A",
-      branch: "feature",
       isPrimary: false,
     });
     expect(section?.members[1]).toMatchObject({
       projectName: "Project B",
-      branch: "main",
       isPrimary: true,
     });
   });
@@ -195,6 +194,10 @@ describe("buildSidebarWorkspaceGroupModel", () => {
               workspaceId: "ws-1",
               cwd: "/repo/project-a/ws-1/",
               title: "In A",
+              labels: {
+                "paseo.workspace-label.urgent": "Urgent",
+                surface: "cli",
+              },
             }),
             agent({
               id: "agent-b",
@@ -213,6 +216,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
     expect(memberA?.agents.map((entry) => entry.agentId)).toEqual(["agent-a"]);
     expect(memberB?.agents.map((entry) => entry.agentId)).toEqual(["agent-b"]);
     expect(memberA?.agents[0]?.matchesMemberDirectory).toBe(true);
+    expect(memberA?.agents[0]?.labels).toEqual(["Urgent"]);
   });
 
   it("carries the member's live diff stat onto its row", () => {

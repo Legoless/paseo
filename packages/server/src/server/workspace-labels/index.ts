@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { FileBackedWorkspaceRegistry } from "../workspace-registry.js";
 import { WorkspaceLabelCatalogStore } from "./internal/catalog-store.js";
+import type { WorkspaceLabelAgentStore } from "./internal/catalog-store.js";
 import { WorkspaceLabelService } from "./internal/service.js";
 import type { WorkspaceLabelDefinition } from "@getpaseo/protocol/workspace-labels";
 import { WorkspaceLabelSequence } from "./internal/sequence.js";
@@ -8,9 +9,18 @@ import { WorkspaceLabelSequence } from "./internal/sequence.js";
 export { WorkspaceLabelError, WorkspaceLabelService } from "./internal/service.js";
 export { WorkspaceLabelStorageUncertainError } from "./internal/catalog-store.js";
 
+const NO_AGENT_LABEL_STORE: WorkspaceLabelAgentStore = {
+  listWorkspaceLabelAgentRecords: async () => [],
+  holdWorkspaceLabelAgentStates: async () => undefined,
+  replaceWorkspaceLabelAgentStates: async () => undefined,
+  releaseWorkspaceLabelAgentStates: async () => undefined,
+  publishWorkspaceLabelAgentStates: async () => undefined,
+};
+
 export function createWorkspaceLabelService(input: {
   paseoHome: string;
   workspaceRegistry: FileBackedWorkspaceRegistry;
+  agentStore?: WorkspaceLabelAgentStore;
   writeCatalog?: (filePath: string, labels: readonly WorkspaceLabelDefinition[]) => Promise<void>;
   writeTransaction?: (filePath: string, transaction: unknown) => Promise<void>;
   removeTransaction?: (filePath: string) => Promise<void>;
@@ -21,10 +31,12 @@ export function createWorkspaceLabelService(input: {
       join(input.paseoHome, "projects", "workspace-labels.json"),
       join(input.paseoHome, "projects", "workspace-labels.transaction.json"),
       input.workspaceRegistry,
+      input.agentStore ?? NO_AGENT_LABEL_STORE,
       input.writeCatalog,
       input.writeTransaction,
       input.removeTransaction,
     ),
     new WorkspaceLabelSequence(input.journalLimit),
+    input.agentStore !== undefined,
   );
 }

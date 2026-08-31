@@ -1,4 +1,5 @@
 import type { Logger } from "pino";
+import { isAgentWorkspaceLabelKey } from "@getpaseo/protocol/agent-labels";
 
 import {
   AgentRunCancellationError,
@@ -166,6 +167,13 @@ export async function updateAgentCommand(
 ): Promise<UpdateAgentResult> {
   const title = input.name?.trim();
   const labels = input.labels && Object.keys(input.labels).length > 0 ? input.labels : undefined;
+
+  if (labels && Object.keys(labels).some(isAgentWorkspaceLabelKey)) {
+    return {
+      accepted: false,
+      error: "Workspace label assignments must use the agent label assignment API",
+    };
+  }
 
   if (!title && !labels) {
     return {

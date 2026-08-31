@@ -862,10 +862,6 @@ export async function createPaseoDaemon(
     path.join(config.paseoHome, "projects", "workspaces.json"),
     logger,
   );
-  const workspaceLabelService = createWorkspaceLabelService({
-    paseoHome: config.paseoHome,
-    workspaceRegistry,
-  });
   const github = createGitHubService();
   const workspaceGitService = new WorkspaceGitServiceImpl({
     logger,
@@ -915,6 +911,11 @@ export async function createPaseoDaemon(
     },
     mcpAuthToken: agentMcpAuthToken,
     logger,
+  });
+  const workspaceLabelService = createWorkspaceLabelService({
+    paseoHome: config.paseoHome,
+    workspaceRegistry,
+    agentStore: agentManager,
   });
 
   const detachAgentStoragePersistence = attachAgentStoragePersistence(

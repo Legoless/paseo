@@ -39,7 +39,7 @@ import type {
   SidebarWorkspaceMemberRow,
   SidebarWorkspaceSection,
 } from "@/projects/workspace-groups";
-import { WorkspaceAgentRow } from "@/components/sidebar/workspace-agent-row";
+import { WorkspaceAgentRow, WorkspaceNewAgentRow } from "@/components/sidebar/workspace-agent-row";
 import { useRemoveWorkspaceMember } from "@/workspaces/use-remove-workspace-member";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { parseHostWorkspaceRouteFromPathname } from "@/utils/host-routes";
@@ -830,7 +830,6 @@ function WorkspaceMemberRow({
   onRemove,
   onPress,
   onCopyPath,
-  onCopyBranchName,
 }: {
   member: SidebarWorkspaceMemberRow;
   serverId: string;
@@ -839,7 +838,6 @@ function WorkspaceMemberRow({
   onRemove: () => void;
   onPress: () => void;
   onCopyPath: () => void;
-  onCopyBranchName: () => void;
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
@@ -904,7 +902,6 @@ function WorkspaceMemberRow({
               onBlur={handleKebabBlur}
               canRemove={canRemove}
               onCopyPath={onCopyPath}
-              onCopyBranchName={onCopyBranchName}
               onRemove={onRemove}
             />
           </View>
@@ -920,7 +917,6 @@ function WorkspaceMemberRow({
             surface="context"
             canRemove={canRemove}
             onCopyPath={onCopyPath}
-            onCopyBranchName={onCopyBranchName}
             onRemove={onRemove}
           />
         </ContextMenuContent>
@@ -954,14 +950,6 @@ function WorkspaceMemberBlock({
     void Clipboard.setStringAsync(member.workspaceDirectory);
     toast.copied(t("sidebar.workspace.toasts.pathCopied"));
   }, [member.workspaceDirectory, t, toast]);
-
-  const handleCopyBranchName = useCallback(() => {
-    if (!member.branch) {
-      return;
-    }
-    void Clipboard.setStringAsync(member.branch);
-    toast.copied(t("sidebar.workspace.toasts.branchNameCopied"));
-  }, [member.branch, t, toast]);
 
   const handleRemove = useCallback(() => {
     if (!canRemove) {
@@ -997,13 +985,22 @@ function WorkspaceMemberBlock({
         onRemove={handleRemove}
         onPress={handlePress}
         onCopyPath={handleCopyPath}
-        onCopyBranchName={handleCopyBranchName}
       />
+      {(member.newAgents ?? []).map((newAgent) => (
+        <WorkspaceNewAgentRow
+          key={newAgent.tabId}
+          newAgent={newAgent}
+          diffStat={newAgent.matchesMemberDirectory ? (member.diffStat ?? null) : null}
+          prHint={newAgent.matchesMemberDirectory ? prHint : null}
+          serverId={serverId}
+          workspaceId={workspaceId}
+          onWorkspacePress={onWorkspacePress}
+        />
+      ))}
       {member.agents.map((agent) => (
         <WorkspaceAgentRow
           key={agent.agentId}
           agent={agent}
-          branch={agent.matchesMemberDirectory ? member.branch : null}
           diffStat={agent.matchesMemberDirectory ? (member.diffStat ?? null) : null}
           prHint={agent.matchesMemberDirectory ? prHint : null}
           serverId={serverId}

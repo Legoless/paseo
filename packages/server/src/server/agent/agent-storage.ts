@@ -2,6 +2,10 @@ import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { Logger } from "pino";
+import {
+  getAgentWorkspaceLabelAssignments,
+  stripAgentWorkspaceLabelAssignments,
+} from "@getpaseo/protocol/agent-labels";
 
 import { writeJsonFileAtomic } from "../atomic-file.js";
 import { AgentFeatureSchema, AgentStatusSchema } from "../messages.js";
@@ -90,6 +94,26 @@ export type SerializableAgentConfig = Pick<
 >;
 
 export type StoredAgentRecord = z.infer<typeof STORED_AGENT_SCHEMA>;
+
+interface AgentRecordWriteOptions {
+  workspaceLabelsAuthoritative?: boolean;
+}
+
+function preserveWorkspaceLabelAssignments(
+  next: StoredAgentRecord,
+  existing: StoredAgentRecord | null,
+  options?: AgentRecordWriteOptions,
+): StoredAgentRecord {
+  if (!existing || options?.workspaceLabelsAuthoritative) return next;
+  return {
+    ...next,
+    labels: {
+      ...stripAgentWorkspaceLabelAssignments(next.labels),
+      ...getAgentWorkspaceLabelAssignments(existing.labels),
+    },
+  };
+}
+
 export function parseStoredAgentRecord(value: unknown): StoredAgentRecord {
   return STORED_AGENT_SCHEMA.parse(value);
 }
@@ -150,13 +174,18 @@ export class AgentStorage {
     return agentId ? (this.cache.get(agentId) ?? null) : null;
   }
 
-  async upsert(record: StoredAgentRecord): Promise<void> {
+  async upsert(record: StoredAgentRecord, options?: AgentRecordWriteOptions): Promise<void> {
     await this.load();
-    await this.queueRecordWrite(record);
+    await this.queueRecordWrite(record, options);
   }
 
-  private queueRecordWrite(record: StoredAgentRecord): Promise<void> {
-    return this.queueRecordMutation(record.id, () => record);
+  private queueRecordWrite(
+    record: StoredAgentRecord,
+    options?: AgentRecordWriteOptions,
+  ): Promise<void> {
+    return this.queueRecordMutation(record.id, (existing) =>
+      preserveWorkspaceLabelAssignments(record, existing, options),
+    );
   }
 
   private queueRecordMutation(
@@ -239,7 +268,11 @@ export class AgentStorage {
 
   async applySnapshot(
     agent: ManagedAgent,
-    options?: { title?: string | null; internal?: boolean },
+    options?: {
+      title?: string | null;
+      internal?: boolean;
+      workspaceLabelsAuthoritative?: boolean;
+    },
   ): Promise<void> {
     await this.load();
     const hasTitleOverride =
@@ -259,7 +292,7 @@ export class AgentStorage {
       if (existing && existing.archivedAt !== undefined) {
         record.archivedAt = existing.archivedAt;
       }
-      return record;
+      return preserveWorkspaceLabelAssignments(record, existing, options);
     });
   }
 

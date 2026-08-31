@@ -1,4 +1,7 @@
-import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import {
+  PARENT_AGENT_ID_LABEL,
+  stripAgentWorkspaceLabelAssignments,
+} from "@getpaseo/protocol/agent-labels";
 
 export interface CreateAgentCaller {
   id: string;
@@ -30,8 +33,8 @@ export async function resolveCreateAgentIntent(input: {
   const parentAgentId = input.legacyDetached ? null : (input.caller?.id ?? null);
   const placement = await resolvePlacement(input);
   const labels = {
-    ...input.childAgentDefaultLabels,
-    ...input.labels,
+    ...stripAgentWorkspaceLabelAssignments(input.childAgentDefaultLabels),
+    ...stripAgentWorkspaceLabelAssignments(input.labels),
     ...(parentAgentId ? { [PARENT_AGENT_ID_LABEL]: parentAgentId } : {}),
   };
 

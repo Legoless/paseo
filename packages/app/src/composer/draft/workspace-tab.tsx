@@ -317,7 +317,7 @@ interface WorkspaceDraftAgentTabProps {
   draftId: string;
   initialSetup?: WorkspaceDraftTabSetup;
   isPaneFocused: boolean;
-  onCreated: (snapshot: AgentSnapshotPayload) => void;
+  onCreated: (snapshot: AgentSnapshotPayload) => Promise<void> | void;
   onOpenWorkspaceFile: (request: WorkspaceFileOpenRequest) => void;
   onOpenImportSheet?: () => void;
 }
@@ -528,11 +528,11 @@ export function WorkspaceDraftAgentTab({
         hostDisconnectedMessage: t("workspace.terminal.hostDisconnected"),
         selectModelMessage: t("workspaceSetup.errors.selectModel"),
       }),
-    onCreateSuccess: ({ result }) => {
+    onCreateSuccess: async ({ result }) => {
       clearDraftInput("sent");
       clearWorkspaceAttachments({ scopeKey: draftAttachmentScopeKey });
       useWorkspaceDraftSubmissionStore.getState().clearDraftSetup({ draftId });
-      onCreated(result);
+      await onCreated(result);
     },
   });
   const turnPresentation = useMemo(

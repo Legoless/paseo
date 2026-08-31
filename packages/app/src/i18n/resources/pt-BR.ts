@@ -1050,6 +1050,8 @@ export const ptBR: TranslationResources = {
       deleteTitle: "Excluir {{name}}?",
       deleteMessage_one: "Isso remove a etiqueta de {{count}} workspace neste host.",
       deleteMessage_other: "Isso remove a etiqueta de {{count}} workspaces neste host.",
+      deleteAgentMessage_one: "Isso também remove a etiqueta de {{count}} agente.",
+      deleteAgentMessage_other: "Isso também remove a etiqueta de {{count}} agentes.",
       offline: "Este host está offline.",
       updateHost: "Atualize este host para gerenciar etiquetas.",
     },

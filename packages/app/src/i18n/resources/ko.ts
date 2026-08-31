@@ -1032,6 +1032,8 @@ export const ko: TranslationResources = {
       deleteTitle: "{{name}}을(를) 삭제할까요?",
       deleteMessage_one: "이 호스트의 워크스페이스 {{count}}개에서 레이블을 제거합니다.",
       deleteMessage_other: "이 호스트의 워크스페이스 {{count}}개에서 레이블을 제거합니다.",
+      deleteAgentMessage_one: "에이전트 {{count}}개에서도 레이블을 제거합니다.",
+      deleteAgentMessage_other: "에이전트 {{count}}개에서도 레이블을 제거합니다.",
       offline: "이 호스트는 오프라인입니다.",
       updateHost: "레이블을 관리하려면 호스트를 업데이트하세요.",
     },

@@ -1,8 +1,19 @@
 import type { Agent, ProjectDescriptor, WorkspaceDescriptor } from "@/stores/session-store";
+import { getAgentWorkspaceLabelNames } from "@getpaseo/protocol/agent-labels";
 import { createProjectIconTarget, type ProjectIconTarget } from "@/projects/icon-target";
 import { deriveSidebarStateBucket, type SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { normalizeWorkspaceOpaqueId, normalizeWorkspacePath } from "@/utils/workspace-identity";
 import { shortenPath } from "@/utils/shorten-path";
+import { collectAllTabs, type WorkspaceLayout } from "@/stores/workspace-layout-actions";
+
+export interface SidebarWorkspaceNewAgentRow {
+  tabId: string;
+  createdAt: number;
+  cwd: string;
+  cwdLabel: string;
+  matchesMemberDirectory: boolean;
+  labels: string[];
+}
 
 export interface SidebarWorkspaceAgentRow {
   agentId: string;
@@ -10,6 +21,7 @@ export interface SidebarWorkspaceAgentRow {
   cwd: string;
   cwdLabel: string;
   matchesMemberDirectory: boolean;
+  labels: string[];
   statusBucket: SidebarStateBucket;
   lastActivityAt: Date;
 }
@@ -21,11 +33,11 @@ export interface SidebarWorkspaceMemberRow {
   projectName: string;
   workspaceDirectory: string;
   workspaceDirectoryLabel: string;
-  branch: string | null;
   /** Live diff for the member's directory; null when the daemon has no snapshot for it. */
   diffStat: { additions: number; deletions: number } | null;
   /** The primary member inherits every agent whose cwd matches no member directory. */
   isPrimary: boolean;
+  newAgents?: SidebarWorkspaceNewAgentRow[];
   agents: SidebarWorkspaceAgentRow[];
 }
 
@@ -56,6 +68,7 @@ export interface SidebarWorkspaceGroupSession {
  */
 export function buildSidebarWorkspaceGroupModel(input: {
   sessions: readonly SidebarWorkspaceGroupSession[];
+  layoutsByWorkspace?: Readonly<Record<string, WorkspaceLayout>>;
 }): SidebarWorkspaceGroupModel {
   const sectionsByWorkspaceKey = new Map<string, SidebarWorkspaceSection>();
   const memberIconTargets: ProjectIconTarget[] = [];
@@ -67,6 +80,7 @@ export function buildSidebarWorkspaceGroupModel(input: {
         workspace,
         agents: session.agents,
         projects: session.projects,
+        layout: input.layoutsByWorkspace?.[`${session.serverId}:${workspace.id}`],
       });
       sectionsByWorkspaceKey.set(section.workspaceKey, section);
       memberIconTargets.push(...iconTargets);
@@ -81,6 +95,7 @@ function buildWorkspaceSection(input: {
   workspace: WorkspaceDescriptor;
   agents: ReadonlyMap<string, Agent>;
   projects: ReadonlyMap<string, ProjectDescriptor>;
+  layout?: WorkspaceLayout;
 }): { section: SidebarWorkspaceSection; iconTargets: ProjectIconTarget[] } {
   const workspaceId = input.workspace.id;
   const workspaceKey = `${input.serverId}:${workspaceId}`;
@@ -107,7 +122,6 @@ function buildWorkspaceSection(input: {
       projectName: member.projectCustomName ?? member.projectDisplayName,
       workspaceDirectory: member.workspaceDirectory,
       workspaceDirectoryLabel: member.worktreeSlug ?? shortenPath(member.workspaceDirectory),
-      branch: member.branch,
       diffStat: member.diffStat ?? null,
       isPrimary: index === 0,
       agents: [],
@@ -122,6 +136,12 @@ function buildWorkspaceSection(input: {
     }
   }
   const primaryMember = members[0] ?? null;
+
+  addNewAgentRowsToMembers({
+    layout: input.layout,
+    memberByDirectory,
+    primaryMember,
+  });
 
   for (const agent of input.agents.values()) {
     if (agent.archivedAt) continue;
@@ -139,6 +159,9 @@ function buildWorkspaceSection(input: {
   }
 
   for (const member of members) {
+    member.newAgents?.sort(
+      (left, right) => right.createdAt - left.createdAt || left.tabId.localeCompare(right.tabId),
+    );
     member.agents.sort(compareAgentRows);
   }
   members.sort(compareMemberRows);
@@ -147,6 +170,30 @@ function buildWorkspaceSection(input: {
     section: { workspaceKey, serverId: input.serverId, workspaceId, members },
     iconTargets,
   };
+}
+
+function addNewAgentRowsToMembers(input: {
+  layout?: WorkspaceLayout;
+  memberByDirectory: ReadonlyMap<string, SidebarWorkspaceMemberRow>;
+  primaryMember: SidebarWorkspaceMemberRow | null;
+}): void {
+  for (const tab of input.layout ? collectAllTabs(input.layout.root) : []) {
+    if (tab.target.kind !== "new_tab" && tab.target.kind !== "draft") continue;
+    const cwd = tab.target.kind === "draft" ? tab.target.setup?.cwd.trim() : undefined;
+    const directory = normalizeWorkspacePath(cwd);
+    const matchedMember = directory ? input.memberByDirectory.get(directory) : undefined;
+    const member = matchedMember ?? input.primaryMember;
+    if (!member) continue;
+    const resolvedCwd = cwd || member.workspaceDirectory;
+    (member.newAgents ??= []).push({
+      tabId: tab.tabId,
+      createdAt: tab.createdAt,
+      cwd: resolvedCwd,
+      cwdLabel: matchedMember?.workspaceDirectoryLabel ?? shortenPath(resolvedCwd),
+      matchesMemberDirectory: Boolean(matchedMember) || !cwd,
+      labels: tab.target.labels ?? [],
+    });
+  }
 }
 
 function createAgentRow(
@@ -160,6 +207,7 @@ function createAgentRow(
     cwd: agent.cwd,
     cwdLabel,
     matchesMemberDirectory,
+    labels: getAgentWorkspaceLabelNames(agent.labels),
     statusBucket: deriveSidebarStateBucket({
       status: agent.status,
       pendingPermissionCount: agent.pendingPermissions.length,
@@ -245,9 +293,7 @@ function areMembersEqual(
     left.projectName !== right.projectName ||
     left.workspaceDirectory !== right.workspaceDirectory ||
     left.workspaceDirectoryLabel !== right.workspaceDirectoryLabel ||
-    left.branch !== right.branch ||
-    left.isPrimary !== right.isPrimary ||
-    left.agents.length !== right.agents.length
+    left.isPrimary !== right.isPrimary
   ) {
     return false;
   }
@@ -257,17 +303,54 @@ function areMembersEqual(
   ) {
     return false;
   }
-  return left.agents.every((leftAgent, index) => {
-    const rightAgent = right.agents[index];
-    return (
-      Boolean(rightAgent) &&
-      leftAgent.agentId === rightAgent.agentId &&
-      leftAgent.title === rightAgent.title &&
-      leftAgent.cwd === rightAgent.cwd &&
-      leftAgent.cwdLabel === rightAgent.cwdLabel &&
-      leftAgent.matchesMemberDirectory === rightAgent.matchesMemberDirectory &&
-      leftAgent.statusBucket === rightAgent.statusBucket &&
-      leftAgent.lastActivityAt.getTime() === rightAgent.lastActivityAt.getTime()
-    );
-  });
+  return (
+    areNewAgentRowsEqual(left.newAgents ?? [], right.newAgents ?? []) &&
+    areAgentRowsEqual(left.agents, right.agents)
+  );
+}
+
+function areNewAgentRowsEqual(
+  left: readonly SidebarWorkspaceNewAgentRow[],
+  right: readonly SidebarWorkspaceNewAgentRow[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((row, index) => {
+      const rightRow = right[index];
+      return (
+        Boolean(rightRow) &&
+        row.tabId === rightRow.tabId &&
+        row.createdAt === rightRow.createdAt &&
+        row.cwd === rightRow.cwd &&
+        row.cwdLabel === rightRow.cwdLabel &&
+        row.matchesMemberDirectory === rightRow.matchesMemberDirectory &&
+        row.labels.length === rightRow.labels.length &&
+        row.labels.every((label, labelIndex) => label === rightRow.labels[labelIndex])
+      );
+    })
+  );
+}
+
+function areAgentRowsEqual(
+  left: readonly SidebarWorkspaceAgentRow[],
+  right: readonly SidebarWorkspaceAgentRow[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((leftAgent, index) => {
+      const rightAgent = right[index];
+      return (
+        Boolean(rightAgent) &&
+        leftAgent.agentId === rightAgent.agentId &&
+        leftAgent.title === rightAgent.title &&
+        leftAgent.cwd === rightAgent.cwd &&
+        leftAgent.cwdLabel === rightAgent.cwdLabel &&
+        leftAgent.matchesMemberDirectory === rightAgent.matchesMemberDirectory &&
+        leftAgent.labels.length === rightAgent.labels.length &&
+        leftAgent.labels.every((label, labelIndex) => label === rightAgent.labels[labelIndex]) &&
+        leftAgent.statusBucket === rightAgent.statusBucket &&
+        leftAgent.lastActivityAt.getTime() === rightAgent.lastActivityAt.getTime()
+      );
+    })
+  );
 }

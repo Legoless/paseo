@@ -2419,9 +2419,21 @@ function WorkspaceScreenContent({
         return;
       }
       if (selection.kind === "agent") {
+        const replacedTab =
+          destination.kind === "replace"
+            ? useWorkspaceLayoutStore
+                .getState()
+                .getWorkspaceTabs(persistenceKey)
+                .find((tab) => tab.tabId === destination.tabId)
+            : undefined;
+        const labels =
+          replacedTab?.target.kind === "new_tab" || replacedTab?.target.kind === "draft"
+            ? replacedTab.target.labels
+            : undefined;
         openTarget({
           kind: "draft",
           draftId: generateDraftId(),
+          ...(labels?.length ? { labels } : {}),
         });
         return;
       }

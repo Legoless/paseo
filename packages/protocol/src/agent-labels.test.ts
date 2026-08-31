@@ -1,11 +1,16 @@
 import { describe, expect, test } from "vitest";
 import {
+  AGENT_WORKSPACE_LABEL_PREFIX,
+  getAgentWorkspaceLabelAssignments,
+  getAgentWorkspaceLabelKey,
+  getAgentWorkspaceLabelNames,
   getParentAgentIdFromLabels,
   getOpenAgentTabLabel,
   hasOpenAgentTab,
   isDelegatedAgent,
   isOpenAgentTabLabel,
   PARENT_AGENT_ID_LABEL,
+  stripAgentWorkspaceLabelAssignments,
 } from "./agent-labels.js";
 
 describe("agent label policy", () => {
@@ -35,5 +40,23 @@ describe("agent label policy", () => {
     expect(isOpenAgentTabLabel(getOpenAgentTabLabel("client-a"))).toBe(true);
     expect(isOpenAgentTabLabel("paseo.open-agent-tab")).toBe(false);
     expect(isOpenAgentTabLabel("custom.open-agent-tab.client-a")).toBe(false);
+  });
+
+  test("keeps workspace-label assignments in daemon-owned label keys", () => {
+    const key = getAgentWorkspaceLabelKey(" Needs   Review ");
+    const labels = {
+      purpose: "review",
+      [key]: "Needs Review",
+      [`${AGENT_WORKSPACE_LABEL_PREFIX}empty`]: " ",
+      [`${AGENT_WORKSPACE_LABEL_PREFIX}legacy-key`]: " Urgent ",
+    };
+
+    expect(key).toBe(`${AGENT_WORKSPACE_LABEL_PREFIX}needs review`);
+    expect(getAgentWorkspaceLabelAssignments(labels)).toEqual({
+      [key]: "Needs Review",
+      [getAgentWorkspaceLabelKey("Urgent")]: "Urgent",
+    });
+    expect(getAgentWorkspaceLabelNames(labels)).toEqual(["Needs Review", "Urgent"]);
+    expect(stripAgentWorkspaceLabelAssignments(labels)).toEqual({ purpose: "review" });
   });
 });

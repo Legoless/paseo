@@ -1034,6 +1034,8 @@ export const en = {
       deleteTitle: "Delete {{name}}?",
       deleteMessage_one: "This removes the label from {{count}} workspace on this host.",
       deleteMessage_other: "This removes the label from {{count}} workspaces on this host.",
+      deleteAgentMessage_one: "It also removes the label from {{count}} agent.",
+      deleteAgentMessage_other: "It also removes the label from {{count}} agents.",
       offline: "This host is offline.",
       updateHost: "Update this host to manage labels.",
     },

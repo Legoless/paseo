@@ -7,13 +7,13 @@ import {
 
 describe("workspace label wire schemas", () => {
   test("keeps the capability optional for old daemons", () => {
-    expect(
-      ServerInfoStatusPayloadSchema.parse({
-        status: "server_info",
-        serverId: "old-host",
-        features: {},
-      }).features.workspaceLabels,
-    ).toBeUndefined();
+    const features = ServerInfoStatusPayloadSchema.parse({
+      status: "server_info",
+      serverId: "old-host",
+      features: {},
+    }).features;
+    expect(features.workspaceLabels).toBeUndefined();
+    expect(features.agentLabels).toBeUndefined();
   });
 
   test("parses the explicit list subscription and sequenced response", () => {
@@ -121,5 +121,41 @@ describe("workspace label wire schemas", () => {
         payload: { requestId: "req-edit", label: { name: "Priority", color: "sky" } },
       }),
     ).toThrow();
+  });
+
+  test("assigns the shared catalog labels to agents through a distinct RPC", () => {
+    expect(
+      SessionInboundMessageSchema.parse({
+        type: "agent.label.assignment.set.request",
+        requestId: "req-agent-label",
+        agentId: "agent-1",
+        label: { name: "Urgent", color: "red" },
+        assigned: true,
+      }),
+    ).toMatchObject({ type: "agent.label.assignment.set.request", agentId: "agent-1" });
+    expect(
+      SessionOutboundMessageSchema.parse({
+        type: "agent.label.assignment.set.response",
+        payload: {
+          requestId: "req-agent-label",
+          label: { name: "Urgent", color: "red" },
+          agentLabels: ["Urgent"],
+        },
+      }),
+    ).toMatchObject({ payload: { agentLabels: ["Urgent"] } });
+  });
+
+  test("accepts label edit counts from new daemons and their absence from old daemons", () => {
+    const base = {
+      type: "workspace.label.delete.inspect.response" as const,
+      payload: { requestId: "req-inspect", affectedWorkspaceCount: 2 },
+    };
+    expect(SessionOutboundMessageSchema.parse(base)).toMatchObject(base);
+    expect(
+      SessionOutboundMessageSchema.parse({
+        ...base,
+        payload: { ...base.payload, affectedAgentCount: 3 },
+      }),
+    ).toMatchObject({ payload: { affectedAgentCount: 3 } });
   });
 });

@@ -14,6 +14,7 @@ import type {
   AgentSession,
   AgentSessionConfig,
 } from "./agent-sdk-types.js";
+import { getAgentWorkspaceLabelKey } from "@getpaseo/protocol/agent-labels";
 
 type ManagedAgentOverrides = Omit<
   Partial<ManagedAgent>,
@@ -129,6 +130,7 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
     lastUserMessageAt: overrides.lastUserMessageAt ?? core.now,
     lastUsage: overrides.lastUsage,
     lastError: overrides.lastError,
+    labels: overrides.labels ?? {},
   };
 }
 
@@ -193,6 +195,32 @@ describe("AgentStorage", () => {
     const [persisted] = await reloaded.list();
     expect(persisted.cwd).toBe("/tmp/project");
     expect(persisted.config?.providerOptions).toEqual({ allowedTools: ["Read"] });
+  });
+
+  test("ordinary snapshots preserve durable workspace-label assignments", async () => {
+    const agentId = "agent-label-snapshot";
+    const urgent = getAgentWorkspaceLabelKey("Urgent");
+    const priority = getAgentWorkspaceLabelKey("Priority");
+    await storage.applySnapshot(
+      createManagedAgent({ id: agentId, labels: { purpose: "stored", [priority]: "Priority" } }),
+      { workspaceLabelsAuthoritative: true },
+    );
+
+    const stale = createManagedAgent({
+      id: agentId,
+      labels: { purpose: "current", [urgent]: "Urgent" },
+    });
+    await storage.applySnapshot(stale);
+    expect((await storage.get(agentId))?.labels).toEqual({
+      purpose: "current",
+      [priority]: "Priority",
+    });
+
+    await storage.applySnapshot(stale, { workspaceLabelsAuthoritative: true });
+    expect((await storage.get(agentId))?.labels).toEqual({
+      purpose: "current",
+      [urgent]: "Urgent",
+    });
   });
 
   test("applySnapshot stores and reloads featureValues when present", async () => {

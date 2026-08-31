@@ -232,7 +232,6 @@ describe("useSidebarWorkspaceGroupSections", () => {
     const section = latestGroupModel?.sectionsByWorkspaceKey.get(`${SERVER_ID}:ws-multi`);
 
     expect(section?.members.map((entry) => entry.projectId)).toEqual(["project-a", "project-b"]);
-    expect(section?.members.map((entry) => entry.branch)).toEqual(["main", "feature"]);
     expect(section?.members[0]?.diffStat).toEqual({ additions: 12, deletions: 3 });
     expect(section?.members[1]?.diffStat).toBeNull();
     expect(

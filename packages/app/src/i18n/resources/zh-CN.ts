@@ -1017,6 +1017,8 @@ export const zhCN: TranslationResources = {
       deleteTitle: "删除{{name}}？",
       deleteMessage_one: "这会从此主机的{{count}}个工作区中移除该标签。",
       deleteMessage_other: "这会从此主机的{{count}}个工作区中移除该标签。",
+      deleteAgentMessage_one: "还会从{{count}}个代理中移除该标签。",
+      deleteAgentMessage_other: "还会从{{count}}个代理中移除该标签。",
       offline: "此主机离线。",
       updateHost: "请更新此主机以管理标签。",
     },

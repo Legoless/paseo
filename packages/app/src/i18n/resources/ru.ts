@@ -1040,6 +1040,8 @@ export const ru: TranslationResources = {
       deleteTitle: "Удалить метку «{{name}}»?",
       deleteMessage_one: "Метка будет снята с {{count}} рабочего пространства на этом хосте.",
       deleteMessage_other: "Метка будет снята с {{count}} рабочих пространств на этом хосте.",
+      deleteAgentMessage_one: "Метка также будет снята с {{count}} агента.",
+      deleteAgentMessage_other: "Метка также будет снята с {{count}} агентов.",
       offline: "Этот хост не в сети.",
       updateHost: "Обновите этот хост для управления метками.",
     },
