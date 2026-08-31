@@ -99,6 +99,7 @@ import { runDesktopStartup } from "./desktop-startup.js";
 import { registerBrowserAutomationIpc } from "./features/browser-automation/ipc.js";
 import { BrowserKeyboard } from "./features/browser-keyboard/index.js";
 import { installAppUpdateOnQuit } from "./features/auto-updater.js";
+import { APP_NAME, APP_SCHEME, isNeo } from "./variant.js";
 import {
   buildAgentDeepLinkRoute,
   parseAgentDeepLink,
@@ -107,10 +108,8 @@ import {
 import { AgentNavigationInbox, parseAgentDeepLinkFromArgv } from "./agent-navigation.js";
 
 const DEV_SERVER_URL = process.env.EXPO_DEV_URL ?? "http://localhost:8081";
-const APP_SCHEME = "paseo";
 const PASEO_DEBUG = process.env.PASEO_DEBUG === "1";
 const DISABLE_SINGLE_INSTANCE_LOCK = process.env.PASEO_DISABLE_SINGLE_INSTANCE_LOCK === "1";
-const APP_NAME = process.env.PASEO_TEST_APP_NAME?.trim() || "Paseo";
 const DESKTOP_WINDOW_CHROME_MODE = resolveDesktopWindowChromeMode({
   platform: process.platform,
   override: process.env.PASEO_DESKTOP_WINDOW_CONTROLS,
@@ -1014,6 +1013,7 @@ const quitLifecycle = createQuitLifecycle({
       showShutdownFeedback: showDaemonShutdownDialog,
     }),
   installAppUpdateOnQuit: async (signal) => {
+    if (isNeo) return false;
     const settings = await getDesktopSettingsStore().get();
     return installAppUpdateOnQuit({
       currentVersion: app.getVersion(),
@@ -1031,7 +1031,9 @@ const quitLifecycle = createQuitLifecycle({
 });
 
 // electron-updater forwards this event through Electron's built-in autoUpdater.
-electronAutoUpdater.on("before-quit-for-update", quitLifecycle.handleBeforeQuitForUpdate);
+if (!isNeo) {
+  electronAutoUpdater.on("before-quit-for-update", quitLifecycle.handleBeforeQuitForUpdate);
+}
 app.on("before-quit", quitLifecycle.handleBeforeQuit);
 registerExternalQuitSignals({ signals: process, quit: () => app.quit() });
 
