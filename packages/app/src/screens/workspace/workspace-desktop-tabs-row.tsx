@@ -22,7 +22,6 @@ import {
   Ellipsis,
   Maximize,
   Minimize,
-  PanelRight,
   Plus,
   X,
 } from "lucide-react-native";
@@ -93,7 +92,6 @@ const PANE_SPLIT_ACTIONS_RESERVED_WIDTH =
   PANE_SPLIT_ACTIONS_HORIZONTAL_PADDING * 2 +
   PANE_SPLIT_ACTIONS_OUTER_MARGIN;
 const PANE_MAXIMIZE_ACTION_RESERVED_WIDTH = smallIconButtonChromeFrameSize(false) + 1;
-const EXPLORER_ACTION_RESERVED_WIDTH = smallIconButtonChromeFrameSize(false) + 1;
 // Chip geometry. `layoutMetrics` measures tabs from these same numbers, so a chip that changes
 // shape without changing them mis-measures and drops the row into the overflow-scroll fallback at
 // the wrong width. Keep them together.
@@ -126,7 +124,6 @@ const ThemedRows2 = withUnistyles(Rows2);
 const ThemedEllipsis = withUnistyles(Ellipsis);
 const ThemedMaximize = withUnistyles(Maximize);
 const ThemedMinimize = withUnistyles(Minimize);
-const ThemedPanelRight = withUnistyles(PanelRight);
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const extraMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundExtraMuted });
@@ -207,27 +204,23 @@ function WorkspacePaneToolbarActions({
   showSplitActions,
   showMaximizeAction,
   paneMaximized,
-  explorerSidebarOpen,
   serverId,
   paneId,
   newTabShortcutKeys,
   onSplitRight,
   onSplitDown,
   onTogglePaneMaximized,
-  onToggleExplorerSidebar,
 }: {
   showNewTabButton: boolean;
   showSplitActions: boolean;
   showMaximizeAction: boolean;
   paneMaximized: boolean;
-  explorerSidebarOpen: boolean;
   serverId: string;
   paneId?: string;
   newTabShortcutKeys: ShortcutKey[][] | null;
   onSplitRight?: () => void;
   onSplitDown?: () => void;
   onTogglePaneMaximized?: () => void;
-  onToggleExplorerSidebar?: () => void;
 }) {
   const { t } = useTranslation();
   const splitRightKeys = useShortcutKeys("workspace-pane-split-right");
@@ -250,14 +243,7 @@ function WorkspacePaneToolbarActions({
     [splitDownKeys],
   );
   const maximizeActionVisible = showMaximizeAction && Boolean(onTogglePaneMaximized);
-  if (
-    !showNewTabButton &&
-    !splitActionsVisible &&
-    !maximizeActionVisible &&
-    !onToggleExplorerSidebar
-  ) {
-    return null;
-  }
+  if (!showNewTabButton && !splitActionsVisible && !maximizeActionVisible) return null;
 
   return (
     <ToolbarControls style={styles.paneSplitActions}>
@@ -321,20 +307,6 @@ function WorkspacePaneToolbarActions({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      ) : null}
-      {onToggleExplorerSidebar ? (
-        <ToolbarButton
-          label={t(
-            explorerSidebarOpen
-              ? "workspace.tabs.explorerSidebar.close"
-              : "workspace.tabs.explorerSidebar.open",
-          )}
-          selected={explorerSidebarOpen}
-          testID="workspace-explorer-toggle"
-          onPress={onToggleExplorerSidebar}
-        >
-          <ThemedPanelRight size={14} uniProps={extraMutedColorMapping} />
-        </ToolbarButton>
       ) : null}
     </ToolbarControls>
   );
@@ -498,9 +470,7 @@ interface WorkspaceDesktopTabsRowProps {
   showPaneSplitActions?: boolean;
   showPaneMaximizeAction?: boolean;
   paneMaximized?: boolean;
-  explorerSidebarOpen?: boolean;
   onTogglePaneMaximized?: () => void;
-  onToggleExplorerSidebar?: () => void;
   onSplitRight?: () => void;
   onSplitDown?: () => void;
   focusModeEnabled: boolean;
@@ -988,9 +958,7 @@ function ResolvedWorkspaceDesktopTabsRow({
   showPaneSplitActions = false,
   showPaneMaximizeAction = false,
   paneMaximized = false,
-  explorerSidebarOpen = false,
   onTogglePaneMaximized,
-  onToggleExplorerSidebar,
   onSplitRight,
   onSplitDown,
   focusModeEnabled,
@@ -1022,8 +990,7 @@ function ResolvedWorkspaceDesktopTabsRow({
         DEFAULT_INLINE_ADD_BUTTON_RESERVED_WIDTH +
           (focusModeEnabled ? exitFocusModeWidth : 0) +
           (showPaneSplitActions ? PANE_SPLIT_ACTIONS_RESERVED_WIDTH : 0) +
-          (showPaneMaximizeAction ? PANE_MAXIMIZE_ACTION_RESERVED_WIDTH : 0) +
-          (onToggleExplorerSidebar ? EXPLORER_ACTION_RESERVED_WIDTH : 0),
+          (showPaneMaximizeAction ? PANE_MAXIMIZE_ACTION_RESERVED_WIDTH : 0),
       ),
       rowPaddingHorizontal: TAB_ROW_PADDING_HORIZONTAL,
       tabGap: TAB_CHIP_GAP,
@@ -1034,13 +1001,7 @@ function ResolvedWorkspaceDesktopTabsRow({
       tabHorizontalPadding: TAB_CHIP_HORIZONTAL_PADDING,
       closeButtonWidth: TAB_CLOSE_BUTTON_RESERVED_WIDTH,
     }),
-    [
-      exitFocusModeWidth,
-      focusModeEnabled,
-      onToggleExplorerSidebar,
-      showPaneMaximizeAction,
-      showPaneSplitActions,
-    ],
+    [exitFocusModeWidth, focusModeEnabled, showPaneMaximizeAction, showPaneSplitActions],
   );
 
   const fallbackTabLabels = useMemo(
@@ -1362,14 +1323,12 @@ function ResolvedWorkspaceDesktopTabsRow({
         showSplitActions={showPaneSplitActions}
         showMaximizeAction={showPaneMaximizeAction}
         paneMaximized={paneMaximized}
-        explorerSidebarOpen={explorerSidebarOpen}
         serverId={normalizedServerId}
         paneId={paneId}
         newTabShortcutKeys={newTabKeys}
         onSplitRight={onSplitRight}
         onSplitDown={onSplitDown}
         onTogglePaneMaximized={onTogglePaneMaximized}
-        onToggleExplorerSidebar={onToggleExplorerSidebar}
       />
     </View>
   );
