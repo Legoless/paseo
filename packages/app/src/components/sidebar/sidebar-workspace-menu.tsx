@@ -90,6 +90,8 @@ export interface SidebarWorkspaceMenuProps {
   serverId?: string;
   workspaceId?: string;
   workspaceLabels?: readonly string[];
+  onCopyPath?: () => void;
+  onCopyBranchName?: () => void;
   onRename?: () => void;
   onMarkAsRead?: () => void;
   onAddProject?: () => void;
@@ -113,6 +115,7 @@ interface SidebarWorkspaceMenuItemsProps extends Omit<
   "onArchive" | "open" | "onOpenChange" | "workspace" | "includeProjectActions"
 > {
   onCopyPath?: () => void;
+  onCopyBranchName?: () => void;
   openInFileManagerPath?: string | null;
   onArchive?: () => void;
 }
@@ -142,6 +145,7 @@ function SidebarWorkspaceMenuItems({
   serverId,
   workspaceId,
   onCopyPath,
+  onCopyBranchName,
   openInFileManagerPath,
   onRename,
   onMarkAsRead,
@@ -174,6 +178,16 @@ function SidebarWorkspaceMenuItems({
           onSelect={onCopyPath}
         >
           {t("sidebar.workspace.actions.copyPath")}
+        </WorkspaceMenuItem>
+      ) : null}
+      {onCopyBranchName ? (
+        <WorkspaceMenuItem
+          surface={surface}
+          testID={`sidebar-workspace-menu-copy-branch-name-${workspaceKey}`}
+          leading={copyLeadingIcon}
+          onSelect={onCopyBranchName}
+        >
+          {t("sidebar.workspace.actions.copyBranchName")}
         </WorkspaceMenuItem>
       ) : null}
       {onRename ? (
@@ -255,6 +269,7 @@ export function SidebarWorkspaceMenu({
   serverId,
   workspaceId,
   workspaceLabels,
+  onCopyBranchName,
   onRename,
   onMarkAsRead,
   onAddProject,
@@ -302,6 +317,7 @@ export function SidebarWorkspaceMenu({
           workspaceId={workspaceId}
           workspaceLabels={workspaceLabels}
           onCopyPath={projectActions.onCopyPath}
+          onCopyBranchName={onCopyBranchName}
           openInFileManagerPath={projectActions.openInFileManagerPath}
           onRename={onRename}
           onMarkAsRead={onMarkAsRead}
@@ -336,6 +352,7 @@ export function SidebarWorkspaceContextMenu({
   onRename,
   onMarkAsRead,
   onAddProject,
+  onCopyBranchName,
   onArchive,
   archiveLabel,
   archiveStatus,
@@ -413,6 +430,7 @@ export function SidebarWorkspaceContextMenu({
           workspaceId={workspace.workspaceId}
           workspaceLabels={workspace.labels}
           onCopyPath={projectActions.onCopyPath}
+          onCopyBranchName={onCopyBranchName}
           openInFileManagerPath={projectActions.openInFileManagerPath}
           onRename={onRename}
           onMarkAsRead={onMarkAsRead}
