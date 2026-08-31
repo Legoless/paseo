@@ -8,6 +8,8 @@ interface SidebarOrderStoreState {
   projectOrder: string[];
   pinnedWorkspaceOrder: string[];
   workspaceOrderByProject: Record<string, string[]>;
+  memberOrderByWorkspace: Record<string, string[]>;
+  agentOrderByMember: Record<string, string[]>;
   /**
    * Flat top-level workspace order for the workspace-grouped sidebar. The per-project
    * `workspaceOrderByProject` predates the inversion and only survives for the project
@@ -22,6 +24,10 @@ interface SidebarOrderStoreState {
   setWorkspaceOrder: (projectViewKey: string, keys: string[]) => void;
   getTopLevelWorkspaceOrder: () => string[];
   setTopLevelWorkspaceOrder: (keys: string[]) => void;
+  getMemberOrder: (workspaceKey: string) => string[];
+  setMemberOrder: (workspaceKey: string, keys: string[]) => void;
+  getAgentOrder: (memberKey: string) => string[];
+  setAgentOrder: (memberKey: string, keys: string[]) => void;
 }
 
 interface SidebarOrderPersistedState {
@@ -29,6 +35,8 @@ interface SidebarOrderPersistedState {
   pinnedWorkspaceOrder?: string[];
   workspaceOrderByProject?: Record<string, string[]>;
   workspaceOrder?: string[];
+  memberOrderByWorkspace?: Record<string, string[]>;
+  agentOrderByMember?: Record<string, string[]>;
   projectOrderByServerId?: Record<string, string[]>;
   workspaceOrderByServerAndProject?: Record<string, string[]>;
 }
@@ -39,6 +47,8 @@ const SidebarOrderPersistedStateSchema = z.strictObject({
   pinnedWorkspaceOrder: z.array(z.string()).optional(),
   workspaceOrderByProject: StringArrayRecordSchema.optional(),
   workspaceOrder: z.array(z.string()).optional(),
+  memberOrderByWorkspace: StringArrayRecordSchema.optional(),
+  agentOrderByMember: StringArrayRecordSchema.optional(),
   projectOrderByServerId: StringArrayRecordSchema.optional(),
   workspaceOrderByServerAndProject: StringArrayRecordSchema.optional(),
 });
@@ -64,12 +74,12 @@ function normalizeKeys(keys: string[]): string[] {
   return normalized;
 }
 
-function normalizeWorkspaceOrderByProject(
-  workspaceOrderByProject: Record<string, string[]> | undefined,
+function normalizeScopedOrders(
+  ordersByScope: Record<string, string[]> | undefined,
 ): Record<string, string[]> {
   const normalized: Record<string, string[]> = {};
-  for (const [projectViewKey, order] of Object.entries(workspaceOrderByProject ?? {})) {
-    const scope = projectViewKey.trim();
+  for (const [rawScope, order] of Object.entries(ordersByScope ?? {})) {
+    const scope = rawScope.trim();
     if (!scope) continue;
     normalized[scope] = normalizeKeys(order);
   }
@@ -97,6 +107,8 @@ export function migrateSidebarOrderState(persistedState: unknown): {
   pinnedWorkspaceOrder: string[];
   workspaceOrderByProject: Record<string, string[]>;
   workspaceOrder: string[];
+  memberOrderByWorkspace: Record<string, string[]>;
+  agentOrderByMember: Record<string, string[]>;
 } {
   const result = SidebarOrderPersistedStateSchema.safeParse(persistedState);
   if (!result.success) {
@@ -105,6 +117,8 @@ export function migrateSidebarOrderState(persistedState: unknown): {
       pinnedWorkspaceOrder: [],
       workspaceOrderByProject: {},
       workspaceOrder: [],
+      memberOrderByWorkspace: {},
+      agentOrderByMember: {},
     };
   }
   const state: SidebarOrderPersistedState = result.data;
@@ -119,7 +133,7 @@ export function migrateSidebarOrderState(persistedState: unknown): {
     }
   }
 
-  const workspaceOrderByProject = normalizeWorkspaceOrderByProject(state.workspaceOrderByProject);
+  const workspaceOrderByProject = normalizeScopedOrders(state.workspaceOrderByProject);
   for (const [scopeKey, order] of Object.entries(state.workspaceOrderByServerAndProject ?? {})) {
     const scope = extractWorkspaceOrderScope(scopeKey);
     if (!scope) continue;
@@ -140,6 +154,8 @@ export function migrateSidebarOrderState(persistedState: unknown): {
     pinnedWorkspaceOrder: normalizeKeys(state.pinnedWorkspaceOrder ?? []),
     workspaceOrderByProject,
     workspaceOrder: normalizeKeys(state.workspaceOrder ?? []),
+    memberOrderByWorkspace: normalizeScopedOrders(state.memberOrderByWorkspace),
+    agentOrderByMember: normalizeScopedOrders(state.agentOrderByMember),
   };
 }
 
@@ -150,6 +166,8 @@ export const useSidebarOrderStore = create<SidebarOrderStoreState>()(
       pinnedWorkspaceOrder: [],
       workspaceOrderByProject: {},
       workspaceOrder: [],
+      memberOrderByWorkspace: {},
+      agentOrderByMember: {},
       getProjectOrder: () => get().projectOrder,
       setProjectOrder: (keys) => {
         const normalized = normalizeKeys(keys);
@@ -181,6 +199,38 @@ export const useSidebarOrderStore = create<SidebarOrderStoreState>()(
         const normalized = normalizeKeys(keys);
         set({ workspaceOrder: normalized });
       },
+      getMemberOrder: (workspaceKey) => {
+        const scope = workspaceKey.trim();
+        if (!scope) return [];
+        return get().memberOrderByWorkspace[scope] ?? [];
+      },
+      setMemberOrder: (workspaceKey, keys) => {
+        const scope = workspaceKey.trim();
+        if (!scope) return;
+        const normalized = normalizeKeys(keys);
+        set((state) => ({
+          memberOrderByWorkspace: {
+            ...state.memberOrderByWorkspace,
+            [scope]: normalized,
+          },
+        }));
+      },
+      getAgentOrder: (memberKey) => {
+        const scope = memberKey.trim();
+        if (!scope) return [];
+        return get().agentOrderByMember[scope] ?? [];
+      },
+      setAgentOrder: (memberKey, keys) => {
+        const scope = memberKey.trim();
+        if (!scope) return;
+        const normalized = normalizeKeys(keys);
+        set((state) => ({
+          agentOrderByMember: {
+            ...state.agentOrderByMember,
+            [scope]: normalized,
+          },
+        }));
+      },
     }),
     {
       name: "sidebar-project-workspace-order",
@@ -190,8 +240,10 @@ export const useSidebarOrderStore = create<SidebarOrderStoreState>()(
         pinnedWorkspaceOrder: state.pinnedWorkspaceOrder,
         workspaceOrderByProject: state.workspaceOrderByProject,
         workspaceOrder: state.workspaceOrder,
+        memberOrderByWorkspace: state.memberOrderByWorkspace,
+        agentOrderByMember: state.agentOrderByMember,
       }),
-      version: 1,
+      version: 2,
       migrate: migrateSidebarOrderState,
     },
   ),

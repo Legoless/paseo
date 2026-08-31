@@ -1,10 +1,9 @@
 import type { Locator } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
 import { gotoAppShell } from "../support/helpers/app";
-import { projectEquivalenceViewKey } from "../support/helpers/project-view-key";
 import { getServerId } from "../support/helpers/server-id";
 import { seedWorkspace } from "../support/helpers/seed-client";
-import { waitForSidebarHydration } from "../support/helpers/workspace-ui";
+import { seedMockAgentWorkspace } from "../support/helpers/mock-agent";
 
 async function rowTestIds(rows: Locator) {
   return rows.evaluateAll((elements) =>
@@ -57,9 +56,7 @@ async function quickDragFirstRowAfterSecond(
   await expect.poll(() => rowTestIds(rows)).toEqual([before[1], before[0]]);
 }
 
-test("projects, workspaces, and pinned chats reorder with an immediate mouse drag", async ({
-  page,
-}) => {
+test("workspaces and pinned chats reorder with an immediate mouse drag", async ({ page }) => {
   const firstProject = await seedWorkspace({ repoPrefix: "sidebar-reorder-first-" });
   const secondProject = await seedWorkspace({ repoPrefix: "sidebar-reorder-second-" });
 
@@ -77,14 +74,7 @@ test("projects, workspaces, and pinned chats reorder with an immediate mouse dra
     }
 
     await gotoAppShell(page);
-    await waitForSidebarHydration(page);
 
-    const firstProjectTestId = `sidebar-project-row-${projectEquivalenceViewKey(firstProject.projectKey)}`;
-    const secondProjectTestId = `sidebar-project-row-${projectEquivalenceViewKey(secondProject.projectKey)}`;
-    await quickDragFirstRowAfterSecond(
-      page.locator(`[data-testid="${firstProjectTestId}"], [data-testid="${secondProjectTestId}"]`),
-      pressProjectRow,
-    );
     const firstWorkspaceTestId = `sidebar-workspace-row-${getServerId()}:${firstProject.workspaceId}`;
     const secondWorkspaceTestId = `sidebar-workspace-row-${getServerId()}:${secondWorkspace.workspace.id}`;
     await quickDragFirstRowAfterSecond(
@@ -103,6 +93,68 @@ test("projects, workspaces, and pinned chats reorder with an immediate mouse dra
       ),
       pressWorkspaceRow,
     );
+  } finally {
+    await firstProject.cleanup();
+    await secondProject.cleanup();
+  }
+});
+
+test("agents reorder within one project and persist across reload", async ({ page }) => {
+  const workspace = await seedMockAgentWorkspace({
+    repoPrefix: "sidebar-agent-reorder-",
+    title: "First agent",
+  });
+
+  try {
+    const secondAgent = await workspace.client.createAgent({
+      provider: "mock",
+      cwd: workspace.cwd,
+      workspaceId: workspace.workspaceId,
+      title: "Second agent",
+      modeId: "load-test",
+      model: "e2e-fast-stream",
+    });
+    await gotoAppShell(page);
+
+    const firstTestId = `sidebar-agent-row-${workspace.agentId}`;
+    const secondTestId = `sidebar-agent-row-${secondAgent.id}`;
+    const rows = page.locator(`[data-testid="${firstTestId}"], [data-testid="${secondTestId}"]`);
+    await expect(rows).toHaveCount(2);
+    await quickDragFirstRowAfterSecond(rows, pressProjectRow);
+    const reordered = await rowTestIds(rows);
+
+    await page.reload();
+    await expect(rows).toHaveCount(2);
+    await expect.poll(() => rowTestIds(rows)).toEqual(reordered);
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+test("project members reorder within one workspace and persist across reload", async ({ page }) => {
+  const firstProject = await seedWorkspace({ repoPrefix: "sidebar-member-reorder-first-" });
+  const secondProject = await seedWorkspace({ repoPrefix: "sidebar-member-reorder-second-" });
+
+  try {
+    const added = await firstProject.client.addWorkspaceMember(firstProject.workspaceId, {
+      kind: "directory",
+      path: secondProject.repoPath,
+      projectId: secondProject.projectId,
+    });
+    if (!added.workspace) throw new Error(added.error ?? "Failed to add workspace member");
+    await gotoAppShell(page);
+
+    const serverId = getServerId();
+    const firstTestId = `sidebar-member-row-${serverId}:${firstProject.workspaceId}#${firstProject.repoPath}`;
+    const secondTestId = `sidebar-member-row-${serverId}:${firstProject.workspaceId}#${secondProject.repoPath}`;
+    const rows = page.locator(`[data-testid="${firstTestId}"], [data-testid="${secondTestId}"]`);
+    await expect(rows).toHaveCount(2);
+    await quickDragFirstRowAfterSecond(rows, pressProjectRow);
+    const reordered = await rowTestIds(rows);
+
+    await page.reload();
+    await expect(rows).toHaveCount(2);
+    await expect.poll(() => rowTestIds(rows)).toEqual(reordered);
   } finally {
     await firstProject.cleanup();
     await secondProject.cleanup();
