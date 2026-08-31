@@ -27,7 +27,9 @@ On desktop, the shell renders inside the focused workspace pane. Every pane has 
 at the top-right of its content surface. The dock starts hidden, uses its own persisted width and
 resize handle, and leaves the workspace header, tab rail, and sibling panes unchanged.
 Desktop development builds put their checkout label at the tray's top-left while Explorer stays at
-the top-right. The global sidebar remains workspace navigation and does not own project work chrome.
+the top-right. Project-scoped git actions sit immediately left of Explorer. The global sidebar and
+workspace header do not own project work chrome on desktop pane layouts. Open in editor uses the
+same pane project directory, so it opens that checkout or worktree rather than the workspace primary.
 
 The dock follows the project bound to the pane's active agent, terminal, or draft. A supporting tab
 inherits another project-bound tab in the same pane. When no tab supplies a project, use the

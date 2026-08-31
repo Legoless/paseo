@@ -37,6 +37,8 @@ import { useTranslation } from "react-i18next";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { ResizeHandle } from "@/components/resize-handle";
 import { ToolbarButton } from "@/components/ui/pane-content-toolbar";
+import { WorkspaceActions } from "@/git/workspace-actions";
+import { WorkspaceOpenInEditorButton } from "@/workspace/open-in-editor/button";
 import {
   resolveExplorerSidebarDockSizes,
   resolveExplorerSidebarWidth,
@@ -161,7 +163,17 @@ const EMPTY_SPLIT_SIZES: number[] = [];
 const EXPLORER_SIDEBAR_RESIZE_GROUP_ID = "explorer-sidebar";
 const DEV_BUILD_LABEL = process.env.EXPO_PUBLIC_PASEO_DEV_BUILD_LABEL?.trim() || null;
 
-function PaneProjectTray({ open, onPress }: { open: boolean; onPress: () => void }) {
+function PaneProjectTray({
+  serverId,
+  cwd,
+  open,
+  onPress,
+}: {
+  serverId: string;
+  cwd: string | null;
+  open: boolean;
+  onPress: () => void;
+}) {
   const { t } = useTranslation();
   const { theme } = useUnistyles();
   return (
@@ -179,18 +191,21 @@ function PaneProjectTray({ open, onPress }: { open: boolean; onPress: () => void
           </Text>
         </View>
       ) : null}
-      <ToolbarButton
-        label={t(
-          open ? "workspace.tabs.explorerSidebar.close" : "workspace.tabs.explorerSidebar.open",
-        )}
-        selected={open}
-        testID="workspace-explorer-toggle"
-        tooltipSide="left"
-        style={styles.paneExplorerToggle}
-        onPress={onPress}
-      >
-        <PanelRight size={14} color={theme.colors.foregroundExtraMuted} />
-      </ToolbarButton>
+      <View style={styles.paneProjectActions}>
+        {cwd ? <WorkspaceOpenInEditorButton serverId={serverId} cwd={cwd} hideLabels /> : null}
+        {cwd ? <WorkspaceActions serverId={serverId} cwd={cwd} /> : null}
+        <ToolbarButton
+          label={t(
+            open ? "workspace.tabs.explorerSidebar.close" : "workspace.tabs.explorerSidebar.open",
+          )}
+          selected={open}
+          testID="workspace-explorer-toggle"
+          tooltipSide="left"
+          onPress={onPress}
+        >
+          <PanelRight size={14} color={theme.colors.foregroundExtraMuted} />
+        </ToolbarButton>
+      </View>
     </View>
   );
 }
@@ -1376,7 +1391,12 @@ function SplitPaneView({
               buildPaneContentModel={buildPaneContentModel}
             />
             <SplitDropZone paneId={pane.id} active={showDropZones} preview={dropPreview} />
-            <PaneProjectTray open={explorerOpenForPane} onPress={handleTogglePaneExplorer} />
+            <PaneProjectTray
+              serverId={normalizedServerId}
+              cwd={paneWorkspaceRoot}
+              open={explorerOpenForPane}
+              onPress={handleTogglePaneExplorer}
+            />
           </View>
           {explorerOpenForPane && explorerSidebarPane && paneWorkspaceRoot ? (
             <>
@@ -1553,8 +1573,11 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[1],
   },
-  paneExplorerToggle: {
+  paneProjectActions: {
     marginLeft: "auto",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
   },
   devBuildBadge: {
     minWidth: 0,
