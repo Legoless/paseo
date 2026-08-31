@@ -177,6 +177,18 @@ describe("loadAppSettingsFromStorage", () => {
     expect(result.workspaceTitleSource).toBe("title");
   });
 
+  it("defaults Explorer to the active tab and preserves pane-group scope", async () => {
+    expect((await loadAppSettingsFromStorage(makeDeps())).explorerProjectScope).toBe("tab");
+    const paneScoped = await loadAppSettingsFromStorage(
+      makeDeps({
+        storage: createInMemoryKeyValueStorage({
+          [APP_SETTINGS_KEY]: JSON.stringify({ explorerProjectScope: "pane" }),
+        }),
+      }),
+    );
+    expect(paneScoped.explorerProjectScope).toBe("pane");
+  });
+
   it("enables the chat outline by default", async () => {
     const deps = makeDeps();
 

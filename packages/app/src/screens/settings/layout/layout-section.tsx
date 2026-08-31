@@ -6,6 +6,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/component
 import { DropdownTrigger } from "@/components/ui/dropdown-trigger";
 import {
   useAppSettings,
+  type AppSettings,
   type OpenInSidePanePreferences,
   type PullRequestOpenLocation,
 } from "@/hooks/use-settings";
@@ -91,6 +92,47 @@ function LayoutPreferenceRow({
   );
 }
 
+function ExplorerProjectScopeRow({
+  value,
+  onChange,
+}: {
+  value: AppSettings["explorerProjectScope"];
+  onChange: (value: AppSettings["explorerProjectScope"]) => void;
+}) {
+  const { t } = useTranslation();
+  const label = t("settings.layout.workspacePanes.explorerProject.label");
+  const selectedLabel = t(`settings.layout.workspacePanes.explorerProject.options.${value}`);
+  const selectTab = useCallback(() => onChange("tab"), [onChange]);
+  const selectPane = useCallback(() => onChange("pane"), [onChange]);
+  return (
+    <View style={settingsStyles.row}>
+      <View style={settingsStyles.rowContent}>
+        <Text style={settingsStyles.rowTitle}>{label}</Text>
+        <Text style={settingsStyles.rowHint}>
+          {t("settings.layout.workspacePanes.explorerProject.description")}
+        </Text>
+      </View>
+      <DropdownMenu>
+        <DropdownTrigger
+          style={destinationTriggerStyle}
+          accessibilityRole="button"
+          accessibilityLabel={`${label}: ${selectedLabel}`}
+        >
+          <Text style={styles.destinationLabel}>{selectedLabel}</Text>
+        </DropdownTrigger>
+        <DropdownMenuContent side="bottom" align="end" width={220}>
+          <DropdownMenuItem selected={value === "tab"} onSelect={selectTab}>
+            {t("settings.layout.workspacePanes.explorerProject.options.tab")}
+          </DropdownMenuItem>
+          <DropdownMenuItem selected={value === "pane"} onSelect={selectPane}>
+            {t("settings.layout.workspacePanes.explorerProject.options.pane")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </View>
+  );
+}
+
 export function LayoutSection() {
   const { t } = useTranslation();
   const { settings, updateSettings } = useAppSettings();
@@ -106,28 +148,44 @@ export function LayoutSection() {
     },
     [settings.openInSidePane, updateSettings],
   );
+  const handleExplorerProjectScopeChange = useCallback(
+    (explorerProjectScope: AppSettings["explorerProjectScope"]) => {
+      void updateSettings({ explorerProjectScope });
+    },
+    [updateSettings],
+  );
   return (
-    <SettingsSection title={t("settings.layout.openInSidePane.title")}>
-      <View style={settingsStyles.card}>
-        {SOURCES.map((source, index) => (
-          <Fragment key={source}>
-            <LayoutPreferenceRow
-              source={source}
-              destination={settings.openInSidePane[source] ? "side" : "main"}
-              first={index === 0}
-              onDestinationChange={handleDestinationChange}
-            />
-          </Fragment>
-        ))}
-        <LayoutPreferenceRow
-          source="pullRequests"
-          destination={settings.pullRequestOpenLocation}
-          first={false}
-          allowExplorer
-          onDestinationChange={handleDestinationChange}
-        />
-      </View>
-    </SettingsSection>
+    <>
+      <SettingsSection title={t("settings.layout.workspacePanes.title")}>
+        <View style={settingsStyles.card}>
+          <ExplorerProjectScopeRow
+            value={settings.explorerProjectScope}
+            onChange={handleExplorerProjectScopeChange}
+          />
+        </View>
+      </SettingsSection>
+      <SettingsSection title={t("settings.layout.openInSidePane.title")}>
+        <View style={settingsStyles.card}>
+          {SOURCES.map((source, index) => (
+            <Fragment key={source}>
+              <LayoutPreferenceRow
+                source={source}
+                destination={settings.openInSidePane[source] ? "side" : "main"}
+                first={index === 0}
+                onDestinationChange={handleDestinationChange}
+              />
+            </Fragment>
+          ))}
+          <LayoutPreferenceRow
+            source="pullRequests"
+            destination={settings.pullRequestOpenLocation}
+            first={false}
+            allowExplorer
+            onDestinationChange={handleDestinationChange}
+          />
+        </View>
+      </SettingsSection>
+    </>
   );
 }
 

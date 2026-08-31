@@ -1891,6 +1891,7 @@ function WorkspaceScreenContent({
     [openTab],
   );
   const openInSidePane = useSettings((settings) => settings.openInSidePane);
+  const explorerProjectScope = useSettings((settings) => settings.explorerProjectScope);
   const pullRequestOpenLocation = useSettings((settings) => settings.pullRequestOpenLocation);
   const focusWorkspaceTab = useWorkspaceLayoutStore((state) => state.focusTab);
   const selectWorkspaceTabInPane = useWorkspaceLayoutStore((state) => state.selectTabInPane);
@@ -3982,6 +3983,7 @@ function WorkspaceScreenContent({
         primaryWorkspaceRoot={workspaceDirectory}
         agentCwdById={agentCwdById}
         terminalCwdById={terminalCwdById}
+        explorerProjectScope={explorerProjectScope}
         isExplorerSidebarOpen={isExplorerSidebarShowing}
         onToggleExplorerSidebar={handleToggleExplorerSidebar}
         isWorkspaceFocused={isRouteFocused}
@@ -4023,6 +4025,7 @@ function WorkspaceScreenContent({
     workspaceDirectory,
     agentCwdById,
     terminalCwdById,
+    explorerProjectScope,
     isExplorerSidebarShowing,
     handleToggleExplorerSidebar,
     isRouteFocused,
