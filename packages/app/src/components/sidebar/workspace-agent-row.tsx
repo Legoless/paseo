@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState, type Ref } from "react";
 import { View, Text, type ViewStyle } from "react-native";
 import { useTranslation } from "react-i18next";
 import * as Clipboard from "expo-clipboard";
@@ -35,6 +35,7 @@ import type { Theme } from "@/styles/theme";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { getStatusDotColor } from "@/utils/status-dot-color";
 import { WorkspaceLabelChip } from "@/workspace-labels/chip";
+import type { DraggableListDragHandleProps } from "@/components/draggable-list.types";
 import {
   STATUS_INDICATOR_ALERT_SIZE,
   STATUS_INDICATOR_FILLED_DOT_SIZE,
@@ -205,6 +206,9 @@ export function WorkspaceNewAgentRow({
   serverId,
   workspaceId,
   onWorkspacePress,
+  drag,
+  isDragging = false,
+  dragHandleProps,
 }: {
   newAgent: SidebarWorkspaceNewAgentRow;
   diffStat: { additions: number; deletions: number } | null;
@@ -212,6 +216,9 @@ export function WorkspaceNewAgentRow({
   serverId: string;
   workspaceId: string;
   onWorkspacePress?: () => void;
+  drag?: () => void;
+  isDragging?: boolean;
+  dragHandleProps?: DraggableListDragHandleProps;
 }) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -314,7 +321,14 @@ export function WorkspaceNewAgentRow({
     styles.agentRow,
     isHovered && !isPressed && styles.agentRowHovered,
     isPressed && styles.agentRowPressed,
+    isDragging && styles.agentRowDragging,
   ];
+  const {
+    role: _dragRole,
+    tabIndex: _dragTabIndex,
+    "aria-roledescription": _dragRoleDescription,
+    ...dragAttributes
+  } = dragHandleProps?.attributes ?? {};
 
   return (
     <AgentHoverCard
@@ -330,6 +344,9 @@ export function WorkspaceNewAgentRow({
       disabled={contextMenuOpen || dropdownMenuOpen}
     >
       <View
+        {...dragAttributes}
+        {...dragHandleProps?.listeners}
+        ref={dragHandleProps?.setActivatorNodeRef as unknown as Ref<View>}
         style={styles.agentRowContainer}
         onPointerEnter={handlePointerEnter}
         onPointerLeave={handlePointerLeave}
@@ -339,6 +356,8 @@ export function WorkspaceNewAgentRow({
             accessibilityRole={platformIsWeb ? undefined : "button"}
             accessibilityLabel={t("panels.draft.newAgent")}
             onPress={handlePress}
+            onLongPress={drag}
+            enabledOnMobile={!drag}
             onPressIn={handlePressIn}
             onPressOut={handlePressOut}
             onFocus={handleFocus}
@@ -424,6 +443,9 @@ export function WorkspaceAgentRow({
   serverId,
   workspaceId,
   onWorkspacePress,
+  drag,
+  isDragging = false,
+  dragHandleProps,
 }: {
   agent: SidebarWorkspaceAgentRow;
   diffStat: { additions: number; deletions: number } | null;
@@ -431,6 +453,9 @@ export function WorkspaceAgentRow({
   serverId: string;
   workspaceId: string;
   onWorkspacePress?: () => void;
+  drag?: () => void;
+  isDragging?: boolean;
+  dragHandleProps?: DraggableListDragHandleProps;
 }) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -503,7 +528,14 @@ export function WorkspaceAgentRow({
     styles.agentRow,
     isHovered && !isPressed && styles.agentRowHovered,
     isPressed && styles.agentRowPressed,
+    isDragging && styles.agentRowDragging,
   ];
+  const {
+    role: _dragRole,
+    tabIndex: _dragTabIndex,
+    "aria-roledescription": _dragRoleDescription,
+    ...dragAttributes
+  } = dragHandleProps?.attributes ?? {};
 
   const handleArchive = useCallback(async () => {
     const storedAgent = useSessionStore.getState().sessions[serverId]?.agents.get(agent.agentId);
@@ -557,6 +589,9 @@ export function WorkspaceAgentRow({
       disabled={contextMenuOpen || dropdownMenuOpen}
     >
       <View
+        {...dragAttributes}
+        {...dragHandleProps?.listeners}
+        ref={dragHandleProps?.setActivatorNodeRef as unknown as Ref<View>}
         style={styles.agentRowContainer}
         onPointerEnter={handlePointerEnter}
         onPointerLeave={handlePointerLeave}
@@ -566,6 +601,8 @@ export function WorkspaceAgentRow({
             accessibilityRole={platformIsWeb ? undefined : "button"}
             accessibilityLabel={agent.title}
             onPress={handlePress}
+            onLongPress={drag}
+            enabledOnMobile={!drag}
             onPressIn={handlePressIn}
             onPressOut={handlePressOut}
             onFocus={handleFocus}
@@ -660,6 +697,10 @@ const styles = StyleSheet.create((theme) => ({
   },
   agentRowPressed: {
     backgroundColor: theme.colors.surface2,
+  },
+  agentRowDragging: {
+    backgroundColor: theme.colors.surface2,
+    opacity: 0.9,
   },
   agentKebabHidden: {
     opacity: 0,

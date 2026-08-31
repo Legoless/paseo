@@ -21,6 +21,8 @@ describe("migrateSidebarOrderState", () => {
         "project-a": ["host-a:main", "host-a:feature", "host-b:main"],
       },
       workspaceOrder: [],
+      memberOrderByWorkspace: {},
+      agentOrderByMember: {},
     });
   });
 
@@ -49,12 +51,28 @@ describe("migrateSidebarOrderState", () => {
     expect(migrated.workspaceOrder).toEqual(["srv:ws-1", "srv:ws-2"]);
   });
 
+  it("restores member and agent orders within their scopes", () => {
+    const migrated = migrateSidebarOrderState({
+      memberOrderByWorkspace: { " srv:workspace ": [" member-b ", "member-a"] },
+      agentOrderByMember: { " member-a ": ["agent:two", "agent:one", "agent:two"] },
+    });
+
+    expect(migrated.memberOrderByWorkspace).toEqual({
+      "srv:workspace": ["member-b", "member-a"],
+    });
+    expect(migrated.agentOrderByMember).toEqual({
+      "member-a": ["agent:two", "agent:one"],
+    });
+  });
+
   it("rejects malformed persisted state wholesale", () => {
     expect(migrateSidebarOrderState({ workspaceOrder: [42] })).toEqual({
       projectOrder: [],
       pinnedWorkspaceOrder: [],
       workspaceOrderByProject: {},
       workspaceOrder: [],
+      memberOrderByWorkspace: {},
+      agentOrderByMember: {},
     });
   });
 });

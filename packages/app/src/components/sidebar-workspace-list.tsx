@@ -36,7 +36,9 @@ import { useHostFeatureMap } from "@/runtime/host-features";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useProjectIcons } from "@/projects/icons";
 import type {
+  SidebarWorkspaceAgentRow,
   SidebarWorkspaceMemberRow,
+  SidebarWorkspaceNewAgentRow,
   SidebarWorkspaceSection,
 } from "@/projects/workspace-groups";
 import { WorkspaceAgentRow, WorkspaceNewAgentRow } from "@/components/sidebar/workspace-agent-row";
@@ -44,6 +46,7 @@ import { useRemoveWorkspaceMember } from "@/workspaces/use-remove-workspace-memb
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { parseHostWorkspaceRouteFromPathname } from "@/utils/host-routes";
 import {
+  applyStoredOrdering,
   type SidebarWorkspaceEntry,
   type SidebarWorkspacePlacement,
 } from "@/hooks/use-sidebar-workspaces-list";
@@ -105,6 +108,8 @@ import type { HostBadgeModel } from "@/hosts/appearance";
 import { useHostBadges } from "@/hosts/use-host-badges";
 import { useSidebarRowItems } from "@/components/sidebar/display-preferences/model";
 
+const EMPTY_ORDER: string[] = [];
+const EMPTY_MEMBERS: SidebarWorkspaceMemberRow[] = [];
 const workspaceKeyExtractor = (workspace: SidebarWorkspacePlacement) => workspace.workspaceKey;
 
 function isWorkspaceSelected(input: {
@@ -830,6 +835,9 @@ function WorkspaceMemberRow({
   onRemove,
   onPress,
   onCopyPath,
+  drag,
+  isDragging,
+  dragHandleProps,
 }: {
   member: SidebarWorkspaceMemberRow;
   serverId: string;
@@ -838,6 +846,9 @@ function WorkspaceMemberRow({
   onRemove: () => void;
   onPress: () => void;
   onCopyPath: () => void;
+  drag: () => void;
+  isDragging: boolean;
+  dragHandleProps?: DraggableListDragHandleProps;
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
@@ -854,7 +865,7 @@ function WorkspaceMemberRow({
   const handleKebabFocus = useCallback(() => setIsKebabFocused(true), []);
   const handleKebabBlur = useCallback(() => setIsKebabFocused(false), []);
   const backdrop = getSidebarRowBackdrop({
-    isDragging: false,
+    isDragging,
     isPressed,
     selected: false,
     isHovered,
@@ -863,15 +874,30 @@ function WorkspaceMemberRow({
     styles.memberRow,
     isHovered && styles.workspaceRowHovered,
     isPressed && styles.workspaceRowPressed,
+    isDragging && styles.workspaceRowDragging,
   ];
+  const {
+    role: _dragRole,
+    tabIndex: _dragTabIndex,
+    "aria-roledescription": _dragRoleDescription,
+    ...dragAttributes
+  } = dragHandleProps?.attributes ?? {};
 
   return (
-    <View onPointerEnter={handlePointerEnter} onPointerLeave={handlePointerLeave}>
+    <View
+      {...dragAttributes}
+      {...dragHandleProps?.listeners}
+      ref={dragHandleProps?.setActivatorNodeRef as unknown as Ref<View>}
+      onPointerEnter={handlePointerEnter}
+      onPointerLeave={handlePointerLeave}
+    >
       <ContextMenu>
         <ContextMenuTrigger
           accessibilityRole={platformIsWeb ? undefined : "button"}
           accessibilityLabel={member.projectName}
           onPress={onPress}
+          onLongPress={drag}
+          enabledOnMobile={false}
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
           onFocus={handleFocus}
@@ -925,6 +951,18 @@ function WorkspaceMemberRow({
   );
 }
 
+type SidebarMemberAgentItem =
+  | { kind: "new"; newAgent: SidebarWorkspaceNewAgentRow }
+  | { kind: "agent"; agent: SidebarWorkspaceAgentRow };
+
+function memberAgentKey(item: SidebarMemberAgentItem): string {
+  return item.kind === "new" ? `new:${item.newAgent.tabId}` : `agent:${item.agent.agentId}`;
+}
+
+function memberKey(member: SidebarWorkspaceMemberRow): string {
+  return member.memberKey;
+}
+
 function WorkspaceMemberBlock({
   member,
   iconDataUri,
@@ -933,6 +971,9 @@ function WorkspaceMemberBlock({
   prHint,
   canRemove,
   onWorkspacePress,
+  drag,
+  isDragging,
+  dragHandleProps,
 }: {
   member: SidebarWorkspaceMemberRow;
   iconDataUri: string | null;
@@ -941,10 +982,24 @@ function WorkspaceMemberBlock({
   prHint: PrHint | null;
   canRemove: boolean;
   onWorkspacePress?: () => void;
+  drag: () => void;
+  isDragging: boolean;
+  dragHandleProps?: DraggableListDragHandleProps;
 }) {
   const { t } = useTranslation();
   const toast = useToast();
   const removeWorkspaceMember = useRemoveWorkspaceMember();
+  const storedAgentOrder = useSidebarOrderStore(
+    (state) => state.agentOrderByMember[member.memberKey] ?? EMPTY_ORDER,
+  );
+  const setAgentOrder = useSidebarOrderStore((state) => state.setAgentOrder);
+  const agentItems = useMemo(() => {
+    const items: SidebarMemberAgentItem[] = [
+      ...(member.newAgents ?? []).map((newAgent) => ({ kind: "new" as const, newAgent })),
+      ...member.agents.map((agent) => ({ kind: "agent" as const, agent })),
+    ];
+    return applyStoredOrdering({ items, storedOrder: storedAgentOrder, getKey: memberAgentKey });
+  }, [member.agents, member.newAgents, storedAgentOrder]);
 
   const handleCopyPath = useCallback(() => {
     void Clipboard.setStringAsync(member.workspaceDirectory);
@@ -974,6 +1029,50 @@ function WorkspaceMemberBlock({
     onWorkspacePress?.();
     navigateToWorkspace({ serverId, workspaceId });
   }, [onWorkspacePress, serverId, workspaceId]);
+  const handleAgentDragEnd = useCallback(
+    (items: SidebarMemberAgentItem[]) => {
+      setAgentOrder(member.memberKey, items.map(memberAgentKey));
+    },
+    [member.memberKey, setAgentOrder],
+  );
+  const renderAgent = useCallback(
+    ({
+      item,
+      drag: dragAgent,
+      isActive,
+      dragHandleProps: agentDragHandleProps,
+    }: DraggableRenderItemInfo<SidebarMemberAgentItem>) => {
+      if (item.kind === "new") {
+        return (
+          <WorkspaceNewAgentRow
+            newAgent={item.newAgent}
+            diffStat={item.newAgent.matchesMemberDirectory ? (member.diffStat ?? null) : null}
+            prHint={item.newAgent.matchesMemberDirectory ? prHint : null}
+            serverId={serverId}
+            workspaceId={workspaceId}
+            onWorkspacePress={onWorkspacePress}
+            drag={dragAgent}
+            isDragging={isActive}
+            dragHandleProps={agentDragHandleProps}
+          />
+        );
+      }
+      return (
+        <WorkspaceAgentRow
+          agent={item.agent}
+          diffStat={item.agent.matchesMemberDirectory ? (member.diffStat ?? null) : null}
+          prHint={item.agent.matchesMemberDirectory ? prHint : null}
+          serverId={serverId}
+          workspaceId={workspaceId}
+          onWorkspacePress={onWorkspacePress}
+          drag={dragAgent}
+          isDragging={isActive}
+          dragHandleProps={agentDragHandleProps}
+        />
+      );
+    },
+    [member.diffStat, onWorkspacePress, prHint, serverId, workspaceId],
+  );
 
   return (
     <>
@@ -985,29 +1084,20 @@ function WorkspaceMemberBlock({
         onRemove={handleRemove}
         onPress={handlePress}
         onCopyPath={handleCopyPath}
+        drag={drag}
+        isDragging={isDragging}
+        dragHandleProps={dragHandleProps}
       />
-      {(member.newAgents ?? []).map((newAgent) => (
-        <WorkspaceNewAgentRow
-          key={newAgent.tabId}
-          newAgent={newAgent}
-          diffStat={newAgent.matchesMemberDirectory ? (member.diffStat ?? null) : null}
-          prHint={newAgent.matchesMemberDirectory ? prHint : null}
-          serverId={serverId}
-          workspaceId={workspaceId}
-          onWorkspacePress={onWorkspacePress}
-        />
-      ))}
-      {member.agents.map((agent) => (
-        <WorkspaceAgentRow
-          key={agent.agentId}
-          agent={agent}
-          diffStat={agent.matchesMemberDirectory ? (member.diffStat ?? null) : null}
-          prHint={agent.matchesMemberDirectory ? prHint : null}
-          serverId={serverId}
-          workspaceId={workspaceId}
-          onWorkspacePress={onWorkspacePress}
-        />
-      ))}
+      <DraggableList
+        testID={`sidebar-agent-list-${member.memberKey}`}
+        data={agentItems}
+        keyExtractor={memberAgentKey}
+        renderItem={renderAgent}
+        onDragEnd={handleAgentDragEnd}
+        scrollEnabled={false}
+        useDragHandle
+        nestable={platformIsNative}
+      />
     </>
   );
 }
@@ -1055,6 +1145,19 @@ function WorkspaceSectionBlock({
   isDragging?: boolean;
   dragHandleProps?: DraggableListDragHandleProps;
 }) {
+  const storedMemberOrder = useSidebarOrderStore(
+    (state) => state.memberOrderByWorkspace[placement.workspaceKey] ?? EMPTY_ORDER,
+  );
+  const setMemberOrder = useSidebarOrderStore((state) => state.setMemberOrder);
+  const orderedMembers = useMemo(
+    () =>
+      applyStoredOrdering({
+        items: section?.members ?? EMPTY_MEMBERS,
+        storedOrder: storedMemberOrder,
+        getKey: memberKey,
+      }),
+    [section?.members, storedMemberOrder],
+  );
   const handleToggleCollapsed = useCallback(() => {
     onToggleCollapsed(placement.workspaceKey);
   }, [onToggleCollapsed, placement.workspaceKey]);
@@ -1064,6 +1167,41 @@ function WorkspaceSectionBlock({
       onToggle: handleToggleCollapsed,
     }),
     [collapsed, handleToggleCollapsed],
+  );
+  const handleMemberDragEnd = useCallback(
+    (members: SidebarWorkspaceMemberRow[]) => {
+      setMemberOrder(placement.workspaceKey, members.map(memberKey));
+    },
+    [placement.workspaceKey, setMemberOrder],
+  );
+  const renderMember = useCallback(
+    ({
+      item,
+      drag: dragMember,
+      isActive,
+      dragHandleProps: memberDragHandleProps,
+    }: DraggableRenderItemInfo<SidebarWorkspaceMemberRow>) => (
+      <MemoWorkspaceMemberBlock
+        member={item}
+        iconDataUri={memberIconByMemberKey.get(item.memberKey) ?? null}
+        serverId={placement.serverId}
+        workspaceId={placement.workspaceId}
+        prHint={item.isPrimary ? (workspaceEntry?.prHint ?? null) : null}
+        canRemove={canRemoveMembers}
+        onWorkspacePress={onWorkspacePress}
+        drag={dragMember}
+        isDragging={isActive}
+        dragHandleProps={memberDragHandleProps}
+      />
+    ),
+    [
+      canRemoveMembers,
+      memberIconByMemberKey,
+      onWorkspacePress,
+      placement.serverId,
+      placement.workspaceId,
+      workspaceEntry?.prHint,
+    ],
   );
 
   return (
@@ -1085,20 +1223,18 @@ function WorkspaceSectionBlock({
         dragHandleProps={dragHandleProps}
         collapseAccessory={collapseAccessory}
       />
-      {!collapsed && section
-        ? section.members.map((member) => (
-            <MemoWorkspaceMemberBlock
-              key={member.memberKey}
-              member={member}
-              iconDataUri={memberIconByMemberKey.get(member.memberKey) ?? null}
-              serverId={placement.serverId}
-              workspaceId={placement.workspaceId}
-              prHint={member.isPrimary ? (workspaceEntry?.prHint ?? null) : null}
-              canRemove={canRemoveMembers}
-              onWorkspacePress={onWorkspacePress}
-            />
-          ))
-        : null}
+      {!collapsed && section ? (
+        <DraggableList
+          testID={`sidebar-member-list-${placement.workspaceKey}`}
+          data={orderedMembers}
+          keyExtractor={memberKey}
+          renderItem={renderMember}
+          onDragEnd={handleMemberDragEnd}
+          scrollEnabled={false}
+          useDragHandle
+          nestable={platformIsNative}
+        />
+      ) : null}
     </View>
   );
 }
