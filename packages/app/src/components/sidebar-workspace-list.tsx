@@ -1,6 +1,4 @@
 import { View, Text, ScrollView, type GestureResponderEvent } from "react-native";
-import { useMutation } from "@tanstack/react-query";
-import { AdaptiveRenameModal } from "@/components/rename-modal";
 import {
   memo,
   useCallback,
@@ -22,6 +20,7 @@ import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
 import { getSidebarRowBackdrop } from "@/components/sidebar/sidebar-row-backdrop";
 import { type GestureType } from "react-native-gesture-handler";
 import * as Clipboard from "expo-clipboard";
+import { WorkspaceRenameModal } from "@/components/workspace-rename-modal";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
 import { DraggableList, type DraggableRenderItemInfo } from "./draggable-list";
 import type { DraggableListDragHandleProps } from "./draggable-list.types";
@@ -547,16 +546,6 @@ function WorkspaceRowWithMenu({
     archiveController.archive();
   }, [archiveController, isArchiving]);
 
-  const renameMutation = useMutation({
-    mutationFn: async (title: string) => {
-      const client = getHostRuntimeStore().getClient(workspace.serverId);
-      if (!client) {
-        throw new Error(t("sidebar.workspace.toasts.hostDisconnected"));
-      }
-      await client.setWorkspaceTitle(workspace.workspaceId, title.length === 0 ? null : title);
-    },
-  });
-
   const handleOpenRename = useCallback(() => {
     setIsRenameOpen(true);
   }, []);
@@ -565,13 +554,6 @@ function WorkspaceRowWithMenu({
     setIsRenameOpen(false);
   }, []);
 
-  const handleSubmitRename = useCallback(
-    async (value: string) => {
-      await renameMutation.mutateAsync(value.trim());
-    },
-    [renameMutation],
-  );
-
   const openAddProject = useOpenAddProject();
   const handleAddProject = useCallback(() => {
     openAddProject(workspace.serverId, {
@@ -579,7 +561,6 @@ function WorkspaceRowWithMenu({
     });
   }, [openAddProject, workspace.serverId, workspace.workspaceId]);
   const onAddProject = canAddProject ? handleAddProject : undefined;
-
   const isPinned = workspace.pinnedAt != null;
   const handleTogglePin = useCallback(() => {
     onToggleWorkspacePin(workspace);
@@ -637,14 +618,10 @@ function WorkspaceRowWithMenu({
         reserveIdleStatusIndicatorSpace={reserveIdleStatusIndicatorSpace}
         collapseAccessory={collapseAccessory}
       />
-      <AdaptiveRenameModal
+      <WorkspaceRenameModal
         visible={isRenameOpen}
-        title={t("sidebar.workspace.rename.title")}
-        initialValue={workspace.title ?? workspace.name}
-        placeholder={workspace.name}
-        submitLabel={t("sidebar.workspace.rename.submit")}
+        workspace={workspace}
         onClose={handleCloseRename}
-        onSubmit={handleSubmitRename}
         testID={`sidebar-workspace-rename-modal-${workspace.workspaceKey}`}
       />
     </>
