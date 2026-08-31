@@ -34,6 +34,8 @@ The tray's workspace-actions toggle collapses or reveals Open in editor and git 
 the branch label and Explorer toggle remain visible.
 The tray is a fixed-height row above pane content. Controls becoming ready never cover or shift the
 agent or terminal surface.
+While Explorer is closed, its toggle sits at the main tray's top-right. Opening Explorer moves the
+same control to the far-right of the Files/Changes rail, so the pointer can close it in place.
 
 The dock follows the project bound to the pane's active agent, terminal, or draft. A supporting tab
 inherits another project-bound tab in the same pane. When no tab supplies a project, use the

@@ -162,6 +162,8 @@ Electron window controls are top-corner obstructions, not a compact-layout condi
 Windows and Linux controls are fixed window chrome, outside scrolling header content. A tab rail that reaches them ends at their obstruction and shows the shared overflow fade. The project tray stays inside each workspace pane's content, with the development-build branch label at the top-left and a collapsible Open in editor and git-action group immediately left of the Explorer toggle at the top-right, so opening and closing the pane-local dock does not move either corner.
 The tray reserves a fixed row above the pane body; loading editor and git controls never overlap the
 agent stream or terminal grid.
+The Explorer toggle follows the pane's outer right edge: the main project tray owns it while closed,
+and the Explorer Files/Changes rail owns it while open.
 
 A new list+detail feature copies the settings shell. A new workspace-shaped feature copies the workspace shell. Inventing a third shape happens in design review, not in a PR.
 

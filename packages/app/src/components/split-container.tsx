@@ -163,6 +163,24 @@ const EMPTY_SPLIT_SIZES: number[] = [];
 const EXPLORER_SIDEBAR_RESIZE_GROUP_ID = "explorer-sidebar";
 const DEV_BUILD_LABEL = process.env.EXPO_PUBLIC_PASEO_DEV_BUILD_LABEL?.trim() || null;
 
+function PaneExplorerToggle({ open, onPress }: { open: boolean; onPress: () => void }) {
+  const { t } = useTranslation();
+  const { theme } = useUnistyles();
+  return (
+    <ToolbarButton
+      label={t(
+        open ? "workspace.tabs.explorerSidebar.close" : "workspace.tabs.explorerSidebar.open",
+      )}
+      selected={open}
+      testID="workspace-explorer-toggle"
+      tooltipSide="left"
+      onPress={onPress}
+    >
+      <PanelRight size={14} color={theme.colors.foregroundExtraMuted} />
+    </ToolbarButton>
+  );
+}
+
 function PaneProjectTray({
   serverId,
   cwd,
@@ -209,17 +227,7 @@ function PaneProjectTray({
         >
           <Ellipsis size={14} color={theme.colors.foregroundExtraMuted} />
         </ToolbarButton>
-        <ToolbarButton
-          label={t(
-            open ? "workspace.tabs.explorerSidebar.close" : "workspace.tabs.explorerSidebar.open",
-          )}
-          selected={open}
-          testID="workspace-explorer-toggle"
-          tooltipSide="left"
-          onPress={onPress}
-        >
-          <PanelRight size={14} color={theme.colors.foregroundExtraMuted} />
-        </ToolbarButton>
+        {!open ? <PaneExplorerToggle open={false} onPress={onPress} /> : null}
       </View>
     </PaneContentToolbar>
   );
@@ -1351,6 +1359,10 @@ function SplitPaneView({
     (tabId: string) => onMoveTabToPane(tabId, paneId),
     [onMoveTabToPane, paneId],
   );
+  const explorerTrailingAccessory = useMemo(
+    () => <PaneExplorerToggle open onPress={handleTogglePaneExplorer} />,
+    [handleTogglePaneExplorer],
+  );
   return (
     <RenderProfile id={`SplitPaneView:${pane.id}`}>
       <View
@@ -1452,6 +1464,7 @@ function SplitPaneView({
                   onMoveTabToMain={handleMoveExplorerTabToMain}
                   onReorderTabsInPane={onReorderTabsInPane}
                   buildPaneContentModel={buildPaneContentModel}
+                  trailingAccessory={explorerTrailingAccessory}
                 />
               </View>
             </>

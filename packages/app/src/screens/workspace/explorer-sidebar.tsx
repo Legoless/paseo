@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { RetainedPanel } from "@/components/retained-panel";
@@ -34,6 +34,7 @@ interface ExplorerSidebarDockProps {
     tab: WorkspaceTabDescriptor;
     workspaceRoot?: string;
   }) => WorkspacePaneContentModel;
+  trailingAccessory?: ReactNode;
 }
 
 /** A dock shell over the shared panel host. It owns no workspace-pane capabilities. */
@@ -53,6 +54,7 @@ export function ExplorerSidebarDock({
   onMoveTabToMain,
   onReorderTabsInPane,
   buildPaneContentModel,
+  trailingAccessory,
 }: ExplorerSidebarDockProps) {
   const paneState = useMemo(() => deriveWorkspacePaneState({ pane, tabs: uiTabs }), [pane, uiTabs]);
   const tabs = useMemo(() => paneState.tabs.map((tab) => tab.descriptor), [paneState.tabs]);
@@ -100,6 +102,7 @@ export function ExplorerSidebarDock({
             onCreateNewTab={onCreateNewTab}
             onMoveTabToMain={onMoveTabToMain}
             onReorderTabs={handleReorderTabs}
+            trailingAccessory={trailingAccessory}
           />
           <View pointerEvents="none" style={styles.tabRailDivider} />
         </WindowChromeSafeArea>
