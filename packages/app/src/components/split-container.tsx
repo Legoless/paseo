@@ -107,6 +107,7 @@ interface SplitContainerProps {
   primaryWorkspaceRoot: string | null;
   agentCwdById: ReadonlyMap<string, string>;
   terminalCwdById: ReadonlyMap<string, string>;
+  explorerProjectScope: "tab" | "pane";
   isExplorerSidebarOpen: boolean;
   onToggleExplorerSidebar: () => void;
   isWorkspaceFocused: boolean;
@@ -424,6 +425,7 @@ export function SplitContainer({
   primaryWorkspaceRoot,
   agentCwdById,
   terminalCwdById,
+  explorerProjectScope,
   isExplorerSidebarOpen,
   onToggleExplorerSidebar,
   isWorkspaceFocused,
@@ -707,6 +709,7 @@ export function SplitContainer({
                   primaryWorkspaceRoot={primaryWorkspaceRoot}
                   agentCwdById={agentCwdById}
                   terminalCwdById={terminalCwdById}
+                  explorerProjectScope={explorerProjectScope}
                   isExplorerSidebarOpen={isExplorerSidebarOpen}
                   onToggleExplorerSidebar={onToggleExplorerSidebar}
                   isWorkspaceFocused={isWorkspaceFocused}
@@ -943,6 +946,7 @@ function SplitNodeView({
   primaryWorkspaceRoot,
   agentCwdById,
   terminalCwdById,
+  explorerProjectScope,
   isExplorerSidebarOpen,
   onToggleExplorerSidebar,
   isWorkspaceFocused,
@@ -1040,6 +1044,7 @@ function SplitNodeView({
             primaryWorkspaceRoot={primaryWorkspaceRoot}
             agentCwdById={agentCwdById}
             terminalCwdById={terminalCwdById}
+            explorerProjectScope={explorerProjectScope}
             isExplorerSidebarOpen={isExplorerSidebarOpen}
             onToggleExplorerSidebar={onToggleExplorerSidebar}
             isWorkspaceFocused={isWorkspaceFocused}
@@ -1100,6 +1105,7 @@ function SplitNodeView({
               primaryWorkspaceRoot={primaryWorkspaceRoot}
               agentCwdById={agentCwdById}
               terminalCwdById={terminalCwdById}
+              explorerProjectScope={explorerProjectScope}
               isExplorerSidebarOpen={isExplorerSidebarOpen}
               onToggleExplorerSidebar={onToggleExplorerSidebar}
               isWorkspaceFocused={isWorkspaceFocused}
@@ -1169,6 +1175,7 @@ function SplitPaneView({
   primaryWorkspaceRoot,
   agentCwdById,
   terminalCwdById,
+  explorerProjectScope,
   isExplorerSidebarOpen,
   onToggleExplorerSidebar,
   isWorkspaceFocused,
@@ -1222,18 +1229,21 @@ function SplitPaneView({
       resolvePaneProjectRoot({
         tabs: paneTabs,
         activeTabId: activeTabDescriptor?.tabId ?? null,
+        scope: explorerProjectScope,
         primaryCwd: primaryWorkspaceRoot,
         agentCwdById,
         terminalCwdById,
       }),
-    [activeTabDescriptor?.tabId, agentCwdById, paneTabs, primaryWorkspaceRoot, terminalCwdById],
+    [
+      activeTabDescriptor?.tabId,
+      agentCwdById,
+      explorerProjectScope,
+      paneTabs,
+      primaryWorkspaceRoot,
+      terminalCwdById,
+    ],
   );
-  const explorerOpenForPane = Boolean(
-    isFocused &&
-    isExplorerSidebarOpen &&
-    explorerSidebarPane &&
-    explorerSidebarPane.hidden !== true,
-  );
+  const explorerOpenForPane = Boolean(isFocused && isExplorerSidebarOpen && explorerSidebarPane);
   const storedExplorerSidebarWidth = useWorkspaceLayoutStore(
     (state) => state.explorerSidebarWidthByWorkspace[workspaceKey],
   );

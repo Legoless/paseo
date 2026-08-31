@@ -107,6 +107,7 @@ See [docs/development.md](docs/development.md) for full setup, build sync requir
 
 ## Critical rules
 
+- **ALWAYS work with and test the Desktop version.** When running or testing the app for the user, use `npm run dev:desktop` (Electron desktop dev). Do not start the Expo mobile/web client (`npm run dev:app`) unless the user explicitly asks for it.
 - **NEVER restart the main Paseo daemon on port 6767 without permission** — it manages all running agents. If you're an agent, restarting it kills your own process.
 - **NEVER assume a timeout means the service needs restarting** — timeouts can be transient.
 - **NEVER add auth checks to tests** — agent providers handle their own auth.

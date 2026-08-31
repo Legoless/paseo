@@ -109,6 +109,8 @@ interface WorkspaceLayoutStore {
   hiddenAgentIdsByWorkspace: Record<string, Set<string>>;
   focusRestorationByWorkspace: Record<string, WorkspaceFocusRestorationState>;
   explorerSidebarPaneIdByWorkspace: Record<string, string | null>;
+  /** workspaceKey → tabId → true. Absent = Explorer is closed for that tab. */
+  explorerSidebarOpenByTab: Record<string, Record<string, boolean>>;
   sidePaneIdByWorkspace: Record<string, string | null>;
   openTab: (input: OpenWorkspaceTabInput) => string | null;
   /** Reveals the Explorer sidebar without selecting a view. Returns its pane id. */
@@ -281,6 +283,7 @@ const WorkspaceLayoutPersistedStateSchema = z.strictObject({
   // rename here would fail every existing blob and wipe the layout it describes.
   explorerPaneIdByWorkspace: z.record(z.string(), z.string().nullable()).optional(),
   explorerSidebarPaneIdByWorkspace: z.record(z.string(), z.string().nullable()).optional(),
+  explorerSidebarOpenByTab: z.record(z.string(), z.record(z.string(), z.boolean())).optional(),
   sidePaneIdByWorkspace: z.record(z.string(), z.string().nullable()).optional(),
   // COMPAT(pullRequestAutoAdd): PR detection stopped opening a tab in v0.5; accepted
   // and ignored so upgrading does not discard the layout. Remove after 2027-08-20.
@@ -559,7 +562,7 @@ function keepWorkspaceFocusOutOfExplorerSidebar(
 
 type ExplorerSidebarState = Pick<
   WorkspaceLayoutStore,
-  "layoutByWorkspace" | "explorerSidebarPaneIdByWorkspace"
+  "layoutByWorkspace" | "explorerSidebarPaneIdByWorkspace" | "explorerSidebarOpenByTab"
 >;
 
 /**
@@ -575,15 +578,52 @@ export function selectExplorerSidebarPaneId(
   return resolveExplorerSidebarPaneId(layout, state.explorerSidebarPaneIdByWorkspace[workspaceKey]);
 }
 
-/** Whether the Explorer sidebar pane is currently on screen. */
+function resolveActiveContentTabId(
+  layout: WorkspaceLayout,
+  explorerSidebarPaneId: string | null,
+): string {
+  const panes = collectAllPanes(layout.root);
+  const focusedPane = panes.find((pane) => pane.id === layout.focusedPaneId);
+  const mainPane =
+    focusedPane?.id !== explorerSidebarPaneId
+      ? focusedPane
+      : (panes.find((pane) => pane.id === DEFAULT_PANE_ID && pane.id !== explorerSidebarPaneId) ??
+        panes.find((pane) => pane.id !== explorerSidebarPaneId));
+  return mainPane?.focusedTabId ?? mainPane?.tabIds[0] ?? "__workspace__";
+}
+
+function deleteExplorerSidebarOpenEntry(
+  openByTab: Record<string, Record<string, boolean>>,
+  workspaceKey: string,
+  tabId: string,
+): Record<string, Record<string, boolean>> {
+  const workspaceMap = openByTab[workspaceKey];
+  if (!workspaceMap || !(tabId in workspaceMap)) {
+    return openByTab;
+  }
+  const { [tabId]: _, ...rest } = workspaceMap;
+  if (Object.keys(rest).length > 0) {
+    return { ...openByTab, [workspaceKey]: rest };
+  }
+  const { [workspaceKey]: __, ...sibling } = openByTab;
+  return sibling;
+}
+
+/** Whether the Explorer sidebar pane is visible for the current focused pane's active tab. */
 export function selectIsExplorerSidebarVisible(
   state: ExplorerSidebarState,
   workspaceKey: string,
 ): boolean {
   const layout = state.layoutByWorkspace[workspaceKey];
-  const paneId = layout ? selectExplorerSidebarPaneId(state, workspaceKey) : null;
-  const pane = paneId && layout ? findPaneById(layout.root, paneId) : null;
-  return Boolean(pane && pane.hidden !== true);
+  if (!layout) {
+    return false;
+  }
+  const paneId = selectExplorerSidebarPaneId(state, workspaceKey);
+  if (!paneId) {
+    return false;
+  }
+  const activeContentTabId = resolveActiveContentTabId(layout, paneId);
+  return state.explorerSidebarOpenByTab[workspaceKey]?.[activeContentTabId] === true;
 }
 
 export function resolveExplorerSidebarPaneId(
@@ -768,6 +808,8 @@ export function createWorkspaceLayoutStore(
         hiddenAgentIdsByWorkspace: {},
         focusRestorationByWorkspace: {},
         explorerSidebarPaneIdByWorkspace: {},
+        /** workspaceKey → tabId → true. Absent = Explorer is closed for that tab. */
+        explorerSidebarOpenByTab: {},
         sidePaneIdByWorkspace: {},
         openTab: (input) => {
           const normalizedWorkspaceKey = trimNonEmpty(input.workspaceKey);
@@ -872,6 +914,13 @@ export function createWorkspaceLayoutStore(
                 ...state.explorerSidebarPaneIdByWorkspace,
                 [normalizedWorkspaceKey]: paneId,
               },
+              explorerSidebarOpenByTab: {
+                ...state.explorerSidebarOpenByTab,
+                [normalizedWorkspaceKey]: {
+                  ...state.explorerSidebarOpenByTab[normalizedWorkspaceKey],
+                  [resolveActiveContentTabId(revealedLayout, paneId)]: true,
+                },
+              },
             };
           });
           return paneId;
@@ -900,6 +949,11 @@ export function createWorkspaceLayoutStore(
                 ...state.layoutByWorkspace,
                 [normalizedWorkspaceKey]: nextLayout,
               },
+              explorerSidebarOpenByTab: deleteExplorerSidebarOpenEntry(
+                state.explorerSidebarOpenByTab,
+                normalizedWorkspaceKey,
+                resolveActiveContentTabId(layout, paneId),
+              ),
             };
           });
         },
@@ -960,57 +1014,43 @@ export function createWorkspaceLayoutStore(
             const closingTab = collectAllTabs(layout.root).find(
               (tab) => tab.tabId === normalizedTabId,
             );
+            let nextLayout: WorkspaceLayout | null;
+            let hidesExplorer = false;
+
             if (closingPane?.tabIds.length === 1 && closingTab?.target.kind === "new_tab") {
-              const nextLayout =
-                closingPane.id === explorerSidebarPaneId
-                  ? setPaneHiddenInLayout({
-                      layout,
-                      paneId: closingPane.id,
+              hidesExplorer = closingPane.id === explorerSidebarPaneId;
+              nextLayout = hidesExplorer
+                ? setPaneHiddenInLayout({ layout, paneId: closingPane.id, hidden: true })
+                : closePaneInLayout({ layout, paneId: closingPane.id, explorerSidebarPaneId });
+            } else {
+              const preserveEmptyPaneId =
+                closingPane?.id === "main" || closingPane?.id === explorerSidebarPaneId
+                  ? closingPane.id
+                  : null;
+              const closedLayout = closeTabInLayout({
+                layout,
+                tabId: normalizedTabId,
+                preserveEmptyPaneId,
+              });
+              hidesExplorer =
+                closingPane?.id === explorerSidebarPaneId && closingPane.tabIds.length === 1;
+              const normalizedLayout =
+                closedLayout && hidesExplorer && explorerSidebarPaneId !== null
+                  ? (setPaneHiddenInLayout({
+                      layout: closedLayout,
+                      paneId: explorerSidebarPaneId,
                       hidden: true,
-                    })
-                  : closePaneInLayout({
-                      layout,
-                      paneId: closingPane.id,
-                      explorerSidebarPaneId,
-                    });
-              if (!nextLayout) {
-                return state;
-              }
-              return {
-                ...withoutFocusRestoration(state, normalizedWorkspaceKey),
-                ...reconcileRememberedSidePane(state, normalizedWorkspaceKey, nextLayout),
-                layoutByWorkspace: {
-                  ...state.layoutByWorkspace,
-                  [normalizedWorkspaceKey]: nextLayout,
-                },
-              };
-            }
-            const preserveEmptyPaneId =
-              closingPane?.id === "main" || closingPane?.id === explorerSidebarPaneId
-                ? closingPane.id
+                    }) ?? closedLayout)
+                  : closedLayout;
+              nextLayout = normalizedLayout
+                ? keepWorkspaceFocusOutOfExplorerSidebar(
+                    normalizedLayout,
+                    explorerSidebarPaneId,
+                    layout.focusedPaneId,
+                  )
                 : null;
-            const closedLayout = closeTabInLayout({
-              layout,
-              tabId: normalizedTabId,
-              preserveEmptyPaneId,
-            });
-            const nextLayoutBeforeFocusNormalization =
-              closedLayout &&
-              closingPane?.id === explorerSidebarPaneId &&
-              closingPane.tabIds.length === 1
-                ? (setPaneHiddenInLayout({
-                    layout: closedLayout,
-                    paneId: explorerSidebarPaneId,
-                    hidden: true,
-                  }) ?? closedLayout)
-                : closedLayout;
-            const nextLayout = nextLayoutBeforeFocusNormalization
-              ? keepWorkspaceFocusOutOfExplorerSidebar(
-                  nextLayoutBeforeFocusNormalization,
-                  explorerSidebarPaneId,
-                  layout.focusedPaneId,
-                )
-              : null;
+            }
+
             if (!nextLayout) {
               return state;
             }
@@ -1018,6 +1058,15 @@ export function createWorkspaceLayoutStore(
             return {
               ...withoutFocusRestoration(state, normalizedWorkspaceKey),
               ...reconcileRememberedSidePane(state, normalizedWorkspaceKey, nextLayout),
+              ...(hidesExplorer
+                ? {
+                    explorerSidebarOpenByTab: deleteExplorerSidebarOpenEntry(
+                      state.explorerSidebarOpenByTab,
+                      normalizedWorkspaceKey,
+                      resolveActiveContentTabId(layout, explorerSidebarPaneId),
+                    ),
+                  }
+                : {}),
               layoutByWorkspace: {
                 ...state.layoutByWorkspace,
                 [normalizedWorkspaceKey]: nextLayout,
@@ -1040,7 +1089,9 @@ export function createWorkspaceLayoutStore(
             );
             const tabPane = findPaneContainingTab(layout.root, normalizedTabId);
             let nextLayout: WorkspaceLayout | null;
+            let explorerReveal = false;
             if (tabPane?.id === explorerSidebarPaneId) {
+              explorerReveal = true;
               const revealedLayout =
                 setPaneHiddenInLayout({
                   layout,
@@ -1060,8 +1111,22 @@ export function createWorkspaceLayoutStore(
               return state;
             }
 
+            const activeTabId = explorerReveal
+              ? resolveActiveContentTabId(layout, explorerSidebarPaneId)
+              : null;
             return {
               ...withoutFocusRestoration(state, normalizedWorkspaceKey),
+              ...(activeTabId
+                ? {
+                    explorerSidebarOpenByTab: {
+                      ...state.explorerSidebarOpenByTab,
+                      [normalizedWorkspaceKey]: {
+                        ...state.explorerSidebarOpenByTab[normalizedWorkspaceKey],
+                        [activeTabId]: true,
+                      },
+                    },
+                  }
+                : {}),
               layoutByWorkspace: {
                 ...state.layoutByWorkspace,
                 [normalizedWorkspaceKey]: nextLayout,
@@ -1777,6 +1842,7 @@ export function createWorkspaceLayoutStore(
               normalizedWorkspaceKey in state.hiddenAgentIdsByWorkspace ||
               normalizedWorkspaceKey in state.focusRestorationByWorkspace ||
               normalizedWorkspaceKey in state.explorerSidebarPaneIdByWorkspace ||
+              normalizedWorkspaceKey in state.explorerSidebarOpenByTab ||
               normalizedWorkspaceKey in state.sidePaneIdByWorkspace;
             if (!hasAny) {
               return state;
@@ -1803,6 +1869,8 @@ export function createWorkspaceLayoutStore(
             } = state.explorerSidebarPaneIdByWorkspace;
             const { [normalizedWorkspaceKey]: _sidePane, ...sidePaneIdByWorkspace } =
               state.sidePaneIdByWorkspace;
+            const { [normalizedWorkspaceKey]: _explorerOpenByTab, ...explorerSidebarOpenByTab } =
+              state.explorerSidebarOpenByTab;
             return {
               layoutByWorkspace,
               splitSizesByWorkspace,
@@ -1812,6 +1880,7 @@ export function createWorkspaceLayoutStore(
               hiddenAgentIdsByWorkspace,
               focusRestorationByWorkspace,
               explorerSidebarPaneIdByWorkspace,
+              explorerSidebarOpenByTab,
               sidePaneIdByWorkspace,
             };
           });
@@ -1825,18 +1894,38 @@ export function createWorkspaceLayoutStore(
           migrateWorkspaceLayoutPersistedState(persistedState, version, ids),
         partialize: (state) => {
           const layoutByWorkspace: Record<string, WorkspaceLayout> = {};
+          const explorerSidebarOpenByTab: Record<string, Record<string, boolean>> = {};
           for (const key in state.layoutByWorkspace) {
             // Strip ephemeral (commit diff) tabs before persisting so they are
             // dropped on reload rather than restored pointing at a rebased SHA.
             layoutByWorkspace[key] = stripEphemeralTabsFromLayout(
               normalizeLayout(state.layoutByWorkspace[key]),
             );
+            // Prune stale entries: keep only tabIds that still exist in the layout.
+            const liveTabIds = new Set(
+              collectAllTabs(layoutByWorkspace[key].root).map((t) => t.tabId),
+            );
+            const workspaceMap = state.explorerSidebarOpenByTab[key];
+            if (workspaceMap) {
+              const pruned: Record<string, boolean> = {};
+              for (const [tabId, open] of Object.entries(workspaceMap)) {
+                if (tabId === "__workspace__" || liveTabIds.has(tabId)) {
+                  pruned[tabId] = open;
+                }
+              }
+              if (Object.keys(pruned).length > 0) {
+                explorerSidebarOpenByTab[key] = pruned;
+              }
+            }
           }
           return {
             layoutByWorkspace,
             splitSizesByWorkspace: state.splitSizesByWorkspace,
             explorerSidebarWidthByWorkspace: state.explorerSidebarWidthByWorkspace,
             explorerPaneIdByWorkspace: state.explorerSidebarPaneIdByWorkspace,
+            ...(Object.keys(explorerSidebarOpenByTab).length > 0
+              ? { explorerSidebarOpenByTab }
+              : {}),
             sidePaneIdByWorkspace: state.sidePaneIdByWorkspace,
           };
         },
@@ -1882,6 +1971,28 @@ export function createWorkspaceLayoutStore(
               ),
             explorerSidebarPaneIdByWorkspace,
             sidePaneIdByWorkspace: result.data.sidePaneIdByWorkspace ?? {},
+            explorerSidebarOpenByTab: (() => {
+              const persisted = result.data.explorerSidebarOpenByTab ?? {};
+              const merged: Record<string, Record<string, boolean>> = {
+                ...currentState.explorerSidebarOpenByTab,
+              };
+              for (const workspaceKey in layoutByWorkspace) {
+                if (persisted[workspaceKey]) {
+                  merged[workspaceKey] = persisted[workspaceKey];
+                  continue;
+                }
+                // Legacy blob (no new key): seed the focused content tab entry
+                // if the Explorer pane is visible (not hidden).
+                const layout = layoutByWorkspace[workspaceKey];
+                const explorerPaneId = explorerSidebarPaneIdByWorkspace[workspaceKey];
+                if (!explorerPaneId) continue;
+                const explorerPane = findPaneById(layout.root, explorerPaneId);
+                if (!explorerPane || explorerPane.hidden === true) continue;
+                const activeContentTabId = resolveActiveContentTabId(layout, explorerPaneId);
+                merged[workspaceKey] = { [activeContentTabId]: true };
+              }
+              return merged;
+            })(),
           };
         },
       },
