@@ -238,6 +238,8 @@ test.describe("Sidebar workspace list", () => {
       await gotoAppShell(page);
       const firstHoverCard = await openAgentHoverCard(page, workspace.agentId);
       await expect(firstHoverCard.getByTestId("hover-card-agent-name")).toHaveText("Hover agent");
+      await page.mouse.move(800, 500);
+      await expect(firstHoverCard).toBeHidden();
 
       const hoverCard = await openAgentHoverCard(page, secondAgent.id);
       await expect(hoverCard.getByTestId("hover-card-agent-name")).toHaveText("Second hover agent");
@@ -258,6 +260,14 @@ test.describe("Sidebar workspace list", () => {
       expect(
         Math.abs(memberRowBox!.x + memberRowBox!.width - memberKebabBox!.x - memberKebabBox!.width),
       ).toBeLessThanOrEqual(12);
+      await memberKebab.click();
+      await expect(
+        page.locator('[data-testid^="sidebar-member-menu-copy-path-"]').filter({ visible: true }),
+      ).toBeVisible();
+      await expect(page.locator('[data-testid^="sidebar-member-menu-copy-branch-"]')).toHaveCount(
+        0,
+      );
+      await page.keyboard.press("Escape");
 
       const agentRow = page.getByTestId(`sidebar-agent-row-${secondAgent.id}`);
       const agentKebab = page.getByTestId(`sidebar-agent-kebab-${secondAgent.id}`);

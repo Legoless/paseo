@@ -129,13 +129,10 @@ const testMember: SidebarWorkspaceMemberRow = {
   projectName: "Project A",
   workspaceDirectory: "/repo/project-a/main",
   workspaceDirectoryLabel: "main",
-  branch: "main",
   diffStat: null,
   isPrimary: true,
   agents: [],
 };
-
-const testMemberNoBranch: SidebarWorkspaceMemberRow = { ...testMember, branch: null };
 
 const SERVER_ID = "sidebar-render-count";
 
@@ -551,7 +548,7 @@ describe("sidebar workspace menu items", () => {
     expect(screen.getByTestId("sidebar-workspace-menu-archive-test-wk")).toBeTruthy();
   });
 
-  it("member menu includes copy path, copy branch, open folder, and remove", () => {
+  it("member menu includes copy path, open folder, and remove but not copy branch", () => {
     render(
       <WorkspaceMemberMenuItems
         member={testMember}
@@ -559,7 +556,6 @@ describe("sidebar workspace menu items", () => {
         surface="context"
         canRemove
         onCopyPath={vi.fn()}
-        onCopyBranchName={vi.fn()}
         onRemove={vi.fn()}
       />,
     );
@@ -567,9 +563,7 @@ describe("sidebar workspace menu items", () => {
     expect(
       screen.getByTestId("sidebar-member-menu-copy-path-test-wk#/repo/project-a/main"),
     ).toBeTruthy();
-    expect(
-      screen.getByTestId("sidebar-member-menu-copy-branch-test-wk#/repo/project-a/main"),
-    ).toBeTruthy();
+    expect(screen.queryByText("Copy branch name")).toBeNull();
     expect(
       screen.getByTestId("sidebar-member-menu-open-folder-test-wk#/repo/project-a/main"),
     ).toBeTruthy();
@@ -586,7 +580,6 @@ describe("sidebar workspace menu items", () => {
         surface="context"
         canRemove={false}
         onCopyPath={vi.fn()}
-        onCopyBranchName={vi.fn()}
         onRemove={vi.fn()}
       />,
     );
@@ -597,26 +590,5 @@ describe("sidebar workspace menu items", () => {
     expect(
       screen.queryByTestId("sidebar-member-menu-remove-test-wk#/repo/project-a/main"),
     ).toBeNull();
-  });
-
-  it("member menu hides copy branch when the member has no branch", () => {
-    render(
-      <WorkspaceMemberMenuItems
-        member={testMemberNoBranch}
-        serverId={SERVER_ID}
-        surface="context"
-        canRemove
-        onCopyPath={vi.fn()}
-        onCopyBranchName={vi.fn()}
-        onRemove={vi.fn()}
-      />,
-    );
-
-    expect(
-      screen.queryByTestId("sidebar-member-menu-copy-branch-test-wk#/repo/project-a/main"),
-    ).toBeNull();
-    expect(
-      screen.getByTestId("sidebar-member-menu-copy-path-test-wk#/repo/project-a/main"),
-    ).toBeTruthy();
   });
 });

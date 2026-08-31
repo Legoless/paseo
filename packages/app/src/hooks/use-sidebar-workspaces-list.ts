@@ -12,6 +12,7 @@ import { useHostProjects } from "@/projects/host-projects";
 import { getHostRuntimeStore, useHostRegistryLoaded, useHosts } from "@/runtime/host-runtime";
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
 import { useSidebarViewStore } from "@/stores/sidebar-view-store";
+import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import {
   buildSidebarWorkspacePlacementModel,
   computeSidebarOrderUpdates,
@@ -189,6 +190,7 @@ export function useSidebarWorkspacesList(options?: {
 }
 
 const EMPTY_GROUP_SESSIONS: SidebarWorkspaceGroupSession[] = [];
+const EMPTY_WORKSPACE_LAYOUTS = {};
 const EMPTY_GROUP_MODEL: SidebarWorkspaceGroupModel = {
   sectionsByWorkspaceKey: new Map(),
   memberIconTargets: [],
@@ -263,14 +265,17 @@ export function useSidebarWorkspaceGroupSections(input: {
     (state) => (enabled ? selectGroupSessions(state.sessions, serverIds) : EMPTY_GROUP_SESSIONS),
     areGroupSessionsEqual,
   );
+  const layoutsByWorkspace = useWorkspaceLayoutStore((state) =>
+    enabled ? state.layoutByWorkspace : EMPTY_WORKSPACE_LAYOUTS,
+  );
   const previousModelRef = useRef<SidebarWorkspaceGroupModel>(EMPTY_GROUP_MODEL);
   return useMemo(() => {
     if (!enabled || sessions.length === 0) {
       return previousModelRef.current;
     }
-    const next = buildSidebarWorkspaceGroupModel({ sessions });
+    const next = buildSidebarWorkspaceGroupModel({ sessions, layoutsByWorkspace });
     const model = preserveSidebarWorkspaceGroupModelIdentity(previousModelRef.current, next);
     previousModelRef.current = model;
     return model;
-  }, [enabled, sessions]);
+  }, [enabled, layoutsByWorkspace, sessions]);
 }

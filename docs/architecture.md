@@ -106,7 +106,7 @@ Cross-platform React Native app that connects to one or more daemons.
 - `HostRuntimeController` manages saved host connections, reconnection, and per-host runtime state
 - `runtime/replica-cache` is typed storage behind the directory and timeline owners. It never observes or mutates `SessionStore`.
 - `runtime/directory-sync` owns directory cache selection and network reconciliation. On demand it paints accepted rows for one host, then passes the persisted per-entity cursor through `project.list`, `fetch_workspaces`, and `fetch_agents`; the daemon returns each entity's latest projection when its sequence is newer, plus tombstones.
-- `workspace-labels` owns one sequenced catalog replica per connected host, the deterministic cross-host projection that surfaces spanning hosts use (the filter page, the manager), and the per-host resolution a workspace row's chips use. Two hosts may give one name different colors, so a row resolves against its own host's catalog and a merged answer would be wrong there. Catalogs never synchronize between hosts; assignment creates a missing definition only on the target host. On the daemon, catalog and assignment rewrites share a journaled commit boundary. Startup recovery completes that commit before workspace or catalog publication.
+- `workspace-labels` owns one sequenced catalog replica per connected host, the deterministic cross-host projection that surfaces spanning hosts use (the filter page, the manager), and the per-host resolution workspace and agent chips use. Two hosts may give one name different colors, so a row resolves against its own host's catalog and a merged answer would be wrong there. Catalogs never synchronize between hosts; assignment creates a missing definition only on the target host. On the daemon, catalog and assignment rewrites share a journaled commit boundary. Startup recovery completes that commit before workspace, agent, or catalog publication.
 - `SessionContext` wraps the daemon client for the active session
 - Composer UI and submit/draft behavior live in `packages/app/src/composer/`; screens and panels should integrate it from there instead of dropping composer internals into `components/`, `hooks/`, or `screens/workspace/`
 - Timeline reducers in `timeline/session-stream-reducers.ts` handle compaction, gap detection, sequence-based deduplication
@@ -137,7 +137,8 @@ independent records; a project with no workspaces does not need a workspace plac
 Workspace label definitions use a separate, explicitly subscribed sequence. The list request both
 fetches and grants live updates for that session. A current cursor receives an empty correlated
 catch-up response when nothing changed; idle sessions and unsubscribed sessions receive no label
-traffic. Workspace assignments stay on the workspace directory sequence.
+traffic. Workspace assignments stay on the workspace directory sequence; agent assignments stay on
+the agent directory sequence.
 
 ### `packages/cli` — Command-line client
 

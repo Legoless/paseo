@@ -1,5 +1,9 @@
 import { normalizeWorkspaceFileLocation, workspaceFileLocationsEqual } from "@/workspace/file-open";
 import type { WorkspaceDraftTabSetup, WorkspaceTabTarget } from "@/workspace-tabs/model";
+import {
+  normalizeWorkspaceLabelName,
+  workspaceLabelKey,
+} from "@getpaseo/protocol/workspace-labels";
 
 export function normalizeWorkspaceTabTarget(
   value: WorkspaceTabTarget | null | undefined,
@@ -13,10 +17,17 @@ export function normalizeWorkspaceTabTarget(
       return null;
     }
     const setup = normalizeWorkspaceDraftTabSetup(value.setup);
-    return setup ? { kind: "draft", draftId, setup } : { kind: "draft", draftId };
+    const labels = normalizeWorkspaceTabLabels(value.labels);
+    return {
+      kind: "draft",
+      draftId,
+      ...(setup ? { setup } : {}),
+      ...(labels ? { labels } : {}),
+    };
   }
   if (value.kind === "new_tab") {
-    return { kind: "new_tab" };
+    const labels = normalizeWorkspaceTabLabels(value.labels);
+    return labels ? { kind: "new_tab", labels } : { kind: "new_tab" };
   }
   if (value.kind === "agent") {
     const agentId = trimNonEmpty(value.agentId);
@@ -103,9 +114,8 @@ export function workspaceTabTargetsEqual(
   if (left.kind !== right.kind) {
     return false;
   }
-  if (left.kind === "draft" && right.kind === "draft") {
-    return left.draftId === right.draftId && workspaceDraftTabSetupsEqual(left.setup, right.setup);
-  }
+  const creationTabEquality = workspaceCreationTabTargetsEqual(left, right);
+  if (creationTabEquality !== null) return creationTabEquality;
   if (left.kind === "agent" && right.kind === "agent") {
     return left.agentId === right.agentId;
   }
@@ -125,6 +135,42 @@ export function workspaceTabTargetsEqual(
     );
   }
   return secondaryWorkspaceTabTargetsEqual(left, right);
+}
+
+function workspaceCreationTabTargetsEqual(
+  left: WorkspaceTabTarget,
+  right: WorkspaceTabTarget,
+): boolean | null {
+  if (left.kind === "draft" && right.kind === "draft") {
+    return (
+      left.draftId === right.draftId &&
+      workspaceDraftTabSetupsEqual(left.setup, right.setup) &&
+      workspaceTabLabelsEqual(left.labels, right.labels)
+    );
+  }
+  return null;
+}
+
+function normalizeWorkspaceTabLabels(labels: readonly string[] | undefined): string[] | undefined {
+  if (!labels) return undefined;
+  const unique = new Map<string, string>();
+  for (const label of labels) {
+    const normalized = normalizeWorkspaceLabelName(label);
+    if (normalized) unique.set(workspaceLabelKey(normalized), normalized);
+  }
+  return unique.size > 0 ? [...unique.values()] : undefined;
+}
+
+function workspaceTabLabelsEqual(
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined,
+): boolean {
+  const normalizedLeft = normalizeWorkspaceTabLabels(left) ?? [];
+  const normalizedRight = normalizeWorkspaceTabLabels(right) ?? [];
+  return (
+    normalizedLeft.length === normalizedRight.length &&
+    normalizedLeft.every((label, index) => label === normalizedRight[index])
+  );
 }
 
 function secondaryWorkspaceTabTargetsEqual(

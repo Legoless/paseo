@@ -597,6 +597,7 @@ export class DirectorySync {
       serverId: this.serverId,
       client,
       supportsWorkspaceLabels: serverInfo?.features?.workspaceLabels === true,
+      supportsAgentLabels: serverInfo?.features?.agentLabels === true,
     });
   }
 

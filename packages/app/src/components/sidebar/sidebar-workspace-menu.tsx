@@ -113,7 +113,6 @@ interface SidebarWorkspaceMenuItemsProps extends Omit<
   "onArchive" | "open" | "onOpenChange" | "workspace" | "includeProjectActions"
 > {
   onCopyPath?: () => void;
-  onCopyBranchName?: () => void;
   openInFileManagerPath?: string | null;
   onArchive?: () => void;
 }
@@ -131,14 +130,8 @@ function useWorkspaceProjectMenuActions(
     void Clipboard.setStringAsync(workspace.workspaceDirectory);
     toast.copied(t("sidebar.workspace.toasts.pathCopied"));
   }, [t, toast, workspace]);
-  const handleCopyBranchName = useCallback(() => {
-    if (!workspace?.currentBranch) return;
-    void Clipboard.setStringAsync(workspace.currentBranch);
-    toast.copied(t("sidebar.workspace.toasts.branchNameCopied"));
-  }, [t, toast, workspace]);
   return {
     onCopyPath: enabled && workspace ? handleCopyPath : undefined,
-    onCopyBranchName: enabled && workspace?.currentBranch ? handleCopyBranchName : undefined,
     openInFileManagerPath: enabled ? workspace?.workspaceDirectory : undefined,
   };
 }
@@ -149,7 +142,6 @@ function SidebarWorkspaceMenuItems({
   serverId,
   workspaceId,
   onCopyPath,
-  onCopyBranchName,
   openInFileManagerPath,
   onRename,
   onMarkAsRead,
@@ -182,16 +174,6 @@ function SidebarWorkspaceMenuItems({
           onSelect={onCopyPath}
         >
           {t("sidebar.workspace.actions.copyPath")}
-        </WorkspaceMenuItem>
-      ) : null}
-      {onCopyBranchName ? (
-        <WorkspaceMenuItem
-          surface={surface}
-          testID={`sidebar-workspace-menu-copy-branch-name-${workspaceKey}`}
-          leading={copyLeadingIcon}
-          onSelect={onCopyBranchName}
-        >
-          {t("sidebar.workspace.actions.copyBranchName")}
         </WorkspaceMenuItem>
       ) : null}
       {onRename ? (
@@ -290,7 +272,9 @@ export function SidebarWorkspaceMenu({
   const projectActions = useWorkspaceProjectMenuActions(workspace, includeProjectActions);
   const workspaceTarget = useMemo<WorkspaceLabelTarget | null>(
     () =>
-      serverId && workspaceId ? { serverId, workspaceId, labels: workspaceLabels ?? [] } : null,
+      serverId && workspaceId
+        ? { kind: "workspace", serverId, workspaceId, labels: workspaceLabels ?? [] }
+        : null,
     [serverId, workspaceId, workspaceLabels],
   );
   const pages = useWorkspaceLabelMenuPages(workspaceTarget);
@@ -318,7 +302,6 @@ export function SidebarWorkspaceMenu({
           workspaceId={workspaceId}
           workspaceLabels={workspaceLabels}
           onCopyPath={projectActions.onCopyPath}
-          onCopyBranchName={projectActions.onCopyBranchName}
           openInFileManagerPath={projectActions.openInFileManagerPath}
           onRename={onRename}
           onMarkAsRead={onMarkAsRead}
@@ -398,6 +381,7 @@ export function SidebarWorkspaceContextMenu({
   });
   const workspaceTarget = useMemo<WorkspaceLabelTarget>(
     () => ({
+      kind: "workspace",
       serverId: workspace.serverId,
       workspaceId: workspace.workspaceId,
       labels: workspace.labels ?? [],
@@ -425,11 +409,10 @@ export function SidebarWorkspaceContextMenu({
         <SidebarWorkspaceMenuItems
           surface="context"
           workspaceKey={workspaceKey}
-          serverId={workspaceTarget.serverId}
-          workspaceId={workspaceTarget.workspaceId}
-          workspaceLabels={workspaceTarget.labels}
+          serverId={workspace.serverId}
+          workspaceId={workspace.workspaceId}
+          workspaceLabels={workspace.labels}
           onCopyPath={projectActions.onCopyPath}
-          onCopyBranchName={projectActions.onCopyBranchName}
           openInFileManagerPath={projectActions.openInFileManagerPath}
           onRename={onRename}
           onMarkAsRead={onMarkAsRead}

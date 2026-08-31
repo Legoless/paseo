@@ -1,5 +1,8 @@
+import { normalizeWorkspaceLabelName, workspaceLabelKey } from "./workspace-labels.js";
+
 export const PARENT_AGENT_ID_LABEL = "paseo.parent-agent-id";
 const OPEN_AGENT_TAB_LABEL_PREFIX = "paseo.open-agent-tab.";
+export const AGENT_WORKSPACE_LABEL_PREFIX = "paseo.workspace-label.";
 
 export function getOpenAgentTabLabel(clientId: string): string {
   return `${OPEN_AGENT_TAB_LABEL_PREFIX}${clientId}`;
@@ -7,6 +10,40 @@ export function getOpenAgentTabLabel(clientId: string): string {
 
 export function isOpenAgentTabLabel(label: string): boolean {
   return label.startsWith(OPEN_AGENT_TAB_LABEL_PREFIX);
+}
+
+export function getAgentWorkspaceLabelKey(name: string): string {
+  return `${AGENT_WORKSPACE_LABEL_PREFIX}${workspaceLabelKey(name)}`;
+}
+
+export function isAgentWorkspaceLabelKey(label: string): boolean {
+  return label.startsWith(AGENT_WORKSPACE_LABEL_PREFIX);
+}
+
+export function getAgentWorkspaceLabelAssignments(
+  labels: Record<string, unknown> | null | undefined,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(labels ?? {}).flatMap(([key, value]) => {
+      if (!isAgentWorkspaceLabelKey(key) || typeof value !== "string") return [];
+      const name = normalizeWorkspaceLabelName(value);
+      return name ? [[getAgentWorkspaceLabelKey(name), name]] : [];
+    }),
+  );
+}
+
+export function getAgentWorkspaceLabelNames(
+  labels: Record<string, unknown> | null | undefined,
+): string[] {
+  return Object.values(getAgentWorkspaceLabelAssignments(labels));
+}
+
+export function stripAgentWorkspaceLabelAssignments(
+  labels: Record<string, string> | null | undefined,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(labels ?? {}).filter(([key]) => !isAgentWorkspaceLabelKey(key)),
+  );
 }
 
 export interface AgentLabelSource {

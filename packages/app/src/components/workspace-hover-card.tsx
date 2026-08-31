@@ -53,6 +53,11 @@ import {
   collectAllTabs,
   useWorkspaceLayoutStore,
 } from "@/stores/workspace-layout-store";
+import { WorkspaceLabelChip } from "@/workspace-labels/chip";
+import {
+  workspaceLabelKey,
+  type WorkspaceLabelDefinition,
+} from "@getpaseo/protocol/workspace-labels";
 
 interface Rect {
   x: number;
@@ -112,10 +117,12 @@ interface AgentHoverCardProps {
   title: string;
   serverId: string;
   branch: string | null;
+  branchPending: boolean;
   diffStat: { additions: number; deletions: number } | null;
   workspaceDirectory: string;
   workspaceDirectoryLabel: string;
   prHint: PrHint | null;
+  labels: readonly WorkspaceLabelDefinition[];
   disabled?: boolean;
 }
 
@@ -154,10 +161,12 @@ export function AgentHoverCard({
   title,
   serverId,
   branch,
+  branchPending,
   diffStat,
   workspaceDirectory,
   workspaceDirectoryLabel,
   prHint,
+  labels,
   disabled = false,
   children,
 }: PropsWithChildren<AgentHoverCardProps>): ReactNode {
@@ -167,12 +176,24 @@ export function AgentHoverCard({
       title,
       serverId,
       branch,
+      branchPending,
       diffStat,
       workspaceDirectory,
       workspaceDirectoryLabel,
       prHint,
+      labels,
     }),
-    [branch, diffStat, prHint, serverId, title, workspaceDirectory, workspaceDirectoryLabel],
+    [
+      branch,
+      branchPending,
+      diffStat,
+      labels,
+      prHint,
+      serverId,
+      title,
+      workspaceDirectory,
+      workspaceDirectoryLabel,
+    ],
   );
   return (
     <HoverCard details={details} disabled={disabled}>
@@ -416,6 +437,13 @@ function AgentHoverCardBody({
           {details.title}
         </Text>
       </View>
+      {details.labels.length > 0 ? (
+        <View style={styles.cardLabels}>
+          {details.labels.map((label) => (
+            <WorkspaceLabelChip key={workspaceLabelKey(label.name)} label={label} />
+          ))}
+        </View>
+      ) : null}
       {details.prHint ? <PrBadge hint={details.prHint} style={styles.cardInfoRow} /> : null}
       {details.diffStat ? (
         <View style={styles.cardInfoRow}>
@@ -431,6 +459,7 @@ function AgentHoverCardBody({
           copyValue={details.branch}
           copyLabel={t("workspace.hoverCard.copyBranchName")}
           testID="hover-card-agent-branch"
+          disabled={details.branchPending}
         />
       ) : null}
       {details.workspaceDirectory ? (
@@ -478,6 +507,7 @@ const ThemedCheck = withUnistyles(Check);
 
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+const DISABLED_ACCESSIBILITY_STATE = { disabled: true } as const;
 
 function InfoRow({
   icon: Icon,
@@ -508,12 +538,14 @@ function CopyableInfoRow({
   copyValue,
   copyLabel,
   testID,
+  disabled = false,
 }: {
   icon: CardInfoIcon;
   value: string;
   copyValue: string;
   copyLabel: string;
   testID: string;
+  disabled?: boolean;
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -523,12 +555,13 @@ function CopyableInfoRow({
   }, []);
 
   const handlePress = useCallback(() => {
+    if (disabled) return;
     void copyToClipboard(copyValue);
     setCopied(true);
     setTimeout(() => {
       setCopied(false);
     }, 2000);
-  }, [copyValue]);
+  }, [copyValue, disabled]);
 
   const handleHoverIn = useCallback(() => setIsHovered(true), []);
   const handleHoverOut = useCallback(() => setIsHovered(false), []);
@@ -544,6 +577,8 @@ function CopyableInfoRow({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={copyLabel}
+      accessibilityState={disabled ? DISABLED_ACCESSIBILITY_STATE : undefined}
+      disabled={disabled}
       style={styles.cardInfoRow}
       hitSlop={4}
       onPressIn={handlePressIn}
@@ -714,6 +749,13 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[1.5],
+    paddingHorizontal: theme.spacing[3],
+    paddingBottom: theme.spacing[2],
+  },
+  cardLabels: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[1],
     paddingHorizontal: theme.spacing[3],
     paddingBottom: theme.spacing[2],
   },

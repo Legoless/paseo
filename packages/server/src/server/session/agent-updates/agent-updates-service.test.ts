@@ -100,6 +100,7 @@ function buildHarness() {
   const projectByWorkspaceId = new Map<string, ProjectPlacementPayload | null>();
   let providerVisible: (provider: string) => boolean = () => true;
   let buildAgentPayloadError: Error | null = null;
+  let projectResolutionError: Error | null = null;
   let enrichProjectedPayload = false;
   const directorySync = new DirectorySyncService("test-generation");
 
@@ -130,8 +131,10 @@ function buildHarness() {
       return payload;
     },
     isProviderVisibleToClient: (provider) => providerVisible(provider),
-    buildProjectPlacementForWorkspaceId: async (workspaceId) =>
-      projectByWorkspaceId.get(workspaceId) ?? null,
+    buildProjectPlacementForWorkspaceId: async (workspaceId) => {
+      if (projectResolutionError) throw projectResolutionError;
+      return projectByWorkspaceId.get(workspaceId) ?? null;
+    },
     emitWorkspaceUpdateForWorkspaceId: async (workspaceId) => {
       workspaceUpdates.push(workspaceId);
     },
@@ -170,6 +173,9 @@ function buildHarness() {
     },
     failBuildAgentPayload(error: Error) {
       buildAgentPayloadError = error;
+    },
+    failProjectResolution(error: Error) {
+      projectResolutionError = error;
     },
     queuePayloadBuilds(...payloads: Promise<AgentSnapshotPayload>[]) {
       queuedPayloadBuilds.push(...payloads);
@@ -499,6 +505,18 @@ describe("emitStoredRecord", () => {
     const payload = await h.service.emitStoredRecord(h.stored("a"));
 
     expect(payload.id).toBe("a");
+    expect(h.agentUpdates()).toEqual([]);
+  });
+
+  test("serializes and logs stored projection failures", async () => {
+    const h = buildHarness();
+    h.service.beginSubscription({ subscriptionId: "sub", filter: {} });
+    h.service.flushBootstrapped("sub");
+    h.register(makeAgentPayload({ id: "a", workspaceId: "ws-1" }));
+    h.failProjectResolution(new Error("project unavailable"));
+
+    await expect(h.service.emitStoredRecord(h.stored("a"))).resolves.toMatchObject({ id: "a" });
+    expect(h.loggedErrors).toHaveLength(1);
     expect(h.agentUpdates()).toEqual([]);
   });
 });

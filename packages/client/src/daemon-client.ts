@@ -700,6 +700,10 @@ export type WorkspaceLabelAssignmentPayload = Extract<
   SessionOutboundMessage,
   { type: "workspace.label.assignment.set.response" }
 >["payload"];
+export type AgentLabelAssignmentPayload = Extract<
+  SessionOutboundMessage,
+  { type: "agent.label.assignment.set.response" }
+>["payload"];
 export type WorkspaceLabelUpdatePayload = Extract<
   SessionOutboundMessage,
   { type: "workspace.label.update.response" }
@@ -2177,6 +2181,23 @@ export class DaemonClient {
       message: {
         type: "workspace.label.assignment.set.request",
         workspaceId: options.workspaceId,
+        label: options.label,
+        assigned: options.assigned,
+      },
+    });
+  }
+
+  setAgentLabel(options: {
+    agentId: string;
+    label: Extract<SessionInboundMessage, { type: "agent.label.assignment.set.request" }>["label"];
+    assigned: boolean;
+    requestId?: string;
+  }): Promise<AgentLabelAssignmentPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "agent.label.assignment.set.request",
+        agentId: options.agentId,
         label: options.label,
         assigned: options.assigned,
       },

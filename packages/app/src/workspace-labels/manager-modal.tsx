@@ -107,10 +107,19 @@ export function WorkspaceLabelManagerModal({
   }, [model]);
   const remove = useCallback((): void => {
     if (!editing) return;
-    void model.delete((affected) =>
+    void model.delete(({ workspaceCount, agentCount }) =>
       confirmDialog({
         title: t("workspaceLabels.manage.deleteTitle", { name: editing.name }),
-        message: t("workspaceLabels.manage.deleteMessage", { count: affected }),
+        message: [
+          workspaceCount > 0 || agentCount === 0
+            ? t("workspaceLabels.manage.deleteMessage", { count: workspaceCount })
+            : null,
+          agentCount > 0
+            ? t("workspaceLabels.manage.deleteAgentMessage", { count: agentCount })
+            : null,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
         confirmLabel: t("workspaceLabels.manage.delete"),
         destructive: true,
       }),

@@ -152,6 +152,7 @@ export class WorkspaceLabelManagerModel extends ObservableModel {
       }) => Promise<{ label?: WorkspaceLabelDefinition }>;
       inspectDelete: (input: { serverId: string; name: string }) => Promise<{
         affectedWorkspaceCount: number;
+        affectedAgentCount?: number;
       }>;
       delete: (input: { serverId: string; name: string }) => Promise<unknown>;
     },
@@ -245,13 +246,21 @@ export class WorkspaceLabelManagerModel extends ObservableModel {
     });
   }
 
-  delete(confirm: (affectedWorkspaceCount: number) => Promise<boolean>): Promise<void> {
+  delete(
+    confirm: (affected: { workspaceCount: number; agentCount: number }) => Promise<boolean>,
+  ): Promise<void> {
     const editing = this.currentSnapshot.editing;
     if (!editing) return Promise.resolve();
     const target = { serverId: this.serverId, name: editing.name };
     return this.run(async () => {
       const inspected = await this.dependencies.inspectDelete(target);
-      if (!(await confirm(inspected.affectedWorkspaceCount))) return;
+      if (
+        !(await confirm({
+          workspaceCount: inspected.affectedWorkspaceCount,
+          agentCount: inspected.affectedAgentCount ?? 0,
+        }))
+      )
+        return;
       await this.dependencies.delete(target);
       this.draft = null;
     });

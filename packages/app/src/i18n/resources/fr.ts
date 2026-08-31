@@ -1058,6 +1058,8 @@ export const fr: TranslationResources = {
       deleteTitle: "Supprimer {{name}} ?",
       deleteMessage_one: "Cela retire l’étiquette de {{count}} espace de travail sur cet hôte.",
       deleteMessage_other: "Cela retire l’étiquette de {{count}} espaces de travail sur cet hôte.",
+      deleteAgentMessage_one: "Cela retire aussi l’étiquette de {{count}} agent.",
+      deleteAgentMessage_other: "Cela retire aussi l’étiquette de {{count}} agents.",
       offline: "Cet hôte est hors ligne.",
       updateHost: "Mettez à jour cet hôte pour gérer les étiquettes.",
     },

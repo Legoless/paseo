@@ -1,4 +1,5 @@
 import {
+  default as React,
   useCallback,
   useEffect,
   useMemo,
@@ -54,12 +55,26 @@ const CREATE_LEADING = <ThemedPlus size={MENU_ICON_SIZE} uniProps={mutedMapping}
 /** The colour a new label takes until you say otherwise. */
 const DEFAULT_CREATE_COLOR: WorkspaceLabelColor = WORKSPACE_LABEL_COLORS[0];
 
-export interface WorkspaceLabelTarget {
+interface WorkspaceLabelTargetBase {
   serverId: string;
-  workspaceId: string;
-  /** Label names the workspace already carries, from the sidebar entry. */
+  /** Label names the target already carries, from its directory entry. */
   labels: readonly string[];
 }
+
+export type WorkspaceLabelTarget = WorkspaceLabelTargetBase &
+  (
+    | { kind: "workspace"; workspaceId: string }
+    | { kind: "agent"; agentId: string }
+    | {
+        kind: "draft";
+        setAssignment: (input: {
+          label: WorkspaceLabelDefinition;
+          assigned: boolean;
+        }) => Promise<unknown>;
+      }
+  );
+
+type PersistedWorkspaceLabelTarget = Exclude<WorkspaceLabelTarget, { kind: "draft" }>;
 
 const NO_PAGES: readonly MenuPageDefinition[] = [];
 
@@ -75,29 +90,48 @@ export function useWorkspaceLabelMenuPages(
   const { t } = useTranslation();
   return useMemo(() => {
     if (!target) return NO_PAGES;
-    return [
+    const pages: MenuPageDefinition[] = [
       {
         id: WORKSPACE_LABEL_PAGE_ID,
         title: t("workspaceLabels.title"),
-        content: (
-          <WorkspaceLabelPickerPage
-            serverId={target.serverId}
-            workspaceId={target.workspaceId}
-            assignedLabels={target.labels}
-          />
-        ),
+        content: <WorkspaceLabelPickerPage target={target} />,
       },
-      {
+    ];
+    if (target.kind !== "draft") {
+      pages.push({
         id: WORKSPACE_LABEL_CREATE_PAGE_ID,
         title: t("workspaceLabels.create"),
         // A page you type into is not one the pointer opens or dismisses on its own.
         hoverIntent: false,
-        content: (
-          <WorkspaceLabelCreatePage serverId={target.serverId} workspaceId={target.workspaceId} />
-        ),
-      },
-    ];
+        content: <WorkspaceLabelCreatePage target={target} />,
+      });
+    }
+    return pages;
   }, [t, target]);
+}
+
+function getPersistedTargetId(target: PersistedWorkspaceLabelTarget): string {
+  return target.kind === "workspace" ? target.workspaceId : target.agentId;
+}
+
+function setTargetAssignment(
+  target: WorkspaceLabelTarget,
+  input: { label: WorkspaceLabelDefinition; assigned: boolean },
+): Promise<unknown> {
+  if (target.kind === "draft") return target.setAssignment(input);
+  const targetId = getPersistedTargetId(target);
+  if (target.kind === "workspace") {
+    return workspaceLabels.setAssignment({
+      serverId: target.serverId,
+      workspaceId: targetId,
+      ...input,
+    });
+  }
+  return workspaceLabels.setAgentAssignment({
+    serverId: target.serverId,
+    agentId: targetId,
+    ...input,
+  });
 }
 
 /**
@@ -107,28 +141,25 @@ export function useWorkspaceLabelMenuPages(
  * dismissed. Assignment is the trailing check `MenuItem` already draws for a chosen row, and the
  * colour goes in the leading slot, which puts both on the rails every other row in the menu uses.
  */
-function WorkspaceLabelPickerPage({
-  serverId,
-  workspaceId,
-  assignedLabels,
-}: {
-  serverId: string;
-  workspaceId: string;
-  assignedLabels: readonly string[];
-}): ReactElement {
+function WorkspaceLabelPickerPage({ target }: { target: WorkspaceLabelTarget }): ReactElement {
   const { t } = useTranslation();
+  const { serverId } = target;
   const { labels, targetHost: host } = useWorkspaceLabelProjection(serverId);
   const model = useMemo(
     () =>
       createWorkspaceLabelPickerModel({
-        mutate: ({ label, assigned }) =>
-          workspaceLabels.setAssignment({ serverId, workspaceId, label, assigned }),
+        mutate: (input) => setTargetAssignment(target, input),
       }),
-    [serverId, workspaceId],
+    [target],
   );
+  const supported = target.kind !== "agent" || host?.agentLabelsSupported === true;
   useEffect(() => {
-    model.sync({ labels, assigned: assignedLabels, online: host?.status === "online" });
-  }, [assignedLabels, host?.status, labels, model]);
+    model.sync({
+      labels,
+      assigned: target.labels,
+      online: host?.status === "online" && supported,
+    });
+  }, [host?.status, labels, model, supported, target.labels]);
   const snapshot = useSyncExternalStore(model.subscribe, model.snapshot, model.snapshot);
   const offline = !snapshot.online;
   const pending = useMemo(() => new Set(snapshot.pendingNames), [snapshot.pendingNames]);
@@ -150,19 +181,23 @@ function WorkspaceLabelPickerPage({
           onToggle={toggle}
         />
       ))}
-      {snapshot.rows.length > 0 ? <MenuSeparator /> : null}
-      <MenuSubTrigger
-        id={WORKSPACE_LABEL_CREATE_PAGE_ID}
-        leading={CREATE_LEADING}
-        disabled={offline}
-        testID="workspace-label-picker-create"
-      >
-        {t("workspaceLabels.create")}
-      </MenuSubTrigger>
+      {target.kind !== "draft" ? (
+        <>
+          {snapshot.rows.length > 0 ? <MenuSeparator /> : null}
+          <MenuSubTrigger
+            id={WORKSPACE_LABEL_CREATE_PAGE_ID}
+            leading={CREATE_LEADING}
+            disabled={offline}
+            testID="workspace-label-picker-create"
+          >
+            {t("workspaceLabels.create")}
+          </MenuSubTrigger>
+        </>
+      ) : null}
       {snapshot.error ? (
         <MenuHint testID="workspace-label-picker-error">{snapshot.error}</MenuHint>
       ) : null}
-      {host?.status === "unsupported" ? (
+      {host?.status === "unsupported" || (host?.status === "online" && !supported) ? (
         <MenuHint>{t("workspaceLabels.updateHostUse")}</MenuHint>
       ) : null}
     </>
@@ -208,37 +243,42 @@ function WorkspaceLabelAssignRow({
  * alternative is retyping the name to find out whether the host is still there.
  */
 function WorkspaceLabelCreatePage({
-  serverId,
-  workspaceId,
+  target,
 }: {
-  serverId: string;
-  workspaceId: string;
+  target: PersistedWorkspaceLabelTarget;
 }): ReactElement {
   const { t } = useTranslation();
   const menu = useMenuContext("WorkspaceLabelCreatePage");
+  const { serverId } = target;
+  const targetKind = target.kind;
+  const targetId = getPersistedTargetId(target);
   const { targetHost: host } = useWorkspaceLabelProjection(serverId);
   const [name, setName] = useState("");
   const [color, setColor] = useState<WorkspaceLabelColor>(DEFAULT_CREATE_COLOR);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const offline = host?.status !== "online";
+  const offline =
+    host?.status !== "online" || (targetKind === "agent" && host.agentLabelsSupported !== true);
 
   const submit = useCallback(() => {
     const trimmed = normalizeWorkspaceLabelName(name);
     if (!trimmed || pending) return;
     setPending(true);
     setError(null);
-    workspaceLabels
-      .setAssignment({
-        serverId,
-        workspaceId,
-        label: { name: trimmed, color },
-        assigned: true,
-      })
+    const assignment = {
+      serverId,
+      label: { name: trimmed, color },
+      assigned: true,
+    };
+    const operation =
+      targetKind === "workspace"
+        ? workspaceLabels.setAssignment({ ...assignment, workspaceId: targetId })
+        : workspaceLabels.setAgentAssignment({ ...assignment, agentId: targetId });
+    operation
       .then(() => menu.goBack())
       .catch((cause: unknown) => setError(workspaceLabelErrorMessage(cause)))
       .finally(() => setPending(false));
-  }, [color, menu, name, pending, serverId, workspaceId]);
+  }, [color, menu, name, pending, serverId, targetId, targetKind]);
 
   return (
     <>

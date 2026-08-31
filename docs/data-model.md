@@ -90,7 +90,7 @@ Each agent is stored as a separate JSON file, grouped by project directory.
 | `lastActivityAt`     | `string?` (ISO 8601)                     | Last activity timestamp                                                                                                                                                                                                                                                                                                                                                             |
 | `lastUserMessageAt`  | `string?` (ISO 8601)                     | Last user message timestamp                                                                                                                                                                                                                                                                                                                                                         |
 | `title`              | `string?`                                | User-visible title                                                                                                                                                                                                                                                                                                                                                                  |
-| `labels`             | `Record<string, string>`                 | Key-value labels (default `{}`). Paseo uses `paseo.parent-agent-id` for parentage and client-scoped `paseo.open-agent-tab.*` labels while managed subagent tabs are open — see [agent-lifecycle.md](./agent-lifecycle.md)                                                                                                                                                           |
+| `labels`             | `Record<string, string>`                 | Key-value labels (default `{}`). Paseo reserves `paseo.workspace-label.*` for catalog assignments, `paseo.parent-agent-id` for parentage, and client-scoped `paseo.open-agent-tab.*` while managed subagent tabs are open — see [agent-lifecycle.md](./agent-lifecycle.md)                                                                                                          |
 | `lastStatus`         | `AgentStatus`                            | One of: `"initializing"`, `"idle"`, `"running"`, `"error"`, `"closed"`. `closed` means the record is resumable but has no live provider runtime; archive remains represented separately by `archivedAt`.                                                                                                                                                                            |
 | `lastModeId`         | `string?`                                | Last active mode ID                                                                                                                                                                                                                                                                                                                                                                 |
 | `config`             | `SerializableConfig?`                    | Agent session configuration (see below)                                                                                                                                                                                                                                                                                                                                             |
@@ -472,25 +472,27 @@ Agents bind to the workspace by `workspaceId` and run in any member `cwd` (defau
 
 **Path:** `$PASEO_HOME/projects/workspace-labels.json`
 
-The catalog is shared by every workspace on one host. A definition contains a display name and one
+The catalog is shared by every workspace and agent on one host. A definition contains a display name and one
 of the ten identity colour names (`WORKSPACE_LABEL_COLORS` in
 `packages/protocol/src/workspace-labels.ts`); trimmed, collapsed, case-insensitive name identity is
 unique within that file. Definitions have no portable ID or principal owner and remain after their
 last assignment. Editing a label takes a new name, a new colour, or both in one commit, so the two
-fields cannot land half-applied. Workspaces store label names, so a rename and a delete rewrite
-workspace assignments through one serialized compound commit while a recolour is catalog-only; a
+fields cannot land half-applied. Workspaces store label names. Agents store each assignment in
+`Agent.labels` under a daemon-owned `paseo.workspace-label.<normalized name>` key, preserving every
+unrelated label. A rename and a delete rewrite both assignment surfaces through one serialized
+compound commit while a recolour is catalog-only; a
 rename onto a name the host already has is refused rather than merged. A prepared
-`workspace-labels.transaction.json` contains both before and after images. The daemon writes the
-catalog and workspace files, then atomically changes the transaction to committed; that phase
+`workspace-labels.transaction.json` contains catalog and workspace images plus the affected agents'
+reserved assignment state. The daemon writes the catalog, agent, and workspace files, then atomically changes the transaction to committed; that phase
 change is the durable commit point. Recovery rolls prepared transactions back before either
 directory is served. A committed marker proves both data files were already written, so recovery
-only loads the current catalog and retries marker cleanup; it never reapplies stale workspace
-after-images over later registry mutations. A request rejected before the commit point therefore
+only loads the current catalog and retries marker cleanup; it never reapplies stale assignment
+after-images over later mutations. A request rejected before the commit point therefore
 cannot take effect after restart. If the live daemon cannot determine or restore the durable state,
 the workspace registry freezes every write and later label mutations fail with
 `workspace_label_storage_uncertain` until daemon restart performs recovery. Reads remain available,
-but may reflect the last acknowledged cache until restart. Workspace directory and catalog updates
-publish only after the commit point; publication failure does not roll durable state back.
+but may reflect the last acknowledged cache until restart. Workspace directory, agent directory,
+and catalog updates publish only after the commit point; publication failure does not roll durable state back.
 
 `projectId` is still a real FK: workspace records should have a matching project record. Read-only
 history surfaces tolerate transient orphaned workspaces by omitting those rows so one bad FK cannot

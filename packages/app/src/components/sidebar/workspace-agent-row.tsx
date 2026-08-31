@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { View, Text, type ViewStyle } from "react-native";
 import { useTranslation } from "react-i18next";
 import * as Clipboard from "expo-clipboard";
@@ -9,12 +9,19 @@ import { AgentHoverCard } from "@/components/workspace-hover-card";
 import { StatusRing } from "@/components/status-ring";
 import { useSidebarRowItems } from "@/components/sidebar/display-preferences/model";
 import { useSidebarWorkspaceTrailing } from "@/components/sidebar/workspace-trailing";
-import type { SidebarWorkspaceAgentRow } from "@/projects/workspace-groups";
+import { useCheckoutStatusQuery } from "@/git/use-status-query";
+import { useWorkspaceLabelMenuPages } from "@/workspace-labels/picker";
+import { useWorkspaceLabelDefinitions } from "@/workspace-labels";
+import type {
+  SidebarWorkspaceAgentRow,
+  SidebarWorkspaceNewAgentRow,
+} from "@/projects/workspace-groups";
 import type { PrHint } from "@/git/use-pr-status-query";
 import { isWeb as platformIsWeb, isNative as platformIsNative } from "@/constants/platform";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { useSessionStore } from "@/stores/session-store";
+import { collectAllTabs, useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { useArchiveAgent } from "@/hooks/use-archive-agent";
 import { useToast } from "@/contexts/toast-context";
 import { confirmDialog } from "@/utils/confirm-dialog";
@@ -31,6 +38,10 @@ import {
   STATUS_INDICATOR_ALERT_SIZE,
   STATUS_INDICATOR_FILLED_DOT_SIZE,
 } from "@/utils/status-indicator-geometry";
+import {
+  workspaceLabelKey,
+  type WorkspaceLabelDefinition,
+} from "@getpaseo/protocol/workspace-labels";
 
 const ThemedCircleAlert = withUnistyles(CircleAlert);
 const ThemedGitBranch = withUnistyles(GitBranch);
@@ -71,16 +82,262 @@ function AgentStatusIndicator({ bucket }: { bucket: SidebarStateBucket }) {
   );
 }
 
+function useAgentCheckoutPresentation(agent: SidebarWorkspaceAgentRow, serverId: string) {
+  const checkout = useCheckoutBranch(agent.cwd, serverId);
+  const labelTarget = useMemo(
+    () => ({
+      kind: "agent" as const,
+      serverId,
+      agentId: agent.agentId,
+      labels: agent.labels,
+    }),
+    [agent.agentId, agent.labels, serverId],
+  );
+  return {
+    ...checkout,
+    labelPages: useWorkspaceLabelMenuPages(labelTarget),
+    labelDefinitions: useWorkspaceLabelDefinitions(serverId, agent.labels),
+  };
+}
+
+function useCheckoutBranch(cwd: string, serverId: string) {
+  const { status, isFetching, isError, isConnected, refetch } = useCheckoutStatusQuery({
+    serverId,
+    cwd,
+  });
+  const branch =
+    status?.isGit && status.currentBranch && status.currentBranch !== "HEAD"
+      ? status.currentBranch
+      : null;
+  return {
+    branch,
+    branchReady: isConnected && !isFetching && !isError,
+    refreshBranch: refetch,
+  };
+}
+
+function showAgentActions(input: {
+  hovered: boolean;
+  focused: boolean;
+  kebabFocused: boolean;
+  compact: boolean;
+  menuOpen: boolean;
+}): boolean {
+  return (
+    input.hovered ||
+    input.focused ||
+    input.kebabFocused ||
+    platformIsNative ||
+    input.compact ||
+    input.menuOpen
+  );
+}
+
+export function WorkspaceNewAgentRow({
+  newAgent,
+  diffStat,
+  prHint,
+  serverId,
+  workspaceId,
+  onWorkspacePress,
+}: {
+  newAgent: SidebarWorkspaceNewAgentRow;
+  diffStat: { additions: number; deletions: number } | null;
+  prHint: PrHint | null;
+  serverId: string;
+  workspaceId: string;
+  onWorkspacePress?: () => void;
+}) {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const [isHovered, setIsHovered] = useState(false);
+  const [isPressed, setIsPressed] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [isKebabFocused, setIsKebabFocused] = useState(false);
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const [dropdownMenuOpen, setDropdownMenuOpen] = useState(false);
+  const { branch, branchReady, refreshBranch } = useCheckoutBranch(newAgent.cwd, serverId);
+  const labelDefinitions = useWorkspaceLabelDefinitions(serverId, newAgent.labels);
+  const menuAgent = useMemo(
+    () => ({ agentId: newAgent.tabId, cwd: newAgent.cwd }),
+    [newAgent.cwd, newAgent.tabId],
+  );
+  const workspaceKey = `${serverId}:${workspaceId}`;
+  const setLabelAssignment = useCallback(
+    async (input: { label: WorkspaceLabelDefinition; assigned: boolean }) => {
+      const store = useWorkspaceLayoutStore.getState();
+      const tab = store
+        .getWorkspaceTabs(workspaceKey)
+        .find((candidate) => candidate.tabId === newAgent.tabId);
+      if (tab?.target.kind !== "new_tab" && tab?.target.kind !== "draft") return;
+      const key = workspaceLabelKey(input.label.name);
+      const current = tab.target.labels ?? [];
+      const labels = input.assigned
+        ? [...current.filter((name) => workspaceLabelKey(name) !== key), input.label.name]
+        : current.filter((name) => workspaceLabelKey(name) !== key);
+      store.replaceTab(workspaceKey, tab.tabId, {
+        ...tab.target,
+        labels: labels.length > 0 ? labels : undefined,
+      });
+    },
+    [newAgent.tabId, workspaceKey],
+  );
+  const labelTarget = useMemo(
+    () => ({
+      kind: "draft" as const,
+      serverId,
+      labels: newAgent.labels,
+      setAssignment: setLabelAssignment,
+    }),
+    [newAgent.labels, serverId, setLabelAssignment],
+  );
+  const labelPages = useWorkspaceLabelMenuPages(labelTarget);
+  const isCompact = useIsCompactFormFactor();
+  const actionsVisible = showAgentActions({
+    hovered: isHovered,
+    focused: isFocused,
+    kebabFocused: isKebabFocused,
+    compact: isCompact,
+    menuOpen: dropdownMenuOpen,
+  });
+  const handlePress = useCallback(() => {
+    onWorkspacePress?.();
+    navigateToWorkspace({ serverId, workspaceId });
+    useWorkspaceLayoutStore.getState().focusTab(`${serverId}:${workspaceId}`, newAgent.tabId);
+  }, [newAgent.tabId, onWorkspacePress, serverId, workspaceId]);
+  const handleCopyPath = useCallback(() => {
+    void Clipboard.setStringAsync(newAgent.cwd);
+    toast.copied(t("sidebar.workspace.toasts.pathCopied"));
+  }, [newAgent.cwd, t, toast]);
+  const handleCopyBranchName = useCallback(() => {
+    if (!branchReady || !branch) return;
+    void Clipboard.setStringAsync(branch);
+    toast.copied(t("sidebar.workspace.toasts.branchNameCopied"));
+  }, [branch, branchReady, t, toast]);
+  const handleFocus = useCallback(() => {
+    setIsFocused(true);
+    void refreshBranch();
+  }, [refreshBranch]);
+  const handleBlur = useCallback(() => setIsFocused(false), []);
+  const handlePointerEnter = useCallback(() => setIsHovered(true), []);
+  const handlePointerLeave = useCallback(() => setIsHovered(false), []);
+  const handlePressIn = useCallback(() => setIsPressed(true), []);
+  const handlePressOut = useCallback(() => setIsPressed(false), []);
+  const handleKebabFocus = useCallback(() => setIsKebabFocused(true), []);
+  const handleKebabBlur = useCallback(() => setIsKebabFocused(false), []);
+  const handleContextMenuOpenChange = useCallback(
+    (open: boolean) => {
+      setContextMenuOpen(open);
+      if (open) void refreshBranch();
+    },
+    [refreshBranch],
+  );
+  const handleDropdownMenuOpenChange = useCallback(
+    (open: boolean) => {
+      setDropdownMenuOpen(open);
+      if (open) void refreshBranch();
+    },
+    [refreshBranch],
+  );
+  const handleClose = useCallback(() => {
+    useWorkspaceLayoutStore.getState().closeTab(workspaceKey, newAgent.tabId);
+  }, [newAgent.tabId, workspaceKey]);
+  const rowStyle = [
+    styles.agentRow,
+    isHovered && !isPressed && styles.agentRowHovered,
+    isPressed && styles.agentRowPressed,
+  ];
+
+  return (
+    <AgentHoverCard
+      title={t("panels.draft.newAgent")}
+      serverId={serverId}
+      branch={branch}
+      branchPending={!branchReady}
+      diffStat={diffStat}
+      workspaceDirectory={newAgent.cwd}
+      workspaceDirectoryLabel={newAgent.cwdLabel}
+      prHint={prHint}
+      labels={labelDefinitions}
+      disabled={contextMenuOpen || dropdownMenuOpen}
+    >
+      <View
+        style={styles.agentRowContainer}
+        onPointerEnter={handlePointerEnter}
+        onPointerLeave={handlePointerLeave}
+      >
+        <ContextMenu open={contextMenuOpen} onOpenChange={handleContextMenuOpenChange}>
+          <ContextMenuTrigger
+            accessibilityRole={platformIsWeb ? undefined : "button"}
+            accessibilityLabel={t("panels.draft.newAgent")}
+            onPress={handlePress}
+            onPressIn={handlePressIn}
+            onPressOut={handlePressOut}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            style={rowStyle}
+            highlightStyle={styles.agentRowPressed}
+            testID={`sidebar-new-agent-row-${newAgent.tabId}`}
+          >
+            <AgentStatusIndicator bucket="done" />
+            <Text style={styles.agentTitle} numberOfLines={1}>
+              {t("panels.draft.newAgent")}
+            </Text>
+            <View
+              style={!actionsVisible && styles.agentKebabHidden}
+              pointerEvents={actionsVisible ? "auto" : "none"}
+            >
+              <WorkspaceAgentKebabMenu
+                agent={menuAgent}
+                serverId={serverId}
+                branch={branch}
+                branchPending={!branchReady}
+                open={dropdownMenuOpen}
+                onOpenChange={handleDropdownMenuOpenChange}
+                onFocus={handleKebabFocus}
+                onBlur={handleKebabBlur}
+                labelPages={labelPages}
+                onOpen={handlePress}
+                onCopyPath={handleCopyPath}
+                onCopyBranchName={handleCopyBranchName}
+                onClose={handleClose}
+                onArchive={handleClose}
+              />
+            </View>
+          </ContextMenuTrigger>
+          <ContextMenuContent
+            align="start"
+            width={220}
+            testID={`sidebar-new-agent-context-menu-${newAgent.tabId}`}
+            pages={labelPages}
+          >
+            <WorkspaceAgentMenuItems
+              agent={menuAgent}
+              serverId={serverId}
+              branch={branch}
+              branchPending={!branchReady}
+              surface="context"
+              onOpen={handlePress}
+              onCopyPath={handleCopyPath}
+              onCopyBranchName={handleCopyBranchName}
+              onClose={handleClose}
+              onArchive={handleClose}
+            />
+          </ContextMenuContent>
+        </ContextMenu>
+      </View>
+    </AgentHoverCard>
+  );
+}
+
 /**
  * Two levels under the workspace header: one agent, named, with its status on the left. The
- * checkout facts the workspace row used to carry live here now — the branch and diff of the
- * member project the agent runs in, handed down by the member block so agents sharing a member
- * never re-derive them. The same preferences gate them as before: "Show → Branch" for the
- * branch, the trailing slot's "diff" choice for the diff.
+ * Branch ownership is the agent's exact cwd; the member block contributes diff/PR facts only
+ * when that cwd matches the member directory. The same preferences gate them as before:
+ * "Show → Branch" for the branch, the trailing slot's "diff" choice for the diff.
  */
 export function WorkspaceAgentRow({
   agent,
-  branch,
   diffStat,
   prHint,
   serverId,
@@ -88,8 +345,6 @@ export function WorkspaceAgentRow({
   onWorkspacePress,
 }: {
   agent: SidebarWorkspaceAgentRow;
-  /** The parent member's checkout facts — shared by every agent bucketed under it. */
-  branch: string | null;
   diffStat: { additions: number; deletions: number } | null;
   prHint: PrHint | null;
   serverId: string;
@@ -105,9 +360,16 @@ export function WorkspaceAgentRow({
   const [isKebabFocused, setIsKebabFocused] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [dropdownMenuOpen, setDropdownMenuOpen] = useState(false);
+  const { branch, branchReady, refreshBranch, labelPages, labelDefinitions } =
+    useAgentCheckoutPresentation(agent, serverId);
   const isCompact = useIsCompactFormFactor();
-  const actionsVisible =
-    isHovered || isFocused || isKebabFocused || platformIsNative || isCompact || dropdownMenuOpen;
+  const actionsVisible = showAgentActions({
+    hovered: isHovered,
+    focused: isFocused,
+    kebabFocused: isKebabFocused,
+    compact: isCompact,
+    menuOpen: dropdownMenuOpen,
+  });
   const showBranch = useSidebarRowItems().branch && branch !== null;
   const trailing = useSidebarWorkspaceTrailing();
   const showDiff = trailing === "diff" && diffStat !== null;
@@ -124,18 +386,38 @@ export function WorkspaceAgentRow({
     toast.copied(t("sidebar.workspace.toasts.pathCopied"));
   }, [agent.cwd, t, toast]);
   const handleCopyBranchName = useCallback(() => {
-    if (!branch) return;
+    if (!branchReady || !branch) return;
     void Clipboard.setStringAsync(branch);
     toast.copied(t("sidebar.workspace.toasts.branchNameCopied"));
-  }, [branch, t, toast]);
-  const handlePointerEnter = useCallback(() => setIsHovered(true), []);
+  }, [branch, branchReady, t, toast]);
+  const handlePointerEnter = useCallback(() => {
+    setIsHovered(true);
+    void refreshBranch();
+  }, [refreshBranch]);
   const handlePointerLeave = useCallback(() => setIsHovered(false), []);
   const handlePressIn = useCallback(() => setIsPressed(true), []);
   const handlePressOut = useCallback(() => setIsPressed(false), []);
-  const handleFocus = useCallback(() => setIsFocused(true), []);
+  const handleFocus = useCallback(() => {
+    setIsFocused(true);
+    void refreshBranch();
+  }, [refreshBranch]);
   const handleBlur = useCallback(() => setIsFocused(false), []);
   const handleKebabFocus = useCallback(() => setIsKebabFocused(true), []);
   const handleKebabBlur = useCallback(() => setIsKebabFocused(false), []);
+  const handleContextMenuOpenChange = useCallback(
+    (open: boolean) => {
+      setContextMenuOpen(open);
+      if (open) void refreshBranch();
+    },
+    [refreshBranch],
+  );
+  const handleDropdownMenuOpenChange = useCallback(
+    (open: boolean) => {
+      setDropdownMenuOpen(open);
+      if (open) void refreshBranch();
+    },
+    [refreshBranch],
+  );
   const rowStyle = [
     styles.agentRow,
     isHovered && !isPressed && styles.agentRowHovered,
@@ -165,16 +447,32 @@ export function WorkspaceAgentRow({
       toast.error(toErrorMessage(error));
     }
   }, [agent.agentId, archiveAgent, serverId, t, toast]);
+  const handleClose = useCallback(() => {
+    const workspaceKey = `${serverId}:${workspaceId}`;
+    const store = useWorkspaceLayoutStore.getState();
+    const layout = store.layoutByWorkspace[workspaceKey];
+    const tab = layout
+      ? collectAllTabs(layout.root).find(
+          (candidate) =>
+            candidate.target.kind === "agent" && candidate.target.agentId === agent.agentId,
+        )
+      : undefined;
+    if (!tab) return;
+    store.hideAgent(workspaceKey, agent.agentId);
+    store.closeTab(workspaceKey, tab.tabId);
+  }, [agent.agentId, serverId, workspaceId]);
 
   return (
     <AgentHoverCard
       title={agent.title}
       serverId={serverId}
       branch={branch}
+      branchPending={!branchReady}
       diffStat={diffStat}
       workspaceDirectory={agent.cwd}
       workspaceDirectoryLabel={agent.cwdLabel}
       prHint={prHint}
+      labels={labelDefinitions}
       disabled={contextMenuOpen || dropdownMenuOpen}
     >
       <View
@@ -182,7 +480,7 @@ export function WorkspaceAgentRow({
         onPointerEnter={handlePointerEnter}
         onPointerLeave={handlePointerLeave}
       >
-        <ContextMenu open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
+        <ContextMenu open={contextMenuOpen} onOpenChange={handleContextMenuOpenChange}>
           <ContextMenuTrigger
             accessibilityRole={platformIsWeb ? undefined : "button"}
             accessibilityLabel={agent.title}
@@ -226,13 +524,16 @@ export function WorkspaceAgentRow({
                 agent={agent}
                 serverId={serverId}
                 branch={branch}
+                branchPending={!branchReady}
                 open={dropdownMenuOpen}
-                onOpenChange={setDropdownMenuOpen}
+                onOpenChange={handleDropdownMenuOpenChange}
                 onFocus={handleKebabFocus}
                 onBlur={handleKebabBlur}
+                labelPages={labelPages}
                 onOpen={handlePress}
                 onCopyPath={handleCopyPath}
                 onCopyBranchName={handleCopyBranchName}
+                onClose={handleClose}
                 onArchive={handleArchive}
               />
             </View>
@@ -241,15 +542,18 @@ export function WorkspaceAgentRow({
             align="start"
             width={220}
             testID={`sidebar-agent-context-menu-${agent.agentId}`}
+            pages={labelPages}
           >
             <WorkspaceAgentMenuItems
               agent={agent}
               serverId={serverId}
               branch={branch}
+              branchPending={!branchReady}
               surface="context"
               onOpen={handlePress}
               onCopyPath={handleCopyPath}
               onCopyBranchName={handleCopyBranchName}
+              onClose={handleClose}
               onArchive={handleArchive}
             />
           </ContextMenuContent>

@@ -661,7 +661,11 @@ describe("workspace label editing", () => {
     const service = {
       update: async (input: unknown) => {
         calls.push(input);
-        return { label: { name: "Priority", color: "sky" }, affectedWorkspaceCount: 3 };
+        return {
+          label: { name: "Priority", color: "sky" },
+          affectedWorkspaceCount: 3,
+          affectedAgentCount: 2,
+        };
       },
     } as unknown as WorkspaceLabelService;
     const messages: SessionOutboundMessage[] = [];
@@ -685,6 +689,71 @@ describe("workspace label editing", () => {
           requestId: "request-edit",
           label: { name: "Priority", color: "sky" },
           affectedWorkspaceCount: 3,
+          affectedAgentCount: 2,
+        },
+      },
+    ]);
+  });
+
+  test("assigns a shared catalog label to an agent", async () => {
+    const setAgentAssignment = vi.fn().mockResolvedValue({
+      label: { name: "Urgent", color: "red" },
+      agentLabels: ["Urgent"],
+    });
+    const messages: SessionOutboundMessage[] = [];
+    const session = createSessionForTest({
+      messages,
+      workspaceLabelService: { setAgentAssignment } as unknown as WorkspaceLabelService,
+    });
+
+    await session.handleMessage({
+      type: "agent.label.assignment.set.request",
+      requestId: "request-agent-label",
+      agentId: "agent-one",
+      label: { name: "Urgent", color: "red" },
+      assigned: true,
+    });
+
+    expect(setAgentAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: "agent-one", assigned: true }),
+    );
+    expect(messages).toEqual([
+      {
+        type: "agent.label.assignment.set.response",
+        payload: {
+          requestId: "request-agent-label",
+          label: { name: "Urgent", color: "red" },
+          agentLabels: ["Urgent"],
+        },
+      },
+    ]);
+  });
+
+  test("reports both workspace and agent counts before label deletion", async () => {
+    const messages: SessionOutboundMessage[] = [];
+    const session = createSessionForTest({
+      messages,
+      workspaceLabelService: {
+        inspectDelete: vi.fn().mockResolvedValue({
+          affectedWorkspaceCount: 3,
+          affectedAgentCount: 2,
+        }),
+      } as unknown as WorkspaceLabelService,
+    });
+
+    await session.handleMessage({
+      type: "workspace.label.delete.inspect.request",
+      requestId: "request-inspect",
+      name: "Urgent",
+    });
+
+    expect(messages).toEqual([
+      {
+        type: "workspace.label.delete.inspect.response",
+        payload: {
+          requestId: "request-inspect",
+          affectedWorkspaceCount: 3,
+          affectedAgentCount: 2,
         },
       },
     ]);

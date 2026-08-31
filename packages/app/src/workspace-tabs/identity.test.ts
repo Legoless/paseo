@@ -15,6 +15,29 @@ describe("New tab identity", () => {
       "New tabs do not have deterministic target identities",
     );
   });
+
+  it("normalizes labels without making launcher tabs share identity", () => {
+    expect(
+      normalizeWorkspaceTabTarget({ kind: "new_tab", labels: [" Ready ", "ready", ""] }),
+    ).toEqual({ kind: "new_tab", labels: ["ready"] });
+    expect(
+      workspaceTabTargetsEqual(
+        { kind: "new_tab", labels: ["Ready"] },
+        { kind: "new_tab", labels: ["Ready"] },
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("Draft tab labels", () => {
+  it("participates in draft target equality", () => {
+    expect(
+      workspaceTabTargetsEqual(
+        { kind: "draft", draftId: "draft-1", labels: ["Ready"] },
+        { kind: "draft", draftId: "draft-1", labels: ["Blocked"] },
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("provider subagent tab identity", () => {

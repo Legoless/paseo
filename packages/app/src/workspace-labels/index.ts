@@ -36,6 +36,7 @@ export function createWorkspaceLabelManagerModel(
 export interface WorkspaceLabelHostSnapshot {
   serverId: string;
   labels: WorkspaceLabelDefinition[];
+  agentLabelsSupported?: boolean;
   status: "offline" | "online" | "unsupported";
   error: string | null;
 }
@@ -141,13 +142,16 @@ interface HostConnection {
 class WorkspaceLabelsController {
   private readonly replicas = new Map<string, HostWorkspaceLabelReplica>();
   private readonly connections = new Map<string, HostConnection>();
+  private readonly agentLabelsSupported = new Map<string, boolean>();
 
   async connect(input: {
     serverId: string;
     client: DaemonClient;
     supportsWorkspaceLabels: boolean;
+    supportsAgentLabels?: boolean;
   }): Promise<void> {
     this.disconnect(input.serverId);
+    this.agentLabelsSupported.set(input.serverId, input.supportsAgentLabels === true);
     const replica = this.replicas.get(input.serverId) ?? new HostWorkspaceLabelReplica();
     this.replicas.set(input.serverId, replica);
     if (!input.supportsWorkspaceLabels) {
@@ -183,6 +187,15 @@ class WorkspaceLabelsController {
     assigned: boolean;
   }) {
     return this.mutate(input.serverId, (client) => client.setWorkspaceLabel(input));
+  }
+
+  async setAgentAssignment(input: {
+    serverId: string;
+    agentId: string;
+    label: WorkspaceLabelDefinition;
+    assigned: boolean;
+  }) {
+    return this.mutate(input.serverId, (client) => client.setAgentLabel(input));
   }
 
   async update(input: {
@@ -245,6 +258,7 @@ class WorkspaceLabelsController {
     useWorkspaceLabels.getState().setHost({
       serverId,
       labels: replica.snapshot().labels,
+      agentLabelsSupported: this.agentLabelsSupported.get(serverId) === true,
       status,
       error,
     });

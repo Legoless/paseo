@@ -107,6 +107,8 @@ import { applyLegacyDaemonWorkspaceOwnership } from "@/workspace/legacy-daemon-w
 import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { buildDraftAgentSetup, type ClientSlashCommand } from "@/client-slash-commands";
+import { useWorkspaceLabelDefinitions, workspaceLabels } from "@/workspace-labels";
+import { useToast } from "@/contexts/toast-context";
 
 interface ChatAgentStateShape {
   serverId: string | null;
@@ -398,6 +400,8 @@ function AgentPanel() {
 }
 
 function DraftPanel() {
+  const { t } = useTranslation();
+  const toast = useToast();
   const {
     serverId,
     workspaceId,
@@ -409,9 +413,10 @@ function DraftPanel() {
   } = usePaneContext();
   const { isInteractive } = usePaneFocus();
   invariant(target.kind === "draft", "DraftPanel requires draft target");
+  const labelDefinitions = useWorkspaceLabelDefinitions(serverId, target.labels ?? []);
 
   const handleCreated = useCallback(
-    (agentSnapshot: Parameters<typeof normalizeAgentSnapshot>[0]) => {
+    async (agentSnapshot: Parameters<typeof normalizeAgentSnapshot>[0]) => {
       const normalized = normalizeAgentSnapshot(agentSnapshot, serverId);
       const agent = applyLegacyDaemonWorkspaceOwnership({ serverId, agent: normalized });
       useSessionStore.getState().setAgents(serverId, (prev) => {
@@ -419,9 +424,23 @@ function DraftPanel() {
         next.set(agentSnapshot.id, agent);
         return next;
       });
+      try {
+        await Promise.all(
+          labelDefinitions.map((label) =>
+            workspaceLabels.setAgentAssignment({
+              serverId,
+              agentId: agentSnapshot.id,
+              label,
+              assigned: true,
+            }),
+          ),
+        );
+      } catch {
+        toast.error(t("workspaceLabels.errors.update"));
+      }
       retargetCurrentTab({ kind: "agent", agentId: agentSnapshot.id });
     },
-    [retargetCurrentTab, serverId],
+    [labelDefinitions, retargetCurrentTab, serverId, t, toast],
   );
 
   return (

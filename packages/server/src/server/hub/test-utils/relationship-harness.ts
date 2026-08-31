@@ -57,6 +57,7 @@ import type {
   HubSocketEvents,
 } from "../relationship-remote.js";
 import { HubEnrollmentRejectedError } from "../relationship-remote.js";
+import { getAgentWorkspaceLabelKey } from "@getpaseo/protocol/agent-labels";
 
 const execFileAsync = promisify(execFile);
 const HUB_ORIGIN = "https://hub.test";
@@ -784,6 +785,16 @@ export class HubRelationshipHarness {
     return (await this.daemon!.agentStorage.list())
       .filter((record) => record.owner?.kind === "daemon")
       .map((record) => record.id);
+  }
+
+  async closeAndSetOwnedAgentLabel(agentId: string, name: string): Promise<void> {
+    await this.daemon!.agentManager.closeAgent(agentId);
+    await this.daemon!.agentManager.replaceWorkspaceLabelAgentStates([
+      {
+        agentId,
+        assignments: { [getAgentWorkspaceLabelKey(name)]: name },
+      },
+    ]);
   }
 
   async durableOwnedAgentIdsOnDisk(): Promise<string[]> {

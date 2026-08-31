@@ -42,6 +42,8 @@ export function useCheckoutStatusQuery({ serverId, cwd }: UseCheckoutStatusQuery
     isFetching: query.isFetching,
     isError: query.isError,
     error: query.error,
+    isConnected: !!client && isConnected,
+    refetch: query.refetch,
   };
 }
 

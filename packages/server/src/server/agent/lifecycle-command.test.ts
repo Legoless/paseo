@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { getParentAgentIdFromLabels, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import {
+  getAgentWorkspaceLabelKey,
+  getParentAgentIdFromLabels,
+  PARENT_AGENT_ID_LABEL,
+} from "@getpaseo/protocol/agent-labels";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import type { StoredAgentRecord } from "./agent-storage.js";
@@ -270,6 +274,18 @@ describe("agent lifecycle commands", () => {
     ).resolves.toEqual({
       accepted: false,
       error: "Nothing to update (provide name and/or labels)",
+    });
+    await expect(
+      updateAgentCommand(
+        { agentManager: manager },
+        {
+          agentId: "agent-1",
+          labels: { [getAgentWorkspaceLabelKey("Reserved")]: "Reserved" },
+        },
+      ),
+    ).resolves.toEqual({
+      accepted: false,
+      error: "Workspace label assignments must use the agent label assignment API",
     });
 
     expect(storage.upserts).toHaveLength(0);

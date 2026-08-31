@@ -18,7 +18,11 @@ import type {
   ImportAgentRequestMessageSchema,
   RecentProviderSessionDescriptorPayload,
 } from "@getpaseo/protocol/messages";
-import { getParentAgentIdFromLabels, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import {
+  getParentAgentIdFromLabels,
+  PARENT_AGENT_ID_LABEL,
+  stripAgentWorkspaceLabelAssignments,
+} from "@getpaseo/protocol/agent-labels";
 import { createRealpathAwarePathMatcher } from "../../utils/path.js";
 
 type ImportAgentRequestMessage = z.infer<typeof ImportAgentRequestMessageSchema>;
@@ -109,7 +113,7 @@ export function normalizeImportAgentRequest(
     providerHandleId,
     cwd: msg.cwd,
     workspaceId: msg.workspaceId,
-    labels: msg.labels,
+    labels: msg.labels ? stripAgentWorkspaceLabelAssignments(msg.labels) : undefined,
     requestId: msg.requestId,
   };
 }

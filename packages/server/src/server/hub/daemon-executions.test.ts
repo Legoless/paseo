@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "vitest";
 import { HubRelationshipHarness } from "./test-utils/relationship-harness.js";
+import { getAgentWorkspaceLabelKey } from "@getpaseo/protocol/agent-labels";
 
 let relationship: HubRelationshipHarness | null = null;
 
@@ -25,6 +26,28 @@ test("sequential replay after reconstruction keeps one durable owned agent", asy
   expect(reconstructed.replay.agent.id).toBe(created.first.agentId);
   expect(reconstructed.replay.agent.status).toBe("closed");
   expect(reconstructed.durableAgentCount).toBe(1);
+});
+
+test("stored label updates reach Hub execution subscribers", async () => {
+  const hub = await launchRelationship();
+  const created = await hub.createOwnedConcurrently();
+  const before = hub.hubMessages().length;
+
+  await hub.closeAndSetOwnedAgentLabel(created.first.agentId, "Urgent");
+
+  const update = hub
+    .hubMessages()
+    .slice(before)
+    .findLast((message) => message.type === "hub.execution.agent.update");
+  expect(update).toMatchObject({
+    payload: {
+      agent: {
+        id: created.first.agentId,
+        status: "closed",
+        labels: { [getAgentWorkspaceLabelKey("Urgent")]: "Urgent" },
+      },
+    },
+  });
 });
 
 test("Hub MCP configuration reaches the provider alongside Paseo MCP without entering snapshots", async () => {

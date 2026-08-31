@@ -483,7 +483,7 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
         return;
       }
 
-      if (event.type === "timeline_replacement") {
+      if (event.type === "timeline_replacement" || event.type === "stored_agent_state") {
         return;
       }
 

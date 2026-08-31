@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import { getAgentWorkspaceLabelKey, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
 import { resolveCreateAgentIntent } from "./intent.js";
 
 describe("resolveCreateAgentIntent", () => {
@@ -7,7 +7,10 @@ describe("resolveCreateAgentIntent", () => {
     const intent = await resolveCreateAgentIntent({
       explicitWorkspaceId: "workspace-isolated",
       caller: { id: "parent-agent", cwd: "/parent", workspaceId: "workspace-parent" },
-      labels: { purpose: "review" },
+      labels: {
+        purpose: "review",
+        [getAgentWorkspaceLabelKey("Reserved")]: "Reserved",
+      },
       resolveWorkspace: async (workspaceId) => ({ workspaceId, cwd: "/isolated" }),
       createWorkspace: async () => ({ workspaceId: "workspace-created", cwd: "/created" }),
     });

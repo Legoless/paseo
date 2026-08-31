@@ -272,7 +272,7 @@ describe("workspace label projection", () => {
           { requestType: "workspace.label.update.request", code: "label_name_taken" },
         );
       },
-      inspectDelete: async () => ({ affectedWorkspaceCount: 7 }),
+      inspectDelete: async () => ({ affectedWorkspaceCount: 7, affectedAgentCount: 2 }),
       delete: async () => {
         deleteCalls += 1;
         throw new Error("delete failed");
@@ -307,14 +307,14 @@ describe("workspace label projection", () => {
       pending: false,
     });
 
-    let confirmedCount = 0;
-    const first = model.delete(async (count) => {
-      confirmedCount = count;
+    let confirmedCounts = { workspaceCount: 0, agentCount: 0 };
+    const first = model.delete(async (counts) => {
+      confirmedCounts = counts;
       return true;
     });
     const repeated = model.delete(async () => true);
     await Promise.all([first, repeated]);
-    expect(confirmedCount).toBe(7);
+    expect(confirmedCounts).toEqual({ workspaceCount: 7, agentCount: 2 });
     expect(deleteCalls).toBe(1);
     expect(model.snapshot()).toMatchObject({
       draft: { name: "Urgent" },

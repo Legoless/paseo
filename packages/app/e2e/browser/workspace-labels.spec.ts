@@ -2,8 +2,11 @@ import { expect, test } from "../support/fixtures";
 import { gotoAppShell } from "../support/helpers/app";
 import { getServerId } from "../support/helpers/server-id";
 import { seedWorkspace } from "../support/helpers/seed-client";
+import { seedMockAgentWorkspace } from "../support/helpers/mock-agent";
 import { waitForSidebarHydration } from "../support/helpers/workspace-ui";
 import { daemonWsRoutePattern } from "../support/helpers/daemon-port";
+
+const AGENT_WORKSPACE_LABEL_PREFIX = "paseo.workspace-label.";
 
 interface SessionEnvelope {
   type?: string;
@@ -34,7 +37,9 @@ async function installWorkspaceLabelMutationFailure(page: import("@playwright/te
       }
       const request = envelope?.type === "session" ? envelope.message : null;
       const failing =
-        (failNextAssignment && request?.type === "workspace.label.assignment.set.request") ||
+        (failNextAssignment &&
+          (request?.type === "workspace.label.assignment.set.request" ||
+            request?.type === "agent.label.assignment.set.request")) ||
         (failNextUpdate && request?.type === "workspace.label.update.request");
       if (failing && request?.type && request.requestId) {
         failNextAssignment = false;
@@ -122,6 +127,27 @@ async function openWorkspaceLabels(page: import("@playwright/test").Page, worksp
   await expect(page.getByTestId("workspace-label-picker-create")).toBeVisible();
 }
 
+async function openAgentLabels(page: import("@playwright/test").Page, agentId: string) {
+  const row = page.getByTestId(`sidebar-agent-row-${agentId}`);
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await row.hover();
+  await page.getByTestId(`sidebar-agent-kebab-${agentId}`).click();
+  await page.getByTestId(`sidebar-agent-menu-labels-${agentId}`).click();
+  await expect(page.getByTestId("workspace-label-picker-create")).toBeVisible();
+}
+
+async function readAgentLabels(
+  seeded: Awaited<ReturnType<typeof seedMockAgentWorkspace>>,
+): Promise<string[]> {
+  const result = await seeded.client.fetchAgents({ scope: "active" });
+  const agent = result.entries.find((entry) => entry.agent.id === seeded.agentId)?.agent;
+  return Object.entries(agent?.labels ?? {})
+    .flatMap(([key, value]) =>
+      key.startsWith(AGENT_WORKSPACE_LABEL_PREFIX) && typeof value === "string" ? [value] : [],
+    )
+    .sort();
+}
+
 /**
  * Creating is its own page: the list is replaced by a name field and the swatches, and one row
  * commits. Picking a colour must not create anything on its own.
@@ -136,6 +162,19 @@ async function createLabel(
   await page.getByTestId("workspace-label-picker-create-name").fill(input.name);
   await page.getByTestId(`workspace-label-swatch-${input.color}`).click();
   await expect(page.getByTestId(`workspace-label-picker-row-${input.name}`)).toBeHidden();
+  await page.getByTestId("workspace-label-picker-create-submit").click();
+  await expectAssigned(page, input.name, true);
+  await page.keyboard.press("Escape");
+}
+
+async function createAgentLabel(
+  page: import("@playwright/test").Page,
+  input: { agentId: string; name: string; color: string },
+) {
+  await openAgentLabels(page, input.agentId);
+  await page.getByTestId("workspace-label-picker-create").click();
+  await page.getByTestId("workspace-label-picker-create-name").fill(input.name);
+  await page.getByTestId(`workspace-label-swatch-${input.color}`).click();
   await page.getByTestId("workspace-label-picker-create-submit").click();
   await expectAssigned(page, input.name, true);
   await page.keyboard.press("Escape");
@@ -176,6 +215,59 @@ test.describe("Workspace labels", () => {
       await expect(
         page.getByTestId(`sidebar-workspace-row-${getServerId()}:${seeded.workspaceId}`),
       ).toBeVisible();
+    } finally {
+      await seeded.cleanup();
+    }
+  });
+
+  test("assigns, renames, and deletes catalog labels on an agent", async ({ page }) => {
+    const seeded = await seedMockAgentWorkspace({
+      repoPrefix: "agent-labels-",
+      title: "Labelled agent",
+    });
+    try {
+      const mutationFailure = await installWorkspaceLabelMutationFailure(page);
+      await gotoAppShell(page);
+      await createAgentLabel(page, {
+        agentId: seeded.agentId,
+        name: "AgentUrgent",
+        color: "red",
+      });
+      await expect.poll(readAgentLabels.bind(null, seeded)).toEqual(["AgentUrgent"]);
+
+      await openAgentLabels(page, seeded.agentId);
+      mutationFailure.failNextAssignment();
+      await labelRow(page, "AgentUrgent").click();
+      await expect(page.getByTestId("workspace-label-picker-error")).toContainText(
+        "Injected label mutation failure.",
+      );
+      await expectAssigned(page, "AgentUrgent", true);
+      await page.keyboard.press("Escape");
+
+      const row = page.getByTestId(`sidebar-agent-row-${seeded.agentId}`);
+      await row.hover();
+      const hoverCard = page.getByRole("menu", { name: "Labelled agent", exact: true });
+      await expect(hoverCard.getByText("AgentUrgent", { exact: true })).toBeVisible();
+
+      await page.reload();
+      await expect(row).toBeVisible({ timeout: 30_000 });
+      await openAgentLabels(page, seeded.agentId);
+      await expectAssigned(page, "AgentUrgent", true);
+
+      await seeded.client.updateWorkspaceLabel({
+        name: "AgentUrgent",
+        newName: "AgentPriority",
+      });
+      await expect.poll(readAgentLabels.bind(null, seeded)).toEqual(["AgentPriority"]);
+      await expectAssigned(page, "AgentPriority", true);
+      await expect(labelRow(page, "AgentUrgent")).toHaveCount(0);
+
+      await seeded.client.deleteWorkspaceLabel({ name: "AgentPriority" });
+      await expect.poll(readAgentLabels.bind(null, seeded)).toEqual([]);
+      await expect(labelRow(page, "AgentPriority")).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await row.hover();
+      await expect(hoverCard.getByText("AgentPriority", { exact: true })).toHaveCount(0);
     } finally {
       await seeded.cleanup();
     }

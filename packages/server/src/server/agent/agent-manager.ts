@@ -6,8 +6,10 @@ import {
   type AgentLifecycleStatus,
 } from "@getpaseo/protocol/agent-lifecycle";
 import {
+  getAgentWorkspaceLabelAssignments,
   getParentAgentIdFromLabels,
   hasOpenAgentTab,
+  isAgentWorkspaceLabelKey,
   isDelegatedAgent,
   isOpenAgentTabLabel,
   PARENT_AGENT_ID_LABEL,
@@ -188,6 +190,7 @@ export type {
 
 export type AgentManagerEvent =
   | { type: "agent_state"; agent: ManagedAgent }
+  | { type: "stored_agent_state"; record: StoredAgentRecord }
   | { type: "provider_subagent"; event: ProviderSubagentStoreEvent }
   | { type: "timeline_replacement"; agentId: string; epoch: string }
   | {
@@ -200,6 +203,18 @@ export type AgentManagerEvent =
     };
 
 export type AgentSubscriber = (event: AgentManagerEvent) => void;
+
+export interface WorkspaceLabelAgentRecord {
+  agentId: string;
+  assignments: Record<string, string>;
+  archivedAt: string | null;
+  internal: boolean;
+}
+
+export interface WorkspaceLabelAgentState {
+  agentId: string;
+  assignments: Record<string, string>;
+}
 
 export interface SubscribeOptions {
   agentId?: string;
@@ -501,6 +516,25 @@ interface AgentMetadataPatch {
   labels?: AgentLabelPatch;
 }
 
+interface RegisterSessionOptions {
+  createdAt?: Date;
+  updatedAt?: Date;
+  lastUserMessageAt?: Date | null;
+  labels?: Record<string, string>;
+  timeline?: AgentTimelineItem[];
+  timelineRows?: AgentTimelineRow[];
+  timelineNextSeq?: number;
+  persistence?: AgentPersistenceHandle;
+  historyPrimed?: boolean;
+  lastUsage?: AgentUsage;
+  lastError?: string;
+  attention?: AttentionState;
+  initialTitle?: string | null;
+  publishWhenReady?: boolean;
+  workspaceId?: string;
+  owner?: AgentOwner;
+}
+
 const SYSTEM_ERROR_PREFIX = "[System Error]";
 
 function attachPersistenceCwd(
@@ -575,6 +609,22 @@ function applyLabelPatch(
     }
   }
   return nextLabels;
+}
+
+function workspaceLabelPatch(
+  current: Record<string, string>,
+  assignments: Record<string, string>,
+): AgentLabelPatch {
+  const patch: AgentLabelPatch = {};
+  for (const key of Object.keys(current)) {
+    if (isAgentWorkspaceLabelKey(key) && !Object.hasOwn(assignments, key)) {
+      patch[key] = null;
+    }
+  }
+  for (const [key, value] of Object.entries(assignments)) {
+    if (current[key] !== value) patch[key] = value;
+  }
+  return patch;
 }
 
 function buildExplicitTimelineSeedForRegister(
@@ -689,6 +739,8 @@ export class AgentManager {
   private readonly agentRegistrationTasks = new Set<Promise<void>>();
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
   private readonly lifecycleMutationTails = new Map<string, Promise<void>>();
+  private readonly workspaceLabelStateHolds = new Set<string>();
+  private readonly workspaceLabelStatesPendingAfterHold = new Set<string>();
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
   private mcpBaseUrl: string | null;
   private readonly mcpAuthToken: string | null;
@@ -1800,24 +1852,130 @@ export class AgentManager {
     });
   }
 
-  private async writeLabels(agentId: string, patch: AgentLabelPatch): Promise<WriteLabelsResult> {
+  async listWorkspaceLabelAgentRecords(): Promise<WorkspaceLabelAgentRecord[]> {
+    const registry = this.requireRegistry();
+    const records = new Map(
+      (await registry.list()).map((record) => [
+        record.id,
+        {
+          agentId: record.id,
+          assignments: getAgentWorkspaceLabelAssignments(record.labels),
+          archivedAt: record.archivedAt ?? null,
+          internal: record.internal === true,
+        },
+      ]),
+    );
+    for (const agent of this.agents.values()) {
+      const stored = records.get(agent.id);
+      records.set(agent.id, {
+        agentId: agent.id,
+        assignments: getAgentWorkspaceLabelAssignments(agent.labels),
+        archivedAt: stored?.archivedAt ?? null,
+        internal: agent.internal === true,
+      });
+    }
+    return [...records.values()];
+  }
+
+  async replaceWorkspaceLabelAgentStates(
+    states: readonly WorkspaceLabelAgentState[],
+    options?: { publish?: boolean; ignoreMissing?: boolean },
+  ): Promise<void> {
+    for (const state of states) {
+      await this.runLifecycleMutation(state.agentId, async () => {
+        const record =
+          this.agents.get(state.agentId) ?? (await this.requireRegistry().get(state.agentId));
+        if (!record) {
+          if (options?.ignoreMissing) return;
+          throw new Error(`Agent not found: ${state.agentId}`);
+        }
+        const patch = workspaceLabelPatch(record.labels, state.assignments);
+        if (Object.keys(patch).length === 0) return;
+        await this.writeLabels(state.agentId, patch, {
+          publish: false,
+          workspaceLabelsAuthoritative: true,
+        });
+      });
+    }
+    if (options?.publish !== false) {
+      await this.publishWorkspaceLabelAgentStates(states.map((state) => state.agentId));
+    }
+  }
+
+  async holdWorkspaceLabelAgentStates(states: readonly WorkspaceLabelAgentState[]): Promise<void> {
+    for (const state of states) this.workspaceLabelStateHolds.add(state.agentId);
+  }
+
+  async releaseWorkspaceLabelAgentStates(agentIds: readonly string[]): Promise<void> {
+    const registry = this.requireRegistry();
+    for (const agentId of agentIds) {
+      this.workspaceLabelStateHolds.delete(agentId);
+      if (!this.workspaceLabelStatesPendingAfterHold.delete(agentId)) continue;
+      const live = this.agents.get(agentId);
+      if (live) {
+        this.emitState(live);
+        continue;
+      }
+      const record = await registry.get(agentId);
+      if (record && !record.internal) {
+        this.dispatch({ type: "stored_agent_state", record });
+      }
+    }
+  }
+
+  async publishWorkspaceLabelAgentStates(agentIds: readonly string[]): Promise<void> {
+    const registry = this.requireRegistry();
+    for (const agentId of agentIds) {
+      try {
+        this.workspaceLabelStateHolds.delete(agentId);
+        this.workspaceLabelStatesPendingAfterHold.delete(agentId);
+        const live = this.agents.get(agentId);
+        if (live) {
+          this.emitState(live);
+          continue;
+        }
+        const record = await registry.get(agentId);
+        if (record && !record.internal) {
+          this.dispatch({ type: "stored_agent_state", record });
+        }
+      } catch (error) {
+        this.logger.warn({ err: error, agentId }, "Failed to publish agent label update");
+      }
+    }
+  }
+
+  private async writeLabels(
+    agentId: string,
+    patch: AgentLabelPatch,
+    options?: { publish?: boolean; workspaceLabelsAuthoritative?: boolean },
+  ): Promise<WriteLabelsResult> {
     const liveAgent = this.agents.get(agentId);
     if (liveAgent) {
       liveAgent.labels = applyLabelPatch(liveAgent.labels, patch);
       this.touchUpdatedAt(liveAgent);
-      await this.persistSnapshot(liveAgent);
-      this.emitState(liveAgent, { persist: false });
+      await this.persistSnapshot(
+        liveAgent,
+        options?.workspaceLabelsAuthoritative ? { workspaceLabelsAuthoritative: true } : undefined,
+      );
+      if (options?.publish !== false) {
+        this.emitState(liveAgent, { persist: false });
+      }
       const record = this.registry ? await this.registry.get(agentId) : null;
       return { record, live: true };
     }
 
-    const nextRecord = await this.writeStoredMetadata(agentId, { labels: patch });
+    const nextRecord = await this.writeStoredMetadata(
+      agentId,
+      { labels: patch },
+      options?.workspaceLabelsAuthoritative ? { workspaceLabelsAuthoritative: true } : undefined,
+    );
     return { record: nextRecord, live: false };
   }
 
   private async writeStoredMetadata(
     agentId: string,
     patch: AgentMetadataPatch,
+    options?: { workspaceLabelsAuthoritative?: boolean },
   ): Promise<StoredAgentRecord> {
     const registry = this.requireRegistry();
     const record = await registry.get(agentId);
@@ -1831,7 +1989,7 @@ export class AgentManager {
       ...(patch.labels ? { labels: applyLabelPatch(record.labels, patch.labels) } : {}),
       updatedAt: this.nextStoredUpdatedAt(record),
     };
-    await registry.upsert(nextRecord);
+    await registry.upsert(nextRecord, options);
     return nextRecord;
   }
 
@@ -3128,28 +3286,22 @@ export class AgentManager {
     });
   }
 
-  private async registerSession(
+  private registerSession(
     session: AgentSession,
     config: AgentSessionConfig,
     agentId: string,
-    options?: {
-      createdAt?: Date;
-      updatedAt?: Date;
-      lastUserMessageAt?: Date | null;
-      labels?: Record<string, string>;
-      timeline?: AgentTimelineItem[];
-      timelineRows?: AgentTimelineRow[];
-      timelineNextSeq?: number;
-      persistence?: AgentPersistenceHandle;
-      historyPrimed?: boolean;
-      lastUsage?: AgentUsage;
-      lastError?: string;
-      attention?: AttentionState;
-      initialTitle?: string | null;
-      publishWhenReady?: boolean;
-      workspaceId?: string;
-      owner?: AgentOwner;
-    },
+    options?: RegisterSessionOptions,
+  ): Promise<ManagedAgent> {
+    return this.runLifecycleMutation(agentId, () =>
+      this.registerSessionUnlocked(session, config, agentId, options),
+    );
+  }
+
+  private async registerSessionUnlocked(
+    session: AgentSession,
+    config: AgentSessionConfig,
+    agentId: string,
+    options?: RegisterSessionOptions,
   ): Promise<ManagedAgent> {
     let registered = false;
     try {
@@ -3171,13 +3323,27 @@ export class AgentManager {
         options,
       });
 
+      const stored = await this.registry?.get(resolvedAgentId);
+      const resolvedOptions = stored
+        ? {
+            ...options,
+            labels: applyLabelPatch(
+              options?.labels ?? {},
+              workspaceLabelPatch(
+                options?.labels ?? {},
+                getAgentWorkspaceLabelAssignments(stored.labels),
+              ),
+            ),
+          }
+        : options;
+
       const managed = this.buildManagedAgentForRegister({
         resolvedAgentId,
         session,
         config,
         now,
         durableTimelineHasRows,
-        options,
+        options: resolvedOptions,
       });
 
       this.assertAcceptingAgentRegistrations();
@@ -3555,7 +3721,11 @@ export class AgentManager {
 
   private async persistSnapshot(
     agent: ManagedAgent,
-    options?: { title?: string | null; internal?: boolean },
+    options?: {
+      title?: string | null;
+      internal?: boolean;
+      workspaceLabelsAuthoritative?: boolean;
+    },
   ): Promise<void> {
     if (!this.registry) {
       return;
@@ -4432,11 +4602,16 @@ export class AgentManager {
   private emitState(agent: ManagedAgent, options?: { persist?: boolean }): void {
     // Keep attention as an edge-triggered unread signal, not a level signal.
     this.checkAndSetAttention(agent);
+    this.syncFeaturesFromSession(agent);
+
+    if (this.workspaceLabelStateHolds.has(agent.id)) {
+      this.workspaceLabelStatesPendingAfterHold.add(agent.id);
+      return;
+    }
+
     if (options?.persist !== false) {
       this.enqueueBackgroundPersist(agent);
     }
-
-    this.syncFeaturesFromSession(agent);
 
     this.logger.trace(
       {
@@ -4664,6 +4839,13 @@ export class AgentManager {
       }
       if (
         subscriber.agentId &&
+        event.type === "stored_agent_state" &&
+        subscriber.agentId !== event.record.id
+      ) {
+        continue;
+      }
+      if (
+        subscriber.agentId &&
         event.type === "provider_subagent" &&
         subscriber.agentId !==
           (event.event.type === "upsert"
@@ -4682,6 +4864,7 @@ export class AgentManager {
 
   private eventBelongsToInternalAgent(event: AgentManagerEvent): boolean {
     if (event.type === "agent_state") return event.agent.internal === true;
+    if (event.type === "stored_agent_state") return event.record.internal === true;
     if (event.type === "agent_stream") return this.agents.get(event.agentId)?.internal === true;
     if (event.type !== "provider_subagent") return false;
     const parentAgentId =
