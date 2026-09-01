@@ -138,7 +138,11 @@ export function GitActionsSplitButton({
     [gitActions.menu, gitActions.primary, gitActions.secondary],
   );
 
-  if (menuOnly) {
+  // The split layout hangs the secondary caret off the primary button, so a checkout with no
+  // primary action — clean and in sync — would render an empty row and take Pull, Merge, the
+  // change-request actions and Archive down with it. Those cases get the menu presentation the
+  // component already has, so the control keeps its place in the toolbar and stays reachable.
+  if (menuOnly || !gitActions.primary) {
     if (menuOnlyActions.length === 0) {
       return null;
     }
@@ -174,10 +178,6 @@ export function GitActionsSplitButton({
         </DropdownMenuContent>
       </DropdownMenu>
     );
-  }
-
-  if (!gitActions.primary && gitActions.secondary.length === 0 && gitActions.menu.length === 0) {
-    return null;
   }
 
   return (
