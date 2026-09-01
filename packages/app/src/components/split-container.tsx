@@ -53,6 +53,7 @@ import {
   splitNodeContainsPane,
 } from "@/components/split-container-focus";
 import { shouldFocusPaneFromEventTarget } from "@/components/split-container-pane-focus";
+import { resolveGroupSizes } from "@/components/split-container-group-sizes";
 import {
   WindowChromeRegion,
   WindowChromeSafeArea,
@@ -1013,8 +1014,11 @@ function SplitNodeView({
     groupId ? state.splitSizesByWorkspace[workspaceKey]?.[groupId] : undefined,
   );
   const groupChildren = node.kind === "group" ? node.group.children : EMPTY_SPLIT_NODES;
-  const groupSizes =
-    storedGroupSizes ?? (node.kind === "group" ? node.group.sizes : EMPTY_SPLIT_SIZES);
+  const groupSizes = resolveGroupSizes({
+    storedSizes: storedGroupSizes,
+    structuralSizes: node.kind === "group" ? node.group.sizes : EMPTY_SPLIT_SIZES,
+    childCount: groupChildren.length,
+  });
   const visibleFlex = useMemo(
     () => resolveVisibleGroupFlex(groupChildren, groupSizes, maximizedPaneId),
     [groupChildren, groupSizes, maximizedPaneId],
