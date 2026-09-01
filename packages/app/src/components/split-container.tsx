@@ -909,6 +909,21 @@ function SplitGroupChild({
   );
 }
 
+/** Stored size the visible children add up to. Hidden ones keep their share out of the total. */
+function resolveVisibleSizeTotal(
+  children: SplitNode[],
+  sizes: number[],
+  maximizedPaneId: string | null,
+): number {
+  return children.reduce(
+    (total, child, index) =>
+      isSplitNodeHiddenForPresentation(child, maximizedPaneId)
+        ? total
+        : total + (sizes[index] ?? 1),
+    0,
+  );
+}
+
 /**
  * Flex grow per child, renormalized so the visible ones always sum to 1.
  *
@@ -923,13 +938,7 @@ function resolveVisibleGroupFlex(
   sizes: number[],
   maximizedPaneId: string | null,
 ): number[] {
-  const visibleTotal = children.reduce(
-    (total, child, index) =>
-      isSplitNodeHiddenForPresentation(child, maximizedPaneId)
-        ? total
-        : total + (sizes[index] ?? 1),
-    0,
-  );
+  const visibleTotal = resolveVisibleSizeTotal(children, sizes, maximizedPaneId);
   if (visibleTotal <= 0) {
     return children.map(() => 0);
   }
@@ -1023,6 +1032,15 @@ function SplitNodeView({
     () => resolveVisibleGroupFlex(groupChildren, groupSizes, maximizedPaneId),
     [groupChildren, groupSizes, maximizedPaneId],
   );
+  /**
+   * Pixels one whole unit of `sizes` spans. Flex is renormalized over the visible children, so a
+   * group holding a hidden pane draws each stored fraction larger than the group is wide, and a
+   * handle converting pointer pixels with the raw width moves the divider faster than the cursor.
+   */
+  const groupSizeUnit = useMemo(() => {
+    const visibleTotal = resolveVisibleSizeTotal(groupChildren, groupSizes, maximizedPaneId);
+    return visibleTotal > 0 ? groupContainerSize / visibleTotal : groupContainerSize;
+  }, [groupChildren, groupContainerSize, groupSizes, maximizedPaneId]);
   const resizeFlex = useSharedValue(visibleFlex);
   useEffect(() => {
     resizeFlex.value = visibleFlex;
@@ -1178,7 +1196,7 @@ function SplitNodeView({
               groupId={node.group.id}
               index={index}
               sizes={groupSizes}
-              containerSize={groupContainerSize}
+              containerSize={groupSizeUnit}
               onPreviewResizeSplit={previewResizeSplit}
               onResizeSplit={onResizeSplit}
             />
