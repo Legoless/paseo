@@ -229,6 +229,50 @@ describe("ReplicaCache", () => {
     expect(restoredTimeline).toEqual(timeline());
   });
 
+  it("keeps every workspace member across a cache round-trip", async () => {
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    const multiProject = normalizeWorkspaceDescriptor({
+      ...workspacePayload(),
+      members: [
+        {
+          projectId: "project-1",
+          projectDisplayName: "Raceline",
+          projectCustomName: null,
+          projectRootPath: "/repo/raceline",
+          workspaceDirectory: "/repo/raceline",
+          workspaceKind: "local_checkout",
+          worktreeSlug: null,
+          branch: null,
+        },
+        {
+          projectId: "project-2",
+          projectDisplayName: "Celestine",
+          projectCustomName: null,
+          projectRootPath: "/repo/celestine",
+          workspaceDirectory: "/repo/celestine",
+          workspaceKind: "local_checkout",
+          worktreeSlug: null,
+          branch: null,
+        },
+      ],
+    });
+    writer.commitDirectory(SERVER_ID, {
+      agents: new Map(),
+      workspaces: new Map([[multiProject.id, multiProject]]),
+      projects: new Map(),
+      checkpoint: {},
+    });
+    await writer.flush();
+
+    const restored = await createCache(storage).readDirectory(SERVER_ID);
+    // A dropped `members` re-hydrates as the single synthesized member, which is how every
+    // multi-project workspace silently collapsed to its primary project after a reload.
+    expect(
+      restored.workspaces.get("workspace-1")?.members.map((m) => m.workspaceDirectory),
+    ).toEqual(["/repo/raceline", "/repo/celestine"]);
+  });
+
   it("never reads directory rows older than an accepted deferred deletion", async () => {
     const storage = new MemoryStorage();
     const cache = createCache(storage);

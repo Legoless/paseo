@@ -247,6 +247,18 @@ const WorkspaceGitRuntimeSchema = z
   .nullable()
   .optional();
 
+const StoredWorkspaceMemberSchema = z.strictObject({
+  projectId: z.string(),
+  projectDisplayName: z.string(),
+  projectCustomName: z.string().nullable(),
+  projectRootPath: z.string(),
+  workspaceDirectory: z.string(),
+  workspaceKind: z.enum(["directory", "local_checkout", "checkout", "worktree"]),
+  worktreeSlug: z.string().nullable(),
+  branch: z.string().nullable(),
+  diffStat: z.strictObject({ additions: z.number(), deletions: z.number() }).nullable(),
+});
+
 const StoredWorkspaceSchema = z.strictObject({
   id: z.string(),
   projectId: z.string(),
@@ -265,6 +277,10 @@ const StoredWorkspaceSchema = z.strictObject({
   // dropped them painted its row without its chips and stayed that way: the directory cursor is
   // current on reconnect, so the daemon has nothing newer to send back.
   labels: z.array(z.string()).optional(),
+  // COMPAT(workspaceMultiProject): absent on caches written before multi-project workspaces.
+  // Dropping it here made every cached workspace re-hydrate as single-project, because
+  // normalizeWorkspaceDescriptor then synthesizes the implicit member from the scalar fields.
+  members: z.array(StoredWorkspaceMemberSchema).optional(),
   status: z.enum(["needs_input", "failed", "running", "attention", "done"]),
   statusEnteredAt: IsoDateSchema.nullable(),
   activityAt: z.null(),
@@ -628,6 +644,17 @@ function serializeWorkspace(workspace: WorkspaceDescriptor): StoredWorkspace {
     title: workspace.title ?? null,
     pinnedAt: workspace.pinnedAt ?? null,
     labels: workspace.labels,
+    members: workspace.members.map((member) => ({
+      projectId: member.projectId,
+      projectDisplayName: member.projectDisplayName,
+      projectCustomName: member.projectCustomName,
+      projectRootPath: member.projectRootPath,
+      workspaceDirectory: member.workspaceDirectory,
+      workspaceKind: member.workspaceKind,
+      worktreeSlug: member.worktreeSlug,
+      branch: member.branch,
+      diffStat: member.diffStat ?? null,
+    })),
     status: workspace.status,
     statusEnteredAt: workspace.statusEnteredAt?.toISOString() ?? null,
     activityAt: null,
