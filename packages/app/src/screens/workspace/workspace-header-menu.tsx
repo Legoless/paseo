@@ -2,14 +2,7 @@ import React, { useCallback, useMemo } from "react";
 import { View } from "react-native";
 import { useRouter, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
-import {
-  Copy,
-  Ellipsis,
-  Globe,
-  Import as ImportIcon,
-  Settings,
-  SquarePen,
-} from "lucide-react-native";
+import { Ellipsis, Globe, Import as ImportIcon, Settings, SquarePen } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { TerminalProfile } from "@getpaseo/protocol/messages";
 import {
@@ -32,10 +25,11 @@ import {
   resolveTerminalProfiles,
 } from "@getpaseo/protocol/terminal-profiles";
 import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
+import { SidebarWorkspaceMenuItems } from "@/components/sidebar/sidebar-workspace-menu";
+import { useWorkspaceLabelMenuPages, type WorkspaceLabelTarget } from "@/workspace-labels/picker";
 import type { Theme } from "@/styles/theme";
 
 const ThemedEllipsis = withUnistyles(Ellipsis);
-const ThemedCopy = withUnistyles(Copy);
 const ThemedSquarePen = withUnistyles(SquarePen);
 const ThemedGlobe = withUnistyles(Globe);
 const ThemedImport = withUnistyles(ImportIcon);
@@ -47,7 +41,6 @@ const MENU_NEW_AGENT_ICON = <ThemedSquarePen size={16} uniProps={mutedColorMappi
 const MENU_NEW_BROWSER_ICON = <ThemedGlobe size={16} uniProps={mutedColorMapping} />;
 const MENU_NEW_TERMINAL_ICON = <TerminalProfileIcon iconKey={undefined} size={16} />;
 const MENU_IMPORT_ICON = <ThemedImport size={16} uniProps={mutedColorMapping} />;
-const MENU_COPY_ICON = <ThemedCopy size={16} uniProps={mutedColorMapping} />;
 const MENU_SETTINGS_ICON = <ThemedSettings size={16} uniProps={mutedColorMapping} />;
 function WorkspaceHeaderMenuTriggerIcon() {
   return (
@@ -70,46 +63,66 @@ const COMPACT_HEADER_BUTTON_HIT_SLOP = { top: 8, bottom: 8 } as const;
  * from the same callbacks, so the two surfaces can't drift.
  */
 export interface WorkspaceHeaderWorkspaceActions {
+  serverId: string;
+  workspaceId: string;
+  workspaceKey: string;
+  workspaceLabels: readonly string[];
   currentBranchName: string | null;
   showWorkspaceSetup: boolean;
   importAgentDisabled: boolean;
-  copyPathDisabled: boolean;
   onOpenImportSheet: () => void;
-  onCopyWorkspacePath: () => void;
   onCopyBranchName: () => void;
+  onRename: () => void;
+  onAddProject?: () => void;
+  onArchive: () => void;
+  archiveLabel?: string;
+  archiveStatus?: "idle" | "pending" | "success";
+  archivePendingLabel?: string;
   onOpenSetupTab: () => void;
 }
 
+/**
+ * The workspace-level entries are the sidebar kebab's, rendered from the same component so the two
+ * surfaces cannot drift. Copy path is deliberately absent: a workspace spans several project
+ * directories, so there is no single path to copy — `OpenInFileManagerMenuItem` is left out for the
+ * same reason.
+ */
 function WorkspaceHeaderWorkspaceActionItems({
+  serverId,
+  workspaceId,
+  workspaceKey,
+  workspaceLabels,
   currentBranchName,
   showWorkspaceSetup,
   importAgentDisabled,
-  copyPathDisabled,
   onOpenImportSheet,
-  onCopyWorkspacePath,
   onCopyBranchName,
+  onRename,
+  onAddProject,
+  onArchive,
+  archiveLabel,
+  archiveStatus,
+  archivePendingLabel,
   onOpenSetupTab,
 }: WorkspaceHeaderWorkspaceActions) {
   const { t } = useTranslation();
   return (
     <>
-      <DropdownMenuItem
-        testID="workspace-header-copy-path"
-        leading={MENU_COPY_ICON}
-        disabled={copyPathDisabled}
-        onSelect={onCopyWorkspacePath}
-      >
-        {t("workspace.header.actions.copyPath")}
-      </DropdownMenuItem>
-      {currentBranchName ? (
-        <DropdownMenuItem
-          testID="workspace-header-copy-branch-name"
-          leading={MENU_COPY_ICON}
-          onSelect={onCopyBranchName}
-        >
-          {t("workspace.header.actions.copyBranchName")}
-        </DropdownMenuItem>
-      ) : null}
+      <SidebarWorkspaceMenuItems
+        surface="dropdown"
+        workspaceKey={workspaceKey}
+        serverId={serverId}
+        workspaceId={workspaceId}
+        workspaceLabels={workspaceLabels}
+        onCopyBranchName={currentBranchName ? onCopyBranchName : undefined}
+        onRename={onRename}
+        onAddProject={onAddProject}
+        onArchive={onArchive}
+        archiveLabel={archiveLabel}
+        archiveStatus={archiveStatus}
+        archivePendingLabel={archivePendingLabel}
+      />
+      <DropdownMenuSeparator />
       <DropdownMenuItem
         testID="workspace-header-import-agent"
         leading={MENU_IMPORT_ICON}
@@ -134,6 +147,19 @@ function WorkspaceHeaderWorkspaceActionItems({
   );
 }
 
+/** Registers the label picker's submenu pages so the shared items' label trigger has a page to open. */
+function useWorkspaceHeaderLabelPages({
+  serverId,
+  workspaceId,
+  workspaceLabels,
+}: Pick<WorkspaceHeaderWorkspaceActions, "serverId" | "workspaceId" | "workspaceLabels">) {
+  const target = useMemo<WorkspaceLabelTarget | null>(
+    () => ({ kind: "workspace", serverId, workspaceId, labels: workspaceLabels }),
+    [serverId, workspaceId, workspaceLabels],
+  );
+  return useWorkspaceLabelMenuPages(target);
+}
+
 function workspaceHeaderMenuButtonStyle({
   hovered,
   pressed,
@@ -151,6 +177,7 @@ function workspaceHeaderMenuButtonStyle({
  */
 export function WorkspaceHeaderMenuDesktop(props: WorkspaceHeaderWorkspaceActions) {
   const { t } = useTranslation();
+  const pages = useWorkspaceHeaderLabelPages(props);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -161,7 +188,7 @@ export function WorkspaceHeaderMenuDesktop(props: WorkspaceHeaderWorkspaceAction
       >
         <WorkspaceHeaderMenuTriggerIcon />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" width={220} testID="workspace-header-menu">
+      <DropdownMenuContent align="start" width={220} pages={pages} testID="workspace-header-menu">
         <WorkspaceHeaderWorkspaceActionItems {...props} />
       </DropdownMenuContent>
     </DropdownMenu>
@@ -234,6 +261,7 @@ export function WorkspaceHeaderMenuMobile({
   const handleEditProfiles = useCallback(() => {
     router.push(buildSettingsHostSectionRoute(normalizedServerId, "terminals") as Href);
   }, [normalizedServerId, router]);
+  const pages = useWorkspaceHeaderLabelPages(workspaceActions);
 
   return (
     <DropdownMenu compactMode="sheet">
@@ -249,6 +277,7 @@ export function WorkspaceHeaderMenuMobile({
       <DropdownMenuContent
         align="start"
         width={220}
+        pages={pages}
         testID="workspace-header-menu"
         sheetTitle={t("workspace.header.actions.workspaceActions")}
       >
