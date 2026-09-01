@@ -110,7 +110,7 @@ export interface SidebarWorkspaceMenuProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-interface SidebarWorkspaceMenuItemsProps extends Omit<
+export interface SidebarWorkspaceMenuItemsProps extends Omit<
   SidebarWorkspaceMenuProps,
   "onArchive" | "open" | "onOpenChange" | "workspace" | "includeProjectActions"
 > {
@@ -139,7 +139,7 @@ function useWorkspaceProjectMenuActions(
   };
 }
 
-function SidebarWorkspaceMenuItems({
+export function SidebarWorkspaceMenuItems({
   surface,
   workspaceKey,
   serverId,

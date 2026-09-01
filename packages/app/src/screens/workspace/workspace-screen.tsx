@@ -192,6 +192,11 @@ import type { SurfaceBackdrop } from "@/styles/surface-backdrop";
 import { buildHostRootRoute, buildSettingsHostRoute } from "@/utils/host-routes";
 import { useWorkspaceTerminals } from "@/screens/workspace/terminals/use-workspace-terminals";
 import type { ListTerminalsResponse, TerminalProfile } from "@getpaseo/protocol/messages";
+import { WorkspaceRenameModal } from "@/components/workspace-rename-modal";
+import {
+  useWorkspaceHeaderActions,
+  type WorkspaceHeaderActions,
+} from "@/screens/workspace/use-workspace-header-actions";
 import {
   WorkspaceHeaderMenuDesktop,
   WorkspaceHeaderMenuMobile,
@@ -998,18 +1003,38 @@ interface WorkspaceHeaderTitleBarProps {
   isMobile: boolean;
   createTerminalDisabled: boolean;
   importAgentDisabled: boolean;
-  copyPathDisabled: boolean;
+  workspaceKey: string;
+  workspaceLabels: readonly string[];
+  onRename: () => void;
+  onAddProject?: () => void;
+  onArchive: () => void;
+  archiveLabel?: string;
+  archiveStatus?: "idle" | "pending" | "success";
+  archivePendingLabel?: string;
   onCreateDraftTab: () => void;
   onCreateTerminal: () => void;
   onCreateTerminalWithProfile: (profile: TerminalProfile) => void;
   onCreateBrowser: () => void;
   onOpenImportSheet: () => void;
-  onCopyWorkspacePath: () => void;
   onCopyBranchName: () => void;
   onOpenSetupTab: () => void;
   onScriptTerminalStarted: (terminalId: string) => void;
   onViewScriptTerminal: (terminalId: string) => void;
   onOpenUrlInBrowserTab: (url: string) => void;
+}
+
+function WorkspaceHeaderRenameModal({ actions }: { actions: WorkspaceHeaderActions }) {
+  if (!actions.renameTarget) {
+    return null;
+  }
+  return (
+    <WorkspaceRenameModal
+      visible={actions.isRenameOpen}
+      workspace={actions.renameTarget}
+      onClose={actions.onCloseRename}
+      testID={`workspace-header-rename-modal-${actions.workspaceKey}`}
+    />
+  );
 }
 
 function WorkspaceHeaderTitleBar({
@@ -1027,13 +1052,19 @@ function WorkspaceHeaderTitleBar({
   isMobile,
   createTerminalDisabled,
   importAgentDisabled,
-  copyPathDisabled,
+  workspaceKey,
+  workspaceLabels,
+  onRename,
+  onAddProject,
+  onArchive,
+  archiveLabel,
+  archiveStatus,
+  archivePendingLabel,
   onCreateDraftTab,
   onCreateTerminal,
   onCreateTerminalWithProfile,
   onCreateBrowser,
   onOpenImportSheet,
-  onCopyWorkspacePath,
   onCopyBranchName,
   onOpenSetupTab,
   onScriptTerminalStarted,
@@ -1065,13 +1096,21 @@ function WorkspaceHeaderTitleBar({
             showCreateBrowserTab={showCreateBrowserTab}
             createTerminalDisabled={createTerminalDisabled}
             importAgentDisabled={importAgentDisabled}
-            copyPathDisabled={copyPathDisabled}
+            serverId={normalizedServerId}
+            workspaceId={normalizedWorkspaceId}
+            workspaceKey={workspaceKey}
+            workspaceLabels={workspaceLabels}
+            onRename={onRename}
+            onAddProject={onAddProject}
+            onArchive={onArchive}
+            archiveLabel={archiveLabel}
+            archiveStatus={archiveStatus}
+            archivePendingLabel={archivePendingLabel}
             onCreateDraftTab={onCreateDraftTab}
             onCreateTerminal={onCreateTerminal}
             onCreateTerminalWithProfile={onCreateTerminalWithProfile}
             onCreateBrowser={onCreateBrowser}
             onOpenImportSheet={onOpenImportSheet}
-            onCopyWorkspacePath={onCopyWorkspacePath}
             onCopyBranchName={onCopyBranchName}
             onOpenSetupTab={onOpenSetupTab}
           />
@@ -1080,9 +1119,17 @@ function WorkspaceHeaderTitleBar({
             currentBranchName={currentBranchName}
             showWorkspaceSetup={showWorkspaceSetup}
             importAgentDisabled={importAgentDisabled}
-            copyPathDisabled={copyPathDisabled}
+            serverId={normalizedServerId}
+            workspaceId={normalizedWorkspaceId}
+            workspaceKey={workspaceKey}
+            workspaceLabels={workspaceLabels}
+            onRename={onRename}
+            onAddProject={onAddProject}
+            onArchive={onArchive}
+            archiveLabel={archiveLabel}
+            archiveStatus={archiveStatus}
+            archivePendingLabel={archivePendingLabel}
             onOpenImportSheet={onOpenImportSheet}
-            onCopyWorkspacePath={onCopyWorkspacePath}
             onCopyBranchName={onCopyBranchName}
             onOpenSetupTab={onOpenSetupTab}
           />
@@ -2825,19 +2872,11 @@ function WorkspaceScreenContent({
     [client, isConnected, normalizedServerId, toast, t],
   );
 
-  const handleCopyWorkspacePath = useCallback(async () => {
-    if (!workspaceDirectory) {
-      toast.error(t("workspace.header.toasts.workspacePathUnavailable"));
-      return;
-    }
-
-    try {
-      await Clipboard.setStringAsync(workspaceDirectory);
-      toast.copied(t("workspace.header.toasts.workspacePathCopiedLabel"));
-    } catch {
-      toast.error(t("workspace.tabs.toasts.copyFailed"));
-    }
-  }, [toast, workspaceDirectory, t]);
+  const workspaceHeaderActions = useWorkspaceHeaderActions({
+    serverId: normalizedServerId,
+    workspaceId: normalizedWorkspaceId,
+    workspace: workspaceDescriptor,
+  });
 
   const handleCopyBranchName = useCallback(async () => {
     if (!currentBranchName) {
@@ -3935,13 +3974,19 @@ function WorkspaceScreenContent({
                 isMobile={isMobile}
                 createTerminalDisabled={createTerminalDisabled}
                 importAgentDisabled={!canOpenImportSheet}
-                copyPathDisabled={!workspaceDirectory}
+                workspaceKey={workspaceHeaderActions.workspaceKey}
+                workspaceLabels={workspaceHeaderActions.workspaceLabels}
+                onRename={workspaceHeaderActions.onRename}
+                onAddProject={workspaceHeaderActions.onAddProject}
+                onArchive={workspaceHeaderActions.onArchive}
+                archiveLabel={workspaceHeaderActions.archiveLabel}
+                archiveStatus={workspaceHeaderActions.archiveStatus}
+                archivePendingLabel={workspaceHeaderActions.archivePendingLabel}
                 onCreateDraftTab={handleCreateDraftTab}
                 onCreateTerminal={handleCreateTerminal}
                 onCreateTerminalWithProfile={handleCreateTerminalWithProfile}
                 onCreateBrowser={handleCreateBrowserTab}
                 onOpenImportSheet={openImportSheet}
-                onCopyWorkspacePath={handleCopyWorkspacePath}
                 onCopyBranchName={handleCopyBranchName}
                 onOpenSetupTab={handleOpenSetupTab}
                 onScriptTerminalStarted={handleScriptTerminalStarted}
@@ -3958,7 +4003,6 @@ function WorkspaceScreenContent({
       createTerminalDisabled,
       currentBranchName,
       handleCopyBranchName,
-      handleCopyWorkspacePath,
       handleCreateBrowserTab,
       handleCreateDraftTab,
       handleCreateTerminal,
@@ -3977,7 +4021,7 @@ function WorkspaceScreenContent({
       showCreateBrowserTab,
       showScreenHeader,
       showWorkspaceSetup,
-      workspaceDirectory,
+      workspaceHeaderActions,
       workspaceHeaderSubtitle,
       workspaceHeaderTitle,
       isWorkspaceHeaderSubtitleDistinct,
@@ -4168,6 +4212,7 @@ function WorkspaceScreenContent({
           onSubmit={handleRenameModalSubmit}
           onClose={handleRenameModalClose}
         />
+        <WorkspaceHeaderRenameModal actions={workspaceHeaderActions} />
       </View>
     </RenderProfile>
   );
