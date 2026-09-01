@@ -3,6 +3,7 @@ import { View, type PointerEvent as RNPointerEvent } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { startResizeHandleDrag, type ResizeHandleDrag } from "@/components/resize-handle-drag";
+import { snapResizeDelta } from "@/components/resize-handle-snap";
 import { useHasFinePointer } from "@/hooks/use-fine-pointer";
 import {
   SIDEBAR_RESIZE_ACTIVATION_OFFSET,
@@ -24,8 +25,13 @@ export interface ResizeHandleProps {
 interface PointerState {
   containerSize: number;
   pointerStart: number;
+  snapOffsets: number[];
   drag: ResizeHandleDrag;
 }
+
+const SNAP_AXIS_ATTRIBUTE = "data-split-resize-axis";
+const HORIZONTAL_SNAP_DATA_SET = { splitResizeAxis: "x" };
+const VERTICAL_SNAP_DATA_SET = { splitResizeAxis: "y" };
 
 function resetWindowHorizontalScroll() {
   // Clamp any browser scroll introduced while dragging past the viewport edge.
@@ -33,6 +39,48 @@ function resetWindowHorizontalScroll() {
     return;
   }
   window.scrollTo(0, window.scrollY);
+}
+
+function handleCenter(element: Element, axis: "x" | "y"): number | null {
+  const rect = element.getBoundingClientRect();
+  // A handle inside a retained panel that is off screen collapses to zero size — not a snap target.
+  if ((axis === "x" ? rect.height : rect.width) <= 0) {
+    return null;
+  }
+  return axis === "x" ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
+}
+
+/**
+ * Distance from this handle to every other divider on the same axis, measured in screen pixels.
+ *
+ * Divider positions are only known to the DOM: each group resizes in its own fraction space, so a
+ * row nested three groups deep has no idea where the row beside it drew its handle. Measuring is
+ * also the cheap way in — the handles are already in the tree, so no offset plumbing or registry
+ * is needed.
+ *
+ * The two elements the handle sits between are the ones this drag resizes, so every divider inside
+ * them travels with the drag and can never come level with it. Measuring those once at pointer
+ * down and then snapping to where they used to be would freeze the drag for 12px at a spot where
+ * nothing lines up, so they are dropped instead. Every remaining target holds still for the whole
+ * gesture, which is what lets the offsets be measured once.
+ */
+function collectSnapOffsets(handleElement: Element, axis: "x" | "y"): number[] {
+  const origin = handleCenter(handleElement, axis);
+  if (origin === null) {
+    return [];
+  }
+  const resized = [handleElement.previousElementSibling, handleElement.nextElementSibling];
+  const offsets: number[] = [];
+  for (const element of document.querySelectorAll(`[${SNAP_AXIS_ATTRIBUTE}="${axis}"]`)) {
+    if (element === handleElement || resized.some((sibling) => sibling?.contains(element))) {
+      continue;
+    }
+    const center = handleCenter(element, axis);
+    if (center !== null) {
+      offsets.push(center - origin);
+    }
+  }
+  return offsets;
 }
 
 export function ResizeHandle({
@@ -74,10 +122,14 @@ export function ResizeHandle({
 
       setDragging(true);
 
+      const axis = direction === "horizontal" ? "x" : "y";
+      const handleElement = hitAreaElement.closest(`[${SNAP_AXIS_ATTRIBUTE}]`);
+
       pointerStatesRef.current.set(pointerId, {
         containerSize,
         pointerStart:
           direction === "horizontal" ? event.nativeEvent.clientX : event.nativeEvent.clientY,
+        snapOffsets: handleElement ? collectSnapOffsets(handleElement, axis) : [],
         drag: startResizeHandleDrag({
           sizes,
           index,
@@ -126,10 +178,14 @@ export function ResizeHandle({
         moveEvent.preventDefault();
         resetWindowHorizontalScroll();
         const pointerCurrent = direction === "horizontal" ? moveEvent.clientX : moveEvent.clientY;
-        const deltaRatio =
-          (pointerCurrent - pointerState.pointerStart) / pointerState.containerSize;
+        const rawDelta = pointerCurrent - pointerState.pointerStart;
+        // Escape hatch for placing a divider inside a snap zone. Not alt: on web that is the
+        // workspace jump modifier and holding it paints shortcut badges across the sidebar.
+        const delta = moveEvent.shiftKey
+          ? rawDelta
+          : snapResizeDelta(rawDelta, pointerState.snapOffsets);
 
-        pointerState.drag.move(deltaRatio);
+        pointerState.drag.move(delta / pointerState.containerSize);
       }
 
       function handlePointerUp(upEvent: PointerEvent) {
@@ -248,7 +304,11 @@ export function ResizeHandle({
   );
 
   return (
-    <View style={handleStyle} testID={testID}>
+    <View
+      style={handleStyle}
+      testID={testID}
+      dataSet={direction === "horizontal" ? HORIZONTAL_SNAP_DATA_SET : VERTICAL_SNAP_DATA_SET}
+    >
       {highlighted && (
         <View
           pointerEvents="none"
