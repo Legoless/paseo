@@ -28,7 +28,7 @@ function createWorkspaceDescriptor(input: Partial<WorkspaceDescriptor> = {}): Wo
     statusEnteredAt: null,
     ...input,
     archivingAt: input.archivingAt ?? null,
-    members: [
+    members: input.members ?? [
       {
         projectId: input.projectId ?? "remote:github.com/getpaseo/paseo",
         projectDisplayName: input.projectDisplayName ?? "getpaseo/paseo",
@@ -96,6 +96,40 @@ describe("workspace source of truth consumption", () => {
     expect(detached.currentBranch).toBeNull();
     expect(blank.currentBranch).toBeNull();
     expect(missing.currentBranch).toBeNull();
+  });
+
+  it("drops the project subtitle once a workspace holds more than one project", () => {
+    const member = (projectId: string, displayName: string, directory: string) => ({
+      projectId,
+      projectDisplayName: displayName,
+      projectCustomName: null,
+      projectRootPath: directory,
+      workspaceDirectory: directory,
+      workspaceKind: "local_checkout" as const,
+      worktreeSlug: null,
+      branch: null,
+    });
+
+    expect(
+      resolveWorkspaceHeaderRenderState({
+        workspace: createWorkspaceDescriptor({
+          name: "Main",
+          projectDisplayName: "Raceline",
+          members: [
+            member("local:/repo/raceline", "Raceline", "/repo/raceline"),
+            member("local:/repo/celestine", "Celestine", "/repo/celestine"),
+          ],
+        }),
+        checkoutState: { kind: "pending" },
+      }),
+    ).toEqual({
+      kind: "ready",
+      title: "Main",
+      subtitle: "",
+      isSubtitleDistinct: false,
+      isGitCheckout: false,
+      currentBranchName: null,
+    });
   });
 
   it("keeps the header skeleton while the workspace descriptor is missing", () => {

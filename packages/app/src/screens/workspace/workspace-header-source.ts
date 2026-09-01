@@ -41,13 +41,18 @@ function areHeaderLabelsEquivalent(
   return normalizedA === normalizedB;
 }
 
+/**
+ * The scalar project fields mirror the primary member only. A workspace holding several projects
+ * has no single project to name, so the subtitle drops out rather than advertising whichever one
+ * the workspace happened to be created from.
+ */
 export function resolveWorkspaceHeader(input: { workspace: WorkspaceDescriptor }): {
   title: string;
   subtitle: string;
 } {
   return {
     title: input.workspace.name,
-    subtitle: input.workspace.projectDisplayName,
+    subtitle: input.workspace.members.length > 1 ? "" : input.workspace.projectDisplayName,
   };
 }
 
@@ -70,7 +75,9 @@ export function resolveWorkspaceHeaderRenderState(input: {
     kind: "ready",
     title: header.title,
     subtitle: header.subtitle,
-    isSubtitleDistinct: !areHeaderLabelsEquivalent(header.title, header.subtitle),
+    isSubtitleDistinct:
+      trimNonEmpty(header.subtitle) !== null &&
+      !areHeaderLabelsEquivalent(header.title, header.subtitle),
     isGitCheckout: checkout?.isGit ?? false,
     currentBranchName,
   };
