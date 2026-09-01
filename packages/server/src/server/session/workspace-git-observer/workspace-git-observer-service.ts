@@ -79,6 +79,13 @@ export function createWorkspaceGitObserverService(deps: {
   const watchTargets = new Map<string, WorkspaceGitWatchTarget>();
   const workspaceStates = new Map<string, WorkspaceGitWatchState>();
   const subscriptions = new Map<string, () => void>();
+  // Non-primary member directories. `workspaceStates` holds one cwd per workspace — the
+  // primary member — so without these every other project in a multi-project workspace
+  // would never be watched, and its checkout status would stay at whatever was computed
+  // on demand. Kept apart from the primary watch because a member's branch must not drive
+  // the workspace's branch-change notifications or its derived name.
+  const memberTargets = new Map<string, Set<string>>();
+  const memberSubscriptions = new Map<string, () => void>();
 
   function descriptorStateKey(workspace: WorkspaceDescriptorPayload | null): string {
     if (!workspace) {
@@ -114,9 +121,91 @@ export function createWorkspaceGitObserverService(deps: {
     watchTargets.delete(normalizedCwd);
     subscriptions.get(normalizedCwd)?.();
     subscriptions.delete(normalizedCwd);
+    // A member of another workspace may still need this directory watched.
+    ensureMemberSubscription(normalizedCwd);
+  }
+
+  function subscribeMember(normalizedCwd: string): void {
+    const subscription = workspaceGitService.registerWorkspace(
+      { cwd: normalizedCwd },
+      (snapshot) => {
+        void emitWorkspaceUpdateForCwd(normalizedCwd).catch((error) => {
+          logger.warn(
+            { err: error, cwd: normalizedCwd },
+            "Failed to emit workspace update after member git snapshot",
+          );
+        });
+        emitStatusUpdate(normalizedCwd, snapshot);
+      },
+    );
+    memberSubscriptions.set(normalizedCwd, subscription.unsubscribe);
+  }
+
+  // One subscription per directory: the primary watch already covers it when present.
+  function ensureMemberSubscription(normalizedCwd: string): void {
+    if (!memberTargets.get(normalizedCwd)?.size) {
+      return;
+    }
+    if (subscriptions.has(normalizedCwd) || memberSubscriptions.has(normalizedCwd)) {
+      return;
+    }
+    try {
+      subscribeMember(normalizedCwd);
+    } catch (error) {
+      logger.warn({ err: error, cwd: normalizedCwd }, "Failed to watch workspace member directory");
+    }
+  }
+
+  function releaseMemberCwd(normalizedCwd: string, workspaceId: string): void {
+    const holders = memberTargets.get(normalizedCwd);
+    if (!holders) {
+      return;
+    }
+    holders.delete(workspaceId);
+    if (holders.size > 0) {
+      return;
+    }
+    memberTargets.delete(normalizedCwd);
+    memberSubscriptions.get(normalizedCwd)?.();
+    memberSubscriptions.delete(normalizedCwd);
+  }
+
+  function removeMemberTargetsForWorkspaceId(workspaceId: string): void {
+    // Snapshot: releaseMemberCwd deletes from the map it is iterating.
+    for (const cwd of Array.from(memberTargets.keys())) {
+      releaseMemberCwd(cwd, workspaceId);
+    }
+  }
+
+  function syncMemberObservers(workspace: WorkspaceDescriptorPayload, primaryCwd: string): void {
+    const desired = new Set<string>();
+    for (const member of workspace.members ?? []) {
+      if (member.workspaceKind === "directory") {
+        continue;
+      }
+      const memberCwd = resolve(member.workspaceDirectory);
+      if (memberCwd === primaryCwd) {
+        continue;
+      }
+      desired.add(memberCwd);
+    }
+
+    for (const cwd of Array.from(memberTargets.keys())) {
+      if (!desired.has(cwd)) {
+        releaseMemberCwd(cwd, workspace.id);
+      }
+    }
+
+    for (const cwd of desired) {
+      const holders = memberTargets.get(cwd) ?? new Set<string>();
+      holders.add(workspace.id);
+      memberTargets.set(cwd, holders);
+      ensureMemberSubscription(cwd);
+    }
   }
 
   function removeForWorkspaceId(workspaceId: string): void {
+    removeMemberTargetsForWorkspaceId(workspaceId);
     const state = workspaceStates.get(workspaceId);
     if (!state) {
       return;
@@ -202,6 +291,7 @@ export function createWorkspaceGitObserverService(deps: {
         isGit: workspace.workspaceKind !== "directory",
         workspaceId: workspace.id,
       });
+      syncMemberObservers(workspace, resolve(workspace.workspaceDirectory));
       rememberDescriptorState(workspace.id, workspace);
     }
   }
@@ -248,9 +338,9 @@ export function createWorkspaceGitObserverService(deps: {
 
     getMetrics() {
       return {
-        watchedDirectoryCount: watchTargets.size,
+        watchedDirectoryCount: watchTargets.size + memberTargets.size,
         workspaceRecordCount: workspaceStates.size,
-        subscriptionCount: subscriptions.size,
+        subscriptionCount: subscriptions.size + memberSubscriptions.size,
       };
     },
 
@@ -261,6 +351,11 @@ export function createWorkspaceGitObserverService(deps: {
         unsubscribe();
       }
       subscriptions.clear();
+      for (const unsubscribe of memberSubscriptions.values()) {
+        unsubscribe();
+      }
+      memberSubscriptions.clear();
+      memberTargets.clear();
       watchTargets.clear();
       workspaceStates.clear();
     },

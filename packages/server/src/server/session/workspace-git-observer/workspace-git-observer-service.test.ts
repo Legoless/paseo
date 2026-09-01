@@ -28,10 +28,19 @@ function makeDescriptor(overrides: {
   name?: string | null;
   currentBranch?: string | null;
   diffStat?: { additions: number; deletions: number } | null;
+  members?: Array<{ workspaceDirectory: string; workspaceKind?: string }>;
 }): WorkspaceDescriptorPayload {
   return {
     id: overrides.id,
     workspaceDirectory: overrides.workspaceDirectory,
+    ...(overrides.members
+      ? {
+          members: overrides.members.map((member) => ({
+            workspaceDirectory: member.workspaceDirectory,
+            workspaceKind: member.workspaceKind ?? "local_checkout",
+          })),
+        }
+      : {}),
     projectKind: overrides.projectKind ?? "git",
     workspaceKind: overrides.workspaceKind ?? "local_checkout",
     name: overrides.name ?? null,
@@ -235,6 +244,98 @@ describe("syncObservers", () => {
       workspaceRecordCount: 0,
       subscriptionCount: 0,
     });
+  });
+});
+
+describe("multi-project members", () => {
+  test("watches every member directory, not just the primary", () => {
+    const harness = buildHarness();
+
+    harness.service.syncObservers([
+      makeDescriptor({
+        id: "ws-1",
+        workspaceDirectory: "/repo/raceline",
+        members: [
+          { workspaceDirectory: "/repo/raceline" },
+          { workspaceDirectory: "/repo/openvehicle" },
+          { workspaceDirectory: "/repo/celestine" },
+        ],
+      }),
+    ]);
+
+    // Without a watch a member's checkout status never refreshes, so its git actions
+    // disappear from the pane toolbar the moment the cached snapshot says "nothing to do".
+    expect(harness.registerCalls).toEqual([
+      "/repo/raceline",
+      "/repo/openvehicle",
+      "/repo/celestine",
+    ]);
+  });
+
+  test("pushes status updates for a member snapshot without renaming the workspace", () => {
+    const harness = buildHarness();
+    harness.service.syncObservers([
+      makeDescriptor({
+        id: "ws-1",
+        workspaceDirectory: "/repo/raceline",
+        currentBranch: "main",
+        members: [
+          { workspaceDirectory: "/repo/raceline" },
+          { workspaceDirectory: "/repo/openvehicle" },
+        ],
+      }),
+    ]);
+
+    harness.emitSnapshot("/repo/openvehicle", "feature/thing");
+
+    expect(harness.statusCalls).toContainEqual({
+      cwd: "/repo/openvehicle",
+      branch: "feature/thing",
+    });
+    // The workspace's branch comes from its primary checkout only.
+    expect(harness.branchChanges).toEqual([]);
+  });
+
+  test("drops member watches when the workspace goes away", () => {
+    const harness = buildHarness();
+    harness.service.syncObservers([
+      makeDescriptor({
+        id: "ws-1",
+        workspaceDirectory: "/repo/raceline",
+        members: [
+          { workspaceDirectory: "/repo/raceline" },
+          { workspaceDirectory: "/repo/openvehicle" },
+        ],
+      }),
+    ]);
+
+    harness.service.removeForWorkspaceId("ws-1");
+
+    expect(harness.unsubscribeCalls).toContain("/repo/openvehicle");
+    expect(harness.service.getMetrics().subscriptionCount).toBe(0);
+  });
+
+  test("stops watching a member that was removed from the workspace", () => {
+    const harness = buildHarness();
+    const withMember = makeDescriptor({
+      id: "ws-1",
+      workspaceDirectory: "/repo/raceline",
+      members: [
+        { workspaceDirectory: "/repo/raceline" },
+        { workspaceDirectory: "/repo/openvehicle" },
+      ],
+    });
+    harness.service.syncObservers([withMember]);
+
+    harness.service.syncObservers([
+      makeDescriptor({
+        id: "ws-1",
+        workspaceDirectory: "/repo/raceline",
+        members: [{ workspaceDirectory: "/repo/raceline" }],
+      }),
+    ]);
+
+    expect(harness.unsubscribeCalls).toEqual(["/repo/openvehicle"]);
   });
 });
 
