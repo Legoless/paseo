@@ -67,11 +67,9 @@ export interface WorkspaceHeaderWorkspaceActions {
   workspaceId: string;
   workspaceKey: string;
   workspaceLabels: readonly string[];
-  currentBranchName: string | null;
   showWorkspaceSetup: boolean;
   importAgentDisabled: boolean;
   onOpenImportSheet: () => void;
-  onCopyBranchName: () => void;
   onRename: () => void;
   onAddProject?: () => void;
   onArchive: () => void;
@@ -83,20 +81,18 @@ export interface WorkspaceHeaderWorkspaceActions {
 
 /**
  * The workspace-level entries are the sidebar kebab's, rendered from the same component so the two
- * surfaces cannot drift. Copy path is deliberately absent: a workspace spans several project
- * directories, so there is no single path to copy — `OpenInFileManagerMenuItem` is left out for the
- * same reason.
+ * surfaces cannot drift. Copy path, copy branch name and open in file manager are deliberately
+ * absent: a workspace spans several project directories, each on its own branch, so none of the
+ * three has a single answer at this level. They belong on a project row.
  */
 function WorkspaceHeaderWorkspaceActionItems({
   serverId,
   workspaceId,
   workspaceKey,
   workspaceLabels,
-  currentBranchName,
   showWorkspaceSetup,
   importAgentDisabled,
   onOpenImportSheet,
-  onCopyBranchName,
   onRename,
   onAddProject,
   onArchive,
@@ -114,7 +110,6 @@ function WorkspaceHeaderWorkspaceActionItems({
         serverId={serverId}
         workspaceId={workspaceId}
         workspaceLabels={workspaceLabels}
-        onCopyBranchName={currentBranchName ? onCopyBranchName : undefined}
         onRename={onRename}
         onAddProject={onAddProject}
         onArchive={onArchive}

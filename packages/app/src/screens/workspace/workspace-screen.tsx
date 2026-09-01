@@ -993,7 +993,6 @@ interface WorkspaceHeaderTitleBarProps {
   title: string;
   subtitle: string;
   isSubtitleDistinct: boolean;
-  currentBranchName: string | null;
   normalizedServerId: string;
   normalizedWorkspaceId: string;
   workspaceScripts: WorkspaceDescriptor["scripts"];
@@ -1016,7 +1015,6 @@ interface WorkspaceHeaderTitleBarProps {
   onCreateTerminalWithProfile: (profile: TerminalProfile) => void;
   onCreateBrowser: () => void;
   onOpenImportSheet: () => void;
-  onCopyBranchName: () => void;
   onOpenSetupTab: () => void;
   onScriptTerminalStarted: (terminalId: string) => void;
   onViewScriptTerminal: (terminalId: string) => void;
@@ -1042,7 +1040,6 @@ function WorkspaceHeaderTitleBar({
   title,
   subtitle,
   isSubtitleDistinct,
-  currentBranchName,
   normalizedServerId,
   normalizedWorkspaceId,
   workspaceScripts,
@@ -1065,7 +1062,6 @@ function WorkspaceHeaderTitleBar({
   onCreateTerminalWithProfile,
   onCreateBrowser,
   onOpenImportSheet,
-  onCopyBranchName,
   onOpenSetupTab,
   onScriptTerminalStarted,
   onViewScriptTerminal,
@@ -1091,7 +1087,6 @@ function WorkspaceHeaderTitleBar({
         {isMobile ? (
           <WorkspaceHeaderMenuMobile
             normalizedServerId={normalizedServerId}
-            currentBranchName={currentBranchName}
             showWorkspaceSetup={showWorkspaceSetup}
             showCreateBrowserTab={showCreateBrowserTab}
             createTerminalDisabled={createTerminalDisabled}
@@ -1111,12 +1106,10 @@ function WorkspaceHeaderTitleBar({
             onCreateTerminalWithProfile={onCreateTerminalWithProfile}
             onCreateBrowser={onCreateBrowser}
             onOpenImportSheet={onOpenImportSheet}
-            onCopyBranchName={onCopyBranchName}
             onOpenSetupTab={onOpenSetupTab}
           />
         ) : (
           <WorkspaceHeaderMenuDesktop
-            currentBranchName={currentBranchName}
             showWorkspaceSetup={showWorkspaceSetup}
             importAgentDisabled={importAgentDisabled}
             serverId={normalizedServerId}
@@ -1130,7 +1123,6 @@ function WorkspaceHeaderTitleBar({
             archiveStatus={archiveStatus}
             archivePendingLabel={archivePendingLabel}
             onOpenImportSheet={onOpenImportSheet}
-            onCopyBranchName={onCopyBranchName}
             onOpenSetupTab={onOpenSetupTab}
           />
         )}
@@ -1240,7 +1232,6 @@ interface WorkspaceHeaderFields {
   workspaceHeaderSubtitle: string;
   isWorkspaceHeaderSubtitleDistinct: boolean;
   isGitCheckout: boolean;
-  currentBranchName: string | null;
 }
 
 function buildWorkspaceHeaderCheckoutState(input: {
@@ -1275,7 +1266,6 @@ function deriveWorkspaceHeaderFields(input: {
       workspaceHeaderSubtitle: "",
       isWorkspaceHeaderSubtitleDistinct: false,
       isGitCheckout: false,
-      currentBranchName: null,
     };
   }
   return {
@@ -1284,7 +1274,6 @@ function deriveWorkspaceHeaderFields(input: {
     workspaceHeaderSubtitle: renderState.subtitle,
     isWorkspaceHeaderSubtitleDistinct: renderState.isSubtitleDistinct,
     isGitCheckout: renderState.isGitCheckout,
-    currentBranchName: renderState.currentBranchName,
   };
 }
 
@@ -1849,7 +1838,6 @@ function WorkspaceScreenContent({
     workspaceHeaderSubtitle,
     isWorkspaceHeaderSubtitleDistinct,
     isGitCheckout,
-    currentBranchName,
   } = deriveWorkspaceHeaderFields({
     workspace: workspaceDescriptor,
     checkoutState: workspaceHeaderCheckoutState,
@@ -2877,20 +2865,6 @@ function WorkspaceScreenContent({
     workspaceId: normalizedWorkspaceId,
     workspace: workspaceDescriptor,
   });
-
-  const handleCopyBranchName = useCallback(async () => {
-    if (!currentBranchName) {
-      toast.error(t("workspace.header.toasts.branchNameUnavailable"));
-      return;
-    }
-
-    try {
-      await Clipboard.setStringAsync(currentBranchName);
-      toast.copied(t("workspace.header.toasts.branchNameCopiedLabel"));
-    } catch {
-      toast.error(t("workspace.tabs.toasts.copyFailed"));
-    }
-  }, [currentBranchName, toast, t]);
 
   const handleOpenSetupTab = useCallback(() => {
     if (!persistenceKey) {
@@ -3964,7 +3938,6 @@ function WorkspaceScreenContent({
                 title={workspaceHeaderTitle}
                 subtitle={workspaceHeaderSubtitle}
                 isSubtitleDistinct={isWorkspaceHeaderSubtitleDistinct}
-                currentBranchName={currentBranchName}
                 normalizedServerId={normalizedServerId}
                 normalizedWorkspaceId={normalizedWorkspaceId}
                 workspaceScripts={workspaceScripts}
@@ -3987,7 +3960,6 @@ function WorkspaceScreenContent({
                 onCreateTerminalWithProfile={handleCreateTerminalWithProfile}
                 onCreateBrowser={handleCreateBrowserTab}
                 onOpenImportSheet={openImportSheet}
-                onCopyBranchName={handleCopyBranchName}
                 onOpenSetupTab={handleOpenSetupTab}
                 onScriptTerminalStarted={handleScriptTerminalStarted}
                 onViewScriptTerminal={handleViewScriptTerminal}
@@ -4001,8 +3973,6 @@ function WorkspaceScreenContent({
     [
       canOpenImportSheet,
       createTerminalDisabled,
-      currentBranchName,
-      handleCopyBranchName,
       handleCreateBrowserTab,
       handleCreateDraftTab,
       handleCreateTerminal,
