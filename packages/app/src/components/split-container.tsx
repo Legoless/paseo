@@ -34,11 +34,13 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 import { useTranslation } from "react-i18next";
-import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
+import type { Theme } from "@/styles/theme";
 import { ResizeHandle } from "@/components/resize-handle";
 import { PaneContentToolbar, ToolbarButton } from "@/components/ui/pane-content-toolbar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { WorkspaceActions } from "@/git/workspace-actions";
+import { useCheckoutStatusQuery } from "@/git/use-status-query";
 import { WorkspaceOpenInEditorButton } from "@/workspace/open-in-editor/button";
 import {
   resolveExplorerSidebarDockSizes,
@@ -164,7 +166,38 @@ interface SplitPaneDropData {
 const EMPTY_SPLIT_NODES: SplitNode[] = [];
 const EMPTY_SPLIT_SIZES: number[] = [];
 const EXPLORER_SIDEBAR_RESIZE_GROUP_ID = "explorer-sidebar";
-const DEV_BUILD_LABEL = process.env.EXPO_PUBLIC_PASEO_DEV_BUILD_LABEL?.trim() || null;
+
+const accentForegroundIconMapping = (theme: Theme) => ({ color: theme.colors.accentForeground });
+const extraMutedIconMapping = (theme: Theme) => ({ color: theme.colors.foregroundExtraMuted });
+const ThemedGitBranch = withUnistyles(GitBranch);
+const ThemedEllipsis = withUnistyles(Ellipsis);
+
+/**
+ * The branch of the checkout this pane is actually pointed at — its active tab's agent or
+ * terminal cwd, resolved by `resolvePaneProjectRoot`. Panes in one workspace can sit in
+ * different repositories, so this is per-pane and never a workspace-wide value.
+ */
+function PaneBranchBadge({ serverId, cwd }: { serverId: string; cwd: string }) {
+  const { t } = useTranslation();
+  const { status } = useCheckoutStatusQuery({ serverId, cwd });
+  const branch = status?.isGit ? status.currentBranch : null;
+  if (!branch || branch === "HEAD") {
+    return null;
+  }
+  return (
+    <View
+      pointerEvents="none"
+      style={styles.paneBranchBadge}
+      testID="pane-branch-badge"
+      accessibilityLabel={`${t("sidebar.display.titleSource.branch")}: ${branch}`}
+    >
+      <ThemedGitBranch size={12} uniProps={accentForegroundIconMapping} />
+      <Text numberOfLines={1} ellipsizeMode="tail" style={styles.paneBranchBadgeText}>
+        {branch}
+      </Text>
+    </View>
+  );
+}
 
 function PaneExplorerToggle({ open, onPress }: { open: boolean; onPress: () => void }) {
   const { t } = useTranslation();
@@ -196,7 +229,6 @@ function PaneProjectTray({
   onPress: () => void;
 }) {
   const { t } = useTranslation();
-  const { theme } = useUnistyles();
   const visibleActions = usePanelStore((state) => state.paneProjectActions);
   const toggleAction = usePanelStore((state) => state.togglePaneProjectAction);
   const toggleBranch = useCallback(() => toggleAction("branch"), [toggleAction]);
@@ -204,19 +236,7 @@ function PaneProjectTray({
   const toggleGitActions = useCallback(() => toggleAction("gitActions"), [toggleAction]);
   return (
     <PaneContentToolbar style={styles.paneProjectTray} testID="pane-project-tray">
-      {DEV_BUILD_LABEL && visibleActions.branch ? (
-        <View
-          pointerEvents="none"
-          style={styles.devBuildBadge}
-          testID="dev-build-label"
-          accessibilityLabel={`Development build: ${DEV_BUILD_LABEL}`}
-        >
-          <GitBranch size={12} color={theme.colors.accentForeground} />
-          <Text numberOfLines={1} ellipsizeMode="tail" style={styles.devBuildBadgeText}>
-            {DEV_BUILD_LABEL}
-          </Text>
-        </View>
-      ) : null}
+      {visibleActions.branch && cwd ? <PaneBranchBadge serverId={serverId} cwd={cwd} /> : null}
       <View style={styles.paneProjectActions}>
         {visibleActions.editor && cwd ? (
           <WorkspaceOpenInEditorButton serverId={serverId} cwd={cwd} hideLabels />
@@ -231,13 +251,13 @@ function PaneProjectTray({
             testID="pane-project-commands-toggle"
             tooltipSide="left"
           >
-            <Ellipsis size={14} color={theme.colors.foregroundExtraMuted} />
+            <ThemedEllipsis size={14} uniProps={extraMutedIconMapping} />
           </ToolbarButton>
           <DropdownMenuContent align="end" minWidth={180} testID="pane-project-commands-menu">
             <DropdownMenuItem
               selected={visibleActions.branch}
               showSelectedCheck
-              disabled={!DEV_BUILD_LABEL}
+              disabled={!cwd}
               closeOnSelect={false}
               onSelect={toggleBranch}
             >
@@ -1653,7 +1673,7 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[1],
   },
-  devBuildBadge: {
+  paneBranchBadge: {
     minWidth: 0,
     maxWidth: "70%",
     flexShrink: 1,
@@ -1665,7 +1685,7 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: theme.borderRadius.full,
     backgroundColor: theme.colors.accent,
   },
-  devBuildBadgeText: {
+  paneBranchBadgeText: {
     minWidth: 0,
     flexShrink: 1,
     color: theme.colors.accentForeground,
