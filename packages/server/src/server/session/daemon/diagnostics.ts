@@ -232,7 +232,7 @@ async function collectProviderEntries(
 
 async function collectToolEntries(): Promise<DiagnosticEntry[]> {
   const [git, gh] = await Promise.all([
-    checkTool("git", ["--version"]),
+    checkTool("git", ["-c", "core.fsmonitor=false", "--version"]),
     checkTool("gh", ["--version"]),
   ]);
   return [
