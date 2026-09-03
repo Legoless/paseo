@@ -129,9 +129,8 @@ export async function openPullRequestPanel(page: Page): Promise<void> {
     await expect(visibleTestId(page, "pr-pane").first()).toBeVisible({ timeout: 15_000 });
     return;
   }
-  const trigger = visibleTestId(page, "workspace-new-tab-button").first();
-  await trigger.click();
-  await visibleTestId(page, "workspace-new-tab-menu-pull-request").first().click();
+  const launcher = await openNewTabLauncher(page);
+  await launcher.getByTestId("workspace-new-tab-pull-request").click();
   await expect(visibleTestId(page, "pr-pane").first()).toBeVisible({ timeout: 15_000 });
 }
 
@@ -144,14 +143,38 @@ export async function waitForWorkspaceTabsVisible(page: Page): Promise<void> {
   });
 }
 
-/** Open the pane-local `+` menu and pick Agent. */
-export async function createAgentTabFromMenu(page: Page): Promise<void> {
+/**
+ * Click the pane-local `+` and wait for the New tab launcher it opens.
+ *
+ * The launcher's own default project is "No project" — the daemon user's home — so a terminal or
+ * agent launched without picking one lands outside the workspace. Tests want the behaviour the
+ * pane `+` had before it opened a launcher, so the workspace's project is selected by default;
+ * pass `project: "none"` to keep the launcher's default.
+ */
+export async function openNewTabLauncher(
+  page: Page,
+  options?: { project?: "workspace" | "none" },
+): Promise<Locator> {
   const trigger = visibleTestId(page, "workspace-new-tab-button").first();
   await expect(trigger).toBeVisible({ timeout: 10_000 });
   await trigger.click();
-  const item = visibleTestId(page, "workspace-new-tab-menu-agent").first();
-  await expect(item).toBeVisible({ timeout: 10_000 });
-  await item.click();
+  const panel = visibleTestId(page, "workspace-new-tab-panel").first();
+  await expect(panel).toBeVisible({ timeout: 10_000 });
+  if (options?.project !== "none") {
+    await panel.getByTestId("workspace-new-tab-project-selector-trigger").click();
+    const content = visibleTestId(page, "workspace-new-tab-project-selector-content").first();
+    await content
+      .locator('[data-testid^="workspace-new-tab-project-selector-option-"]')
+      .first()
+      .click();
+  }
+  return panel;
+}
+
+/** Open the pane-local `+` and pick Agent. */
+export async function createAgentTabFromMenu(page: Page): Promise<void> {
+  const launcher = await openNewTabLauncher(page);
+  await launcher.getByTestId("workspace-new-tab-agent").click();
 }
 
 export async function getVisibleWorkspaceAgentTabIds(page: Page): Promise<string[]> {
