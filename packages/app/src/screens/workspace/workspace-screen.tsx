@@ -170,6 +170,7 @@ import { DiffDocumentWorkspaceCacheProvider } from "@/git/diff-document/workspac
 import type { NewTabSelection } from "@/workspace-tabs/new-tab";
 import {
   NewTabLauncherProvider,
+  type WorkspaceTabLaunchOptions,
   type NewTabLauncher,
   type WorkspaceTabLaunchDestination,
 } from "@/workspace-tabs/launcher";
@@ -2495,10 +2496,15 @@ function WorkspaceScreenContent({
   );
 
   const launchWorkspaceTab = useCallback(
-    (selection: NewTabSelection, destination: WorkspaceTabLaunchDestination) => {
+    (
+      selection: NewTabSelection,
+      destination: WorkspaceTabLaunchDestination,
+      options?: WorkspaceTabLaunchOptions,
+    ) => {
       if (!persistenceKey) {
         return;
       }
+      const launchCwd = options?.cwd ?? null;
       const openTarget = (target: WorkspaceTab["target"]) => {
         if (destination.kind === "replace") {
           replaceWorkspaceTabTarget(persistenceKey, destination.tabId, target);
@@ -2526,6 +2532,9 @@ function WorkspaceScreenContent({
           kind: "draft",
           draftId: generateDraftId(),
           ...(labels?.length ? { labels } : {}),
+          // `setup` cannot hold this yet — it needs a provider too — so the draft carries the
+          // chosen directory until the composer pins one.
+          ...(launchCwd ? { cwd: launchCwd } : {}),
         });
         return;
       }
@@ -2533,6 +2542,7 @@ function WorkspaceScreenContent({
         createTerminal({
           profile: selection.profile,
           destination,
+          ...(launchCwd ? { cwd: launchCwd } : {}),
         });
         return;
       }

@@ -450,6 +450,7 @@ function DraftPanel() {
       tabId={tabId}
       draftId={target.draftId}
       initialSetup={target.setup}
+      initialCwd={target.cwd}
       isPaneFocused={isInteractive}
       onOpenWorkspaceFile={openFileInWorkspace}
       onCreated={handleCreated}

@@ -119,9 +119,6 @@ function PaneLayoutPickerPage({ target }: { target: PaneLayoutTarget }): React.R
           onApply={apply}
         />
       ))}
-      {hostSupportsLayouts && custom.length === 0 && errors.length === 0 ? (
-        <MenuHint testID="pane-layout-empty">{t("paneLayouts.emptyHint")}</MenuHint>
-      ) : null}
       {!hostSupportsLayouts ? <MenuHint>{t("paneLayouts.updateHost")}</MenuHint> : null}
       {errors.map((error) => (
         // Daemon output naming a file the user wrote — not translated either.

@@ -623,6 +623,10 @@ export const fr: TranslationResources = {
         changes: "Changements",
         files: "Fichiers",
       },
+      projectSelector: {
+        selectProject: "Sélectionner un projet",
+        home: "Dossier personnel",
+      },
       projectPicker: {
         selectProject: "Sélectionner un projet",
       },
@@ -1024,7 +1028,6 @@ export const fr: TranslationResources = {
       twoRows: "Deux lignes",
       grid: "Grille {{rows}} × {{columns}}",
     },
-    emptyHint: "Ajoutez des dispositions dans le dossier layouts de l'hôte",
     updateHost: "Mettez à jour cet hôte pour utiliser des dispositions personnalisées",
   },
   workspaceLabels: {

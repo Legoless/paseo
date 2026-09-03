@@ -620,6 +620,10 @@ export const ko: TranslationResources = {
         changes: "변경 사항",
         files: "파일",
       },
+      projectSelector: {
+        selectProject: "프로젝트 선택",
+        home: "홈",
+      },
       projectPicker: {
         selectProject: "프로젝트 선택",
       },
@@ -1001,7 +1005,6 @@ export const ko: TranslationResources = {
       twoRows: "두 행",
       grid: "격자 {{rows}} × {{columns}}",
     },
-    emptyHint: "호스트의 layouts 폴더에 레이아웃을 추가하세요",
     updateHost: "사용자 지정 창 레이아웃을 사용하려면 이 호스트를 업데이트하세요",
   },
   workspaceLabels: {

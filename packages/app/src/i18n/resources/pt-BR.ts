@@ -622,6 +622,10 @@ export const ptBR: TranslationResources = {
         changes: "Alterações",
         files: "Arquivos",
       },
+      projectSelector: {
+        selectProject: "Selecionar projeto",
+        home: "Início",
+      },
       projectPicker: {
         selectProject: "Selecionar projeto",
       },
@@ -1016,7 +1020,6 @@ export const ptBR: TranslationResources = {
       twoRows: "Duas linhas",
       grid: "Grade {{rows}} × {{columns}}",
     },
-    emptyHint: "Adicione layouts na pasta layouts do host",
     updateHost: "Atualize este host para usar layouts de painel personalizados",
   },
   workspaceLabels: {

@@ -616,6 +616,10 @@ export const en = {
         changes: "Changes",
         files: "Files",
       },
+      projectSelector: {
+        selectProject: "Select project",
+        home: "Home",
+      },
       projectPicker: {
         selectProject: "Select project",
       },
@@ -1003,7 +1007,6 @@ export const en = {
       twoRows: "Two rows",
       grid: "Grid {{rows}} × {{columns}}",
     },
-    emptyHint: "Add layouts in the host's layouts folder",
     updateHost: "Update this host to use custom pane layouts",
   },
   workspaceLabels: {

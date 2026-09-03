@@ -618,6 +618,10 @@ export const ar: TranslationResources = {
         changes: "التغييرات",
         files: "ملفات",
       },
+      projectSelector: {
+        selectProject: "اختر مشروعًا",
+        home: "المجلد الرئيسي",
+      },
       projectPicker: {
         selectProject: "اختيار المشروع",
       },
@@ -994,7 +998,6 @@ export const ar: TranslationResources = {
       twoRows: "صفان",
       grid: "شبكة {{rows}} × {{columns}}",
     },
-    emptyHint: "أضف التخطيطات إلى مجلد layouts على المضيف",
     updateHost: "حدّث هذا المضيف لاستخدام تخطيطات أجزاء مخصصة",
   },
   workspaceLabels: {
