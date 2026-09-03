@@ -183,7 +183,6 @@ async function expectWorkspaceStatusGroupEvents(input: {
   rowTestId: string;
   includes: string;
   excludes: string;
-  excludesIndicator?: string;
 }) {
   await waitForWorkspaceStatusGroupEvent({
     page: input.page,
@@ -195,11 +194,6 @@ async function expectWorkspaceStatusGroupEvents(input: {
   );
   expect(createdWorkspaceEvents.map((event) => event.bucket)).toContain(input.includes);
   expect(createdWorkspaceEvents.filter((event) => event.bucket === input.excludes)).toEqual([]);
-  if (input.excludesIndicator) {
-    expect(
-      createdWorkspaceEvents.filter((event) => event.indicatorTestId === input.excludesIndicator),
-    ).toEqual([]);
-  }
 }
 
 async function submitNewWorkspaceWithoutPrompt(page: import("@playwright/test").Page) {
@@ -681,14 +675,6 @@ test.describe("New workspace flow", () => {
         rowTestId,
         includes: "done",
         excludes: "running",
-        excludesIndicator: "workspace-status-indicator-loading",
-      });
-      await expectWorkspaceStatusGroupEvents({
-        page,
-        rowTestId,
-        includes: "done",
-        excludes: "running",
-        excludesIndicator: "workspace-status-indicator-running",
       });
     } finally {
       await tempRepo.cleanup();

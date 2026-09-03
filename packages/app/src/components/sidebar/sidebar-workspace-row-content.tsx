@@ -1,14 +1,7 @@
 import { memo, useMemo, useCallback, useState, type ReactNode } from "react";
-import { Pressable, Text, View, type GestureResponderEvent, type ViewStyle } from "react-native";
+import { Pressable, Text, View, type GestureResponderEvent } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import {
-  CircleAlert,
-  ChevronDown,
-  ChevronRight,
-  Folder,
-  FolderGit2,
-  Monitor,
-} from "lucide-react-native";
+import { ChevronDown, ChevronRight, Grid2x2 } from "lucide-react-native";
 import { ProjectStatusIndicator } from "@/components/sidebar/project-leading-visual";
 import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
 import {
@@ -24,29 +17,12 @@ import {
 } from "@/components/sidebar/workspace-trailing";
 import { useAppSettings } from "@/hooks/use-settings";
 import type { Theme } from "@/styles/theme";
-import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
-import { getStatusDotColor } from "@/utils/status-dot-color";
-import {
-  STATUS_INDICATOR_ALERT_SIZE,
-  STATUS_INDICATOR_DOT_SIZE,
-  STATUS_INDICATOR_FILLED_DOT_SIZE,
-} from "@/utils/status-indicator-geometry";
-import { shouldRenderSyncedStatusLoader } from "@/utils/status-loader";
-import { StatusRing } from "@/components/status-ring";
 import { resolveSidebarWorkspacePrimaryLabel } from "@/components/sidebar/sidebar-workspace-title";
 import { TrailingActionScrim } from "@/components/ui/trailing-action-scrim";
 import { useWorkspaceLabelDefinitions } from "@/workspace-labels";
 
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-const needsInputColorMapping = (theme: Theme) => ({
-  color: theme.colors.surface0,
-  fill: getStatusDotColor({ theme, bucket: "needs_input" }) ?? undefined,
-});
-
-const ThemedCircleAlert = withUnistyles(CircleAlert);
-const ThemedMonitor = withUnistyles(Monitor);
-const ThemedFolder = withUnistyles(Folder);
-const ThemedFolderGit2 = withUnistyles(FolderGit2);
+const ThemedGrid = withUnistyles(Grid2x2);
 const ThemedChevronDown = withUnistyles(ChevronDown);
 const ThemedChevronRight = withUnistyles(ChevronRight);
 
@@ -174,9 +150,6 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
           />
         ) : (
           <WorkspaceLeadingSlot
-            bucket={workspace.statusBucket}
-            workspaceKind={workspace.workspaceKind}
-            loading={isLoading}
             reserveIdleSpace={reserveIdleStatusIndicatorSpace}
             collapseChevron={collapseChevron}
             collapseChevronVisible={collapseChevronVisible}
@@ -210,18 +183,12 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
 });
 
 function WorkspaceLeadingSlot({
-  bucket,
-  workspaceKind,
-  loading = false,
   reserveIdleSpace = true,
   collapseChevron,
   collapseChevronVisible = false,
   onCollapseToggle,
   workspaceKey,
 }: {
-  bucket: SidebarWorkspaceEntry["statusBucket"];
-  workspaceKind: SidebarWorkspaceEntry["workspaceKind"];
-  loading?: boolean;
   reserveIdleSpace?: boolean;
   collapseChevron?: "expand" | "collapse";
   collapseChevronVisible?: boolean;
@@ -236,14 +203,7 @@ function WorkspaceLeadingSlot({
     },
     [onCollapseToggle],
   );
-  const indicator = (
-    <WorkspaceStatusIndicator
-      bucket={bucket}
-      workspaceKind={workspaceKind}
-      loading={loading}
-      reserveIdleSpace={reserveIdleSpace}
-    />
-  );
+  const indicator = <WorkspaceStatusIndicator reserveIdleSpace={reserveIdleSpace} />;
   if (!collapseChevron || !onCollapseToggle) {
     return indicator;
   }
@@ -272,96 +232,19 @@ function WorkspaceLeadingSlot({
   );
 }
 
-function WorkspaceStatusIndicator({
-  bucket,
-  workspaceKind,
-  loading = false,
-  reserveIdleSpace = true,
-}: {
-  bucket: SidebarWorkspaceEntry["statusBucket"];
-  workspaceKind: SidebarWorkspaceEntry["workspaceKind"];
-  loading?: boolean;
-  reserveIdleSpace?: boolean;
-}) {
-  // Busy is the only status that moves, and it is the ring rather than a dot for the same
-  // reason it is a dot elsewhere: every status in the sidebar sits in this one slot, so busy
-  // has to fill it without displacing anything. A row starting up and a row working are both
-  // busy, so they share the ring and differ only in testID.
-  if (loading) {
-    return (
-      <View style={styles.workspaceStatusDot} testID="workspace-status-indicator-loading">
-        <StatusRing />
-      </View>
-    );
+function WorkspaceStatusIndicator({ reserveIdleSpace = true }: { reserveIdleSpace?: boolean }) {
+  // One fixed glyph, no status. The slot used to carry the row's aggregate state — a ring while
+  // running, a coloured dot otherwise — which put four different shapes in the rail and made a
+  // workspace row's leading edge move as its agents worked. The grid marks the row as a workspace
+  // and nothing else; status lives on the agent rows underneath it.
+  if (!reserveIdleSpace) {
+    return null;
   }
-
-  if (shouldRenderSyncedStatusLoader({ bucket })) {
-    return (
-      <View style={styles.workspaceStatusDot} testID="workspace-status-indicator-running">
-        <StatusRing />
-      </View>
-    );
-  }
-
-  if (bucket === "needs_input") {
-    return (
-      <View style={styles.workspaceStatusDot} testID="workspace-status-indicator-needs_input">
-        <ThemedCircleAlert size={STATUS_INDICATOR_ALERT_SIZE} uniProps={needsInputColorMapping} />
-      </View>
-    );
-  }
-
-  if (bucket === "attention") {
-    return (
-      <View style={styles.workspaceStatusDot} testID="workspace-status-indicator-attention">
-        <View style={styles.standaloneStatusDot} />
-      </View>
-    );
-  }
-
-  if (bucket === "done") {
-    // An idle row still gets a dot rather than an empty slot. Nested rows are marked as
-    // workspaces by indentation alone, and with nothing in the leading slot the rail has no
-    // edge to read against — a workspace carrying its own glyph starts looking like a project
-    // header. The dot is muted to half opacity so it holds the rail without reporting status.
-    return reserveIdleSpace ? (
-      <View style={styles.workspaceStatusDot} testID="workspace-status-indicator-done">
-        <View style={styles.idleStatusDot} />
-      </View>
-    ) : null;
-  }
-
-  let KindIcon: typeof ThemedMonitor;
-  if (workspaceKind === "local_checkout") KindIcon = ThemedMonitor;
-  else if (workspaceKind === "worktree") KindIcon = ThemedFolderGit2;
-  else KindIcon = ThemedFolder;
-
-  const dotColorStyle = getStatusDotColorStyle(bucket);
   return (
-    <View style={styles.workspaceStatusDot} testID={`workspace-status-indicator-${bucket}`}>
-      <KindIcon size={14} uniProps={foregroundMutedColorMapping} />
-      {dotColorStyle ? <StatusDotOverlay dotColorStyle={dotColorStyle} /> : null}
+    <View style={styles.workspaceStatusDot} testID="workspace-status-indicator">
+      <ThemedGrid size={14} uniProps={foregroundMutedColorMapping} />
     </View>
   );
-}
-
-function StatusDotOverlay({ dotColorStyle }: { dotColorStyle: ViewStyle }) {
-  return <View style={[styles.statusDotOverlay, dotColorStyle]} />;
-}
-
-function getStatusDotColorStyle(bucket: SidebarStateBucket) {
-  switch (bucket) {
-    case "needs_input":
-      return styles.statusDotNeedsInput;
-    case "failed":
-      return styles.statusDotFailed;
-    case "running":
-      return styles.statusDotRunning;
-    case "attention":
-      return styles.statusDotAttention;
-    case "done":
-      return null;
-  }
 }
 
 export const sidebarWorkspaceRowStyles = StyleSheet.create((theme) => ({
@@ -569,28 +452,6 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     justifyContent: "center",
   },
-  statusDotOverlay: {
-    position: "absolute",
-    right: 0,
-    bottom: 0,
-    width: STATUS_INDICATOR_DOT_SIZE,
-    height: STATUS_INDICATOR_DOT_SIZE,
-    borderRadius: theme.borderRadius.full,
-    borderWidth: 1,
-  },
-  standaloneStatusDot: {
-    width: STATUS_INDICATOR_FILLED_DOT_SIZE,
-    height: STATUS_INDICATOR_FILLED_DOT_SIZE,
-    borderRadius: theme.borderRadius.full,
-    backgroundColor: getStatusDotColor({ theme, bucket: "attention" }) ?? undefined,
-  },
-  idleStatusDot: {
-    width: STATUS_INDICATOR_FILLED_DOT_SIZE,
-    height: STATUS_INDICATOR_FILLED_DOT_SIZE,
-    borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.foregroundExtraMuted,
-    opacity: 0.3,
-  },
   // The title owns the first line outright now that the host, change request and CI moved
   // to the meta row, so it takes the full width the trailing slot leaves behind.
   workspaceBranchText: {
@@ -607,21 +468,5 @@ const styles = StyleSheet.create((theme) => ({
   },
   workspaceBranchTextHovered: {
     opacity: 1,
-  },
-  statusDotNeedsInput: {
-    backgroundColor: getStatusDotColor({ theme, bucket: "needs_input" }) ?? undefined,
-    borderColor: theme.colors.surface0,
-  },
-  statusDotFailed: {
-    backgroundColor: getStatusDotColor({ theme, bucket: "failed" }) ?? undefined,
-    borderColor: theme.colors.surface0,
-  },
-  statusDotRunning: {
-    backgroundColor: getStatusDotColor({ theme, bucket: "running" }) ?? undefined,
-    borderColor: theme.colors.surface0,
-  },
-  statusDotAttention: {
-    backgroundColor: getStatusDotColor({ theme, bucket: "attention" }) ?? undefined,
-    borderColor: theme.colors.surface0,
   },
 }));
