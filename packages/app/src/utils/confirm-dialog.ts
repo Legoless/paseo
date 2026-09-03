@@ -1,6 +1,6 @@
 import { Alert } from "react-native";
-import { getDesktopHost, type DesktopDialogAskOptions } from "@/desktop/host";
 import { isNative } from "@/constants/platform";
+import { requestConfirmDialog } from "@/stores/confirm-dialog-store";
 
 export interface ConfirmDialogInput {
   title: string;
@@ -10,20 +10,9 @@ export interface ConfirmDialogInput {
   destructive?: boolean;
 }
 
-interface ConfirmButtonConfig {
-  confirmLabel: string;
-  cancelLabel: string;
-}
-
-function resolveButtonLabels(input: ConfirmDialogInput): ConfirmButtonConfig {
-  return {
-    confirmLabel: input.confirmLabel ?? "Confirm",
-    cancelLabel: input.cancelLabel ?? "Cancel",
-  };
-}
-
 async function showNativeConfirmDialog(input: ConfirmDialogInput): Promise<boolean> {
-  const labels = resolveButtonLabels(input);
+  const confirmLabel = input.confirmLabel ?? "Confirm";
+  const cancelLabel = input.cancelLabel ?? "Cancel";
 
   return new Promise<boolean>((resolve) => {
     Alert.alert(
@@ -31,12 +20,12 @@ async function showNativeConfirmDialog(input: ConfirmDialogInput): Promise<boole
       input.message,
       [
         {
-          text: labels.cancelLabel,
+          text: cancelLabel,
           style: "cancel",
           onPress: () => resolve(false),
         },
         {
-          text: labels.confirmLabel,
+          text: confirmLabel,
           style: input.destructive ? "destructive" : "default",
           onPress: () => resolve(true),
         },
@@ -49,24 +38,6 @@ async function showNativeConfirmDialog(input: ConfirmDialogInput): Promise<boole
   });
 }
 
-function getDesktopApi() {
-  if (isNative) {
-    return null;
-  }
-  return getDesktopHost();
-}
-
-function buildDesktopAskOptions(input: ConfirmDialogInput): DesktopDialogAskOptions {
-  const labels = resolveButtonLabels(input);
-
-  return {
-    title: input.title,
-    okLabel: labels.confirmLabel,
-    cancelLabel: labels.cancelLabel,
-    kind: input.destructive ? "warning" : "info",
-  };
-}
-
 function blurActiveWebElement(): void {
   if (isNative) {
     return;
@@ -75,48 +46,22 @@ function blurActiveWebElement(): void {
   (activeElement as HTMLElement | null)?.blur?.();
 }
 
-async function showDesktopConfirmDialog(input: ConfirmDialogInput): Promise<boolean | null> {
-  const desktopApi = getDesktopApi();
-  if (!desktopApi) {
-    return null;
-  }
-
-  blurActiveWebElement();
-  const options = buildDesktopAskOptions(input);
-  const desktopAsk = desktopApi.dialog?.ask;
-
-  if (typeof desktopAsk === "function") {
-    return await desktopAsk(input.message, options);
-  }
-
-  return null;
-}
-
-function showWebConfirmDialog(input: ConfirmDialogInput): boolean {
-  const browserConfirm = (globalThis as { confirm?: (message?: string) => boolean }).confirm;
-  if (typeof browserConfirm !== "function") {
-    throw new Error("[ConfirmDialog] No web confirmation backend is available.");
-  }
-
-  blurActiveWebElement();
-  const promptMessage = `${input.title}\n\n${input.message}`;
-  return browserConfirm(promptMessage);
-}
-
+/**
+ * Asks the user to confirm, and resolves false on every way of declining, dismissal included.
+ *
+ * iOS and Android get `Alert.alert`, which is the platform's own confirmation and the one users
+ * expect there. Desktop and browser get the app's dialog instead of the OS alert box or
+ * `window.confirm`: those paint outside the window in someone else's design language, and
+ * `window.confirm` silently drops the button labels the caller wrote.
+ */
 export async function confirmDialog(input: ConfirmDialogInput): Promise<boolean> {
   if (isNative) {
     return showNativeConfirmDialog(input);
   }
-
-  const desktopResult = await showDesktopConfirmDialog(input);
-  if (desktopResult !== null) {
-    return desktopResult;
-  }
-
-  return showWebConfirmDialog(input);
+  blurActiveWebElement();
+  return requestConfirmDialog(input);
 }
 
 export const __private__ = {
   blurActiveWebElement,
-  buildDesktopAskOptions,
 };

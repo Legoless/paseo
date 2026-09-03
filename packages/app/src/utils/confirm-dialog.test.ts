@@ -1,13 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const desktopHostState = {
-  api: null as {
-    dialog?: {
-      ask?: (message: string, options?: Record<string, unknown>) => Promise<boolean>;
-    };
-  } | null,
-};
-
 type MockPlatform = "web" | "ios" | "android";
 
 interface AlertButton {
@@ -16,28 +8,20 @@ interface AlertButton {
 
 async function loadModuleForPlatform(platform: MockPlatform): Promise<{
   confirmDialog: typeof import("./confirm-dialog").confirmDialog;
+  store: typeof import("@/stores/confirm-dialog-store");
   alertMock: ReturnType<typeof vi.fn>;
 }> {
   vi.resetModules();
 
   const alertMock = vi.fn();
   vi.doMock("react-native", () => ({
-    Alert: {
-      alert: alertMock,
-    },
+    Alert: { alert: alertMock },
     Platform: { OS: platform },
-  }));
-  vi.doMock("@/desktop/host", () => ({
-    getDesktopHost: () => desktopHostState.api,
   }));
 
   const module = await import("./confirm-dialog");
-  return { confirmDialog: module.confirmDialog, alertMock };
-}
-
-function clearDialogGlobals(): void {
-  desktopHostState.api = null;
-  delete (globalThis as { confirm?: unknown }).confirm;
+  const store = await import("@/stores/confirm-dialog-store");
+  return { confirmDialog: module.confirmDialog, store, alertMock };
 }
 
 describe("confirmDialog", () => {
@@ -45,74 +29,79 @@ describe("confirmDialog", () => {
     vi.doUnmock("react-native");
     vi.restoreAllMocks();
     vi.resetModules();
-    clearDialogGlobals();
+    delete (globalThis as { document?: unknown }).document;
   });
 
-  it("uses the desktop dialog bridge on web when available", async () => {
-    const askMock = vi.fn(async () => true);
+  it("hands the question to the in-app dialog on web instead of an OS alert", async () => {
     const blurMock = vi.fn();
     (globalThis as { document?: unknown }).document = {
       activeElement: { blur: blurMock },
     } as unknown as Document;
-    desktopHostState.api = {
-      dialog: { ask: askMock },
-    };
 
-    const { confirmDialog, alertMock } = await loadModuleForPlatform("web");
-    const confirmed = await confirmDialog({
-      title: "Restart host",
-      message: "This will restart the daemon.",
-      confirmLabel: "Restart",
+    const { confirmDialog, store, alertMock } = await loadModuleForPlatform("web");
+    const pending = confirmDialog({
+      title: "Switch project?",
+      message: "This agent's conversation will be discarded.",
+      confirmLabel: "Switch",
       cancelLabel: "Cancel",
       destructive: true,
     });
 
-    expect(confirmed).toBe(true);
+    const request = store.useConfirmDialogStore.getState().request;
     expect(alertMock).not.toHaveBeenCalled();
     expect(blurMock).toHaveBeenCalledTimes(1);
-    expect(askMock).toHaveBeenCalledWith("This will restart the daemon.", {
-      title: "Restart host",
-      okLabel: "Restart",
+    expect(request).toMatchObject({
+      title: "Switch project?",
+      message: "This agent's conversation will be discarded.",
+      confirmLabel: "Switch",
       cancelLabel: "Cancel",
-      kind: "warning",
-    });
-  });
-
-  it("falls back to browser confirm on web when desktop APIs are unavailable", async () => {
-    const browserConfirm = vi.fn(() => true);
-    const blurMock = vi.fn();
-    (globalThis as { document?: unknown }).document = {
-      activeElement: { blur: blurMock },
-    } as unknown as Document;
-    (globalThis as { confirm?: unknown }).confirm = browserConfirm;
-
-    const { confirmDialog } = await loadModuleForPlatform("web");
-    const confirmed = await confirmDialog({
-      title: "Restart host",
-      message: "This will restart the daemon.",
+      destructive: true,
     });
 
-    expect(confirmed).toBe(true);
-    expect(blurMock).toHaveBeenCalledTimes(1);
-    expect(browserConfirm).toHaveBeenCalledWith("Restart host\n\nThis will restart the daemon.");
+    store.useConfirmDialogStore.getState().settle(request?.id ?? -1, true);
+    await expect(pending).resolves.toBe(true);
+    expect(store.useConfirmDialogStore.getState().request).toBeNull();
   });
 
-  it("throws on web when no confirm backend exists", async () => {
-    const { confirmDialog } = await loadModuleForPlatform("web");
+  it("resolves false when the dialog is declined", async () => {
+    const { confirmDialog, store } = await loadModuleForPlatform("web");
+    const pending = confirmDialog({ title: "Discard changes?", message: "They are lost." });
 
-    await expect(
-      confirmDialog({
-        title: "Restart host",
-        message: "This will restart the daemon.",
-      }),
-    ).rejects.toThrow("[ConfirmDialog] No web confirmation backend is available.");
+    const request = store.useConfirmDialogStore.getState().request;
+    store.useConfirmDialogStore.getState().settle(request?.id ?? -1, false);
+    await expect(pending).resolves.toBe(false);
+  });
+
+  it("declines a pending question when a second one replaces it", async () => {
+    const { confirmDialog, store } = await loadModuleForPlatform("web");
+    const first = confirmDialog({ title: "First", message: "One." });
+    const second = confirmDialog({ title: "Second", message: "Two." });
+
+    // Two stacked confirmations have no reading order, so the older one is answered as declined.
+    await expect(first).resolves.toBe(false);
+    const request = store.useConfirmDialogStore.getState().request;
+    expect(request?.title).toBe("Second");
+
+    store.useConfirmDialogStore.getState().settle(request?.id ?? -1, true);
+    await expect(second).resolves.toBe(true);
+  });
+
+  it("ignores a settle aimed at a request that is no longer open", async () => {
+    const { confirmDialog, store } = await loadModuleForPlatform("web");
+    const pending = confirmDialog({ title: "Only", message: "One." });
+    const request = store.useConfirmDialogStore.getState().request;
+
+    store.useConfirmDialogStore.getState().settle(-99, true);
+    expect(store.useConfirmDialogStore.getState().request).not.toBeNull();
+
+    store.useConfirmDialogStore.getState().settle(request?.id ?? -1, true);
+    await expect(pending).resolves.toBe(true);
   });
 
   it("uses native Alert on iOS/Android", async () => {
-    const { confirmDialog, alertMock } = await loadModuleForPlatform("ios");
+    const { confirmDialog, store, alertMock } = await loadModuleForPlatform("ios");
     alertMock.mockImplementation((_title: string, _message: string, buttons?: AlertButton[]) => {
-      const confirmButton = buttons?.[1];
-      confirmButton?.onPress?.();
+      buttons?.[1]?.onPress?.();
     });
 
     const confirmed = await confirmDialog({
@@ -125,5 +114,6 @@ describe("confirmDialog", () => {
 
     expect(confirmed).toBe(true);
     expect(alertMock).toHaveBeenCalled();
+    expect(store.useConfirmDialogStore.getState().request).toBeNull();
   });
 });

@@ -8,6 +8,7 @@ export const ru: TranslationResources = {
     actions: {
       back: "Назад",
       cancel: "Отмена",
+      confirm: "Подтвердить",
       close: "Закрыть",
       copy: "Копировать",
       dismiss: "Отклонить",

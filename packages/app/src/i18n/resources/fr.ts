@@ -8,6 +8,7 @@ export const fr: TranslationResources = {
     actions: {
       back: "Dos",
       cancel: "Annuler",
+      confirm: "Confirmer",
       close: "Fermer",
       copy: "Copie",
       dismiss: "Rejeter",
