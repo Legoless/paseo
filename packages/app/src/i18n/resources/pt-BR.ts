@@ -623,8 +623,9 @@ export const ptBR: TranslationResources = {
         files: "Arquivos",
       },
       projectSelector: {
+        label: "Projeto",
         selectProject: "Selecionar projeto",
-        home: "Início",
+        noProject: "Sem projeto",
       },
       projectPicker: {
         selectProject: "Selecionar projeto",

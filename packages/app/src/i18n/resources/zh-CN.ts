@@ -619,8 +619,9 @@ export const zhCN: TranslationResources = {
         files: "文件",
       },
       projectSelector: {
+        label: "项目",
         selectProject: "选择项目",
-        home: "主目录",
+        noProject: "无项目",
       },
       projectPicker: {
         selectProject: "选择项目",
