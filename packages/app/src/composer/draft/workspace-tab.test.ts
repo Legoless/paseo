@@ -1,10 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import {
-  buildDraftSetupWithCwd,
-  shouldAllowEmptyDraftText,
-  validateDraftSubmission,
-} from "./workspace-tab-core";
+import { shouldAllowEmptyDraftText, validateDraftSubmission } from "./workspace-tab-core";
 
 const baseComposerState = {
   providerDefinitions: [{ id: "codewhale" }],
@@ -71,58 +67,5 @@ describe("workspace draft empty text readiness", () => {
         attachments: [],
       }),
     ).toBe(false);
-  });
-});
-
-describe("buildDraftSetupWithCwd", () => {
-  test("keeps every existing setup field but the cwd", () => {
-    const currentSetup = {
-      provider: "claude" as const,
-      cwd: "/repo-one",
-      modeId: "plan",
-      model: "opus",
-      thinkingOptionId: "high",
-      featureValues: { fast: true },
-    };
-
-    expect(buildDraftSetupWithCwd({ currentSetup, cwd: "/repo-two" })).toEqual({
-      ...currentSetup,
-      cwd: "/repo-two",
-    });
-  });
-
-  test("snapshots the composer selections when the draft has no setup yet", () => {
-    expect(
-      buildDraftSetupWithCwd({
-        currentSetup: null,
-        cwd: "/repo-two",
-        provider: "codex",
-        modeId: null,
-        model: "gpt-5",
-        thinkingOptionId: null,
-        featureValues: undefined,
-      }),
-    ).toEqual({
-      provider: "codex",
-      cwd: "/repo-two",
-      modeId: null,
-      model: "gpt-5",
-      thinkingOptionId: null,
-      featureValues: {},
-    });
-  });
-
-  test("returns null when there is no provider to pin", () => {
-    expect(
-      buildDraftSetupWithCwd({
-        currentSetup: null,
-        cwd: "/repo-two",
-        provider: null,
-        modeId: null,
-        model: null,
-        thinkingOptionId: null,
-        featureValues: undefined,
-      }),
-    ).toBeNull();
   });
 });

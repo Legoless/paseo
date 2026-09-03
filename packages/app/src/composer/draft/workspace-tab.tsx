@@ -30,7 +30,6 @@ import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
 import { shouldAutoFocusWorkspaceDraftComposer } from "@/screens/workspace/workspace-draft-pane-focus";
 import {
   shouldAllowEmptyDraftText,
-  buildDraftSetupWithCwd,
   validateDraftSubmission,
 } from "@/composer/draft/workspace-tab-core";
 import type { AgentCapabilityFlags } from "@getpaseo/protocol/agent-types";
@@ -55,9 +54,6 @@ import {
 } from "@/workspace-tabs/model";
 import { openWorkspaceChanges } from "@/workspace-tabs/open-supporting-view";
 import { useSettings } from "@/hooks/use-settings";
-import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
-import { buildWorkspaceProjectPickerOptions } from "@/components/workspace-project-picker";
-import type { DraftProjectPickerValue } from "@/composer/agent-controls/project-picker";
 
 const EMPTY_PENDING_PERMISSIONS = new Map();
 const EMPTY_ONLINE_SERVER_IDS: string[] = [];
@@ -355,10 +351,8 @@ export function WorkspaceDraftAgentTab({
   const workspaceFields = useWorkspaceFields(serverId, workspaceId, (w) => ({
     workspaceDirectory: w.workspaceDirectory,
     id: w.id,
-    members: w.members,
   }));
   const workspaceDirectory = workspaceFields?.workspaceDirectory || null;
-  const workspaceMembers = workspaceFields?.members ?? null;
   const draftSetup = initialSetup ?? null;
   const draftWorkingDirectory = resolveDraftWorkingDirectory({
     workspaceDirectory,
@@ -652,60 +646,14 @@ export function WorkspaceDraftAgentTab({
   const handleDropdownCloseFocus = useCallback(() => {
     focusInputRef.current?.();
   }, []);
-  const handleSelectDraftProject = useCallback(
-    (cwd: string) => {
-      const persistenceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId });
-      if (!persistenceKey) {
-        return;
-      }
-      const nextSetup = buildDraftSetupWithCwd({
-        currentSetup: initialSetup ?? null,
-        cwd,
-        provider: composerState.selectedProvider,
-        modeId: composerState.selectedMode || null,
-        model: composerState.effectiveModelId || null,
-        thinkingOptionId: composerState.effectiveThinkingOptionId || null,
-        featureValues: composerState.featureValues,
-      });
-      if (!nextSetup) {
-        return;
-      }
-      useWorkspaceLayoutStore.getState().replaceTab(persistenceKey, tabId, {
-        kind: "draft",
-        draftId,
-        setup: nextSetup,
-      });
-    },
-    [composerState, draftId, initialSetup, serverId, tabId, workspaceId],
-  );
-  const draftProjectPicker = useMemo<DraftProjectPickerValue | null>(() => {
-    if (!workspaceMembers || workspaceMembers.length <= 1 || !draftWorkingDirectory) {
-      return null;
-    }
-    return {
-      options: buildWorkspaceProjectPickerOptions(workspaceMembers),
-      selectedCwd: draftWorkingDirectory,
-      onSelect: handleSelectDraftProject,
-      // Without a setup the pick snapshots the composer's provider, so it has
-      // to wait until the form resolves one.
-      disabled: !initialSetup && !composerState.selectedProvider,
-    };
-  }, [
-    composerState.selectedProvider,
-    draftWorkingDirectory,
-    handleSelectDraftProject,
-    initialSetup,
-    workspaceMembers,
-  ]);
   const importPillPress = resolveImportPillPress(onOpenImportSheet, isSubmitting);
   const composerAgentControls = useMemo(
     () => ({
       ...composerState.agentControls,
       onDropdownClose: handleDropdownCloseFocus,
       disabled: isSubmitting,
-      projectPicker: draftProjectPicker,
     }),
-    [composerState.agentControls, draftProjectPicker, handleDropdownCloseFocus, isSubmitting],
+    [composerState.agentControls, handleDropdownCloseFocus, isSubmitting],
   );
   return (
     <FileDropZone style={styles.container}>
