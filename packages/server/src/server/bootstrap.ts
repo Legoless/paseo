@@ -119,6 +119,7 @@ export async function fanOutReconciledWorkspaceUpdates(input: {
 import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
 import { WorkspaceSetupRuntime } from "./workspace-setup-runtime.js";
 import { createWorkspaceLabelService } from "./workspace-labels/index.js";
+import { loadPaneLayouts } from "./workspace-layouts.js";
 import { createGitHubService } from "../services/github-service.js";
 import { createPaseoWorktree as createRegisteredPaseoWorktree } from "./paseo-worktree-service.js";
 import { createWorkspaceProvisioningService } from "./session/workspace-provisioning/workspace-provisioning-service.js";
@@ -560,7 +561,24 @@ function createInitialMutableDaemonConfig(config: PaseoDaemonConfig): MutableDae
     initialConfig.agentProfiles = config.agentProfiles;
   }
 
+  Object.assign(initialConfig, readPaneLayoutFields(config.paseoHome));
+
   return initialConfig;
+}
+
+/**
+ * Rescanned on every call rather than watched: `paseo daemon reload` re-invokes
+ * createInitialMutableDaemonConfig and broadcasts daemon_config_changed, which is the whole
+ * refresh path.
+ */
+function readPaneLayoutFields(
+  paseoHome: string,
+): Pick<MutableDaemonConfig, "paneLayouts" | "paneLayoutErrors"> {
+  const { layouts, errors } = loadPaneLayouts(paseoHome);
+  return {
+    ...(layouts.length > 0 ? { paneLayouts: layouts } : {}),
+    ...(errors.length > 0 ? { paneLayoutErrors: errors } : {}),
+  };
 }
 
 export async function createPaseoDaemon(

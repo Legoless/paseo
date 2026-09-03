@@ -995,6 +995,17 @@ export const en = {
       },
     },
   },
+  paneLayouts: {
+    title: "Pane layout",
+    builtIn: {
+      single: "Single pane",
+      twoColumns: "Two columns",
+      twoRows: "Two rows",
+      grid: "Grid {{rows}} × {{columns}}",
+    },
+    emptyHint: "Add layouts in the host's layouts folder",
+    updateHost: "Update this host to use custom pane layouts",
+  },
   workspaceLabels: {
     title: "Labels",
     unlabelled: "Unlabelled",

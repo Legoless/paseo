@@ -6,6 +6,7 @@ import { MAX_EXPLICIT_AGENT_TITLE_CHARS } from "./agent-title-limits.js";
 import { AgentProviderSchema } from "./provider-manifest.js";
 import { TOOL_CALL_ICON_NAMES } from "./agent-types.js";
 import { WORKSPACE_LABEL_COLORS } from "./workspace-labels.js";
+import { PaneLayoutSchema } from "./workspace-layouts.js";
 import {
   ChatCreateRequestSchema,
   ChatListRequestSchema,
@@ -242,6 +243,12 @@ export const MutableDaemonConfigSchema = z
     enableTerminalAgentHooks: z.boolean().default(false),
     appendSystemPrompt: z.string().default(""),
     terminalProfiles: z.array(TerminalProfileSchema).optional(),
+    // Daemon-owned and read-only: sourced from `$PASEO_HOME/layouts/`, not from config.json,
+    // which is why neither field appears in MutableDaemonConfigPatchSchema.
+    // COMPAT(paneLayouts): added in v0.8.0, remove optional parsing after 2028-03-01.
+    paneLayouts: z.array(PaneLayoutSchema).optional(),
+    /** One line per unusable layout file, pre-formatted for display. */
+    paneLayoutErrors: z.array(z.string()).optional(),
     agentProfiles: z.array(AgentProfileSchema).optional(),
     skills: z.object({ selection: AgentSkillSelectionSchema.optional() }).strict().optional(),
     pluginsEnabled: z.boolean().optional(),
@@ -3409,6 +3416,8 @@ export const ServerInfoStatusPayloadSchema = z
         workspaceLabels: z.boolean().optional(),
         // COMPAT(agentLabels): added in v0.7.0, remove after 2027-02-28.
         agentLabels: z.boolean().optional(),
+        // COMPAT(paneLayouts): added in v0.8.0, remove gate after 2028-03-01.
+        paneLayouts: z.boolean().optional(),
         // COMPAT(checkoutForgeSetAutoMerge): added in v0.2.0-beta.1. Remove the
         // feature gate and checkoutGithubSetAutoMerge fallback after 2027-01-17
         // once the supported daemon floor is >= v0.2.0.

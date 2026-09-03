@@ -1001,6 +1001,17 @@ export const ru: TranslationResources = {
       },
     },
   },
+  paneLayouts: {
+    title: "Расположение панелей",
+    builtIn: {
+      single: "Одна панель",
+      twoColumns: "Два столбца",
+      twoRows: "Две строки",
+      grid: "Сетка {{rows}} × {{columns}}",
+    },
+    emptyHint: "Добавьте макеты в папку layouts на хосте",
+    updateHost: "Обновите этот хост, чтобы использовать свои макеты панелей",
+  },
   workspaceLabels: {
     title: "Метки",
     unlabelled: "Без метки",

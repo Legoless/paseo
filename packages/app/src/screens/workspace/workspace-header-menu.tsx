@@ -27,6 +27,7 @@ import {
 import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
 import { SidebarWorkspaceMenuItems } from "@/components/sidebar/sidebar-workspace-menu";
 import { useWorkspaceLabelMenuPages, type WorkspaceLabelTarget } from "@/workspace-labels/picker";
+import { usePaneLayoutMenuPages, type PaneLayoutTarget } from "@/workspace-layouts/picker";
 import type { Theme } from "@/styles/theme";
 
 const ThemedEllipsis = withUnistyles(Ellipsis);
@@ -152,7 +153,13 @@ function useWorkspaceHeaderLabelPages({
     () => ({ kind: "workspace", serverId, workspaceId, labels: workspaceLabels }),
     [serverId, workspaceId, workspaceLabels],
   );
-  return useWorkspaceLabelMenuPages(target);
+  const layoutTarget = useMemo<PaneLayoutTarget>(
+    () => ({ serverId, workspaceId }),
+    [serverId, workspaceId],
+  );
+  const labelPages = useWorkspaceLabelMenuPages(target);
+  const layoutPages = usePaneLayoutMenuPages(layoutTarget);
+  return useMemo(() => [...labelPages, ...layoutPages], [labelPages, layoutPages]);
 }
 
 function workspaceHeaderMenuButtonStyle({

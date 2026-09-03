@@ -9,7 +9,9 @@ import {
   defaultWorkspaceLayoutIds,
   type WorkspaceLayoutIdSource,
 } from "@/stores/workspace-layout-ids";
+import { type PaneLayoutNode } from "@getpaseo/protocol/workspace-layouts";
 import {
+  buildWorkspaceLayoutFromPaneLayout,
   canDismissPaneInLayout,
   clampNormalizedSizes,
   closePaneInLayout,
@@ -160,6 +162,11 @@ interface WorkspaceLayoutStore {
   focusPane: (workspaceKey: string, paneId: string) => void;
   unfocusPane: (workspaceKey: string) => string | null;
   restorePaneFocus: (workspaceKey: string, token: string) => void;
+  /**
+   * Rearranges a workspace's panes into the shape of a pane layout. Geometry only: every open tab
+   * is carried across, nothing is created or destroyed. See buildWorkspaceLayoutFromPaneLayout.
+   */
+  applyPaneLayout: (workspaceKey: string, node: PaneLayoutNode) => void;
   resizeSplit: (workspaceKey: string, groupId: string, sizes: number[]) => void;
   resizeExplorerSidebar: (workspaceKey: string, width: number) => void;
   reorderTabsInPane: (workspaceKey: string, paneId: string, tabIds: string[]) => void;
@@ -1662,6 +1669,52 @@ export function createWorkspaceLayoutStore(
                   focusedPaneId: restorePaneId,
                 },
               },
+            };
+          });
+        },
+        applyPaneLayout: (workspaceKey, node) => {
+          const normalizedWorkspaceKey = trimNonEmpty(workspaceKey);
+          if (!normalizedWorkspaceKey) {
+            return;
+          }
+
+          set((state) => {
+            const current = getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey);
+            const explorerSidebarPaneId = resolveExplorerSidebarPaneId(
+              current,
+              state.explorerSidebarPaneIdByWorkspace[normalizedWorkspaceKey],
+            );
+            const built = buildWorkspaceLayoutFromPaneLayout({
+              node,
+              current,
+              explorerSidebarPaneId,
+              ids,
+            });
+            // restoreEmptyPanesInLayout normalizes internally and refills any pane the layout left
+            // empty with a launcher, or the Explorer's default trees.
+            const restored = restoreEmptyPanesInLayout(built, explorerSidebarPaneId);
+            const nextLayout = keepWorkspaceFocusOutOfExplorerSidebar(
+              restored,
+              explorerSidebarPaneId,
+              restored.focusedPaneId,
+            );
+            // Drag overrides are keyed by group id and no action prunes them, so a stale entry
+            // would fight the layout's own weights. The layout wins.
+            const { [normalizedWorkspaceKey]: _staleSizes, ...splitSizesByWorkspace } =
+              state.splitSizesByWorkspace;
+
+            return {
+              layoutByWorkspace: {
+                ...state.layoutByWorkspace,
+                [normalizedWorkspaceKey]: nextLayout,
+              },
+              splitSizesByWorkspace,
+              explorerSidebarPaneIdByWorkspace: {
+                ...state.explorerSidebarPaneIdByWorkspace,
+                [normalizedWorkspaceKey]: explorerSidebarPaneId,
+              },
+              ...reconcileRememberedSidePane(state, normalizedWorkspaceKey, nextLayout),
+              ...withoutFocusRestoration(state, normalizedWorkspaceKey),
             };
           });
         },

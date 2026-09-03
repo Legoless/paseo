@@ -1008,6 +1008,17 @@ export const ptBR: TranslationResources = {
       },
     },
   },
+  paneLayouts: {
+    title: "Layout dos painéis",
+    builtIn: {
+      single: "Painel único",
+      twoColumns: "Duas colunas",
+      twoRows: "Duas linhas",
+      grid: "Grade {{rows}} × {{columns}}",
+    },
+    emptyHint: "Adicione layouts na pasta layouts do host",
+    updateHost: "Atualize este host para usar layouts de painel personalizados",
+  },
   workspaceLabels: {
     title: "Etiquetas",
     unlabelled: "Sem etiqueta",

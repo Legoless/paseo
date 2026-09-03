@@ -4,7 +4,10 @@ import type { WorkspaceTab, WorkspaceTabTarget } from "@/workspace-tabs/model";
 import { MIN_SPLIT_SIZE } from "@/stores/workspace-layout-constants";
 import { panelResourceKey, panelSupportsHost } from "@/panels/panel-manifest";
 import { defaultWorkspaceLayoutIds } from "@/stores/workspace-layout-ids";
-import type { WorkspaceLayoutNodeIdPrefix } from "@/stores/workspace-layout-ids";
+import type {
+  WorkspaceLayoutIdSource,
+  WorkspaceLayoutNodeIdPrefix,
+} from "@/stores/workspace-layout-ids";
 import {
   buildDeterministicWorkspaceTabId,
   normalizeWorkspaceTabTarget,
@@ -12,6 +15,7 @@ import {
 } from "@/workspace-tabs/identity";
 import { createNewWorkspaceTab } from "@/workspace-tabs/new-tab";
 import { generateDraftId } from "@/stores/draft-keys";
+import { isPaneLayoutSplit, type PaneLayoutNode } from "@getpaseo/protocol/workspace-layouts";
 
 export interface SplitPane {
   id: string;
@@ -1219,6 +1223,145 @@ export function createWorkspaceLayoutWithExplorerSidebar(): WorkspaceLayout {
     }),
     focusedPaneId: DEFAULT_PANE_ID,
   };
+}
+
+/**
+ * Collects panes in visual order — a group's child order is already left-to-right for a row and
+ * top-to-bottom for a column.
+ */
+function collectPanesInVisualOrder(node: SplitNodeInternal, into: SplitPaneInternal[]): void {
+  if (node.kind === "pane") {
+    into.push(node.pane);
+    return;
+  }
+  for (const child of node.group.children) {
+    collectPanesInVisualOrder(child, into);
+  }
+}
+
+/** Finds the Explorer sidebar's node so it can be lifted out of the tree and re-docked after. */
+function findExplorerSidebarNode(
+  node: SplitNodeInternal,
+  explorerSidebarPaneId: string,
+): SplitNodeInternal | null {
+  if (node.kind === "pane") {
+    return node.pane.id === explorerSidebarPaneId ? node : null;
+  }
+  for (const child of node.group.children) {
+    const found = findExplorerSidebarNode(child, explorerSidebarPaneId);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
+/** Leaf count of a pane layout — how many panes the built tree will have. */
+function countPaneLayoutLeaves(node: PaneLayoutNode): number {
+  if (!isPaneLayoutSplit(node)) {
+    return 1;
+  }
+  return node.children.reduce((total, child) => total + countPaneLayoutLeaves(child), 0);
+}
+
+/**
+ * Rebuilds a workspace tree in the shape of a pane layout, carrying every open tab across.
+ *
+ * Pane layouts are geometry only, so nothing here creates or destroys a tab. The workspace's
+ * existing content panes are read in visual order and dealt into the layout's panes by index,
+ * wrapping when the layout has fewer. The first N new panes reuse the first N existing pane ids,
+ * so a layout with the same pane count as the current one repositions everything without
+ * remounting a single tab. Panes past the old count start empty, and the caller's
+ * `restoreEmptyPanesInLayout` gives them a launcher.
+ *
+ * The Explorer sidebar never participates — it docks outside the workspace splits — so it is
+ * lifted out and re-wrapped with its tabs and hidden flag intact.
+ */
+export function buildWorkspaceLayoutFromPaneLayout(input: {
+  node: PaneLayoutNode;
+  current: WorkspaceLayout;
+  explorerSidebarPaneId: string | null;
+  ids: WorkspaceLayoutIdSource;
+}): WorkspaceLayout {
+  const { node, current, explorerSidebarPaneId, ids } = input;
+  const stripped = stripEphemeralTabsFromLayout(current);
+  const currentRoot = asInternalNode(stripped.root);
+
+  const explorerNode = explorerSidebarPaneId
+    ? findExplorerSidebarNode(currentRoot, explorerSidebarPaneId)
+    : null;
+
+  const allPanes: SplitPaneInternal[] = [];
+  collectPanesInVisualOrder(currentRoot, allPanes);
+  const contentPanes = allPanes.filter((pane) => pane.id !== explorerSidebarPaneId);
+
+  // Deal the old panes into the new ones by index up front, so each new pane knows both the id it
+  // inherits and the tabs it receives before the tree is built.
+  const leafCount = countPaneLayoutLeaves(node);
+  const carried = Array.from({ length: leafCount }, (_unused, index) => {
+    const source = contentPanes[index];
+    return {
+      id: source?.id ?? null,
+      tabs: source ? [...source.tabs] : [],
+      focusedTabId: source?.focusedTabId ?? null,
+    };
+  });
+  for (let index = leafCount; index < contentPanes.length; index += 1) {
+    const slot = carried[index % leafCount];
+    const source = contentPanes[index];
+    if (slot && source) {
+      slot.tabs.push(...source.tabs);
+    }
+  }
+
+  let leafIndex = 0;
+  const build = (layoutNode: PaneLayoutNode): SplitNodeInternal => {
+    if (isPaneLayoutSplit(layoutNode)) {
+      return createGroupNode({
+        id: ids.createNodeId("group"),
+        direction: layoutNode.direction === "row" ? "horizontal" : "vertical",
+        children: layoutNode.children.map(build),
+        // clampNormalizedSizes rather than the bare normalizeSizes createGroupNode would default
+        // to: that one has no floor, so a weight of 100 beside 1 would render a pane narrower
+        // than the resize handles can produce.
+        sizes: clampNormalizedSizes(layoutNode.children.map((child) => child.size ?? 1)),
+      });
+    }
+    const slot = carried[leafIndex];
+    leafIndex += 1;
+    return createPaneNode({
+      id: slot?.id ?? ids.createNodeId("pane"),
+      tabs: slot?.tabs ?? [],
+      focusedTabId: slot?.focusedTabId ?? null,
+    });
+  };
+
+  const content = build(node);
+  const focusedPaneId =
+    current.focusedPaneId !== null &&
+    current.focusedPaneId !== explorerSidebarPaneId &&
+    carried.some((slot) => slot.id === current.focusedPaneId)
+      ? current.focusedPaneId
+      : (carried[0]?.id ?? DEFAULT_PANE_ID);
+
+  const root = explorerNode
+    ? createGroupNode({
+        // A fresh group id, never DEFAULT_LAYOUT_GROUP_ID: a stale splitSizesByWorkspace entry
+        // keyed to the old root would otherwise be reapplied over the layout's own weights.
+        id: ids.createNodeId("group"),
+        direction: "horizontal",
+        children: [content, explorerNode],
+        sizes: [0.78, 0.22],
+      })
+    : content;
+
+  return normalizeLayout({
+    root,
+    focusedPaneId,
+    // normalizeLayout prunes edges whose endpoints did not survive. Dropping this instead would
+    // silently lose every subagent-track and open-from-chat parent edge.
+    ...(current.parentTabIdByTabId ? { parentTabIdByTabId: current.parentTabIdByTabId } : {}),
+  });
 }
 
 export function insertSplit(
