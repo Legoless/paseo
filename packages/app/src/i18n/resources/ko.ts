@@ -1215,6 +1215,7 @@ export const ko: TranslationResources = {
         hideFailed: "워크스페이스를 숨기지 못했습니다",
         archiveFailed: "워크스페이스를 보관하지 못했습니다.",
       },
+      uncategorized: "분류되지 않음",
     },
     agent: {
       actions: {

@@ -35,8 +35,15 @@ export interface SidebarWorkspaceMemberRow {
   workspaceDirectoryLabel: string;
   /** Live diff for the member's directory; null when the daemon has no snapshot for it. */
   diffStat: { additions: number; deletions: number } | null;
-  /** The primary member inherits every agent whose cwd matches no member directory. */
+  /** The primary member owns the workspace's PR facts. */
   isPrimary: boolean;
+  newAgents?: SidebarWorkspaceNewAgentRow[];
+  agents: SidebarWorkspaceAgentRow[];
+}
+
+export interface SidebarWorkspaceUncategorizedRow {
+  /** `${workspaceKey}#uncategorized` — shares the member rows' drag-order namespace. */
+  memberKey: string;
   newAgents?: SidebarWorkspaceNewAgentRow[];
   agents: SidebarWorkspaceAgentRow[];
 }
@@ -45,6 +52,12 @@ export interface SidebarWorkspaceSection {
   workspaceKey: string;
   serverId: string;
   workspaceId: string;
+  /**
+   * Agents and launcher tabs whose cwd is no member's directory. A tab owns its own project, so
+   * one that has not chosen a project belongs to no member — putting it under the primary member
+   * claimed a project it never had, and lent it that project's branch and diff.
+   */
+  uncategorized: SidebarWorkspaceUncategorizedRow;
   members: SidebarWorkspaceMemberRow[];
 }
 
@@ -135,21 +148,19 @@ function buildWorkspaceSection(input: {
       memberByDirectory.set(directory, member);
     }
   }
-  const primaryMember = members[0] ?? null;
+  const uncategorized: SidebarWorkspaceUncategorizedRow = {
+    memberKey: `${workspaceKey}#uncategorized`,
+    agents: [],
+  };
 
-  addNewAgentRowsToMembers({
-    layout: input.layout,
-    memberByDirectory,
-    primaryMember,
-  });
+  addNewAgentRows({ layout: input.layout, memberByDirectory, uncategorized });
 
   for (const agent of input.agents.values()) {
     if (agent.archivedAt) continue;
     if (normalizeWorkspaceOpaqueId(agent.workspaceId) !== workspaceId) continue;
     const directory = normalizeWorkspacePath(agent.cwd);
     const matchedMember = directory ? memberByDirectory.get(directory) : undefined;
-    const member = matchedMember ?? primaryMember;
-    member?.agents.push(
+    (matchedMember ?? uncategorized).agents.push(
       createAgentRow(
         agent,
         matchedMember?.workspaceDirectoryLabel ?? shortenPath(agent.cwd),
@@ -158,39 +169,45 @@ function buildWorkspaceSection(input: {
     );
   }
 
-  for (const member of members) {
-    member.newAgents?.sort(
-      (left, right) => right.createdAt - left.createdAt || left.tabId.localeCompare(right.tabId),
-    );
-    member.agents.sort(compareAgentRows);
+  for (const bucket of [...members, uncategorized]) {
+    sortAgentBucket(bucket);
   }
   members.sort(compareMemberRows);
 
   return {
-    section: { workspaceKey, serverId: input.serverId, workspaceId, members },
+    section: { workspaceKey, serverId: input.serverId, workspaceId, uncategorized, members },
     iconTargets,
   };
 }
 
-function addNewAgentRowsToMembers(input: {
+type SidebarAgentBucket = Pick<SidebarWorkspaceMemberRow, "newAgents" | "agents">;
+
+function sortAgentBucket(bucket: SidebarAgentBucket): void {
+  bucket.newAgents?.sort(
+    (left, right) => right.createdAt - left.createdAt || left.tabId.localeCompare(right.tabId),
+  );
+  bucket.agents.sort(compareAgentRows);
+}
+
+function addNewAgentRows(input: {
   layout?: WorkspaceLayout;
   memberByDirectory: ReadonlyMap<string, SidebarWorkspaceMemberRow>;
-  primaryMember: SidebarWorkspaceMemberRow | null;
+  uncategorized: SidebarWorkspaceUncategorizedRow;
 }): void {
   for (const tab of input.layout ? collectAllTabs(input.layout.root) : []) {
     if (tab.target.kind !== "new_tab" && tab.target.kind !== "draft") continue;
-    const cwd = tab.target.kind === "draft" ? tab.target.setup?.cwd.trim() : undefined;
+    // A draft carries its chosen project on the target until the composer pins one into `setup`.
+    const cwd =
+      tab.target.kind === "draft" ? (tab.target.setup?.cwd ?? tab.target.cwd)?.trim() : undefined;
     const directory = normalizeWorkspacePath(cwd);
     const matchedMember = directory ? input.memberByDirectory.get(directory) : undefined;
-    const member = matchedMember ?? input.primaryMember;
-    if (!member) continue;
-    const resolvedCwd = cwd || member.workspaceDirectory;
-    (member.newAgents ??= []).push({
+    const bucket = matchedMember ?? input.uncategorized;
+    (bucket.newAgents ??= []).push({
       tabId: tab.tabId,
       createdAt: tab.createdAt,
-      cwd: resolvedCwd,
-      cwdLabel: matchedMember?.workspaceDirectoryLabel ?? shortenPath(resolvedCwd),
-      matchesMemberDirectory: Boolean(matchedMember) || !cwd,
+      cwd: cwd ?? "",
+      cwdLabel: matchedMember?.workspaceDirectoryLabel ?? (cwd ? shortenPath(cwd) : ""),
+      matchesMemberDirectory: Boolean(matchedMember),
       labels: tab.target.labels ?? [],
     });
   }
@@ -273,7 +290,8 @@ function areSectionsEqual(left: SidebarWorkspaceSection, right: SidebarWorkspace
     left.workspaceKey !== right.workspaceKey ||
     left.serverId !== right.serverId ||
     left.workspaceId !== right.workspaceId ||
-    left.members.length !== right.members.length
+    left.members.length !== right.members.length ||
+    !areAgentBucketsEqual(left.uncategorized, right.uncategorized)
   ) {
     return false;
   }
@@ -303,6 +321,10 @@ function areMembersEqual(
   ) {
     return false;
   }
+  return areAgentBucketsEqual(left, right);
+}
+
+function areAgentBucketsEqual(left: SidebarAgentBucket, right: SidebarAgentBucket): boolean {
   return (
     areNewAgentRowsEqual(left.newAgents ?? [], right.newAgents ?? []) &&
     areAgentRowsEqual(left.agents, right.agents)

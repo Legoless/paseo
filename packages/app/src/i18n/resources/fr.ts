@@ -1242,6 +1242,7 @@ export const fr: TranslationResources = {
         hideFailed: "Échec du masquage de l'espace de travail",
         archiveFailed: "Échec de l'archivage de l'espace de travail",
       },
+      uncategorized: "Non classé",
     },
     agent: {
       actions: {

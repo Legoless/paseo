@@ -1224,6 +1224,7 @@ export const ru: TranslationResources = {
         hideFailed: "Не удалось скрыть рабочее пространство",
         archiveFailed: "Не удалось архивировать рабочее пространство",
       },
+      uncategorized: "Без категории",
     },
     agent: {
       actions: {

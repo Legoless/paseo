@@ -1197,6 +1197,7 @@ export const zhCN: TranslationResources = {
         hideFailed: "隐藏 workspace 失败",
         archiveFailed: "归档工作区失败",
       },
+      uncategorized: "未分类",
     },
     agent: {
       actions: {

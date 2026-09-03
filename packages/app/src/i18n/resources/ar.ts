@@ -1208,6 +1208,7 @@ export const ar: TranslationResources = {
         hideFailed: "فشل في إخفاء مساحة العمل",
         archiveFailed: "فشل في أرشفة مساحة العمل",
       },
+      uncategorized: "غير مصنّف",
     },
     agent: {
       actions: {

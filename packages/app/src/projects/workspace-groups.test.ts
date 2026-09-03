@@ -1,10 +1,29 @@
 import { describe, expect, it } from "vitest";
 import type { Agent, ProjectDescriptor, WorkspaceDescriptor } from "@/stores/session-store";
+import type { WorkspaceLayout } from "@/stores/workspace-layout-actions";
+import type { WorkspaceTab, WorkspaceTabTarget } from "@/workspace-tabs/model";
 import {
   buildSidebarWorkspaceGroupModel,
   preserveSidebarWorkspaceGroupModelIdentity,
   type SidebarWorkspaceGroupSession,
 } from "./workspace-groups";
+
+function tab(input: {
+  tabId: string;
+  target: WorkspaceTabTarget;
+  createdAt: number;
+}): WorkspaceTab {
+  return { tabId: input.tabId, target: input.target, createdAt: input.createdAt };
+}
+
+/** `collectAllTabs` reads the pane's internal `tabs` array, which `SplitPane` does not declare. */
+function layout(tabs: WorkspaceTab[]): WorkspaceLayout {
+  const pane = { id: "main", tabIds: tabs.map((entry) => entry.tabId), focusedTabId: null, tabs };
+  return {
+    root: { kind: "pane", pane } as unknown as WorkspaceLayout["root"],
+    focusedPaneId: "main",
+  };
+}
 
 function member(input: {
   projectId: string;
@@ -241,7 +260,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
     expect(section?.members[0]?.diffStat).toEqual({ additions: 12, deletions: 3 });
   });
 
-  it("sends agents whose cwd matches no member to the primary member", () => {
+  it("sends agents whose cwd matches no member to the uncategorized bucket", () => {
     const model = buildSidebarWorkspaceGroupModel({
       sessions: [
         session({
@@ -258,14 +277,88 @@ describe("buildSidebarWorkspaceGroupModel", () => {
     });
 
     const section = model.sectionsByWorkspaceKey.get("srv:ws-1");
-    const primary = section?.members.find((entry) => entry.isPrimary);
-    const secondary = section?.members.find((entry) => !entry.isPrimary);
-    expect(primary?.projectId).toBe("project-b");
-    expect(primary?.agents.map((entry) => entry.agentId)).toEqual(["stray"]);
-    expect(primary?.agents[0]?.cwd).toBe("/somewhere/else");
-    expect(primary?.agents[0]?.cwdLabel).toBe("/somewhere/else");
-    expect(primary?.agents[0]?.matchesMemberDirectory).toBe(false);
-    expect(secondary?.agents).toEqual([]);
+    expect(section?.members.every((entry) => entry.agents.length === 0)).toBe(true);
+    expect(section?.uncategorized.memberKey).toBe("srv:ws-1#uncategorized");
+    expect(section?.uncategorized.agents.map((entry) => entry.agentId)).toEqual(["stray"]);
+    expect(section?.uncategorized.agents[0]?.cwd).toBe("/somewhere/else");
+    expect(section?.uncategorized.agents[0]?.cwdLabel).toBe("/somewhere/else");
+    expect(section?.uncategorized.agents[0]?.matchesMemberDirectory).toBe(false);
+  });
+
+  it("leaves launcher and unpinned draft tabs uncategorized", () => {
+    const model = buildSidebarWorkspaceGroupModel({
+      sessions: [session({ workspaces: [TWO_PROJECT_WORKSPACE] })],
+      layoutsByWorkspace: {
+        "srv:ws-1": layout([
+          tab({ tabId: "tab_launcher", target: { kind: "new_tab" }, createdAt: 1 }),
+          tab({
+            tabId: "tab_draft",
+            target: { kind: "draft", draftId: "draft-1" },
+            createdAt: 2,
+          }),
+        ]),
+      },
+    });
+
+    const section = model.sectionsByWorkspaceKey.get("srv:ws-1");
+    expect(section?.members.every((entry) => (entry.newAgents ?? []).length === 0)).toBe(true);
+    expect(section?.uncategorized.newAgents?.map((entry) => entry.tabId)).toEqual([
+      "tab_draft",
+      "tab_launcher",
+    ]);
+    expect(section?.uncategorized.newAgents?.[0]).toMatchObject({
+      cwd: "",
+      cwdLabel: "",
+      matchesMemberDirectory: false,
+    });
+  });
+
+  it("buckets a draft into the member matching the project it chose", () => {
+    const model = buildSidebarWorkspaceGroupModel({
+      sessions: [session({ workspaces: [TWO_PROJECT_WORKSPACE] })],
+      layoutsByWorkspace: {
+        "srv:ws-1": layout([
+          tab({
+            tabId: "tab_chosen",
+            createdAt: 1,
+            target: { kind: "draft", draftId: "draft-1", cwd: "/repo/project-a/ws-1" },
+          }),
+          tab({
+            tabId: "tab_pinned",
+            createdAt: 2,
+            target: {
+              kind: "draft",
+              draftId: "draft-2",
+              setup: {
+                provider: "claude",
+                cwd: "/repo/project-b/ws-1",
+                modeId: null,
+                model: null,
+                thinkingOptionId: null,
+                featureValues: {},
+              },
+            },
+          }),
+          tab({
+            tabId: "tab_elsewhere",
+            createdAt: 3,
+            target: { kind: "draft", draftId: "draft-3", cwd: "/home/user" },
+          }),
+        ]),
+      },
+    });
+
+    const section = model.sectionsByWorkspaceKey.get("srv:ws-1");
+    const memberA = section?.members.find((entry) => entry.projectId === "project-a");
+    const memberB = section?.members.find((entry) => entry.projectId === "project-b");
+    expect(memberA?.newAgents?.map((entry) => entry.tabId)).toEqual(["tab_chosen"]);
+    expect(memberA?.newAgents?.[0]?.matchesMemberDirectory).toBe(true);
+    expect(memberB?.newAgents?.map((entry) => entry.tabId)).toEqual(["tab_pinned"]);
+    expect(section?.uncategorized.newAgents?.map((entry) => entry.tabId)).toEqual([
+      "tab_elsewhere",
+    ]);
+    // The launcher's "No project" is the daemon user's home, which `shortenPath` renders as ~.
+    expect(section?.uncategorized.newAgents?.[0]?.cwdLabel).toBe("~");
   });
 
   it("excludes archived agents and agents of other workspaces, keeps subagents", () => {
