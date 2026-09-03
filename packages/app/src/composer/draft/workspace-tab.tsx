@@ -296,11 +296,13 @@ function buildDraftInitialValues(input: {
 function resolveDraftWorkingDirectory(input: {
   workspaceDirectory: string | null;
   initialSetup: WorkspaceDraftTabSetup | null;
+  /** Chosen in the launcher before a provider existed, so it never made it into `initialSetup`. */
+  initialCwd?: string | null;
 }): string | null {
   if (input.initialSetup) {
     return input.initialSetup.cwd;
   }
-  return input.workspaceDirectory;
+  return input.initialCwd ?? input.workspaceDirectory;
 }
 
 function resolveOnlineServerIds(input: { isConnected: boolean; serverId: string }): string[] {
@@ -316,6 +318,8 @@ interface WorkspaceDraftAgentTabProps {
   tabId: string;
   draftId: string;
   initialSetup?: WorkspaceDraftTabSetup;
+  /** Project chosen in the new-tab launcher, before the draft had a provider to pin a setup with. */
+  initialCwd?: string;
   isPaneFocused: boolean;
   onCreated: (snapshot: AgentSnapshotPayload) => Promise<void> | void;
   onOpenWorkspaceFile: (request: WorkspaceFileOpenRequest) => void;
@@ -338,6 +342,7 @@ export function WorkspaceDraftAgentTab({
   tabId,
   draftId,
   initialSetup = undefined,
+  initialCwd,
   isPaneFocused,
   onCreated,
   onOpenWorkspaceFile,
@@ -358,6 +363,7 @@ export function WorkspaceDraftAgentTab({
   const draftWorkingDirectory = resolveDraftWorkingDirectory({
     workspaceDirectory,
     initialSetup: draftSetup,
+    initialCwd,
   });
   const draftInitialValues = buildDraftInitialValues({
     workingDir: draftWorkingDirectory,

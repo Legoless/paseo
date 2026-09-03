@@ -4,6 +4,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type ComponentType,
   type ReactElement,
 } from "react";
@@ -24,6 +25,10 @@ import {
   useWorkspaceTabLaunchCatalog,
   type WorkspaceTabLaunchItem,
 } from "@/workspace-tabs/launcher";
+import {
+  NewTabProjectSelector,
+  useHostHomeDirectory,
+} from "@/workspace-tabs/launcher/project-selector";
 
 const ThemedPlus = withUnistyles(Plus);
 const ThemedPencil = withUnistyles(Pencil);
@@ -87,11 +92,11 @@ function EditProfilesButton({ label, onPress }: { label: string; onPress: () => 
   );
 }
 
-function LauncherRow({ item }: { item: WorkspaceTabLaunchItem }) {
+function LauncherRow({ item, cwd }: { item: WorkspaceTabLaunchItem; cwd: string | null }) {
   const { tabId } = usePaneContext();
   const handlePress = useCallback(() => {
-    item.launch({ kind: "replace", tabId });
-  }, [item, tabId]);
+    item.launch({ kind: "replace", tabId }, { cwd });
+  }, [cwd, item, tabId]);
 
   return (
     <Pressable
@@ -130,7 +135,14 @@ function useNewTabDescriptor() {
 }
 
 const NewTabPanel = memo(function NewTabPanel(): ReactElement {
-  const { host, serverId, tabId } = usePaneContext();
+  const { host, serverId, workspaceId, tabId } = usePaneContext();
+  // Local to this launcher: you pick a project and immediately launch, so there is nothing worth
+  // persisting. null means home.
+  const [selectedProjectCwd, setSelectedProjectCwd] = useState<string | null>(null);
+  const homeDirectory = useHostHomeDirectory(serverId);
+  // Against a daemon too old to send a home directory there is nothing to fall back to, so the
+  // launch keeps the workspace's own project.
+  const launchCwd = selectedProjectCwd ?? homeDirectory;
   const { isInteractive, focusPane } = usePaneFocus();
   const containerRef = useRef<View | null>(null);
   const groups = useWorkspaceTabLaunchCatalog({
@@ -198,32 +210,32 @@ const NewTabPanel = memo(function NewTabPanel(): ReactElement {
   const handleKeyboardAction = useCallback(
     (action: KeyboardActionDefinition): boolean => {
       if (action.id === "workspace.agent.new" || action.id === "workspace.tab.target.agent") {
-        itemsById.get("agent")?.launch({ kind: "replace", tabId });
+        itemsById.get("agent")?.launch({ kind: "replace", tabId }, { cwd: launchCwd });
         return true;
       }
       if (action.id === "workspace.terminal.new") {
-        itemsById.get("terminal")?.launch({ kind: "replace", tabId });
+        itemsById.get("terminal")?.launch({ kind: "replace", tabId }, { cwd: launchCwd });
         return true;
       }
       if (action.id === "workspace.browser.new" || action.id === "workspace.tab.target.browser") {
-        itemsById.get("browser")?.launch({ kind: "replace", tabId });
+        itemsById.get("browser")?.launch({ kind: "replace", tabId }, { cwd: launchCwd });
         return true;
       }
       if (action.id === "workspace.tab.target.changes") {
         const changesItem = itemsById.get("changes") ?? itemsById.get("diff");
         if (!changesItem) return false;
-        changesItem.launch({ kind: "replace", tabId });
+        changesItem.launch({ kind: "replace", tabId }, { cwd: launchCwd });
         return true;
       }
       if (action.id === "workspace.tab.target.files") {
         const filesItem = itemsById.get("files");
         if (!filesItem) return false;
-        filesItem.launch({ kind: "replace", tabId });
+        filesItem.launch({ kind: "replace", tabId }, { cwd: launchCwd });
         return true;
       }
       return false;
     },
-    [itemsById, tabId],
+    [itemsById, launchCwd, tabId],
   );
   useKeyboardActionHandler({
     handlerId: `new-tab:${tabId}`,
@@ -245,6 +257,12 @@ const NewTabPanel = memo(function NewTabPanel(): ReactElement {
     <View ref={containerRef} style={styles.container} testID="workspace-new-tab-panel">
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.rail}>
+          <NewTabProjectSelector
+            serverId={serverId}
+            workspaceId={workspaceId}
+            selectedCwd={selectedProjectCwd}
+            onSelect={setSelectedProjectCwd}
+          />
           {groups.map((group) => (
             <View key={group.id} style={styles.group}>
               {group.label ? (
@@ -259,7 +277,7 @@ const NewTabPanel = memo(function NewTabPanel(): ReactElement {
                 </View>
               ) : null}
               {group.items.map((item) => (
-                <LauncherRow key={item.id} item={item} />
+                <LauncherRow key={item.id} item={item} cwd={launchCwd} />
               ))}
             </View>
           ))}

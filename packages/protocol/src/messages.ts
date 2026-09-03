@@ -3399,6 +3399,13 @@ export const ServerInfoStatusPayloadSchema = z
     serverId: z.string().trim().min(1),
     hostname: ServerInfoHostnameSchema.optional(),
     version: ServerInfoVersionSchema.optional(),
+    /**
+     * The daemon user's home directory, so a client can offer it as a working directory outside
+     * every workspace project. Absence is the gate: an older daemon sends nothing and clients fall
+     * back to the workspace's own project.
+     */
+    // COMPAT(homeDirectory): added in v0.8.0, remove optional parsing after 2028-03-01.
+    homeDirectory: z.string().min(1).optional(),
     // COMPAT(sessionPermissions): optional while clients support older daemons.
     permissions: z.array(DaemonPermissionSchema).optional(),
     // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.

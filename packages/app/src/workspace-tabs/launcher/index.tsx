@@ -42,7 +42,16 @@ export interface NewTabLauncher {
   showPullRequest: boolean;
   showBrowser: boolean;
   terminalDisabled: boolean;
-  launch: (selection: NewTabSelection, destination: WorkspaceTabLaunchDestination) => void;
+  launch: (
+    selection: NewTabSelection,
+    destination: WorkspaceTabLaunchDestination,
+    options?: WorkspaceTabLaunchOptions,
+  ) => void;
+}
+
+export interface WorkspaceTabLaunchOptions {
+  /** Working directory the new tab belongs to. Omitted keeps the workspace's own project. */
+  cwd?: string | null;
 }
 
 export interface WorkspaceTabLaunchItem {
@@ -53,7 +62,7 @@ export interface WorkspaceTabLaunchItem {
   shortcutActionId?: string;
   disabled: boolean;
   panelKind: WorkspaceTabTarget["kind"];
-  launch: (destination: WorkspaceTabLaunchDestination) => void;
+  launch: (destination: WorkspaceTabLaunchDestination, options?: WorkspaceTabLaunchOptions) => void;
 }
 
 export interface WorkspaceTabLaunchGroup {
@@ -106,9 +115,10 @@ export function useWorkspaceTabLaunchCatalog(input: {
   ensurePanelsRegistered();
 
   const launchSelection = useCallback(
-    (selection: NewTabSelection) => (destination: WorkspaceTabLaunchDestination) => {
-      launcher.launch(selection, destination);
-    },
+    (selection: NewTabSelection) =>
+      (destination: WorkspaceTabLaunchDestination, options?: WorkspaceTabLaunchOptions) => {
+        launcher.launch(selection, destination, options);
+      },
     [launcher],
   );
   const editTerminalProfiles = useCallback(() => {

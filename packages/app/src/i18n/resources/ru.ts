@@ -623,6 +623,10 @@ export const ru: TranslationResources = {
         changes: "Изменения",
         files: "Файлы",
       },
+      projectSelector: {
+        selectProject: "Выбрать проект",
+        home: "Домашняя папка",
+      },
       projectPicker: {
         selectProject: "Выбрать проект",
       },
@@ -1009,7 +1013,6 @@ export const ru: TranslationResources = {
       twoRows: "Две строки",
       grid: "Сетка {{rows}} × {{columns}}",
     },
-    emptyHint: "Добавьте макеты в папку layouts на хосте",
     updateHost: "Обновите этот хост, чтобы использовать свои макеты панелей",
   },
   workspaceLabels: {

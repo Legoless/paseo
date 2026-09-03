@@ -623,6 +623,10 @@ export const es: TranslationResources = {
         changes: "Cambios",
         files: "Archivos",
       },
+      projectSelector: {
+        selectProject: "Seleccionar proyecto",
+        home: "Inicio",
+      },
       projectPicker: {
         selectProject: "Seleccionar proyecto",
       },
@@ -1025,7 +1029,6 @@ export const es: TranslationResources = {
       twoRows: "Dos filas",
       grid: "Cuadrícula {{rows}} × {{columns}}",
     },
-    emptyHint: "Añade diseños en la carpeta layouts del host",
     updateHost: "Actualiza este host para usar diseños de paneles personalizados",
   },
   workspaceLabels: {

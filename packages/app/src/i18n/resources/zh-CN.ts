@@ -618,6 +618,10 @@ export const zhCN: TranslationResources = {
         changes: "变更",
         files: "文件",
       },
+      projectSelector: {
+        selectProject: "选择项目",
+        home: "主目录",
+      },
       projectPicker: {
         selectProject: "选择项目",
       },
@@ -986,7 +990,6 @@ export const zhCN: TranslationResources = {
       twoRows: "两行",
       grid: "网格 {{rows}} × {{columns}}",
     },
-    emptyHint: "在主机的 layouts 文件夹中添加布局",
     updateHost: "更新此主机以使用自定义窗格布局",
   },
   workspaceLabels: {

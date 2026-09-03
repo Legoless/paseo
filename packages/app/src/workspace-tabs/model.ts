@@ -34,7 +34,18 @@ export type PluginWorkspaceTabTarget =
 
 export type WorkspaceTabTarget =
   | { kind: "new_tab"; labels?: string[] }
-  | { kind: "draft"; draftId: string; setup?: WorkspaceDraftTabSetup; labels?: string[] }
+  | {
+      kind: "draft";
+      draftId: string;
+      setup?: WorkspaceDraftTabSetup;
+      labels?: string[];
+      /**
+       * Working directory chosen before a provider was, so `setup` cannot hold it yet — `setup` is
+       * dropped wholesale unless both provider and cwd are set. The launcher's project selector
+       * writes here; the composer promotes it into `setup` once it pins one.
+       */
+      cwd?: string;
+    }
   | { kind: "agent"; agentId: string }
   | { kind: "provider_subagent"; parentAgentId: string; subagentId: string }
   | { kind: "terminal"; terminalId: string }

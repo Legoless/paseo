@@ -623,6 +623,10 @@ export const ja: TranslationResources = {
         changes: "変更",
         files: "ファイル",
       },
+      projectSelector: {
+        selectProject: "プロジェクトを選択",
+        home: "ホーム",
+      },
       projectPicker: {
         selectProject: "プロジェクトを選択",
       },
@@ -1005,7 +1009,6 @@ export const ja: TranslationResources = {
       twoRows: "2 行",
       grid: "グリッド {{rows}} × {{columns}}",
     },
-    emptyHint: "ホストの layouts フォルダーにレイアウトを追加してください",
     updateHost: "カスタムペインレイアウトを使うにはこのホストを更新してください",
   },
   workspaceLabels: {

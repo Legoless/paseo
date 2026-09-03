@@ -18,11 +18,14 @@ export function normalizeWorkspaceTabTarget(
     }
     const setup = normalizeWorkspaceDraftTabSetup(value.setup);
     const labels = normalizeWorkspaceTabLabels(value.labels);
+    // Only meaningful until `setup` exists, which carries its own cwd.
+    const cwd = setup ? null : trimNonEmpty(value.cwd);
     return {
       kind: "draft",
       draftId,
       ...(setup ? { setup } : {}),
       ...(labels ? { labels } : {}),
+      ...(cwd ? { cwd } : {}),
     };
   }
   if (value.kind === "new_tab") {

@@ -27,6 +27,8 @@ export type TerminalTabDestination =
 interface PendingTerminalCreateInput {
   destination: TerminalTabDestination;
   profile?: TerminalProfile;
+  /** Overrides the workspace's selected project — the launcher's own project choice. */
+  cwd?: string;
 }
 
 interface UseWorkspaceTerminalsInput {
@@ -141,17 +143,18 @@ export function useWorkspaceTerminals(input: UseWorkspaceTerminalsInput) {
 
   const createMutation = useMutation({
     mutationFn: async (_input: PendingTerminalCreateInput) => {
-      if (!client || !terminalCreateCwd) {
+      const createCwd = _input.cwd ?? terminalCreateCwd;
+      if (!client || !createCwd) {
         throw new Error(t("workspace.terminal.hostDisconnected"));
       }
       const profile = _input.profile ? resolveTerminalProfileLaunch(_input.profile, "") : undefined;
       const payload = profile
-        ? await client.createTerminal(terminalCreateCwd, profile.name, undefined, {
+        ? await client.createTerminal(createCwd, profile.name, undefined, {
             command: profile.command,
             args: profile.args,
             workspaceId: normalizedWorkspaceId || undefined,
           })
-        : await client.createTerminal(terminalCreateCwd, undefined, undefined, {
+        : await client.createTerminal(createCwd, undefined, undefined, {
             workspaceId: normalizedWorkspaceId || undefined,
           });
       // The daemon reports a failed spawn (e.g. a profile command that isn't
