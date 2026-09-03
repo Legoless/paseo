@@ -623,6 +623,9 @@ export const ko: TranslationResources = {
       projectSelector: {
         label: "프로젝트",
         selectProject: "프로젝트 선택",
+        searchPlaceholder: "프로젝트 검색",
+        empty: "사용할 수 있는 프로젝트가 없습니다.",
+        leaveProject: "프로젝트 없이 작업",
         noProject: "프로젝트 없음",
       },
       projectPicker: {

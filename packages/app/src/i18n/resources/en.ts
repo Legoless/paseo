@@ -619,6 +619,9 @@ export const en = {
       projectSelector: {
         label: "Project",
         selectProject: "Select project",
+        searchPlaceholder: "Search projects",
+        empty: "No projects available.",
+        leaveProject: "Don't work in a project",
         noProject: "No project",
       },
       projectPicker: {

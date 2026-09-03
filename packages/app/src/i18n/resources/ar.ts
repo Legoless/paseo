@@ -621,6 +621,9 @@ export const ar: TranslationResources = {
       projectSelector: {
         label: "المشروع",
         selectProject: "اختر مشروعًا",
+        searchPlaceholder: "البحث في المشاريع",
+        empty: "لا توجد مشاريع متاحة.",
+        leaveProject: "العمل خارج أي مشروع",
         noProject: "بدون مشروع",
       },
       projectPicker: {
