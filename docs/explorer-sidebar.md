@@ -27,12 +27,16 @@ On desktop, the shell renders inside the focused workspace pane. Every pane has 
 at the top-right of its content surface. Explorer visibility is remembered per content tab of the
 focused pane; tabs that have never been toggled default closed. The dock uses its own persisted
 width and resize handle, and leaves the workspace header, tab rail, and sibling panes unchanged.
-The tray's top-left carries the pane project directory, then the checkout label; Explorer stays at
-the top-right. The directory badge shows whenever the pane resolves a project, and the checkout
-label only where that directory is a git repository. A draft owns its working directory, so on a
-draft tab the badge is a picker over the workspace members plus **Browse…**, which opens the
-add-project flow against this workspace. Every other tab is already running somewhere it cannot
-move, so the badge is a plain label. Project-scoped git actions sit immediately left of Explorer.
+The tray's top-left carries the pane project badge, then the checkout label; Explorer stays at the
+top-right. The badge names the project whose member directory equals the pane's — the sidebar's
+Uncategorized rule from `packages/app/src/projects/workspace-groups.ts`, so a pane and its sidebar
+row never disagree. An agent that belongs to no project runs in the daemon home directory, and the
+pane shows no badge rather than naming a directory that is nobody's project; add that directory as
+a project and the same agent gets one. The checkout label shows only where the directory is a git
+repository. A draft owns its working directory, so on a draft tab the badge is instead a picker —
+**No project**, the workspace members, and **Browse…**, which opens the add-project flow against
+this workspace — and it stays even while uncategorized, because there it assigns the project rather
+than reporting it. Project-scoped git actions sit immediately left of Explorer.
 The global sidebar and workspace header do not own project work chrome on desktop pane layouts.
 Open in editor uses the same pane project directory, so it opens that checkout or worktree rather
 than the workspace primary. The tray's workspace-actions menu configures the visible controls:
