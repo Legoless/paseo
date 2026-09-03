@@ -27,12 +27,17 @@ On desktop, the shell renders inside the focused workspace pane. Every pane has 
 at the top-right of its content surface. Explorer visibility is remembered per content tab of the
 focused pane; tabs that have never been toggled default closed. The dock uses its own persisted
 width and resize handle, and leaves the workspace header, tab rail, and sibling panes unchanged.
-Desktop development builds put their checkout label at the tray's top-left while Explorer stays at
-the top-right. Project-scoped git actions sit immediately left of Explorer. The global sidebar and
-workspace header do not own project work chrome on desktop pane layouts. Open in editor uses the
-same pane project directory, so it opens that checkout or worktree rather than the workspace primary.
-The tray's workspace-actions menu configures the visible controls: development branch label, Open
-in editor, and git actions. The selection persists per device and applies to every pane.
+The tray's top-left carries the pane project directory, then the checkout label; Explorer stays at
+the top-right. The directory badge shows whenever the pane resolves a project, and the checkout
+label only where that directory is a git repository. A draft owns its working directory, so on a
+draft tab the badge is a picker over the workspace members plus **Browse…**, which opens the
+add-project flow against this workspace. Every other tab is already running somewhere it cannot
+move, so the badge is a plain label. Project-scoped git actions sit immediately left of Explorer.
+The global sidebar and workspace header do not own project work chrome on desktop pane layouts.
+Open in editor uses the same pane project directory, so it opens that checkout or worktree rather
+than the workspace primary. The tray's workspace-actions menu configures the visible controls:
+development branch label, Open in editor, and git actions. The selection persists per device and
+applies to every pane.
 The tray is a fixed-height row above pane content. Controls becoming ready never cover or shift the
 agent or terminal surface.
 While Explorer is closed, its toggle sits at the main tray's top-right. Opening Explorer moves the

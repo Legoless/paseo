@@ -86,6 +86,7 @@ import {
   WorkspaceTabIcon,
 } from "@/screens/workspace/workspace-tab-presentation";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
+import { PaneProjectBadge } from "@/components/pane-project-badge";
 import {
   createDefaultLayout,
   findPaneById,
@@ -220,12 +221,18 @@ function PaneExplorerToggle({ open, onPress }: { open: boolean; onPress: () => v
 
 function PaneProjectTray({
   serverId,
+  workspaceId,
+  workspaceKey,
   cwd,
+  activeTab,
   open,
   onPress,
 }: {
   serverId: string;
+  workspaceId: string;
+  workspaceKey: string;
   cwd: string | null;
+  activeTab: WorkspaceTabDescriptor | null;
   open: boolean;
   onPress: () => void;
 }) {
@@ -245,6 +252,15 @@ function PaneProjectTray({
   }
   return (
     <PaneContentToolbar style={styles.paneProjectTray} testID="pane-project-tray">
+      {cwd ? (
+        <PaneProjectBadge
+          serverId={serverId}
+          workspaceId={workspaceId}
+          workspaceKey={workspaceKey}
+          cwd={cwd}
+          activeTab={activeTab}
+        />
+      ) : null}
       {visibleActions.branch && cwd ? <PaneBranchBadge serverId={serverId} cwd={cwd} /> : null}
       <View style={styles.paneProjectActions}>
         {visibleActions.editor && cwd ? (
@@ -1502,7 +1518,10 @@ function SplitPaneView({
           <View style={styles.paneContent}>
             <PaneProjectTray
               serverId={normalizedServerId}
+              workspaceId={normalizedWorkspaceId}
+              workspaceKey={workspaceKey}
               cwd={paneWorkspaceRoot}
+              activeTab={activeTabDescriptor}
               open={explorerOpenForPane}
               onPress={handleTogglePaneExplorer}
             />
