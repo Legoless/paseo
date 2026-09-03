@@ -80,16 +80,6 @@ export async function expectProjectStatusHidden(page: Page, project: StatusProje
   });
 }
 
-export async function expectWorkspaceStatus(
-  page: Page,
-  workspaceName: string,
-  status: "running" | "needs_input",
-): Promise<void> {
-  await expect(
-    workspaceRow(page, workspaceName).getByTestId(`workspace-status-indicator-${status}`),
-  ).toBeVisible({ timeout: 60_000 });
-}
-
 function projectGroup(page: Page, project: StatusProject) {
   return page.getByRole("group", { name: project.seed.projectDisplayName, exact: true });
 }
