@@ -626,6 +626,9 @@ export const fr: TranslationResources = {
       projectSelector: {
         label: "Projet",
         selectProject: "Sélectionner un projet",
+        searchPlaceholder: "Rechercher des projets",
+        empty: "Aucun projet disponible.",
+        leaveProject: "Travailler hors projet",
         noProject: "Aucun projet",
       },
       projectPicker: {

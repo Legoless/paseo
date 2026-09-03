@@ -626,6 +626,9 @@ export const ja: TranslationResources = {
       projectSelector: {
         label: "プロジェクト",
         selectProject: "プロジェクトを選択",
+        searchPlaceholder: "プロジェクトを検索",
+        empty: "利用できるプロジェクトがありません。",
+        leaveProject: "プロジェクトを使わない",
         noProject: "プロジェクトなし",
       },
       projectPicker: {

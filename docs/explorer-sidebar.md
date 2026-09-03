@@ -33,9 +33,11 @@ Uncategorized rule from `packages/app/src/projects/workspace-groups.ts`, so a pa
 row never disagree. An agent that belongs to no project runs in the daemon home directory, and the
 pane shows no badge rather than naming a directory that is nobody's project; add that directory as
 a project and the same agent gets one. The checkout label shows only where the directory is a git
-repository. On a draft or an agent tab the badge is a picker instead — **No project**, the workspace
-members, and **Browse…**, which opens the add-project flow against this workspace — and it stays
-even while uncategorized, because there it assigns the project rather than reporting it.
+repository. On a draft or an agent tab the badge is a picker instead — a searchable `Combobox` over
+the workspace members, with **Add project** and **Don't work in a project** pinned below it — and it
+stays even while uncategorized, because there it assigns the project rather than reporting it. It is
+a `Combobox` and not a menu because the list is searchable and unbounded; `docs/design.md` puts a
+small fixed set in a `DropdownMenu` and anything you type to find in a `Combobox`.
 `packages/app/src/workspace-tabs/switch-tab-project.ts` owns which kinds those are: a subagent and a
 plugin's agent pane borrow the parent agent's directory rather than owning one, and a terminal is
 read-only for now. A draft moves in place. An agent cannot — its cwd is fixed on the daemon — so the

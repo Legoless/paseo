@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { matchWorkspaceProject } from "./pane-project-badge";
+import { matchWorkspaceProject } from "./match-workspace-project";
 
 describe("matchWorkspaceProject", () => {
   const options = [

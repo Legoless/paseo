@@ -1,34 +1,29 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { Folder, FolderGit2 } from "lucide-react-native";
+import { CircleSlash, Folder, FolderGit2, FolderPlus } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  buildWorkspaceProjectPickerOptions,
-  WorkspaceProjectMenuItems,
-} from "@/components/workspace-project-picker";
-import type { WorkspaceProjectPickerOption } from "@/components/workspace-project-picker";
+import { Combobox, ComboboxItem, type ComboboxOption } from "@/components/ui/combobox";
+import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
+import { buildWorkspaceProjectPickerOptions } from "@/components/workspace-project-picker";
 import { useHostHomeDirectory } from "@/workspace-tabs/launcher/project-selector";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
-import { normalizeWorkspacePath } from "@/utils/workspace-identity";
-import { shortenPath } from "@/utils/shorten-path";
+import { matchWorkspaceProject } from "@/projects/match-workspace-project";
 import { canSwitchTabProject } from "@/workspace-tabs/switch-tab-project";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
-import type { Theme } from "@/styles/theme";
+import { ICON_SIZE, type Theme } from "@/styles/theme";
 
 const ThemedProjectFolder = withUnistyles(FolderGit2);
 /** A plain folder for "no project"; the git folder means one of the workspace's projects. */
 const ThemedPlainFolder = withUnistyles(Folder);
+const ThemedFolderPlus = withUnistyles(FolderPlus);
+const ThemedCircleSlash = withUnistyles(CircleSlash);
 
 const mutedIconMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+
+const addProjectIcon = <ThemedFolderPlus size={ICON_SIZE.sm} uniProps={mutedIconMapping} />;
+const leaveProjectIcon = <ThemedCircleSlash size={ICON_SIZE.sm} uniProps={mutedIconMapping} />;
 
 interface PaneProjectBadgeProps {
   serverId: string;
@@ -39,33 +34,13 @@ interface PaneProjectBadgeProps {
   onSwitchProject: (input: { tabId: string; cwd: string }) => void;
 }
 
-interface BadgeTriggerState {
-  hovered: boolean;
-  pressed: boolean;
-  open: boolean;
-}
-
 /**
- * The workspace project a directory belongs to, or null when it belongs to none. Matching is the
- * sidebar's rule from `projects/workspace-groups.ts` — a normalized directory equal to a member's,
- * nothing looser — so a pane and its sidebar row agree on what counts as Uncategorized.
- */
-export function matchWorkspaceProject(
-  options: readonly WorkspaceProjectPickerOption[],
-  cwd: string,
-): WorkspaceProjectPickerOption | null {
-  const normalized = normalizeWorkspacePath(cwd);
-  if (!normalized) {
-    return null;
-  }
-  return options.find((option) => normalizeWorkspacePath(option.cwd) === normalized) ?? null;
-}
-
-/**
- * The project this pane is pointed at, sitting left of the branch pill. A draft owns its working
- * directory, so there the badge is a picker that re-points it. Every other tab is already running
- * somewhere it cannot move, so the badge is a plain label — and an Uncategorized one has no project
- * to name, so it gets no badge at all.
+ * The project this pane is pointed at, sitting left of the branch pill. A tab that owns its working
+ * directory gets a picker; every other tab is already running somewhere it cannot move, so the badge
+ * is a plain label — and an Uncategorized one has no project to name, so it gets no badge at all.
+ *
+ * The list is a Combobox rather than a menu because it is searchable and unbounded: `docs/design.md`
+ * puts a small fixed set in a DropdownMenu and anything you type to find in a Combobox.
  */
 export function PaneProjectBadge({
   serverId,
@@ -76,12 +51,25 @@ export function PaneProjectBadge({
 }: PaneProjectBadgeProps) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
+  const anchorRef = useRef<View | null>(null);
   const members = useWorkspaceFields(serverId, workspaceId, (workspace) => workspace.members);
   const openAddProject = useOpenAddProject();
   const homeDirectory = useHostHomeDirectory(serverId);
-  const options = useMemo(() => buildWorkspaceProjectPickerOptions(members ?? []), [members]);
-  const matched = useMemo(() => matchWorkspaceProject(options, cwd), [cwd, options]);
+  const projects = useMemo(() => buildWorkspaceProjectPickerOptions(members ?? []), [members]);
+  const matched = useMemo(() => matchWorkspaceProject(projects, cwd), [cwd, projects]);
   const switchable = activeTab !== null && canSwitchTabProject(activeTab.target);
+
+  // The cwd is the option id: it is what the switch needs, and it is already unique per member.
+  const options = useMemo<ComboboxOption[]>(
+    () =>
+      projects.map((project) => ({
+        id: project.cwd,
+        label: project.label,
+        description: project.path,
+        kind: "directory" as const,
+      })),
+    [projects],
+  );
 
   const handleSelect = useCallback(
     (nextCwd: string) => {
@@ -92,20 +80,41 @@ export function PaneProjectBadge({
     },
     [activeTab, onSwitchProject],
   );
-  const handleSelectHome = useCallback(() => {
+  const openPicker = useCallback(() => setIsOpen(true), []);
+  const handleAddProject = useCallback(() => {
+    setIsOpen(false);
+    openAddProject(serverId, { targetWorkspace: { serverId, workspaceId } });
+  }, [openAddProject, serverId, workspaceId]);
+  // "No project" is the daemon user's home directory: a tab belongs to no project until one is
+  // picked, and going back there is leaving the project rather than choosing another.
+  const handleLeaveProject = useCallback(() => {
+    setIsOpen(false);
     if (homeDirectory) {
       handleSelect(homeDirectory);
     }
   }, [handleSelect, homeDirectory]);
-  const handleBrowse = useCallback(() => {
-    openAddProject(serverId, { targetWorkspace: { serverId, workspaceId } });
-  }, [openAddProject, serverId, workspaceId]);
-  const triggerStyle = useCallback(
-    ({ hovered, pressed, open }: BadgeTriggerState) => [
-      styles.badge,
-      (hovered || pressed || open) && styles.badgeActive,
-    ],
-    [],
+
+  const footer = useMemo(
+    () => (
+      <>
+        <ComboboxItem
+          label={t("sidebar.actions.addProject")}
+          leadingSlot={addProjectIcon}
+          onPress={handleAddProject}
+          testID="pane-project-badge-add-project"
+        />
+        {homeDirectory ? (
+          <ComboboxItem
+            label={t("workspace.tabs.projectSelector.leaveProject")}
+            leadingSlot={leaveProjectIcon}
+            selected={!matched}
+            onPress={handleLeaveProject}
+            testID="pane-project-badge-leave-project"
+          />
+        ) : null}
+      </>
+    ),
+    [handleAddProject, handleLeaveProject, homeDirectory, matched, t],
   );
 
   // A tab the workspace files as Uncategorized runs somewhere that is nobody's project — home,
@@ -140,41 +149,38 @@ export function PaneProjectBadge({
   }
 
   return (
-    <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
-      <DropdownMenuTrigger
+    <>
+      <ComboboxTrigger
+        ref={anchorRef}
+        onPress={openPicker}
+        style={triggerStyle}
         accessibilityRole="button"
         accessibilityLabel={t("workspace.tabs.projectPicker.selectProject")}
-        style={triggerStyle}
         testID="pane-project-badge"
       >
         {content}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" minWidth={240} testID="pane-project-badge-content">
-        {homeDirectory ? (
-          <DropdownMenuItem
-            selected={!matched}
-            showSelectedCheck
-            description={shortenPath(homeDirectory)}
-            onSelect={handleSelectHome}
-            testID="pane-project-badge-home"
-          >
-            {t("workspace.tabs.projectSelector.noProject")}
-          </DropdownMenuItem>
-        ) : null}
-        {homeDirectory && options.length > 0 ? <DropdownMenuSeparator /> : null}
-        <WorkspaceProjectMenuItems
-          options={options}
-          selectedCwd={matched?.cwd ?? null}
-          onSelect={handleSelect}
-          testIDPrefix="pane-project-badge"
-        />
-        {options.length > 0 ? <DropdownMenuSeparator /> : null}
-        <DropdownMenuItem onSelect={handleBrowse} testID="pane-project-badge-browse">
-          {t("projectPicker.browse")}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </ComboboxTrigger>
+      <Combobox
+        options={options}
+        value={matched?.cwd ?? ""}
+        onSelect={handleSelect}
+        searchable
+        searchPlaceholder={t("workspace.tabs.projectSelector.searchPlaceholder")}
+        title={t("workspace.tabs.projectSelector.label")}
+        emptyText={t("workspace.tabs.projectSelector.empty")}
+        open={isOpen}
+        onOpenChange={setIsOpen}
+        anchorRef={anchorRef}
+        desktopPlacement="bottom-start"
+        desktopMinWidth={280}
+        footer={footer}
+      />
+    </>
   );
+}
+
+function triggerStyle({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) {
+  return [styles.badge, (hovered === true || pressed) && styles.badgeActive];
 }
 
 const styles = StyleSheet.create((theme) => ({

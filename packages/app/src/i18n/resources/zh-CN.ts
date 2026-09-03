@@ -621,6 +621,9 @@ export const zhCN: TranslationResources = {
       projectSelector: {
         label: "项目",
         selectProject: "选择项目",
+        searchPlaceholder: "搜索项目",
+        empty: "没有可用的项目。",
+        leaveProject: "不在项目中工作",
         noProject: "无项目",
       },
       projectPicker: {
