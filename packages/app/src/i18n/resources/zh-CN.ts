@@ -8,6 +8,7 @@ export const zhCN: TranslationResources = {
     actions: {
       back: "返回",
       cancel: "取消",
+      confirm: "确认",
       close: "关闭",
       copy: "复制",
       dismiss: "关闭",

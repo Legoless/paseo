@@ -8,6 +8,7 @@ export const ptBR: TranslationResources = {
     actions: {
       back: "Voltar",
       cancel: "Cancelar",
+      confirm: "Confirmar",
       close: "Fechar",
       copy: "Copiar",
       dismiss: "Dispensar",

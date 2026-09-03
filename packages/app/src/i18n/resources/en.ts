@@ -5,6 +5,7 @@ export const en = {
     actions: {
       back: "Back",
       cancel: "Cancel",
+      confirm: "Confirm",
       close: "Close",
       copy: "Copy",
       dismiss: "Dismiss",

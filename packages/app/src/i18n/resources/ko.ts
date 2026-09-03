@@ -8,6 +8,7 @@ export const ko: TranslationResources = {
     actions: {
       back: "뒤로",
       cancel: "취소",
+      confirm: "확인",
       close: "닫기",
       copy: "복사",
       dismiss: "닫기",

@@ -8,6 +8,7 @@ export const ar: TranslationResources = {
     actions: {
       back: "خلف",
       cancel: "يلغي",
+      confirm: "تأكيد",
       close: "يغلق",
       copy: "ينسخ",
       dismiss: "رفض",
