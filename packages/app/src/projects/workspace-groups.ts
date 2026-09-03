@@ -195,10 +195,11 @@ function addNewAgentRows(input: {
   uncategorized: SidebarWorkspaceUncategorizedRow;
 }): void {
   for (const tab of input.layout ? collectAllTabs(input.layout.root) : []) {
-    if (tab.target.kind !== "new_tab" && tab.target.kind !== "draft") continue;
+    // Drafts only. A `new_tab` is an empty pane waiting on a choice, not an agent the user asked
+    // for — the sidebar manages agents, so a pane earns a row once it becomes one.
+    if (tab.target.kind !== "draft") continue;
     // A draft carries its chosen project on the target until the composer pins one into `setup`.
-    const cwd =
-      tab.target.kind === "draft" ? (tab.target.setup?.cwd ?? tab.target.cwd)?.trim() : undefined;
+    const cwd = (tab.target.setup?.cwd ?? tab.target.cwd)?.trim();
     const directory = normalizeWorkspacePath(cwd);
     const matchedMember = directory ? input.memberByDirectory.get(directory) : undefined;
     const bucket = matchedMember ?? input.uncategorized;

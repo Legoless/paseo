@@ -285,7 +285,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
     expect(section?.uncategorized.agents[0]?.matchesMemberDirectory).toBe(false);
   });
 
-  it("leaves launcher and unpinned draft tabs uncategorized", () => {
+  it("ignores launcher panes and leaves unpinned drafts uncategorized", () => {
     const model = buildSidebarWorkspaceGroupModel({
       sessions: [session({ workspaces: [TWO_PROJECT_WORKSPACE] })],
       layoutsByWorkspace: {
@@ -302,15 +302,30 @@ describe("buildSidebarWorkspaceGroupModel", () => {
 
     const section = model.sectionsByWorkspaceKey.get("srv:ws-1");
     expect(section?.members.every((entry) => (entry.newAgents ?? []).length === 0)).toBe(true);
-    expect(section?.uncategorized.newAgents?.map((entry) => entry.tabId)).toEqual([
-      "tab_draft",
-      "tab_launcher",
-    ]);
+    expect(section?.uncategorized.newAgents?.map((entry) => entry.tabId)).toEqual(["tab_draft"]);
     expect(section?.uncategorized.newAgents?.[0]).toMatchObject({
       cwd: "",
       cwdLabel: "",
       matchesMemberDirectory: false,
     });
+  });
+
+  it("gives an empty workspace of launcher panes no rows at all", () => {
+    const model = buildSidebarWorkspaceGroupModel({
+      sessions: [session({ workspaces: [TWO_PROJECT_WORKSPACE] })],
+      layoutsByWorkspace: {
+        "srv:ws-1": layout([
+          tab({ tabId: "tab_a", target: { kind: "new_tab" }, createdAt: 1 }),
+          tab({ tabId: "tab_b", target: { kind: "new_tab" }, createdAt: 2 }),
+          tab({ tabId: "tab_c", target: { kind: "terminal", terminalId: "term-1" }, createdAt: 3 }),
+        ]),
+      },
+    });
+
+    const section = model.sectionsByWorkspaceKey.get("srv:ws-1");
+    expect(section?.uncategorized.newAgents).toBeUndefined();
+    expect(section?.uncategorized.agents).toEqual([]);
+    expect(section?.members.every((entry) => (entry.newAgents ?? []).length === 0)).toBe(true);
   });
 
   it("buckets a draft into the member matching the project it chose", () => {
