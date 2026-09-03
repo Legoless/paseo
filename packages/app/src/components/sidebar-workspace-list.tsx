@@ -1116,9 +1116,11 @@ function WorkspaceMemberBlock({
       workspaceId,
       cwd: member.workspaceDirectory,
       projectName: member.projectName,
+      agentCount: member.agents.length,
     });
   }, [
     canRemove,
+    member.agents.length,
     member.projectName,
     member.workspaceDirectory,
     removeWorkspaceMember,

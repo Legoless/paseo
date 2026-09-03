@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { removeWorkspaceMemberErrorMessage } from "./remove-workspace-member-message";
+import {
+  buildRemoveWorkspaceMemberDialog,
+  removeWorkspaceMemberErrorMessage,
+} from "./remove-workspace-member-message";
 
 const projectName = "legoless";
 
@@ -41,5 +44,27 @@ describe("removeWorkspaceMemberErrorMessage", () => {
     expect(removeWorkspaceMemberErrorMessage({ errorCode: null, error: null, projectName })).toBe(
       "Could not remove the project from this workspace.",
     );
+  });
+});
+
+describe("buildRemoveWorkspaceMemberDialog", () => {
+  test("names the agents the removal will archive", () => {
+    expect(buildRemoveWorkspaceMemberDialog({ projectName, agentCount: 0 }).message).toBe(
+      '"legoless" will no longer be part of this workspace. Its directory stays on disk.',
+    );
+    expect(buildRemoveWorkspaceMemberDialog({ projectName, agentCount: 1 }).message).toBe(
+      '"legoless" will no longer be part of this workspace, and its agent will be archived. Its directory stays on disk.',
+    );
+    expect(buildRemoveWorkspaceMemberDialog({ projectName, agentCount: 5 }).message).toBe(
+      '"legoless" will no longer be part of this workspace, and its 5 agents will be archived. Its directory stays on disk.',
+    );
+  });
+
+  test("stays destructive so the confirm button carries the warning", () => {
+    expect(buildRemoveWorkspaceMemberDialog({ projectName, agentCount: 0 })).toMatchObject({
+      title: "Remove project from workspace?",
+      confirmLabel: "Remove",
+      destructive: true,
+    });
   });
 });

@@ -1,3 +1,33 @@
+import type { ConfirmDialogInput } from "@/utils/confirm-dialog";
+
+function archivedAgentsClause(agentCount: number): string {
+  if (agentCount === 1) {
+    return ", and its agent will be archived";
+  }
+  if (agentCount > 1) {
+    return `, and its ${agentCount} agents will be archived`;
+  }
+  return "";
+}
+
+/**
+ * The confirmation for removing a project from a workspace. Removing it archives whatever agents
+ * are still sitting in that directory, so the count is named here rather than discovered afterwards
+ * — the archive is the part of this the user cannot undo by re-adding the project.
+ */
+export function buildRemoveWorkspaceMemberDialog(input: {
+  projectName: string;
+  agentCount: number;
+}): ConfirmDialogInput {
+  const agents = archivedAgentsClause(input.agentCount);
+  return {
+    title: "Remove project from workspace?",
+    message: `"${input.projectName}" will no longer be part of this workspace${agents}. Its directory stays on disk.`,
+    confirmLabel: "Remove",
+    destructive: true,
+  };
+}
+
 /**
  * Turns a daemon refusal into something the user can act on. The daemon guards a removal that would
  * orphan work: an agent or a terminal still sitting in the directory being removed, or the last
