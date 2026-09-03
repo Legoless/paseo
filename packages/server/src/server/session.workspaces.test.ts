@@ -8892,8 +8892,9 @@ test("workspace.member.remove.request refuses to remove the last member", async 
   expect(response?.payload.error).toBeTruthy();
 });
 
-test("workspace.member.remove.request refuses while an active agent runs on the member directory", async () => {
+test("workspace.member.remove.request archives the agents left on the removed member directory", async () => {
   const emitted: SessionOutboundMessage[] = [];
+  const archiveSnapshotCalls: string[] = [];
   const session = asTestSession(
     createSessionForWorkspaceTests({
       onMessage: (message) => emitted.push(message),
@@ -8906,10 +8907,19 @@ test("workspace.member.remove.request refuses while an active agent runs on the 
             workspaceId: "ws-1",
             archivedAt: "2026-03-02T00:00:00.000Z",
           },
+          { id: "agent-other-dir", cwd: REPO_CWD, workspaceId: "ws-1", archivedAt: null },
         ],
       },
     }),
   );
+  const agentManager = asTestSession(session).agentManager as unknown as {
+    getAgent: (id: string) => unknown;
+    archiveSnapshot: (id: string, archivedAt: string) => Promise<void>;
+  };
+  agentManager.getAgent = () => undefined;
+  agentManager.archiveSnapshot = async (id: string) => {
+    archiveSnapshotCalls.push(id);
+  };
   createMemberTestRegistries({ withMember: true }).apply(session);
 
   await session.handleMessage({
@@ -8920,11 +8930,11 @@ test("workspace.member.remove.request refuses while an active agent runs on the 
   });
 
   const response = findByType(emitted, "workspace.member.remove.response");
-  expect(response?.payload).toMatchObject({
-    requestId: "req-member-remove-agents",
-    workspace: null,
-    errorCode: "member_has_active_agents",
-  });
+  expect(response?.payload.error).toBeNull();
+  expect(response?.payload.workspace).not.toBeNull();
+  // Only the live agent on the removed directory. An already-archived one needs nothing, and an
+  // agent in a directory the workspace keeps is none of this removal's business.
+  expect(archiveSnapshotCalls).toEqual(["agent-member"]);
 });
 
 test("workspace.member.remove.request refuses while a live terminal runs on the member directory", async () => {

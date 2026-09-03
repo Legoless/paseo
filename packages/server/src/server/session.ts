@@ -3449,6 +3449,43 @@ export class Session {
     }
   }
 
+  /**
+   * Agents left behind by a member removal. Their directory stops being part of the workspace, so
+   * they are archived rather than left pointing at a project the workspace no longer has. This used
+   * to refuse the removal instead, which meant a project you had ever run an agent in could never
+   * be removed — the check said "active" but tested `archivedAt`, so an idle agent blocked it too.
+   *
+   * A failure here is logged and the removal continues: the worst case is an agent whose directory
+   * matches no member, which the clients already render as Uncategorized.
+   */
+  private async archiveAgentsForRemovedMember(
+    workspaceId: string,
+    memberCwd: string,
+  ): Promise<void> {
+    const records = (await this.agentStorage.listByWorkspace(workspaceId)).filter(
+      (record) => !record.archivedAt && areEquivalentPaths(record.cwd, memberCwd),
+    );
+    if (records.length === 0) {
+      return;
+    }
+    const archivedAt = new Date().toISOString();
+    const results = await Promise.allSettled(
+      records.map((record) =>
+        this.agentManager.getAgent(record.id)
+          ? this.agentManager.archiveAgent(record.id)
+          : this.agentManager.archiveSnapshot(record.id, archivedAt),
+      ),
+    );
+    for (const result of results) {
+      if (result.status === "rejected") {
+        this.sessionLogger.warn(
+          { err: result.reason, workspaceId, memberCwd },
+          "session: failed to archive an agent while removing a workspace member; continuing",
+        );
+      }
+    }
+  }
+
   private async handleWorkspaceMemberRemoveRequest(
     request: Extract<SessionInboundMessage, { type: "workspace.member.remove.request" }>,
   ): Promise<void> {
@@ -3469,15 +3506,8 @@ export class Session {
         areEquivalentPaths(candidate.cwd, cwd),
       );
       if (member) {
-        const blockingAgent = (await this.agentStorage.listByWorkspace(workspaceId)).find(
-          (record) => !record.archivedAt && areEquivalentPaths(record.cwd, member.cwd),
-        );
-        if (blockingAgent) {
-          throw new WorkspaceProvisioningError(
-            "member_has_active_agents",
-            `Workspace ${workspaceId} has an active agent at ${member.cwd}`,
-          );
-        }
+        // A live terminal is a running process someone is watching, so it still blocks: a
+        // membership change is not the place to decide their shell should die.
         const liveTerminals = this.terminalManager
           ? await this.terminalManager.getTerminals(member.cwd, { workspaceId })
           : [];
@@ -3487,6 +3517,7 @@ export class Session {
             `Workspace ${workspaceId} has a live terminal at ${member.cwd}`,
           );
         }
+        await this.archiveAgentsForRemovedMember(workspaceId, member.cwd);
       }
 
       const updated = await this.workspaceProvisioning.removeWorkspaceMember({ workspaceId, cwd });

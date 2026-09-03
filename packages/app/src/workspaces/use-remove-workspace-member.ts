@@ -1,7 +1,10 @@
 import { useCallback } from "react";
 import { useToast } from "@/contexts/toast-context";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import { removeWorkspaceMemberErrorMessage } from "@/workspaces/remove-workspace-member-message";
+import {
+  buildRemoveWorkspaceMemberDialog,
+  removeWorkspaceMemberErrorMessage,
+} from "@/workspaces/remove-workspace-member-message";
 import { removeWorkspaceMember, type WorkspaceMembersClient } from "@/workspaces/workspace-members";
 
 export interface RemoveWorkspaceMemberInput {
@@ -9,13 +12,15 @@ export interface RemoveWorkspaceMemberInput {
   workspaceId: string;
   cwd: string;
   projectName: string;
+  /** Agents still in this directory. The daemon archives them as part of the removal. */
+  agentCount: number;
 }
 
 /**
- * Confirms, then removes one project membership from a workspace. Guard refusals from the daemon
- * (last member, agents still in the directory, live terminals) surface as a toast: this runs on
- * desktop and web, where `Alert.alert` renders nothing, so an alert made a refusal look like the
- * button doing nothing at all.
+ * Confirms, then removes one project membership from a workspace. The daemon archives the agents
+ * left in that directory, so the confirmation names them first. Refusals it can still return (last
+ * member, a live terminal) surface as a toast: this runs on desktop and web, where `Alert.alert`
+ * renders nothing, so an alert made a refusal look like the button doing nothing at all.
  */
 export function useRemoveWorkspaceMember(): (input: RemoveWorkspaceMemberInput) => Promise<void> {
   const toast = useToast();
@@ -24,12 +29,12 @@ export function useRemoveWorkspaceMember(): (input: RemoveWorkspaceMemberInput) 
       if (!input.client) {
         return;
       }
-      const confirmed = await confirmDialog({
-        title: "Remove project from workspace?",
-        message: `"${input.projectName}" will no longer be part of this workspace. Its directory stays on disk.`,
-        confirmLabel: "Remove",
-        destructive: true,
-      });
+      const confirmed = await confirmDialog(
+        buildRemoveWorkspaceMemberDialog({
+          projectName: input.projectName,
+          agentCount: input.agentCount,
+        }),
+      );
       if (!confirmed) {
         return;
       }
