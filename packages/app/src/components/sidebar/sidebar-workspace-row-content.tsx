@@ -1,7 +1,7 @@
 import { memo, useMemo, useCallback, useState, type ReactNode } from "react";
 import { Pressable, Text, View, type GestureResponderEvent } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { ChevronDown, ChevronRight, Grid2x2 } from "lucide-react-native";
+import { ChevronDown, ChevronRight, Folder, FolderOpen } from "lucide-react-native";
 import { ProjectStatusIndicator } from "@/components/sidebar/project-leading-visual";
 import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
 import {
@@ -22,7 +22,8 @@ import { TrailingActionScrim } from "@/components/ui/trailing-action-scrim";
 import { useWorkspaceLabelDefinitions } from "@/workspace-labels";
 
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-const ThemedGrid = withUnistyles(Grid2x2);
+const ThemedFolder = withUnistyles(Folder);
+const ThemedFolderOpen = withUnistyles(FolderOpen);
 const ThemedChevronDown = withUnistyles(ChevronDown);
 const ThemedChevronRight = withUnistyles(ChevronRight);
 
@@ -203,11 +204,13 @@ function WorkspaceLeadingSlot({
     },
     [onCollapseToggle],
   );
-  const indicator = <WorkspaceStatusIndicator reserveIdleSpace={reserveIdleSpace} />;
+  // "collapse" is the action the toggle offers, so it means the subtree is open right now.
+  const isOpen = collapseChevron === "collapse";
+  const glyph = <WorkspaceLeadingGlyph open={isOpen} reserveIdleSpace={reserveIdleSpace} />;
   if (!collapseChevron || !onCollapseToggle) {
-    return indicator;
+    return glyph;
   }
-  let slotContent: ReactNode = indicator;
+  let slotContent: ReactNode = glyph;
   if (collapseChevronVisible) {
     slotContent =
       collapseChevron === "collapse" ? (
@@ -224,7 +227,7 @@ function WorkspaceLeadingSlot({
       }
       hitSlop={6}
       onPress={handlePress}
-      style={styles.workspaceStatusDot}
+      style={styles.workspaceLeadingSlot}
       testID={`sidebar-workspace-collapse-toggle-${workspaceKey}`}
     >
       {slotContent}
@@ -232,17 +235,27 @@ function WorkspaceLeadingSlot({
   );
 }
 
-function WorkspaceStatusIndicator({ reserveIdleSpace = true }: { reserveIdleSpace?: boolean }) {
-  // One fixed glyph, no status. The slot used to carry the row's aggregate state — a ring while
-  // running, a coloured dot otherwise — which put four different shapes in the rail and made a
-  // workspace row's leading edge move as its agents worked. The grid marks the row as a workspace
-  // and nothing else; status lives on the agent rows underneath it.
+function WorkspaceLeadingGlyph({
+  open,
+  reserveIdleSpace = true,
+}: {
+  open: boolean;
+  reserveIdleSpace?: boolean;
+}) {
+  // The slot used to carry the row's aggregate status — a ring while running, a coloured dot
+  // otherwise — which put several shapes in one 16pt box and made the rail shift as agents worked.
+  // It shows whether the workspace is open instead, which is the one thing about the row that the
+  // glyph can say without moving. Status lives on the agent rows underneath it.
   if (!reserveIdleSpace) {
     return null;
   }
   return (
-    <View style={styles.workspaceStatusDot} testID="workspace-status-indicator">
-      <ThemedGrid size={14} uniProps={foregroundMutedColorMapping} />
+    <View style={styles.workspaceLeadingSlot} testID="workspace-leading-glyph">
+      {open ? (
+        <ThemedFolderOpen size={14} uniProps={foregroundMutedColorMapping} />
+      ) : (
+        <ThemedFolder size={14} uniProps={foregroundMutedColorMapping} />
+      )}
     </View>
   );
 }
@@ -443,7 +456,7 @@ const styles = StyleSheet.create((theme) => ({
     top: 1,
     right: 0,
   },
-  workspaceStatusDot: {
+  workspaceLeadingSlot: {
     position: "relative",
     width: theme.iconSize.md,
     height: 20,
