@@ -33,6 +33,7 @@ import {
 import { gotoAppShell } from "../support/helpers/app";
 import { waitForSidebarHydration } from "../support/helpers/workspace-ui";
 import { getServerId } from "../support/helpers/server-id";
+import { openNewTabLauncher } from "../support/helpers/workspace-tabs";
 
 // ─── Shared state ──────────────────────────────────────────────────────────
 
@@ -138,16 +139,16 @@ test.describe("Tab creation", () => {
     ).toBeVisible();
   });
 
-  test("clicking + opens its menu without creating a New tab", async ({ page }) => {
+  test("clicking + opens a New tab launcher in the pane", async ({ page }) => {
     await gotoWorkspace(page, workspace.workspaceId);
-    const countBefore = await countTabsOfKind(page, "new_tab");
+    const newTabs = page
+      .locator('[data-testid^="workspace-tab-tab_"]')
+      .filter({ hasText: "New tab" });
+    const countBefore = await newTabs.count();
 
-    await page.getByTestId("workspace-new-tab-button").filter({ visible: true }).click();
+    await openNewTabLauncher(page);
 
-    await expect(
-      page.getByTestId("workspace-new-tab-menu").filter({ visible: true }),
-    ).toBeVisible();
-    await expect.poll(() => countTabsOfKind(page, "new_tab")).toBe(countBefore);
+    await expect(newTabs).toHaveCount(countBefore + 1);
   });
 
   test("opening two New tabs creates two independent tab identities", async ({ page }) => {
@@ -220,13 +221,14 @@ test.describe("Tab creation", () => {
     await clickNewTerminal(page);
 
     await expectTerminalSurfaceVisible(page);
-
-    const tabsAfter = await getTabTestIds(page);
-    const terminalTabs = tabsAfter.filter((id) => id.includes("terminal"));
-    expect(terminalTabs.length).toBeGreaterThanOrEqual(1);
+    // Launching from the launcher replaces its tab in place, so the tab keeps its `tab_` id and
+    // the launcher panel is what disappears.
+    await expect(page.getByTestId("workspace-new-tab-panel").filter({ visible: true })).toHaveCount(
+      0,
+    );
   });
 
-  test("launching a profile from the New tab menu drops its empty prompt argument", async ({
+  test("launching a profile from the New tab launcher drops its empty prompt argument", async ({
     page,
   }) => {
     test.setTimeout(45_000);
@@ -234,12 +236,8 @@ test.describe("Tab creation", () => {
 
     try {
       await gotoWorkspace(page, workspace.workspaceId);
-      await page.getByTestId("workspace-new-tab-button").filter({ visible: true }).click();
-      await page
-        .getByTestId("workspace-new-tab-menu")
-        .filter({ visible: true })
-        .getByRole("menuitem", { name: EMPTY_PROMPT_PROFILE.name })
-        .click();
+      const launcher = await openNewTabLauncher(page);
+      await launcher.getByRole("button", { name: EMPTY_PROMPT_PROFILE.name }).click();
 
       await expectTerminalOutputContains(page, "prompt-args: 0");
     } finally {
@@ -249,12 +247,11 @@ test.describe("Tab creation", () => {
 
   test("terminal profiles are grouped with a settings action", async ({ page }) => {
     await gotoWorkspace(page, workspace.workspaceId);
-    await page.getByTestId("workspace-new-tab-button").filter({ visible: true }).click();
+    const launcher = await openNewTabLauncher(page);
 
-    const menu = page.getByTestId("workspace-new-tab-menu").filter({ visible: true });
-    await expect(menu.getByText("Terminal profiles", { exact: true })).toBeVisible();
+    await expect(launcher.getByText("Terminal profiles", { exact: true })).toBeVisible();
 
-    const editProfiles = menu.getByTestId("workspace-new-tab-menu-edit-terminal-profiles");
+    const editProfiles = launcher.getByTestId("workspace-new-tab-edit-terminal-profiles");
     await expect(editProfiles).toHaveAccessibleName("Edit profiles");
 
     await editProfiles.click();
