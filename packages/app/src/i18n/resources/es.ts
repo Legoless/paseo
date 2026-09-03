@@ -658,6 +658,10 @@ export const es: TranslationResources = {
         closeTerminalTitle: "¿Cerrar terminal?",
         closeTerminalMessage:
           "Cualquier proceso en ejecución en esta terminal se detendrá inmediatamente.",
+        switchProjectTitle: "¿Cambiar de proyecto?",
+        switchProjectMessage:
+          "Se descartará la conversación de este agente y comenzará una nueva en el proyecto que elijas.",
+        switchProject: "Cambiar",
         archiveRunningAgentTitle: "¿Agente de ejecución de archivos?",
         archiveRunningAgentMessage:
           "Este agente todavía está ejecutándose. Archivarlo detendrá al agente y cerrará la pestaña.",

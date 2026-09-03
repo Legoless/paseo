@@ -652,6 +652,10 @@ export const ar: TranslationResources = {
         archive: "أرشيف",
         closeTerminalTitle: "إغلاق المحطة؟",
         closeTerminalMessage: "سيتم إيقاف أي عملية جارية في هذه المحطة على الفور.",
+        switchProjectTitle: "تغيير المشروع؟",
+        switchProjectMessage:
+          "سيتم تجاهل محادثة هذا الوكيل وبدء محادثة جديدة في المشروع الذي تختاره.",
+        switchProject: "تغيير",
         archiveRunningAgentTitle: "وكيل تشغيل الأرشيف؟",
         archiveRunningAgentMessage:
           "هذا الوكيل لا يزال قيد التشغيل. ستؤدي أرشفته إلى إيقاف الوكيل وإغلاق علامة التبويب.",

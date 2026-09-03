@@ -658,6 +658,10 @@ export const fr: TranslationResources = {
         closeTerminalTitle: "Fermer le terminal?",
         closeTerminalMessage:
           "Tout processus en cours d’exécution dans ce terminal sera immédiatement arrêté.",
+        switchProjectTitle: "Changer de projet ?",
+        switchProjectMessage:
+          "La conversation de cet agent sera abandonnée et une nouvelle démarrera dans le projet choisi.",
+        switchProject: "Changer",
         archiveRunningAgentTitle: "Archiver l'agent en cours d'exécution?",
         archiveRunningAgentMessage:
           "Cet agent est toujours en cours d'exécution. L'archiver arrêtera l'agent et fermera l'onglet.",

@@ -655,6 +655,10 @@ export const ja: TranslationResources = {
         archive: "アーカイブ",
         closeTerminalTitle: "ターミナルを閉じますか？",
         closeTerminalMessage: "このターミナルで実行中のプロセスはすぐに停止されます。",
+        switchProjectTitle: "プロジェクトを切り替えますか？",
+        switchProjectMessage:
+          "このエージェントの会話は破棄され、選んだプロジェクトで新しい会話が始まります。",
+        switchProject: "切り替える",
         archiveRunningAgentTitle: "実行中のエージェントをアーカイブしますか？",
         archiveRunningAgentMessage:
           "このエージェントはまだ実行中です。アーカイブするとエージェントが停止してタブが閉じられます。",

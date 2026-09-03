@@ -113,6 +113,12 @@ import { createWorkspaceBrowser, useBrowserStore } from "@/desktop/browser/store
 import { getDesktopHost } from "@/desktop/host";
 import { buildProviderCommand } from "@/utils/provider-command-templates";
 import { generateDraftId } from "@/stores/draft-keys";
+import { buildDraftAgentSetup } from "@/client-slash-commands";
+import {
+  canSwitchTabProject,
+  repointDraftTarget,
+  switchTabProjectNeedsConfirm,
+} from "@/workspace-tabs/switch-tab-project";
 import { normalizeWorkspaceOpaqueId, resolveWorkspaceRouteId } from "@/utils/workspace-identity";
 import { useOpenAgentTabLabels } from "@/subagents/use-open-agent-tab-labels";
 import {
@@ -2706,6 +2712,85 @@ function WorkspaceScreenContent({
     ],
   );
 
+  /**
+   * Re-points a tab at another project from the pane's project badge. A draft carries its own cwd,
+   * so it just moves. An agent's cwd is fixed on the daemon, so it is relaunched: the tab becomes a
+   * fresh draft in the new directory carrying the agent's provider and model, and the old agent is
+   * archived. Without the unpin/hide pair `reconcileWorkspaceTabs` would re-open it beside the new
+   * tab, because a non-archived workspace agent is always auto-opened.
+   */
+  const handleSwitchTabProject = useCallback(
+    async (input: { tabId: string; cwd: string }) => {
+      if (!persistenceKey || !normalizedServerId) {
+        return;
+      }
+      const tab = useWorkspaceLayoutStore
+        .getState()
+        .getWorkspaceTabs(persistenceKey)
+        .find((entry) => entry.tabId === input.tabId);
+      const target = tab?.target;
+      if (!target || !canSwitchTabProject(target)) {
+        return;
+      }
+
+      if (target.kind === "draft") {
+        replaceWorkspaceTabTarget(
+          persistenceKey,
+          input.tabId,
+          repointDraftTarget(target, input.cwd),
+        );
+        return;
+      }
+
+      const session = useSessionStore.getState().sessions[normalizedServerId];
+      const agent =
+        session?.agents?.get(target.agentId) ?? session?.agentDetails?.get(target.agentId) ?? null;
+      if (
+        switchTabProjectNeedsConfirm({
+          target,
+          lastUserMessageAt: agent?.lastUserMessageAt ?? null,
+        })
+      ) {
+        const confirmed = await confirmDialog({
+          title: t("workspace.tabs.confirmations.switchProjectTitle"),
+          message: t("workspace.tabs.confirmations.switchProjectMessage"),
+          confirmLabel: t("workspace.tabs.confirmations.switchProject"),
+          cancelLabel: t("workspace.tabs.confirmations.cancel"),
+          destructive: true,
+        });
+        if (!confirmed) {
+          return;
+        }
+      }
+
+      unpinWorkspaceAgent(persistenceKey, target.agentId);
+      hideWorkspaceAgent(persistenceKey, target.agentId);
+      replaceWorkspaceTabTarget(
+        persistenceKey,
+        input.tabId,
+        repointDraftTarget(
+          {
+            kind: "draft",
+            draftId: generateDraftId(),
+            ...(agent ? { setup: buildDraftAgentSetup(agent) } : {}),
+          },
+          input.cwd,
+        ),
+      );
+      // Errors (e.g. timeout) are handled by the mutation's onSettled callback
+      void archiveAgent({ serverId: normalizedServerId, agentId: target.agentId }).catch(() => {});
+    },
+    [
+      archiveAgent,
+      hideWorkspaceAgent,
+      normalizedServerId,
+      persistenceKey,
+      replaceWorkspaceTabTarget,
+      t,
+      unpinWorkspaceAgent,
+    ],
+  );
+
   const handleClosePassiveTab = useCallback(
     function handleClosePassiveTab(input: { tabId: string; target?: WorkspaceTabTarget | null }) {
       setHoveredCloseTabKey((current) => (current === input.tabId ? null : current));
@@ -4039,6 +4124,7 @@ function WorkspaceScreenContent({
         onCopyTerminalId={handleCopyTerminalId}
         onCopyFilePath={handleCopyFilePath}
         onReloadAgent={handleReloadAgent}
+        onSwitchTabProject={handleSwitchTabProject}
         onRenameTab={handleRenameTab}
         onCloseTabsToLeft={handleCloseTabsToLeftInPane}
         onCloseTabsToRight={handleCloseTabsToRightInPane}
@@ -4080,6 +4166,7 @@ function WorkspaceScreenContent({
     handleCopyTerminalId,
     handleCopyFilePath,
     handleReloadAgent,
+    handleSwitchTabProject,
     handleRenameTab,
     handleCloseTabsToLeftInPane,
     handleCloseTabsToRightInPane,

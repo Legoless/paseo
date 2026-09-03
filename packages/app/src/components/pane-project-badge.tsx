@@ -18,9 +18,9 @@ import type { WorkspaceProjectPickerOption } from "@/components/workspace-projec
 import { useHostHomeDirectory } from "@/workspace-tabs/launcher/project-selector";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
-import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { normalizeWorkspacePath } from "@/utils/workspace-identity";
 import { shortenPath } from "@/utils/shorten-path";
+import { canSwitchTabProject } from "@/workspace-tabs/switch-tab-project";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import type { Theme } from "@/styles/theme";
 
@@ -33,9 +33,10 @@ const mutedIconMapping = (theme: Theme) => ({ color: theme.colors.foregroundMute
 interface PaneProjectBadgeProps {
   serverId: string;
   workspaceId: string;
-  workspaceKey: string;
   cwd: string;
   activeTab: WorkspaceTabDescriptor | null;
+  /** Re-points the tab at another project. Owns the confirmation and the relaunch. */
+  onSwitchProject: (input: { tabId: string; cwd: string }) => void;
 }
 
 interface BadgeTriggerState {
@@ -43,8 +44,6 @@ interface BadgeTriggerState {
   pressed: boolean;
   open: boolean;
 }
-
-type DraftTarget = Extract<WorkspaceTabDescriptor["target"], { kind: "draft" }>;
 
 /**
  * The workspace project a directory belongs to, or null when it belongs to none. Matching is the
@@ -63,18 +62,6 @@ export function matchWorkspaceProject(
 }
 
 /**
- * Both cwd fields move together: `setup.cwd` wins once a provider is pinned, and the bare `cwd`
- * carries the pick until one is. Leaving either behind strands the draft on a stale directory.
- */
-export function repointDraftTarget(target: DraftTarget, cwd: string): DraftTarget {
-  return {
-    ...target,
-    cwd,
-    ...(target.setup ? { setup: { ...target.setup, cwd } } : {}),
-  };
-}
-
-/**
  * The project this pane is pointed at, sitting left of the branch pill. A draft owns its working
  * directory, so there the badge is a picker that re-points it. Every other tab is already running
  * somewhere it cannot move, so the badge is a plain label — and an Uncategorized one has no project
@@ -83,28 +70,27 @@ export function repointDraftTarget(target: DraftTarget, cwd: string): DraftTarge
 export function PaneProjectBadge({
   serverId,
   workspaceId,
-  workspaceKey,
   cwd,
   activeTab,
+  onSwitchProject,
 }: PaneProjectBadgeProps) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const members = useWorkspaceFields(serverId, workspaceId, (workspace) => workspace.members);
   const openAddProject = useOpenAddProject();
-  const replaceTab = useWorkspaceLayoutStore((state) => state.replaceTab);
   const homeDirectory = useHostHomeDirectory(serverId);
   const options = useMemo(() => buildWorkspaceProjectPickerOptions(members ?? []), [members]);
   const matched = useMemo(() => matchWorkspaceProject(options, cwd), [cwd, options]);
-  const draftTarget = activeTab?.target.kind === "draft" ? activeTab.target : null;
+  const switchable = activeTab !== null && canSwitchTabProject(activeTab.target);
 
   const handleSelect = useCallback(
     (nextCwd: string) => {
-      if (!activeTab || !draftTarget) {
+      if (!activeTab) {
         return;
       }
-      replaceTab(workspaceKey, activeTab.tabId, repointDraftTarget(draftTarget, nextCwd));
+      onSwitchProject({ tabId: activeTab.tabId, cwd: nextCwd });
     },
-    [activeTab, draftTarget, replaceTab, workspaceKey],
+    [activeTab, onSwitchProject],
   );
   const handleSelectHome = useCallback(() => {
     if (homeDirectory) {
@@ -122,10 +108,10 @@ export function PaneProjectBadge({
     [],
   );
 
-  // An agent or terminal the workspace files as Uncategorized runs somewhere that is nobody's
-  // project — home, most often. There is no project to name, so the pane shows none. A draft keeps
-  // its badge either way: there it is the control that assigns one.
-  if (!matched && !draftTarget) {
+  // A tab the workspace files as Uncategorized runs somewhere that is nobody's project — home,
+  // most often. There is no project to name, so a tab that cannot move shows nothing. One that can
+  // keeps its badge either way: there the badge assigns the project rather than reporting it.
+  if (!matched && !switchable) {
     return null;
   }
 
@@ -145,7 +131,7 @@ export function PaneProjectBadge({
     </>
   );
 
-  if (!draftTarget) {
+  if (!switchable) {
     return (
       <View pointerEvents="none" style={styles.badge} testID="pane-project-badge">
         {content}

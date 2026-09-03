@@ -649,6 +649,10 @@ export const en = {
         bulkUnsaved: "{{count}} tab(s) have unsaved changes. Closing will discard those drafts.",
         closeTerminalTitle: "Close terminal?",
         closeTerminalMessage: "Any running process in this terminal will be stopped immediately.",
+        switchProjectTitle: "Switch project?",
+        switchProjectMessage:
+          "This agent's conversation will be discarded and a new one started in the project you pick.",
+        switchProject: "Switch",
         archiveRunningAgentTitle: "Archive running agent?",
         archiveRunningAgentMessage:
           "This agent is still running. Archiving it will stop the agent and close the tab.",
