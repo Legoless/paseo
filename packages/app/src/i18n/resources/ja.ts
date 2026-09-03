@@ -1220,6 +1220,7 @@ export const ja: TranslationResources = {
         hideFailed: "ワークスペースの非表示に失敗しました",
         archiveFailed: "ワークスペースのアーカイブに失敗しました",
       },
+      uncategorized: "未分類",
     },
     agent: {
       actions: {

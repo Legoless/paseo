@@ -1,17 +1,46 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "../support/fixtures";
 import { gotoWorkspace } from "../support/helpers/launcher";
 import { seedWorkspace } from "../support/helpers/seed-client";
+import { getServerId } from "../support/helpers/server-id";
 import {
   createAgentTabFromMenu,
   waitForWorkspaceTabsVisible,
 } from "../support/helpers/workspace-tabs";
 
-function visibleNewAgentRows(page: Page) {
-  return page.locator('[data-testid^="sidebar-new-agent-row-"]').filter({ visible: true });
+function visibleNewAgentRows(scope: Page | Locator) {
+  return scope.locator('[data-testid^="sidebar-new-agent-row-"]').filter({ visible: true });
 }
 
 test.describe("workspace pane agent visibility", () => {
+  test("keeps agents without a project out of the project's group", async ({ page }) => {
+    const workspace = await seedWorkspace({ repoPrefix: "pane-agent-uncategorized-" });
+
+    try {
+      await gotoWorkspace(page, workspace.workspaceId);
+      await waitForWorkspaceTabsVisible(page);
+
+      const uncategorized = page.getByTestId(
+        `sidebar-uncategorized-${getServerId()}:${workspace.workspaceId}`,
+      );
+
+      // The workspace opens on a draft that has not chosen a project yet, so every row the
+      // sidebar shows sits under Uncategorized rather than under the workspace's project.
+      await expect(uncategorized).toBeVisible();
+      await expect(uncategorized).toContainText("Uncategorized");
+      await expect(visibleNewAgentRows(uncategorized)).toHaveCount(1);
+      await expect(visibleNewAgentRows(page)).toHaveCount(1);
+
+      // Launching into the workspace's own project files that draft under the project instead.
+      await createAgentTabFromMenu(page);
+
+      await expect(visibleNewAgentRows(page)).toHaveCount(2);
+      await expect(visibleNewAgentRows(uncategorized)).toHaveCount(1);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   test("shows every unstarted agent in the sidebar as soon as its tab is created", async ({
     page,
   }) => {

@@ -1217,6 +1217,7 @@ export const en = {
         hideFailed: "Failed to hide workspace",
         archiveFailed: "Failed to archive workspace",
       },
+      uncategorized: "Uncategorized",
     },
     agent: {
       actions: {

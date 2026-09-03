@@ -38,6 +38,7 @@ import type {
   SidebarWorkspaceAgentRow,
   SidebarWorkspaceMemberRow,
   SidebarWorkspaceNewAgentRow,
+  SidebarWorkspaceUncategorizedRow,
   SidebarWorkspaceSection,
 } from "@/projects/workspace-groups";
 import { WorkspaceAgentRow, WorkspaceNewAgentRow } from "@/components/sidebar/workspace-agent-row";
@@ -940,6 +941,140 @@ function memberKey(member: SidebarWorkspaceMemberRow): string {
   return member.memberKey;
 }
 
+function hasUncategorizedRows(section: SidebarWorkspaceSection): boolean {
+  return (section.uncategorized.newAgents?.length ?? 0) + section.uncategorized.agents.length > 0;
+}
+
+/**
+ * The agent rows under one bucket — a project member, or the workspace's uncategorized tabs.
+ * Diff and PR facts belong to the bucket's directory, so a row whose cwd is something else shows
+ * neither.
+ */
+function SidebarAgentItemList({
+  orderKey,
+  newAgents,
+  agents,
+  diffStat,
+  prHint,
+  serverId,
+  workspaceId,
+  onWorkspacePress,
+}: {
+  orderKey: string;
+  newAgents: readonly SidebarWorkspaceNewAgentRow[] | undefined;
+  agents: readonly SidebarWorkspaceAgentRow[];
+  diffStat: { additions: number; deletions: number } | null;
+  prHint: PrHint | null;
+  serverId: string;
+  workspaceId: string;
+  onWorkspacePress?: () => void;
+}) {
+  const storedAgentOrder = useSidebarOrderStore(
+    (state) => state.agentOrderByMember[orderKey] ?? EMPTY_ORDER,
+  );
+  const setAgentOrder = useSidebarOrderStore((state) => state.setAgentOrder);
+  const agentItems = useMemo(() => {
+    const items: SidebarMemberAgentItem[] = [
+      ...(newAgents ?? []).map((newAgent) => ({ kind: "new" as const, newAgent })),
+      ...agents.map((agent) => ({ kind: "agent" as const, agent })),
+    ];
+    return applyStoredOrdering({ items, storedOrder: storedAgentOrder, getKey: memberAgentKey });
+  }, [agents, newAgents, storedAgentOrder]);
+  const handleAgentDragEnd = useCallback(
+    (items: SidebarMemberAgentItem[]) => {
+      setAgentOrder(orderKey, items.map(memberAgentKey));
+    },
+    [orderKey, setAgentOrder],
+  );
+  const renderAgent = useCallback(
+    ({
+      item,
+      drag: dragAgent,
+      isActive,
+      dragHandleProps: agentDragHandleProps,
+    }: DraggableRenderItemInfo<SidebarMemberAgentItem>) => {
+      if (item.kind === "new") {
+        return (
+          <WorkspaceNewAgentRow
+            newAgent={item.newAgent}
+            diffStat={item.newAgent.matchesMemberDirectory ? diffStat : null}
+            prHint={item.newAgent.matchesMemberDirectory ? prHint : null}
+            serverId={serverId}
+            workspaceId={workspaceId}
+            onWorkspacePress={onWorkspacePress}
+            drag={dragAgent}
+            isDragging={isActive}
+            dragHandleProps={agentDragHandleProps}
+          />
+        );
+      }
+      return (
+        <WorkspaceAgentRow
+          agent={item.agent}
+          diffStat={item.agent.matchesMemberDirectory ? diffStat : null}
+          prHint={item.agent.matchesMemberDirectory ? prHint : null}
+          serverId={serverId}
+          workspaceId={workspaceId}
+          onWorkspacePress={onWorkspacePress}
+          drag={dragAgent}
+          isDragging={isActive}
+          dragHandleProps={agentDragHandleProps}
+        />
+      );
+    },
+    [diffStat, onWorkspacePress, prHint, serverId, workspaceId],
+  );
+
+  return (
+    <DraggableList
+      testID={`sidebar-agent-list-${orderKey}`}
+      data={agentItems}
+      keyExtractor={memberAgentKey}
+      renderItem={renderAgent}
+      onDragEnd={handleAgentDragEnd}
+      scrollEnabled={false}
+      useDragHandle
+      nestable={platformIsNative}
+    />
+  );
+}
+
+/** Tabs and agents the workspace holds that have not chosen a project. */
+function WorkspaceUncategorizedBlock({
+  uncategorized,
+  serverId,
+  workspaceId,
+  onWorkspacePress,
+}: {
+  uncategorized: SidebarWorkspaceUncategorizedRow;
+  serverId: string;
+  workspaceId: string;
+  onWorkspacePress?: () => void;
+}) {
+  const { t } = useTranslation();
+  const workspaceKey = `${serverId}:${workspaceId}`;
+
+  return (
+    <View testID={`sidebar-uncategorized-${workspaceKey}`}>
+      <View style={styles.uncategorizedRow}>
+        <Text style={styles.uncategorizedName} numberOfLines={1}>
+          {t("sidebar.workspace.uncategorized")}
+        </Text>
+      </View>
+      <SidebarAgentItemList
+        orderKey={uncategorized.memberKey}
+        newAgents={uncategorized.newAgents}
+        agents={uncategorized.agents}
+        diffStat={null}
+        prHint={null}
+        serverId={serverId}
+        workspaceId={workspaceId}
+        onWorkspacePress={onWorkspacePress}
+      />
+    </View>
+  );
+}
+
 function WorkspaceMemberBlock({
   member,
   iconDataUri,
@@ -966,17 +1101,6 @@ function WorkspaceMemberBlock({
   const { t } = useTranslation();
   const toast = useToast();
   const removeWorkspaceMember = useRemoveWorkspaceMember();
-  const storedAgentOrder = useSidebarOrderStore(
-    (state) => state.agentOrderByMember[member.memberKey] ?? EMPTY_ORDER,
-  );
-  const setAgentOrder = useSidebarOrderStore((state) => state.setAgentOrder);
-  const agentItems = useMemo(() => {
-    const items: SidebarMemberAgentItem[] = [
-      ...(member.newAgents ?? []).map((newAgent) => ({ kind: "new" as const, newAgent })),
-      ...member.agents.map((agent) => ({ kind: "agent" as const, agent })),
-    ];
-    return applyStoredOrdering({ items, storedOrder: storedAgentOrder, getKey: memberAgentKey });
-  }, [member.agents, member.newAgents, storedAgentOrder]);
 
   const handleCopyPath = useCallback(() => {
     void Clipboard.setStringAsync(member.workspaceDirectory);
@@ -1006,51 +1130,6 @@ function WorkspaceMemberBlock({
     onWorkspacePress?.();
     navigateToWorkspace({ serverId, workspaceId });
   }, [onWorkspacePress, serverId, workspaceId]);
-  const handleAgentDragEnd = useCallback(
-    (items: SidebarMemberAgentItem[]) => {
-      setAgentOrder(member.memberKey, items.map(memberAgentKey));
-    },
-    [member.memberKey, setAgentOrder],
-  );
-  const renderAgent = useCallback(
-    ({
-      item,
-      drag: dragAgent,
-      isActive,
-      dragHandleProps: agentDragHandleProps,
-    }: DraggableRenderItemInfo<SidebarMemberAgentItem>) => {
-      if (item.kind === "new") {
-        return (
-          <WorkspaceNewAgentRow
-            newAgent={item.newAgent}
-            diffStat={item.newAgent.matchesMemberDirectory ? (member.diffStat ?? null) : null}
-            prHint={item.newAgent.matchesMemberDirectory ? prHint : null}
-            serverId={serverId}
-            workspaceId={workspaceId}
-            onWorkspacePress={onWorkspacePress}
-            drag={dragAgent}
-            isDragging={isActive}
-            dragHandleProps={agentDragHandleProps}
-          />
-        );
-      }
-      return (
-        <WorkspaceAgentRow
-          agent={item.agent}
-          diffStat={item.agent.matchesMemberDirectory ? (member.diffStat ?? null) : null}
-          prHint={item.agent.matchesMemberDirectory ? prHint : null}
-          serverId={serverId}
-          workspaceId={workspaceId}
-          onWorkspacePress={onWorkspacePress}
-          drag={dragAgent}
-          isDragging={isActive}
-          dragHandleProps={agentDragHandleProps}
-        />
-      );
-    },
-    [member.diffStat, onWorkspacePress, prHint, serverId, workspaceId],
-  );
-
   return (
     <>
       <WorkspaceMemberRow
@@ -1065,15 +1144,15 @@ function WorkspaceMemberBlock({
         isDragging={isDragging}
         dragHandleProps={dragHandleProps}
       />
-      <DraggableList
-        testID={`sidebar-agent-list-${member.memberKey}`}
-        data={agentItems}
-        keyExtractor={memberAgentKey}
-        renderItem={renderAgent}
-        onDragEnd={handleAgentDragEnd}
-        scrollEnabled={false}
-        useDragHandle
-        nestable={platformIsNative}
+      <SidebarAgentItemList
+        orderKey={member.memberKey}
+        newAgents={member.newAgents}
+        agents={member.agents}
+        diffStat={member.diffStat}
+        prHint={prHint}
+        serverId={serverId}
+        workspaceId={workspaceId}
+        onWorkspacePress={onWorkspacePress}
       />
     </>
   );
@@ -1201,16 +1280,26 @@ function WorkspaceSectionBlock({
         collapseAccessory={collapseAccessory}
       />
       {!collapsed && section ? (
-        <DraggableList
-          testID={`sidebar-member-list-${placement.workspaceKey}`}
-          data={orderedMembers}
-          keyExtractor={memberKey}
-          renderItem={renderMember}
-          onDragEnd={handleMemberDragEnd}
-          scrollEnabled={false}
-          useDragHandle
-          nestable={platformIsNative}
-        />
+        <>
+          {hasUncategorizedRows(section) ? (
+            <WorkspaceUncategorizedBlock
+              uncategorized={section.uncategorized}
+              serverId={placement.serverId}
+              workspaceId={placement.workspaceId}
+              onWorkspacePress={onWorkspacePress}
+            />
+          ) : null}
+          <DraggableList
+            testID={`sidebar-member-list-${placement.workspaceKey}`}
+            data={orderedMembers}
+            keyExtractor={memberKey}
+            renderItem={renderMember}
+            onDragEnd={handleMemberDragEnd}
+            scrollEnabled={false}
+            useDragHandle
+            nestable={platformIsNative}
+          />
+        </>
       ) : null}
     </View>
   );
@@ -1810,6 +1899,26 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[2],
     userSelect: "none",
+  },
+  // A label, not a project row: the members' rail so its children line up with theirs, but no
+  // icon, no hover, and nothing to press.
+  uncategorizedRow: {
+    minHeight: 32,
+    marginBottom: theme.spacing[0.5],
+    paddingVertical: theme.spacing[1.5],
+    paddingLeft: theme.spacing[2] + theme.iconSize.md + theme.spacing[2],
+    paddingRight: theme.spacing[2],
+    flexDirection: "row",
+    alignItems: "center",
+    userSelect: "none",
+  },
+  uncategorizedName: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.base,
+    fontWeight: "400",
+    minWidth: 0,
+    flex: 1,
+    flexShrink: 1,
   },
   memberName: {
     color: theme.colors.foreground,

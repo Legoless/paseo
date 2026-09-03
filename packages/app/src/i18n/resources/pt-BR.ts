@@ -1233,6 +1233,7 @@ export const ptBR: TranslationResources = {
         hideFailed: "Falha ao ocultar workspace",
         archiveFailed: "Falha ao arquivar workspace",
       },
+      uncategorized: "Sem categoria",
     },
     agent: {
       actions: {
