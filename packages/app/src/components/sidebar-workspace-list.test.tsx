@@ -110,6 +110,12 @@ vi.mock("@/workspace-labels/picker", () => ({
   useWorkspaceLabelMenuPages: () => [],
 }));
 
+vi.mock("@/workspace-layouts/picker", () => ({
+  PANE_LAYOUT_PAGE_ID: "paneLayout",
+  useCanApplyPaneLayouts: () => false,
+  usePaneLayoutMenuPages: () => [],
+}));
+
 vi.mock("expo-clipboard", () => ({
   setStringAsync: vi.fn(),
 }));

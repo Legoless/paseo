@@ -978,6 +978,17 @@ export const zhCN: TranslationResources = {
       },
     },
   },
+  paneLayouts: {
+    title: "窗格布局",
+    builtIn: {
+      single: "单窗格",
+      twoColumns: "两列",
+      twoRows: "两行",
+      grid: "网格 {{rows}} × {{columns}}",
+    },
+    emptyHint: "在主机的 layouts 文件夹中添加布局",
+    updateHost: "更新此主机以使用自定义窗格布局",
+  },
   workspaceLabels: {
     title: "标签",
     unlabelled: "无标签",

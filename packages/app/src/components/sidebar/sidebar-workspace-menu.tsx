@@ -15,6 +15,7 @@ import {
   CircleCheck,
   Copy,
   FolderPlus,
+  LayoutGrid,
   MoreVertical,
   Pencil,
   Pin,
@@ -48,6 +49,12 @@ import {
   WORKSPACE_LABEL_PAGE_ID,
   type WorkspaceLabelTarget,
 } from "@/workspace-labels/picker";
+import {
+  PANE_LAYOUT_PAGE_ID,
+  useCanApplyPaneLayouts,
+  usePaneLayoutMenuPages,
+  type PaneLayoutTarget,
+} from "@/workspace-layouts/picker";
 
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const foregroundMutedColorMapping = (theme: Theme) => ({
@@ -63,6 +70,7 @@ const ThemedPin = withUnistyles(Pin);
 const ThemedPinOff = withUnistyles(PinOff);
 const ThemedTag = withUnistyles(Tag);
 const ThemedFolderPlus = withUnistyles(FolderPlus);
+const ThemedLayoutGrid = withUnistyles(LayoutGrid);
 
 const renameLeadingIcon = <ThemedPencil size={14} uniProps={foregroundMutedColorMapping} />;
 const copyLeadingIcon = <ThemedCopy size={14} uniProps={foregroundMutedColorMapping} />;
@@ -167,6 +175,11 @@ export function SidebarWorkspaceMenuItems({
     () => <ThemedTag size={14} uniProps={foregroundMutedColorMapping} />,
     [],
   );
+  const paneLayoutLeading = useMemo(
+    () => <ThemedLayoutGrid size={14} uniProps={foregroundMutedColorMapping} />,
+    [],
+  );
+  const canApplyPaneLayouts = useCanApplyPaneLayouts();
 
   return (
     <>
@@ -230,6 +243,15 @@ export function SidebarWorkspaceMenuItems({
           Add project…
         </WorkspaceMenuItem>
       ) : null}
+      {canApplyPaneLayouts && serverId && workspaceId ? (
+        <DropdownMenuSubTrigger
+          id={PANE_LAYOUT_PAGE_ID}
+          leading={paneLayoutLeading}
+          testID={`sidebar-workspace-menu-pane-layout-${workspaceKey}`}
+        >
+          {t("paneLayouts.title")}
+        </DropdownMenuSubTrigger>
+      ) : null}
       {serverId && workspaceId ? (
         <DropdownMenuSubTrigger
           id={WORKSPACE_LABEL_PAGE_ID}
@@ -292,7 +314,13 @@ export function SidebarWorkspaceMenu({
         : null,
     [serverId, workspaceId, workspaceLabels],
   );
-  const pages = useWorkspaceLabelMenuPages(workspaceTarget);
+  const layoutTarget = useMemo<PaneLayoutTarget | null>(
+    () => (serverId && workspaceId ? { serverId, workspaceId } : null),
+    [serverId, workspaceId],
+  );
+  const labelPages = useWorkspaceLabelMenuPages(workspaceTarget);
+  const layoutPages = usePaneLayoutMenuPages(layoutTarget);
+  const pages = useMemo(() => [...labelPages, ...layoutPages], [labelPages, layoutPages]);
   return (
     <DropdownMenu compactMode="sheet" open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger
@@ -405,7 +433,13 @@ export function SidebarWorkspaceContextMenu({
     }),
     [workspace],
   );
-  const pages = useWorkspaceLabelMenuPages(workspaceTarget);
+  const layoutTarget = useMemo<PaneLayoutTarget>(
+    () => ({ serverId: workspace.serverId, workspaceId: workspace.workspaceId }),
+    [workspace.serverId, workspace.workspaceId],
+  );
+  const labelPages = useWorkspaceLabelMenuPages(workspaceTarget);
+  const layoutPages = usePaneLayoutMenuPages(layoutTarget);
+  const pages = useMemo(() => [...labelPages, ...layoutPages], [labelPages, layoutPages]);
 
   return (
     <ContextMenu open={contextMenuOpen} onOpenChange={onContextMenuOpenChange}>

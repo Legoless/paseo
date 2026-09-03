@@ -1016,6 +1016,17 @@ export const fr: TranslationResources = {
       },
     },
   },
+  paneLayouts: {
+    title: "Disposition des volets",
+    builtIn: {
+      single: "Volet unique",
+      twoColumns: "Deux colonnes",
+      twoRows: "Deux lignes",
+      grid: "Grille {{rows}} × {{columns}}",
+    },
+    emptyHint: "Ajoutez des dispositions dans le dossier layouts de l'hôte",
+    updateHost: "Mettez à jour cet hôte pour utiliser des dispositions personnalisées",
+  },
   workspaceLabels: {
     title: "Étiquettes",
     unlabelled: "Sans étiquette",

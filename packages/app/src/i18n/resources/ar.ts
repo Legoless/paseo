@@ -986,6 +986,17 @@ export const ar: TranslationResources = {
       },
     },
   },
+  paneLayouts: {
+    title: "تخطيط الأجزاء",
+    builtIn: {
+      single: "جزء واحد",
+      twoColumns: "عمودان",
+      twoRows: "صفان",
+      grid: "شبكة {{rows}} × {{columns}}",
+    },
+    emptyHint: "أضف التخطيطات إلى مجلد layouts على المضيف",
+    updateHost: "حدّث هذا المضيف لاستخدام تخطيطات أجزاء مخصصة",
+  },
   workspaceLabels: {
     title: "التسميات",
     unlabelled: "بلا تسمية",

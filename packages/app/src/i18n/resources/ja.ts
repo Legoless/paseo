@@ -997,6 +997,17 @@ export const ja: TranslationResources = {
       },
     },
   },
+  paneLayouts: {
+    title: "ペインレイアウト",
+    builtIn: {
+      single: "単一ペイン",
+      twoColumns: "2 列",
+      twoRows: "2 行",
+      grid: "グリッド {{rows}} × {{columns}}",
+    },
+    emptyHint: "ホストの layouts フォルダーにレイアウトを追加してください",
+    updateHost: "カスタムペインレイアウトを使うにはこのホストを更新してください",
+  },
   workspaceLabels: {
     title: "ラベル",
     unlabelled: "ラベルなし",

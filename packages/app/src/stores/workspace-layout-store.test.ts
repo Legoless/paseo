@@ -4364,3 +4364,290 @@ describe("per-tab Explorer sidebar visibility", () => {
     expect(merged.explorerSidebarOpenByTab[workspaceKey]?.[agentTabId]).toBe(true);
   });
 });
+
+describe("applyPaneLayout", () => {
+  function seedLayout(root: SplitNode, focusedPaneId: string): string {
+    const workspaceKey = createWorkspaceKey();
+    workspaceLayoutStore.setState({
+      layoutByWorkspace: { [workspaceKey]: normalizeLayout({ root, focusedPaneId }) },
+      splitSizesByWorkspace: {},
+      explorerSidebarPaneIdByWorkspace: {},
+      sidePaneIdByWorkspace: {},
+      focusRestorationByWorkspace: {},
+    });
+    return workspaceKey;
+  }
+
+  function layoutOf(workspaceKey: string) {
+    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+    expect(layout).toBeTruthy();
+    return layout as NonNullable<typeof layout>;
+  }
+
+  beforeEach(() => {
+    workspaceLayoutIds.reset();
+  });
+
+  it("turns a row into two side-by-side panes and a column into stacked ones", () => {
+    const workspaceKey = seedLayout(createPane({ id: "main", tabIds: ["a"] }), "main");
+
+    workspaceLayoutStore
+      .getState()
+      .applyPaneLayout(workspaceKey, { direction: "row", children: [{}, {}] });
+    expect(expectGroup(layoutOf(workspaceKey).root).group.direction).toBe("horizontal");
+
+    workspaceLayoutStore
+      .getState()
+      .applyPaneLayout(workspaceKey, { direction: "column", children: [{}, {}] });
+    expect(expectGroup(layoutOf(workspaceKey).root).group.direction).toBe("vertical");
+  });
+
+  it("keeps every pane id when the pane count is unchanged, so nothing remounts", () => {
+    const workspaceKey = seedLayout(
+      {
+        kind: "group",
+        group: {
+          id: "root",
+          direction: "horizontal",
+          children: [
+            createPane({ id: "left", tabIds: ["a"] }),
+            createPane({ id: "right", tabIds: ["b"] }),
+          ],
+          sizes: [0.5, 0.5],
+        },
+      },
+      "left",
+    );
+
+    // Same two panes, restacked as rows at a different ratio.
+    workspaceLayoutStore.getState().applyPaneLayout(workspaceKey, {
+      direction: "column",
+      children: [{ size: 2 }, { size: 1 }],
+    });
+
+    const layout = layoutOf(workspaceKey);
+    expect(collectAllPanes(layout.root).map((pane) => pane.id)).toEqual(["left", "right"]);
+    expect(findPaneById(layout.root, "left")?.tabIds).toEqual(["a"]);
+    expect(findPaneById(layout.root, "right")?.tabIds).toEqual(["b"]);
+    expect(layout.focusedPaneId).toBe("left");
+  });
+
+  it("distributes panes by position and leaves the extra ones empty", () => {
+    const workspaceKey = seedLayout(
+      {
+        kind: "group",
+        group: {
+          id: "root",
+          direction: "horizontal",
+          children: [
+            createPane({ id: "left", tabIds: ["a"] }),
+            createPane({ id: "right", tabIds: ["b"] }),
+          ],
+          sizes: [0.5, 0.5],
+        },
+      },
+      "left",
+    );
+
+    workspaceLayoutStore.getState().applyPaneLayout(workspaceKey, {
+      direction: "column",
+      children: [
+        { direction: "row", children: [{}, {}] },
+        { direction: "row", children: [{}, {}] },
+      ],
+    });
+
+    const layout = layoutOf(workspaceKey);
+    const panes = collectAllPanes(layout.root);
+    expect(panes).toHaveLength(4);
+    expect(panes[0]?.id).toBe("left");
+    expect(panes[1]?.id).toBe("right");
+    // Nothing was destroyed, and the two new panes got launchers rather than staying empty.
+    expect(contentTabs(collectAllTabs(layout.root)).map((tab) => tab.tabId)).toEqual(["a", "b"]);
+    expect(panes[2]?.tabIds).toHaveLength(1);
+    expect(panes[3]?.tabIds).toHaveLength(1);
+  });
+
+  it("folds overflowing panes back round-robin when the layout has fewer", () => {
+    const workspaceKey = seedLayout(
+      {
+        kind: "group",
+        group: {
+          id: "root",
+          direction: "horizontal",
+          children: [
+            createPane({ id: "p1", tabIds: ["a"] }),
+            createPane({ id: "p2", tabIds: ["b"] }),
+            createPane({ id: "p3", tabIds: ["c"] }),
+          ],
+          sizes: [0.34, 0.33, 0.33],
+        },
+      },
+      "p1",
+    );
+
+    workspaceLayoutStore
+      .getState()
+      .applyPaneLayout(workspaceKey, { direction: "row", children: [{}, {}] });
+
+    const layout = layoutOf(workspaceKey);
+    const panes = collectAllPanes(layout.root);
+    expect(panes.map((pane) => pane.id)).toEqual(["p1", "p2"]);
+    expect(panes[0]?.tabIds).toEqual(["a", "c"]);
+    expect(panes[1]?.tabIds).toEqual(["b"]);
+  });
+
+  it("collapses every pane into one without losing a tab", () => {
+    const workspaceKey = seedLayout(
+      {
+        kind: "group",
+        group: {
+          id: "root",
+          direction: "horizontal",
+          children: [
+            createPane({ id: "left", tabIds: ["a", "b"] }),
+            createPane({ id: "right", tabIds: ["c"] }),
+          ],
+          sizes: [0.5, 0.5],
+        },
+      },
+      "right",
+    );
+
+    workspaceLayoutStore.getState().applyPaneLayout(workspaceKey, {});
+
+    const layout = layoutOf(workspaceKey);
+    expect(layout.root.kind).toBe("pane");
+    expect(collectTabIds(layout.root)).toEqual(["a", "b", "c"]);
+    // Focus followed the surviving pane rather than pointing at a pane that is gone.
+    expect(layout.focusedPaneId).toBe("left");
+  });
+
+  it("applies sizes as weights and floors them at MIN_SPLIT_SIZE", () => {
+    const workspaceKey = seedLayout(createPane({ id: "main", tabIds: ["a"] }), "main");
+
+    workspaceLayoutStore.getState().applyPaneLayout(workspaceKey, {
+      direction: "row",
+      children: [{ size: 2 }, { size: 1 }],
+    });
+    const twoToOne = expectGroup(layoutOf(workspaceKey).root).group.sizes;
+    expect(twoToOne[0]).toBeCloseTo(2 / 3, 5);
+    expect(twoToOne[1]).toBeCloseTo(1 / 3, 5);
+
+    workspaceLayoutStore.getState().applyPaneLayout(workspaceKey, {
+      direction: "row",
+      children: [{ size: 100 }, { size: 1 }],
+    });
+    expect(expectGroup(layoutOf(workspaceKey).root).group.sizes).toEqual([0.9, 0.1]);
+  });
+
+  it("treats an omitted size as a weight of 1 alongside sized siblings", () => {
+    const workspaceKey = seedLayout(createPane({ id: "main", tabIds: ["a"] }), "main");
+
+    workspaceLayoutStore
+      .getState()
+      .applyPaneLayout(workspaceKey, { direction: "row", children: [{ size: 3 }, {}] });
+
+    const sizes = expectGroup(layoutOf(workspaceKey).root).group.sizes;
+    expect(sizes[0]).toBeCloseTo(0.75, 5);
+    expect(sizes[1]).toBeCloseTo(0.25, 5);
+  });
+
+  it("keeps the Explorer sidebar docked outside the layout with its tabs intact", () => {
+    const workspaceKey = createWorkspaceKey();
+    workspaceLayoutStore.setState({
+      layoutByWorkspace: { [workspaceKey]: createWorkspaceLayoutWithExplorerSidebar() },
+      splitSizesByWorkspace: {},
+      explorerSidebarPaneIdByWorkspace: { [workspaceKey]: "explorer" },
+      sidePaneIdByWorkspace: {},
+      focusRestorationByWorkspace: {},
+    });
+    const before = findPaneById(layoutOf(workspaceKey).root, "explorer");
+
+    workspaceLayoutStore
+      .getState()
+      .applyPaneLayout(workspaceKey, { direction: "row", children: [{}, {}] });
+
+    const layout = layoutOf(workspaceKey);
+    const explorer = findPaneById(layout.root, "explorer");
+    expect(explorer?.tabIds).toEqual(before?.tabIds);
+    expect(explorer?.hidden).toBe(true);
+    // collectAllPanes skips hidden panes, so this is the two content panes; the Explorer is
+    // still in the tree, asserted above.
+    expect(collectAllPanes(layout.root)).toHaveLength(2);
+    expect(layout.focusedPaneId).not.toBe("explorer");
+  });
+
+  it("never nests past the depth the split helpers allow", () => {
+    const workspaceKey = seedLayout(createPane({ id: "main", tabIds: ["a"] }), "main");
+
+    workspaceLayoutStore.getState().applyPaneLayout(workspaceKey, {
+      direction: "row",
+      children: [
+        {},
+        {
+          direction: "column",
+          children: [{}, { direction: "row", children: [{}, {}] }],
+        },
+      ],
+    });
+
+    expect(getTreeDepth(layoutOf(workspaceKey).root)).toBeLessThanOrEqual(5);
+  });
+
+  it("drops stale drag sizes for this workspace only", () => {
+    const workspaceKey = seedLayout(createPane({ id: "main", tabIds: ["a"] }), "main");
+    workspaceLayoutStore.setState({
+      splitSizesByWorkspace: {
+        [workspaceKey]: { root: [0.2, 0.8] },
+        other: { root: [0.3, 0.7] },
+      },
+    });
+
+    workspaceLayoutStore
+      .getState()
+      .applyPaneLayout(workspaceKey, { direction: "row", children: [{}, {}] });
+
+    const sizes = workspaceLayoutStore.getState().splitSizesByWorkspace;
+    expect(sizes[workspaceKey]).toBeUndefined();
+    expect(sizes.other).toEqual({ root: [0.3, 0.7] });
+  });
+
+  it("keeps parent-tab edges between tabs that survived", () => {
+    const workspaceKey = createWorkspaceKey();
+    workspaceLayoutStore.setState({
+      layoutByWorkspace: {
+        [workspaceKey]: normalizeLayout({
+          root: {
+            kind: "group",
+            group: {
+              id: "root",
+              direction: "horizontal",
+              children: [
+                createPane({ id: "left", tabIds: ["parent"] }),
+                createPane({ id: "right", tabIds: ["child"] }),
+              ],
+              sizes: [0.5, 0.5],
+            },
+          },
+          focusedPaneId: "left",
+          parentTabIdByTabId: { child: "parent" },
+        }),
+      },
+      splitSizesByWorkspace: {},
+      explorerSidebarPaneIdByWorkspace: {},
+      sidePaneIdByWorkspace: {},
+      focusRestorationByWorkspace: {},
+    });
+
+    workspaceLayoutStore.getState().applyPaneLayout(workspaceKey, {});
+
+    expect(layoutOf(workspaceKey).parentTabIdByTabId).toEqual({ child: "parent" });
+  });
+
+  it("ignores a blank workspace key", () => {
+    const before = workspaceLayoutStore.getState().layoutByWorkspace;
+    workspaceLayoutStore.getState().applyPaneLayout("  ", { direction: "row", children: [{}, {}] });
+    expect(workspaceLayoutStore.getState().layoutByWorkspace).toBe(before);
+  });
+});

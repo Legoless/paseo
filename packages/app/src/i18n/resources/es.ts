@@ -1017,6 +1017,17 @@ export const es: TranslationResources = {
       },
     },
   },
+  paneLayouts: {
+    title: "Diseño de paneles",
+    builtIn: {
+      single: "Un solo panel",
+      twoColumns: "Dos columnas",
+      twoRows: "Dos filas",
+      grid: "Cuadrícula {{rows}} × {{columns}}",
+    },
+    emptyHint: "Añade diseños en la carpeta layouts del host",
+    updateHost: "Actualiza este host para usar diseños de paneles personalizados",
+  },
   workspaceLabels: {
     title: "Etiquetas",
     unlabelled: "Sin etiqueta",
