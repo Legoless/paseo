@@ -619,8 +619,9 @@ export const ar: TranslationResources = {
         files: "ملفات",
       },
       projectSelector: {
+        label: "المشروع",
         selectProject: "اختر مشروعًا",
-        home: "المجلد الرئيسي",
+        noProject: "بدون مشروع",
       },
       projectPicker: {
         selectProject: "اختيار المشروع",

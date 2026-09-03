@@ -617,8 +617,9 @@ export const en = {
         files: "Files",
       },
       projectSelector: {
+        label: "Project",
         selectProject: "Select project",
-        home: "Home",
+        noProject: "No project",
       },
       projectPicker: {
         selectProject: "Select project",

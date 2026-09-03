@@ -621,8 +621,9 @@ export const ko: TranslationResources = {
         files: "파일",
       },
       projectSelector: {
+        label: "프로젝트",
         selectProject: "프로젝트 선택",
-        home: "홈",
+        noProject: "프로젝트 없음",
       },
       projectPicker: {
         selectProject: "프로젝트 선택",

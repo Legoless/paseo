@@ -624,8 +624,9 @@ export const es: TranslationResources = {
         files: "Archivos",
       },
       projectSelector: {
+        label: "Proyecto",
         selectProject: "Seleccionar proyecto",
-        home: "Inicio",
+        noProject: "Sin proyecto",
       },
       projectPicker: {
         selectProject: "Seleccionar proyecto",

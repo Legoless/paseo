@@ -88,7 +88,9 @@ test.describe("A pane with no project claims none", () => {
     ).toHaveCount(0);
   });
 
-  test("the launcher offers a project selector that starts on Home", async ({ page }) => {
+  test("the launcher offers a labelled project selector that starts on No project", async ({
+    page,
+  }) => {
     await gotoWorkspace(page, workspace.workspaceId);
     await openNewTabMenuWithShortcut(page);
 
@@ -97,13 +99,18 @@ test.describe("A pane with no project claims none", () => {
       .filter({ visible: true })
       .first();
     await expect(label).toBeVisible({ timeout: 30_000 });
-    await expect(label).toHaveText("Home");
+    await expect(label).toHaveText("No project");
 
     // A launcher pane has no project either, so it shows no branch.
     await expect(page.getByTestId("pane-branch-badge").filter({ visible: true })).toHaveCount(0);
 
+    // The control is labelled, so it reads as a project choice rather than an unexplained row.
+    await expect(
+      page.getByTestId("workspace-new-tab-panel").filter({ visible: true }).first(),
+    ).toContainText("Project");
+
     // The trigger names the real home path, which proves server_info.homeDirectory reached the
-    // app rather than the label merely defaulting to "Home".
+    // app rather than the label merely defaulting.
     const trigger = page
       .getByTestId("workspace-new-tab-project-selector-trigger")
       .filter({ visible: true })
@@ -111,10 +118,11 @@ test.describe("A pane with no project claims none", () => {
     await expect(trigger).toContainText("~");
 
     await trigger.click();
-    const home = page
+    const noProject = page
       .getByTestId("workspace-new-tab-project-selector-home")
       .filter({ visible: true });
-    await expect(home).toBeVisible({ timeout: 10_000 });
-    await expect(home).toContainText("~");
+    await expect(noProject).toBeVisible({ timeout: 10_000 });
+    await expect(noProject).toContainText("No project");
+    await expect(noProject).toContainText("~");
   });
 });

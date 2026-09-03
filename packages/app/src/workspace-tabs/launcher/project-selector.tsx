@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, FolderGit2, House } from "lucide-react-native";
+import { ChevronDown, Folder, FolderGit2 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
   DropdownMenu,
@@ -20,7 +20,8 @@ import { shortenPath } from "@/utils/shorten-path";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
 
 const ThemedFolder = withUnistyles(FolderGit2);
-const ThemedHouse = withUnistyles(House);
+/** A plain folder for "no project"; the git folder means a project is chosen. */
+const ThemedPlainFolder = withUnistyles(Folder);
 const ThemedChevronDown = withUnistyles(ChevronDown);
 
 const mutedMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -36,8 +37,9 @@ export function useHostHomeDirectory(serverId: string): string | null {
 }
 
 /**
- * Chooses the working directory a new tab launches into. Home is the default: a tab created from
- * the launcher belongs to no project until the user says otherwise.
+ * Chooses the project a new tab launches into. "No project" is the default and resolves to the
+ * daemon user's home directory: a tab created from the launcher belongs to no project until the
+ * user picks one.
  */
 export function NewTabProjectSelector({
   serverId,
@@ -72,7 +74,7 @@ export function NewTabProjectSelector({
   }
 
   const selected = selectedCwd ? options.find((option) => option.cwd === selectedCwd) : null;
-  const label = selected?.label ?? t("workspace.tabs.projectSelector.home");
+  const label = selected?.label ?? t("workspace.tabs.projectSelector.noProject");
   const homePath = homeDirectory ? shortenPath(homeDirectory) : "~";
   const path = selected?.path ?? homePath;
 
@@ -88,7 +90,7 @@ export function NewTabProjectSelector({
           {selected ? (
             <ThemedFolder size={ICON_SIZE.sm} uniProps={mutedMapping} />
           ) : (
-            <ThemedHouse size={ICON_SIZE.sm} uniProps={mutedMapping} />
+            <ThemedPlainFolder size={ICON_SIZE.sm} uniProps={mutedMapping} />
           )}
           <Text
             numberOfLines={1}
@@ -116,7 +118,7 @@ export function NewTabProjectSelector({
           onSelect={selectHome}
           testID="workspace-new-tab-project-selector-home"
         >
-          {t("workspace.tabs.projectSelector.home")}
+          {t("workspace.tabs.projectSelector.noProject")}
         </DropdownMenuItem>
         {options.length > 0 ? <DropdownMenuSeparator /> : null}
         <WorkspaceProjectMenuItems

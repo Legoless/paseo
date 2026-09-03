@@ -138,6 +138,7 @@ const NewTabPanel = memo(function NewTabPanel(): ReactElement {
   const { host, serverId, workspaceId, tabId } = usePaneContext();
   // Local to this launcher: you pick a project and immediately launch, so there is nothing worth
   // persisting. null means home.
+  const { t } = useTranslation();
   const [selectedProjectCwd, setSelectedProjectCwd] = useState<string | null>(null);
   const homeDirectory = useHostHomeDirectory(serverId);
   // Against a daemon too old to send a home directory there is nothing to fall back to, so the
@@ -257,12 +258,17 @@ const NewTabPanel = memo(function NewTabPanel(): ReactElement {
     <View ref={containerRef} style={styles.container} testID="workspace-new-tab-panel">
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.rail}>
-          <NewTabProjectSelector
-            serverId={serverId}
-            workspaceId={workspaceId}
-            selectedCwd={selectedProjectCwd}
-            onSelect={setSelectedProjectCwd}
-          />
+          <View style={styles.group}>
+            <View style={styles.groupHeader}>
+              <Text style={styles.groupLabel}>{t("workspace.tabs.projectSelector.label")}</Text>
+            </View>
+            <NewTabProjectSelector
+              serverId={serverId}
+              workspaceId={workspaceId}
+              selectedCwd={selectedProjectCwd}
+              onSelect={setSelectedProjectCwd}
+            />
+          </View>
           {groups.map((group) => (
             <View key={group.id} style={styles.group}>
               {group.label ? (

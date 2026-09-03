@@ -624,8 +624,9 @@ export const ru: TranslationResources = {
         files: "Файлы",
       },
       projectSelector: {
+        label: "Проект",
         selectProject: "Выбрать проект",
-        home: "Домашняя папка",
+        noProject: "Без проекта",
       },
       projectPicker: {
         selectProject: "Выбрать проект",

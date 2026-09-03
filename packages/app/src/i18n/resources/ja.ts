@@ -624,8 +624,9 @@ export const ja: TranslationResources = {
         files: "ファイル",
       },
       projectSelector: {
+        label: "プロジェクト",
         selectProject: "プロジェクトを選択",
-        home: "ホーム",
+        noProject: "プロジェクトなし",
       },
       projectPicker: {
         selectProject: "プロジェクトを選択",
