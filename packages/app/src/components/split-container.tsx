@@ -245,8 +245,8 @@ function PaneProjectTray({
   }
   return (
     <PaneContentToolbar style={styles.paneProjectTray} testID="pane-project-tray">
+      {visibleActions.branch && cwd ? <PaneBranchBadge serverId={serverId} cwd={cwd} /> : null}
       <View style={styles.paneProjectActions}>
-        {visibleActions.branch && cwd ? <PaneBranchBadge serverId={serverId} cwd={cwd} /> : null}
         {visibleActions.editor && cwd ? (
           <WorkspaceOpenInEditorButton serverId={serverId} cwd={cwd} hideLabels />
         ) : null}
