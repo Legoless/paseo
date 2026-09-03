@@ -658,6 +658,10 @@ export const ru: TranslationResources = {
         closeTerminalTitle: "Закрыть терминал?",
         closeTerminalMessage:
           "Любой запущенный процесс в этом терминале будет немедленно остановлен.",
+        switchProjectTitle: "Сменить проект?",
+        switchProjectMessage:
+          "Переписка этого агента будет удалена, а новая начнётся в выбранном проекте.",
+        switchProject: "Сменить",
         archiveRunningAgentTitle: "Архивировать работающего агента?",
         archiveRunningAgentMessage:
           "Этот агент всё ещё работает. При архивировании агент будет остановлен, а вкладка закрыта.",

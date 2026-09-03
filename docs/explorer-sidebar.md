@@ -33,10 +33,17 @@ Uncategorized rule from `packages/app/src/projects/workspace-groups.ts`, so a pa
 row never disagree. An agent that belongs to no project runs in the daemon home directory, and the
 pane shows no badge rather than naming a directory that is nobody's project; add that directory as
 a project and the same agent gets one. The checkout label shows only where the directory is a git
-repository. A draft owns its working directory, so on a draft tab the badge is instead a picker —
-**No project**, the workspace members, and **Browse…**, which opens the add-project flow against
-this workspace — and it stays even while uncategorized, because there it assigns the project rather
-than reporting it. Project-scoped git actions sit immediately left of Explorer.
+repository. On a draft or an agent tab the badge is a picker instead — **No project**, the workspace
+members, and **Browse…**, which opens the add-project flow against this workspace — and it stays
+even while uncategorized, because there it assigns the project rather than reporting it.
+`packages/app/src/workspace-tabs/switch-tab-project.ts` owns which kinds those are: a subagent and a
+plugin's agent pane borrow the parent agent's directory rather than owning one, and a terminal is
+read-only for now. A draft moves in place. An agent cannot — its cwd is fixed on the daemon — so the
+pick relaunches the tab as a fresh draft in the new directory carrying the agent's provider and
+model, archives the old agent, and confirms first whenever a message has already been sent. The
+unpin/hide pair before the retarget is load-bearing: without it `reconcileWorkspaceTabs` re-opens the
+archived-but-still-visible agent beside the new tab. Project-scoped git actions sit immediately left
+of Explorer.
 The global sidebar and workspace header do not own project work chrome on desktop pane layouts.
 Open in editor uses the same pane project directory, so it opens that checkout or worktree rather
 than the workspace primary. The tray's workspace-actions menu configures the visible controls:

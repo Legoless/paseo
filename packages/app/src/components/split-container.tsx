@@ -126,6 +126,7 @@ interface SplitContainerProps {
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
+  onSwitchTabProject: (input: { tabId: string; cwd: string }) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
   onCloseTabsToLeft: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
@@ -222,19 +223,19 @@ function PaneExplorerToggle({ open, onPress }: { open: boolean; onPress: () => v
 function PaneProjectTray({
   serverId,
   workspaceId,
-  workspaceKey,
   cwd,
   activeTab,
   open,
   onPress,
+  onSwitchTabProject,
 }: {
   serverId: string;
   workspaceId: string;
-  workspaceKey: string;
   cwd: string | null;
   activeTab: WorkspaceTabDescriptor | null;
   open: boolean;
   onPress: () => void;
+  onSwitchTabProject: (input: { tabId: string; cwd: string }) => Promise<void> | void;
 }) {
   const { t } = useTranslation();
   const visibleActions = usePanelStore((state) => state.paneProjectActions);
@@ -242,6 +243,12 @@ function PaneProjectTray({
   const toggleBranch = useCallback(() => toggleAction("branch"), [toggleAction]);
   const toggleEditor = useCallback(() => toggleAction("editor"), [toggleAction]);
   const toggleGitActions = useCallback(() => toggleAction("gitActions"), [toggleAction]);
+  const switchTabProject = useCallback(
+    (input: { tabId: string; cwd: string }) => {
+      void onSwitchTabProject(input);
+    },
+    [onSwitchTabProject],
+  );
   // Every project action needs a project, and so does the menu that configures them. A pane
   // holding only the launcher has none, so the tray collapses to the Explorer toggle — or, when
   // the Explorer is already open, to nothing at all rather than an empty bar.
@@ -256,9 +263,9 @@ function PaneProjectTray({
         <PaneProjectBadge
           serverId={serverId}
           workspaceId={workspaceId}
-          workspaceKey={workspaceKey}
           cwd={cwd}
           activeTab={activeTab}
+          onSwitchProject={switchTabProject}
         />
       ) : null}
       {visibleActions.branch && cwd ? <PaneBranchBadge serverId={serverId} cwd={cwd} /> : null}
@@ -486,6 +493,7 @@ export function SplitContainer({
   onCopyTerminalId,
   onCopyFilePath,
   onReloadAgent,
+  onSwitchTabProject,
   onRenameTab,
   onCloseTabsToLeft,
   onCloseTabsToRight,
@@ -769,6 +777,7 @@ export function SplitContainer({
                   onCopyTerminalId={onCopyTerminalId}
                   onCopyFilePath={onCopyFilePath}
                   onReloadAgent={onReloadAgent}
+                  onSwitchTabProject={onSwitchTabProject}
                   onRenameTab={onRenameTab}
                   onCloseTabsToLeft={onCloseTabsToLeft}
                   onCloseTabsToRight={onCloseTabsToRight}
@@ -1015,6 +1024,7 @@ function SplitNodeView({
   onCopyTerminalId,
   onCopyFilePath,
   onReloadAgent,
+  onSwitchTabProject,
   onRenameTab,
   onCloseTabsToLeft,
   onCloseTabsToRight,
@@ -1125,6 +1135,7 @@ function SplitNodeView({
             onCopyTerminalId={onCopyTerminalId}
             onCopyFilePath={onCopyFilePath}
             onReloadAgent={onReloadAgent}
+            onSwitchTabProject={onSwitchTabProject}
             onRenameTab={onRenameTab}
             onCloseTabsToLeft={onCloseTabsToLeft}
             onCloseTabsToRight={onCloseTabsToRight}
@@ -1186,6 +1197,7 @@ function SplitNodeView({
               onCopyTerminalId={onCopyTerminalId}
               onCopyFilePath={onCopyFilePath}
               onReloadAgent={onReloadAgent}
+              onSwitchTabProject={onSwitchTabProject}
               onRenameTab={onRenameTab}
               onCloseTabsToLeft={onCloseTabsToLeft}
               onCloseTabsToRight={onCloseTabsToRight}
@@ -1256,6 +1268,7 @@ function SplitPaneView({
   onCopyTerminalId,
   onCopyFilePath,
   onReloadAgent,
+  onSwitchTabProject,
   onRenameTab,
   onCloseTabsToLeft,
   onCloseTabsToRight,
@@ -1519,11 +1532,11 @@ function SplitPaneView({
             <PaneProjectTray
               serverId={normalizedServerId}
               workspaceId={normalizedWorkspaceId}
-              workspaceKey={workspaceKey}
               cwd={paneWorkspaceRoot}
               activeTab={activeTabDescriptor}
               open={explorerOpenForPane}
               onPress={handleTogglePaneExplorer}
+              onSwitchTabProject={onSwitchTabProject}
             />
             <View style={styles.panePanelContent}>
               <WorkspacePanelHost
