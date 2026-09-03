@@ -235,54 +235,63 @@ function PaneProjectTray({
   const toggleBranch = useCallback(() => toggleAction("branch"), [toggleAction]);
   const toggleEditor = useCallback(() => toggleAction("editor"), [toggleAction]);
   const toggleGitActions = useCallback(() => toggleAction("gitActions"), [toggleAction]);
+  // Every project action needs a project, and so does the menu that configures them. A pane
+  // holding only the launcher has none, so the tray collapses to the Explorer toggle — or, when
+  // the Explorer is already open, to nothing at all rather than an empty bar.
+  const showProjectActions = Boolean(cwd);
+  const showExplorerToggle = !open;
+  if (!showProjectActions && !showExplorerToggle) {
+    return null;
+  }
   return (
     <PaneContentToolbar style={styles.paneProjectTray} testID="pane-project-tray">
-      {visibleActions.branch && cwd ? <PaneBranchBadge serverId={serverId} cwd={cwd} /> : null}
       <View style={styles.paneProjectActions}>
+        {visibleActions.branch && cwd ? <PaneBranchBadge serverId={serverId} cwd={cwd} /> : null}
         {visibleActions.editor && cwd ? (
           <WorkspaceOpenInEditorButton serverId={serverId} cwd={cwd} hideLabels />
         ) : null}
         {visibleActions.gitActions && cwd ? (
           <WorkspaceActions serverId={serverId} cwd={cwd} />
         ) : null}
-        <DropdownMenu>
-          <ToolbarButton
-            kind="menu"
-            label={t("workspace.header.actions.workspaceActions")}
-            testID="pane-project-commands-toggle"
-            tooltipSide="left"
-          >
-            <ThemedEllipsis size={14} uniProps={extraMutedIconMapping} />
-          </ToolbarButton>
-          <DropdownMenuContent align="end" minWidth={180} testID="pane-project-commands-menu">
-            <DropdownMenuItem
-              selected={visibleActions.branch}
-              showSelectedCheck
-              disabled={!cwd}
-              closeOnSelect={false}
-              onSelect={toggleBranch}
+        {showProjectActions ? (
+          <DropdownMenu>
+            <ToolbarButton
+              kind="menu"
+              label={t("workspace.header.actions.workspaceActions")}
+              testID="pane-project-commands-toggle"
+              tooltipSide="left"
             >
-              {t("sidebar.display.show.branch")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              selected={visibleActions.editor}
-              showSelectedCheck
-              closeOnSelect={false}
-              onSelect={toggleEditor}
-            >
-              {t("workspace.git.openInEditor.chooseEditor")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              selected={visibleActions.gitActions}
-              showSelectedCheck
-              closeOnSelect={false}
-              onSelect={toggleGitActions}
-            >
-              {t("workspace.git.actions.push.label")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        {!open ? <PaneExplorerToggle open={false} onPress={onPress} /> : null}
+              <ThemedEllipsis size={14} uniProps={extraMutedIconMapping} />
+            </ToolbarButton>
+            <DropdownMenuContent align="end" minWidth={180} testID="pane-project-commands-menu">
+              <DropdownMenuItem
+                selected={visibleActions.branch}
+                showSelectedCheck
+                closeOnSelect={false}
+                onSelect={toggleBranch}
+              >
+                {t("sidebar.display.show.branch")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                selected={visibleActions.editor}
+                showSelectedCheck
+                closeOnSelect={false}
+                onSelect={toggleEditor}
+              >
+                {t("workspace.git.openInEditor.chooseEditor")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                selected={visibleActions.gitActions}
+                showSelectedCheck
+                closeOnSelect={false}
+                onSelect={toggleGitActions}
+              >
+                {t("workspace.git.actions.push.label")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+        {showExplorerToggle ? <PaneExplorerToggle open={false} onPress={onPress} /> : null}
       </View>
     </PaneContentToolbar>
   );
