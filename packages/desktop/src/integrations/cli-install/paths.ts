@@ -1,18 +1,22 @@
 import path from "node:path";
 import os from "node:os";
 import { app } from "electron";
+import { CLI_BIN_NAME } from "../../variant.js";
 
 export function getLocalBinDir(): string {
   return path.join(os.homedir(), ".local", "bin");
 }
 
+function cliBinFilename(): string {
+  return process.platform === "win32" ? `${CLI_BIN_NAME}.cmd` : CLI_BIN_NAME;
+}
+
 export function getCliTargetPath(): string {
-  const filename = process.platform === "win32" ? "paseo.cmd" : "paseo";
-  return path.join(getLocalBinDir(), filename);
+  return path.join(getLocalBinDir(), cliBinFilename());
 }
 
 export function getBundledCliShimPath(): string {
-  const cliShimFilename = process.platform === "win32" ? "paseo.cmd" : "paseo";
+  const cliShimFilename = cliBinFilename();
 
   if (process.platform === "darwin") {
     const electronExePath = app.getPath("exe");

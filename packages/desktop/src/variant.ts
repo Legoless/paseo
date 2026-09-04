@@ -42,6 +42,10 @@ export const isNeo = variant?.variant === "neo";
 
 export const APP_NAME = process.env.PASEO_TEST_APP_NAME?.trim() || (isNeo ? "Paseo Neo" : "Paseo");
 export const APP_SCHEME = isNeo ? "paseo-neo" : "paseo";
+// Neo installs its CLI under its own name so it can sit on PATH beside the
+// official app's `paseo` instead of overwriting that symlink. Must match the
+// `to:` filename the variant's electron-builder config ships the shim as.
+export const CLI_BIN_NAME = isNeo ? "paseoneo" : "paseo";
 export const NEO_PASEO_HOME = path.join(process.env.HOME ?? "~", ".paseo-neo");
 // ponytail: port 6768 chosen to leave room for dev ports 6769+; change if it collides.
 export const NEO_PASEO_LISTEN = "127.0.0.1:6768";

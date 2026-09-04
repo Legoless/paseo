@@ -20,29 +20,54 @@ done
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)
 RESOURCES_DIR=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)
 
-MACOS_DIR="${RESOURCES_DIR}/../MacOS"
-MACOS_HELPER_EXECUTABLE="${RESOURCES_DIR}/../Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper"
+APP_ROOT=$(CDPATH= cd -- "${RESOURCES_DIR}/.." && pwd)
+MACOS_DIR="${APP_ROOT}/MacOS"
 
 # macOS CLI invocations must enter Electron through the agent Helper. Launching
 # the main APPL executable here makes later daemon supervision inherit app UI
 # lifecycle behavior.
 if [ -d "${MACOS_DIR}" ]; then
+  # Every executable inside the bundle is named after the product, which differs
+  # per build variant ("Paseo", "Paseo Neo"). Read it off the bundle rather than
+  # baking it in, so one shim serves every variant.
+  APP_NAME=$(basename -- "$(dirname -- "${APP_ROOT}")" .app)
+  MACOS_HELPER_EXECUTABLE="${APP_ROOT}/Frameworks/${APP_NAME} Helper.app/Contents/MacOS/${APP_NAME} Helper"
   if [ ! -x "${MACOS_HELPER_EXECUTABLE}" ]; then
-    echo "Bundled Paseo Helper executable not found at ${MACOS_HELPER_EXECUTABLE}" >&2
+    echo "Bundled ${APP_NAME} Helper executable not found at ${MACOS_HELPER_EXECUTABLE}" >&2
     exit 1
   fi
   APP_EXECUTABLE="${MACOS_HELPER_EXECUTABLE}"
-elif [ -x "${RESOURCES_DIR}/../Paseo.bin" ]; then
-  APP_EXECUTABLE="${RESOURCES_DIR}/../Paseo.bin"
-elif [ -x "${RESOURCES_DIR}/../Paseo" ]; then
-  APP_EXECUTABLE="${RESOURCES_DIR}/../Paseo"
 else
-  echo "Bundled Paseo executable not found relative to ${RESOURCES_DIR}" >&2
-  exit 1
+  # Linux and Windows name the executable after the product too, so match on
+  # shape instead. `.bin` first: electron-builder's launcher wrapper shares the
+  # product name with the real binary beside it.
+  APP_EXECUTABLE=""
+  for CANDIDATE in "${APP_ROOT}"/*.bin "${APP_ROOT}"/*; do
+    if [ -f "${CANDIDATE}" ] && [ -x "${CANDIDATE}" ]; then
+      APP_EXECUTABLE="${CANDIDATE}"
+      break
+    fi
+  done
+  if [ -z "${APP_EXECUTABLE}" ]; then
+    echo "Bundled Paseo executable not found relative to ${RESOURCES_DIR}" >&2
+    exit 1
+  fi
 fi
 
 RUNNER_PATH="${RESOURCES_DIR}/app.asar.unpacked/dist/daemon/node-entrypoint-runner.js"
 CLI_ENTRYPOINT="${RESOURCES_DIR}/app.asar/node_modules/@getpaseo/cli/dist/index.js"
+
+# Neo runs its own daemon on its own home and port so it can sit beside the
+# official app. Without this the CLI would default to ~/.paseo on 6767 and talk
+# to the wrong daemon — or to none at all. An explicit value from the caller
+# still wins. Keep in step with NEO_PASEO_HOME/NEO_PASEO_LISTEN in
+# src/variant.ts; cli-bin-name.test.ts fails if they drift.
+VARIANT_MANIFEST="${RESOURCES_DIR}/variant.json"
+if [ -f "${VARIANT_MANIFEST}" ] && grep -q '"variant"[[:space:]]*:[[:space:]]*"neo"' "${VARIANT_MANIFEST}"; then
+  PASEO_HOME="${PASEO_HOME:-${HOME}/.paseo-neo}"
+  PASEO_LISTEN="${PASEO_LISTEN:-127.0.0.1:6768}"
+  export PASEO_HOME PASEO_LISTEN
+fi
 
 # PASEO_DESKTOP_MANAGED marks daemons started through this bundled CLI as
 # desktop-managed, so the desktop app restarts them when it upgrades.
