@@ -1,5 +1,12 @@
-import { memo, useMemo, useCallback, useState, type ReactNode } from "react";
-import { Pressable, Text, View, type GestureResponderEvent } from "react-native";
+import { memo, useMemo, useCallback, useRef, useState, type ReactNode } from "react";
+import {
+  Pressable,
+  Text,
+  View,
+  type GestureResponderEvent,
+  type StyleProp,
+  type TextStyle,
+} from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ChevronDown, ChevronRight, Folder, FolderOpen } from "lucide-react-native";
 import { ProjectStatusIndicator } from "@/components/sidebar/project-leading-visual";
@@ -20,6 +27,10 @@ import type { Theme } from "@/styles/theme";
 import { resolveSidebarWorkspacePrimaryLabel } from "@/components/sidebar/sidebar-workspace-title";
 import { TrailingActionScrim } from "@/components/ui/trailing-action-scrim";
 import { useWorkspaceLabelDefinitions } from "@/workspace-labels";
+import { AdaptiveTextInput } from "@/components/adaptive-text-input";
+import { getHostRuntimeStore } from "@/runtime/host-runtime";
+import { useWorkspaceRenameIntentStore } from "@/stores/workspace-rename-intent-store";
+import { resolveWorkspaceRenameOutcome } from "@/components/sidebar/workspace-inline-rename";
 
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const ThemedFolder = withUnistyles(Folder);
@@ -124,6 +135,13 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
     settings: { workspaceTitleSource },
   } = useAppSettings();
   const workspaceLabel = resolveSidebarWorkspacePrimaryLabel({ workspace, workspaceTitleSource });
+  // Cheap despite being per-row: this store only changes when a workspace is
+  // created, and the selector collapses to a boolean so other rows never
+  // re-render. Kept here rather than at the three call sites so every surface
+  // that renders a workspace row can be renamed in place.
+  const isRenaming = useWorkspaceRenameIntentStore(
+    (state) => state.workspaceKey === workspace.workspaceKey,
+  );
   // The workspace carries label names; their colors live in its host's catalog, so the row is
   // where the two meet — the meta line is handed finished definitions.
   const labels = useWorkspaceLabelDefinitions(workspace.serverId, workspace.labels);
@@ -160,9 +178,13 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
         )}
         <View style={styles.workspaceContentColumn}>
           <View style={styles.workspaceTitleRow}>
-            <Text style={workspaceBranchTextStyle} numberOfLines={1}>
-              {workspaceLabel}
-            </Text>
+            {isRenaming ? (
+              <WorkspaceInlineNameEditor workspace={workspace} style={workspaceBranchTextStyle} />
+            ) : (
+              <Text style={workspaceBranchTextStyle} numberOfLines={1}>
+                {workspaceLabel}
+              </Text>
+            )}
             <View style={sidebarWorkspaceRowStyles.rowRight}>{children}</View>
           </View>
           <WorkspaceMetaRow
@@ -182,6 +204,67 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
     </View>
   );
 });
+
+/**
+ * Renames a workspace where it sits. Raised automatically right after a workspace
+ * is created, so naming it is one keystroke rather than a trip through a dialog.
+ *
+ * Enter commits; Escape and blur leave the current name alone. Blur deliberately
+ * does not commit: the workspace already has a usable name, so losing a
+ * half-typed one costs nothing, while committing it by accident does.
+ */
+function WorkspaceInlineNameEditor({
+  workspace,
+  style,
+}: {
+  workspace: SidebarWorkspaceEntry;
+  style: StyleProp<TextStyle>;
+}) {
+  const clearIntent = useWorkspaceRenameIntentStore((state) => state.clear);
+  const valueRef = useRef(workspace.title ?? workspace.name);
+  const committedRef = useRef(false);
+
+  const finish = useCallback(() => {
+    clearIntent(workspace.workspaceKey);
+  }, [clearIntent, workspace.workspaceKey]);
+
+  const handleSubmit = useCallback(() => {
+    if (committedRef.current) return;
+    committedRef.current = true;
+    const outcome = resolveWorkspaceRenameOutcome({
+      value: valueRef.current,
+      title: workspace.title ?? null,
+      name: workspace.name,
+    });
+    finish();
+    if (outcome.kind === "unchanged") return;
+    const client = getHostRuntimeStore().getClient(workspace.serverId);
+    if (!client) return;
+    void client.setWorkspaceTitle(
+      workspace.workspaceId,
+      outcome.kind === "reset" ? null : outcome.title,
+    );
+  }, [finish, workspace.name, workspace.serverId, workspace.title, workspace.workspaceId]);
+
+  const handleChangeText = useCallback((next: string) => {
+    valueRef.current = next;
+  }, []);
+
+  return (
+    <AdaptiveTextInput
+      initialValue={workspace.title ?? workspace.name}
+      onChangeText={handleChangeText}
+      onSubmitEditing={handleSubmit}
+      onBlur={finish}
+      autoFocus
+      selectTextOnFocus
+      autoCapitalize="none"
+      autoCorrect={false}
+      style={[style, styles.workspaceNameInput]}
+      testID={`sidebar-workspace-name-input-${workspace.workspaceKey}`}
+    />
+  );
+}
 
 function WorkspaceLeadingSlot({
   reserveIdleSpace = true,
@@ -467,6 +550,11 @@ const styles = StyleSheet.create((theme) => ({
   },
   // The title owns the first line outright now that the host, change request and CI moved
   // to the meta row, so it takes the full width the trailing slot leaves behind.
+  workspaceNameInput: {
+    flex: 1,
+    padding: 0,
+    margin: 0,
+  },
   workspaceBranchText: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.base,

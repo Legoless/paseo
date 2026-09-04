@@ -5,6 +5,7 @@ import { useHosts } from "@/runtime/host-runtime";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { normalizeWorkspaceDescriptor, useSessionStore } from "@/stores/session-store";
+import { requestWorkspaceRename } from "@/stores/workspace-rename-intent-store";
 import { toErrorMessage } from "@/utils/error-messages";
 
 /**
@@ -61,6 +62,10 @@ export function useCreateProjectlessWorkspace(): () => Promise<boolean> {
       const workspace = normalizeWorkspaceDescriptor(payload.workspace);
       useSessionStore.getState().mergeWorkspaces(serverId, [workspace]);
       navigateToWorkspace({ serverId, workspaceId: workspace.id });
+      // A workspace with no projects has nothing but its name to identify it, so
+      // hand the user the name field straight away rather than making them find
+      // the rename action. Enter on the untouched field keeps the default.
+      requestWorkspaceRename({ serverId, workspaceId: workspace.id });
     } catch (error) {
       toast.error(toErrorMessage(error));
     }
