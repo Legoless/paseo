@@ -6,6 +6,7 @@ import {
   ExternalLink,
   GitBranch,
   MoreVertical,
+  SquarePen,
   Tag,
   Trash2,
   X,
@@ -26,6 +27,8 @@ import { ContextMenuSeparator } from "@/components/ui/context-menu";
 import { WorkspaceMenuItem } from "@/components/sidebar/workspace-menu-item";
 import { OpenInFileManagerMenuItem } from "@/workspace/open-in-file-manager/menu-item";
 import { WORKSPACE_LABEL_PAGE_ID } from "@/workspace-labels/picker";
+import { TerminalProfileIcon } from "@/components/terminal-profile-icon";
+import { useLaunchProjectTab } from "@/hooks/use-launch-project-tab";
 
 const ThemedMoreVertical = withUnistyles(MoreVertical);
 const ThemedTrash2 = withUnistyles(Trash2);
@@ -35,6 +38,7 @@ const ThemedExternalLink = withUnistyles(ExternalLink);
 const ThemedArchive = withUnistyles(Archive);
 const ThemedTag = withUnistyles(Tag);
 const ThemedX = withUnistyles(X);
+const ThemedSquarePen = withUnistyles(SquarePen);
 
 const foregroundColorMapping = (theme: Theme) => ({
   color: theme.colors.foreground,
@@ -60,6 +64,8 @@ const openLeadingIcon = <ThemedExternalLink size={14} uniProps={foregroundMutedC
 const archiveLeadingIcon = <ThemedArchive size={14} uniProps={foregroundMutedColorMapping} />;
 const labelLeadingIcon = <ThemedTag size={14} uniProps={foregroundMutedColorMapping} />;
 const closeLeadingIcon = <ThemedX size={14} uniProps={foregroundMutedColorMapping} />;
+const newAgentLeadingIcon = <ThemedSquarePen size={14} uniProps={foregroundMutedColorMapping} />;
+const newTerminalLeadingIcon = <TerminalProfileIcon iconKey={undefined} size={14} />;
 
 function kebabStyle({ hovered = false }: { hovered?: boolean }) {
   return [styles.kebabButton, hovered && styles.kebabButtonHovered];
@@ -77,6 +83,7 @@ function renderKebabTriggerIcon({ hovered }: { hovered?: boolean }) {
 export interface WorkspaceMemberMenuItemsProps {
   member: SidebarWorkspaceMemberRow;
   serverId: string;
+  workspaceId: string;
   surface: "context" | "dropdown";
   canRemove: boolean;
   onCopyPath: () => void;
@@ -86,6 +93,7 @@ export interface WorkspaceMemberMenuItemsProps {
 export function WorkspaceMemberMenuItems({
   member,
   serverId,
+  workspaceId,
   surface,
   canRemove,
   onCopyPath,
@@ -93,8 +101,34 @@ export function WorkspaceMemberMenuItems({
 }: WorkspaceMemberMenuItemsProps) {
   const { t } = useTranslation();
   const Separator = surface === "context" ? ContextMenuSeparator : DropdownMenuSeparator;
+  const { launchAgent, launchTerminal } = useLaunchProjectTab({ serverId, workspaceId });
+  const onNewAgent = React.useCallback(
+    () => launchAgent(member.workspaceDirectory),
+    [launchAgent, member.workspaceDirectory],
+  );
+  const onNewTerminal = React.useCallback(
+    () => launchTerminal(member.workspaceDirectory),
+    [launchTerminal, member.workspaceDirectory],
+  );
   return (
     <>
+      <WorkspaceMenuItem
+        surface={surface}
+        testID={`sidebar-member-menu-new-agent-${member.memberKey}`}
+        leading={newAgentLeadingIcon}
+        onSelect={onNewAgent}
+      >
+        {t("workspace.header.actions.newAgent")}
+      </WorkspaceMenuItem>
+      <WorkspaceMenuItem
+        surface={surface}
+        testID={`sidebar-member-menu-new-terminal-${member.memberKey}`}
+        leading={newTerminalLeadingIcon}
+        onSelect={onNewTerminal}
+      >
+        {t("workspace.header.actions.newTerminal")}
+      </WorkspaceMenuItem>
+      <Separator />
       <WorkspaceMenuItem
         surface={surface}
         testID={`sidebar-member-menu-copy-path-${member.memberKey}`}
@@ -129,6 +163,7 @@ export function WorkspaceMemberMenuItems({
 export function WorkspaceMemberKebabMenu({
   member,
   serverId,
+  workspaceId,
   onFocus,
   onBlur,
   canRemove,
@@ -156,6 +191,7 @@ export function WorkspaceMemberKebabMenu({
         <WorkspaceMemberMenuItems
           member={member}
           serverId={serverId}
+          workspaceId={workspaceId}
           surface="dropdown"
           canRemove={canRemove}
           onCopyPath={onCopyPath}

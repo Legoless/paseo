@@ -141,6 +141,7 @@ const testMember: SidebarWorkspaceMemberRow = {
 };
 
 const SERVER_ID = "sidebar-render-count";
+const WORKSPACE_ID = "test-wk";
 
 interface RenderCounts {
   frame: number;
@@ -554,11 +555,12 @@ describe("sidebar workspace menu items", () => {
     expect(screen.getByTestId("sidebar-workspace-menu-archive-test-wk")).toBeTruthy();
   });
 
-  it("member menu includes copy path, open folder, and remove but not copy branch", () => {
+  it("member menu starts an agent or terminal in the project, and keeps the copy actions", () => {
     render(
       <WorkspaceMemberMenuItems
         member={testMember}
         serverId={SERVER_ID}
+        workspaceId={WORKSPACE_ID}
         surface="context"
         canRemove
         onCopyPath={vi.fn()}
@@ -566,6 +568,12 @@ describe("sidebar workspace menu items", () => {
       />,
     );
 
+    expect(
+      screen.getByTestId("sidebar-member-menu-new-agent-test-wk#/repo/project-a/main"),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("sidebar-member-menu-new-terminal-test-wk#/repo/project-a/main"),
+    ).toBeTruthy();
     expect(
       screen.getByTestId("sidebar-member-menu-copy-path-test-wk#/repo/project-a/main"),
     ).toBeTruthy();
@@ -583,6 +591,7 @@ describe("sidebar workspace menu items", () => {
       <WorkspaceMemberMenuItems
         member={testMember}
         serverId={SERVER_ID}
+        workspaceId={WORKSPACE_ID}
         surface="context"
         canRemove={false}
         onCopyPath={vi.fn()}
