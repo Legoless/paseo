@@ -1462,6 +1462,10 @@ export const ko: TranslationResources = {
         title: "프로젝트 추가",
         description: "내 컴퓨터의 폴더를 엽니다",
       },
+      newWorkspace: {
+        title: "새 워크스페이스",
+        description: "빈 상태로 시작하고 나중에 프로젝트를 추가합니다",
+      },
       importSession: {
         title: "세션 가져오기",
         description: "최근 외부 CLI 세션을 가져옵니다",

@@ -3,10 +3,11 @@ import { useTranslation } from "react-i18next";
 import { View, Text, Pressable } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useRouter } from "expo-router";
-import { FolderOpen, Inbox, Plug, Smartphone } from "lucide-react-native";
+import { FolderOpen, Inbox, LayoutGrid, Plug, Smartphone } from "lucide-react-native";
 import { PaseoLogo } from "@/components/icons/paseo-logo";
 import { CommunityLinks } from "@/components/community-links";
 import { MenuHeader } from "@/components/headers/menu-header";
+import { useCreateProjectlessWorkspace } from "@/hooks/use-create-projectless-workspace";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { useHostChooser } from "@/hosts/host-chooser";
 import { usePanelStore } from "@/stores/panel-store";
@@ -19,7 +20,11 @@ import {
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import { PairDeviceModal } from "@/desktop/components/pair-device-modal";
-import { buildHostAgentDetailRoute, buildSettingsHostSectionRoute } from "@/utils/host-routes";
+import {
+  buildHostAgentDetailRoute,
+  buildNewWorkspaceRoute,
+  buildSettingsHostSectionRoute,
+} from "@/utils/host-routes";
 import { ImportSessionSheet } from "@/components/import-session-sheet";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useOpenProject } from "@/hooks/use-open-project";
@@ -30,6 +35,7 @@ export function OpenProjectScreen() {
   const router = useRouter();
   const openDesktopAgentList = usePanelStore((s) => s.openDesktopAgentList);
   const openProjectPicker = useOpenAddProject();
+  const createProjectlessWorkspace = useCreateProjectlessWorkspace();
   const chooseHost = useHostChooser();
   const localServerId = useLocalDaemonServerId();
   const [importServerId, setImportServerId] = useState<string | null>(null);
@@ -49,6 +55,14 @@ export function OpenProjectScreen() {
   const handleOpenPicker = useCallback(() => {
     void openProjectPicker();
   }, [openProjectPicker]);
+
+  const handleCreateWorkspace = useCallback(() => {
+    void (async () => {
+      // Falls back to the New Workspace screen, which is the surface that can
+      // ask which host to use when several are configured and none is active.
+      if (!(await createProjectlessWorkspace())) router.push(buildNewWorkspaceRoute() as Href);
+    })();
+  }, [createProjectlessWorkspace, router]);
 
   const handleOpenPairDevice = useCallback(() => setIsPairDeviceOpen(true), []);
   const handleClosePairDevice = useCallback(() => setIsPairDeviceOpen(false), []);
@@ -102,6 +116,13 @@ export function OpenProjectScreen() {
             onPress={handleOpenPicker}
             testID="open-project-submit"
             accent
+          />
+          <HomeTile
+            icon={LayoutGrid}
+            title={t("openProject.tiles.newWorkspace.title")}
+            description={t("openProject.tiles.newWorkspace.description")}
+            onPress={handleCreateWorkspace}
+            testID="open-project-new-workspace"
           />
           <HomeTile
             icon={Inbox}

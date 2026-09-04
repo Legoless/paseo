@@ -1496,6 +1496,10 @@ export const es: TranslationResources = {
         title: "Agregar un proyecto",
         description: "Abra una carpeta en su máquina",
       },
+      newWorkspace: {
+        title: "Nuevo espacio de trabajo",
+        description: "Empiece vacío y agregue proyectos después",
+      },
       importSession: {
         title: "Importar sesión",
         description: "Incorporar sesionesCLIexternas recientes",

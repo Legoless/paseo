@@ -1499,6 +1499,10 @@ export const fr: TranslationResources = {
         title: "Ajouter un projet",
         description: "Ouvrez un dossier sur votre machine",
       },
+      newWorkspace: {
+        title: "Nouvel espace de travail",
+        description: "Commencez à vide et ajoutez des projets plus tard",
+      },
       importSession: {
         title: "Session d'importation",
         description: "Apportez des sessionsCLIexternes récentes",

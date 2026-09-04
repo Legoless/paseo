@@ -1482,6 +1482,10 @@ export const ptBR: TranslationResources = {
         title: "Adicionar um projeto",
         description: "Abra uma pasta na sua máquina",
       },
+      newWorkspace: {
+        title: "Novo workspace",
+        description: "Comece vazio e adicione projetos depois",
+      },
       importSession: {
         title: "Importar sessão",
         description: "Importe sessões externas recentes da CLI",
