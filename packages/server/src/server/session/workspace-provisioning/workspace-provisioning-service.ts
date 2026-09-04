@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import type { Logger } from "pino";
 import {
@@ -74,6 +75,11 @@ export interface WorkspaceProvisioningService {
     cwd: string,
     title?: string | null,
     projectId?: string,
+    context?: { expectsInitialAgent?: boolean },
+  ): Promise<PersistedWorkspaceRecord>;
+  // COMPAT(workspaceProjectless): added in v0.8.0, remove after 2028-03-01.
+  createProjectlessWorkspace(
+    title?: string | null,
     context?: { expectsInitialAgent?: boolean },
   ): Promise<PersistedWorkspaceRecord>;
   createWorkspaceForWorktree(
@@ -226,6 +232,40 @@ export function createWorkspaceProvisioningService(deps: {
       projectId: project.projectId,
       ...initialWorkspacePlacement({ source: "checkout", cwd: normalizedCwd, checkout }),
       title: title?.trim() || null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    await workspaceRegistry.upsert(workspace, context);
+    return workspace;
+  }
+
+  /**
+   * COMPAT(workspaceProjectless): added in v0.8.0. Creates a workspace holding no
+   * projects — a pane arrangement whose panes each carry their own project.
+   *
+   * `members: []` is the truth. The scalar mirror is still filled, pointed at the
+   * daemon home directory with the workspace's own id standing in for a project,
+   * because the descriptor's scalar fields are required on the wire and clients
+   * older than v0.8.0 read only those. A unique stand-in keeps such a client
+   * listing each empty workspace separately instead of collapsing them all into
+   * one bogus project group. No project record is created, so the user's project
+   * list stays clean; nothing resolves that id.
+   */
+  async function createProjectlessWorkspace(
+    title?: string | null,
+    context?: { expectsInitialAgent?: boolean },
+  ): Promise<PersistedWorkspaceRecord> {
+    const timestamp = new Date().toISOString();
+    const workspaceId = generateWorkspaceId();
+    const displayName = title?.trim() || "New workspace";
+    const workspace = createPersistedWorkspaceRecord({
+      workspaceId,
+      projectId: workspaceId,
+      cwd: homedir(),
+      kind: "directory",
+      displayName,
+      title: title?.trim() || null,
+      members: [],
       createdAt: timestamp,
       updatedAt: timestamp,
     });
@@ -583,6 +623,7 @@ export function createWorkspaceProvisioningService(deps: {
     findOrCreateWorkspaceForDirectory,
     resolveOrCreateWorkspaceIdForCreateAgent,
     createWorkspaceForDirectory,
+    createProjectlessWorkspace,
     createWorkspaceForWorktree,
     findOrCreateProjectForDirectory,
     ensureWorkspaceRecordUnarchived,

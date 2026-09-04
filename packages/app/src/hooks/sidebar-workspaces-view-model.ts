@@ -14,6 +14,7 @@ import type { WorkspaceAgentActivity } from "@/utils/workspace-agent-activity";
 import { resolveWorkspaceMapKeyByIdentity } from "@/utils/workspace-identity";
 
 const EMPTY_PROJECTS: SidebarProjectEntry[] = [];
+const EMPTY_PLACEMENTS: SidebarWorkspacePlacement[] = [];
 
 export type SidebarStateBucket = WorkspaceDescriptor["status"];
 
@@ -21,6 +22,12 @@ export interface SidebarWorkspacePlacement {
   workspaceKey: string;
   serverId: string;
   workspaceId: string;
+  /**
+   * Both are the empty string for a projectless workspace — one that holds no project at all and
+   * is a pane arrangement only. The sentinel is what every consumer already reads: no project
+   * group to join, no icon target to key, and a falsy `projectName` renders the plain workspace
+   * glyph instead of a project icon.
+   */
   projectViewKey: string;
   projectName: string;
   projectRootPath?: string;
@@ -129,6 +136,12 @@ interface EffectiveWorkspaceStatus {
 }
 
 function projectNameForWorkspace(workspace: WorkspaceDescriptor): string {
+  // A projectless workspace still carries a scalar `projectId`, but it is synthetic and names no
+  // project record, so deriving a display name from it would invent a project the workspace does
+  // not have. Empty is the placement's "no project" sentinel.
+  if (workspace.members.length === 0) {
+    return "";
+  }
   return (
     workspace.projectCustomName ??
     workspace.projectDisplayName ??
@@ -289,15 +302,57 @@ export function deriveProjectStatusBucket(input: {
 
 export function buildSidebarWorkspacePlacementModel(input: {
   projects: readonly HostProjectListItem[];
+  /** Top-level rows that no project group can supply — see `selectProjectlessWorkspacePlacements`. */
+  projectlessWorkspaces?: readonly SidebarWorkspacePlacement[];
 }): SidebarWorkspacePlacementModel {
   const projects = buildSidebarProjectsFromHostProjects({ projects: input.projects });
   return {
     projects,
-    workspaces: projects.flatMap((project) => project.workspaces),
+    workspaces: [
+      ...projects.flatMap((project) => project.workspaces),
+      ...(input.projectlessWorkspaces ?? EMPTY_PLACEMENTS),
+    ],
     projectNamesByViewKey: new Map(
       projects.map((project) => [project.viewKey, project.projectName]),
     ),
   };
+}
+
+/**
+ * Placements for workspaces that hold no project. They cannot come out of the project groups the
+ * rest of the sidebar is projected from, so they are read straight off the session store and
+ * appended as ordinary top-level rows.
+ *
+ * `members.length === 0` is the only usable test. A projectless workspace still ships populated
+ * scalar `projectId`/`projectRootPath`/`workspaceDirectory` mirror fields — pointed at the daemon
+ * home — so that pre-v0.8.0 clients can parse the descriptor at all.
+ */
+export function selectProjectlessWorkspacePlacements(
+  sessions: Record<string, { workspaces: ReadonlyMap<string, WorkspaceDescriptor> } | undefined>,
+  serverIds: readonly string[],
+): SidebarWorkspacePlacement[] {
+  const placements: SidebarWorkspacePlacement[] = [];
+  for (const serverId of serverIds) {
+    const session = sessions[serverId];
+    if (!session) continue;
+    for (const workspace of session.workspaces.values()) {
+      if (workspace.members.length > 0) continue;
+      placements.push({
+        workspaceKey: `${serverId}:${workspace.id}`,
+        serverId,
+        workspaceId: workspace.id,
+        projectViewKey: "",
+        projectName: "",
+        projectKind: workspace.projectKind,
+        workspaceKind: workspace.workspaceKind,
+        // Sorts the top-level rows. Unlike a structural placement, which stands in for a row the
+        // session store has not produced yet, this row is real and its name is already known —
+        // so sort it by the name the user reads rather than by its opaque id.
+        name: workspace.name,
+      });
+    }
+  }
+  return placements.length > 0 ? placements : EMPTY_PLACEMENTS;
 }
 
 function createStructuralWorkspaceEntry(input: {

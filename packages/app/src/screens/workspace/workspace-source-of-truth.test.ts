@@ -8,6 +8,7 @@ import {
   resolveWorkspaceHeader,
   resolveWorkspaceHeaderRenderState,
   shouldRenderMissingWorkspaceDescriptor,
+  shouldRenderMissingWorkspaceDirectory,
 } from "./workspace-header-source";
 import { createSidebarWorkspaceEntry } from "@/hooks/use-sidebar-workspaces-list";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
@@ -235,6 +236,28 @@ describe("workspace source of truth consumption", () => {
       isGitCheckout: false,
       currentBranchName: null,
     });
+  });
+
+  it("names no project on a projectless workspace header", () => {
+    const workspace = createWorkspaceDescriptor({ members: [] });
+
+    expect(resolveWorkspaceHeader({ workspace }).subtitle).toBe("");
+  });
+
+  it("reports a missing directory only for a workspace that holds projects", () => {
+    expect(
+      shouldRenderMissingWorkspaceDirectory({
+        workspace: createWorkspaceDescriptor({ workspaceDirectory: "" }),
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldRenderMissingWorkspaceDirectory({
+        workspace: createWorkspaceDescriptor({ members: [], workspaceDirectory: "" }),
+      }),
+    ).toBe(false);
+
+    expect(shouldRenderMissingWorkspaceDirectory({ workspace: null })).toBe(false);
   });
 
   it("renders explicit missing state only after workspace hydration", () => {

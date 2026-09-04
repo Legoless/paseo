@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canCreateWorkspaceTerminal,
   collectKnownTerminalIds,
   collectScriptTerminalIds,
   collectStandaloneTerminalIds,
@@ -19,6 +20,16 @@ function createdTerminal(id: string): NonNullable<CreateTerminalResponse["payloa
 }
 
 describe("workspace terminal state", () => {
+  it("creates a terminal whenever a launch cwd resolves, workspace directory or not", () => {
+    const connected = { isRouteFocused: true, client: {}, isConnected: true };
+
+    // A projectless workspace launches into the daemon home instead of a directory of its own.
+    expect(canCreateWorkspaceTerminal({ ...connected, workspaceDirectory: "/Users/me" })).toBe(
+      true,
+    );
+    expect(canCreateWorkspaceTerminal({ ...connected, workspaceDirectory: null })).toBe(false);
+  });
+
   it("keeps pending script terminals until they appear or a fresher list arrives", () => {
     const pending = new Map([
       ["older-than-list", 10],

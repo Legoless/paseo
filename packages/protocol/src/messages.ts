@@ -2551,6 +2551,14 @@ export const WorkspaceCreateRequestSchema = z.object({
       githubPrNumber: z.number().int().positive().optional(),
       worktreeSlug: z.string().optional(),
     }),
+    // COMPAT(workspaceProjectless): added in v0.8.0, remove after 2028-03-01 once
+    // the supported daemon floor is >= v0.8.0. A workspace with no project at all:
+    // panes carry their own project, so the workspace is a pane arrangement only.
+    // Gate on server_info.features.workspaceProjectless before sending; an older
+    // daemon fails the discriminated union and answers rpc_error `unknown_schema`.
+    z.object({
+      kind: z.literal("empty"),
+    }),
   ]),
 });
 
@@ -3487,6 +3495,8 @@ export const ServerInfoStatusPayloadSchema = z
         workspaceMultiProject: z.boolean().optional(),
         // COMPAT(workspaceMemberMove): added in v0.7.0, remove gate after 2027-03-01.
         workspaceMemberMove: z.boolean().optional(),
+        // COMPAT(workspaceProjectless): added in v0.8.0, remove gate after 2028-03-01.
+        workspaceProjectless: z.boolean().optional(),
         // COMPAT(projectRemove): added in v0.1.97, drop the gate when floor >= v0.1.97.
         projectRemove: z.boolean().optional(),
         // COMPAT(projectAdd): added in v0.1.97, drop the gate when floor >= v0.1.97.
@@ -3888,6 +3898,13 @@ export const WorkspaceDescriptorPayloadSchema = z
     // Project memberships of this workspace. Absent means a single implicit
     // member derived from the scalar project/placement fields.
     members: z.array(WorkspaceMemberPayloadSchema).optional(),
+    // COMPAT(workspaceProjectless): added in v0.8.0, remove gate after 2028-03-01.
+    // True means `members` is complete as sent, so an empty array means this
+    // workspace genuinely has no projects rather than "old daemon, derive the
+    // implicit member from the scalars". Consumers cannot read a host feature
+    // flag here, so the descriptor has to carry the distinction itself. The
+    // scalar project fields stay populated for old clients either way.
+    membersAuthoritative: z.boolean().optional(),
     archivingAt: z.string().nullable().optional().default(null),
     status: WorkspaceStateBucketSchema,
     // Best-effort workspace status entry timestamp. Old daemons omit the

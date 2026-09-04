@@ -39,10 +39,10 @@ import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { Shortcut } from "@/components/ui/shortcut";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HEADER_INNER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout";
+import { resolveAddProjectTargetWorkspace } from "@/add-project-flow/target-workspace";
+import { useCreateProjectlessWorkspace } from "@/hooks/use-create-projectless-workspace";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
-import { canCreateWorktreeForProjectKind } from "@/projects/host-projects";
-import { useHostFeature } from "@/runtime/host-features";
 import {
   type SidebarWorkspaceEntry,
   type SidebarWorkspacePlacement,
@@ -57,7 +57,6 @@ import { type SidebarGroupMode, useSidebarViewStore } from "@/stores/sidebar-vie
 import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
 import { useHosts } from "@/runtime/host-runtime";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import { useWorkspace } from "@/stores/session-store-hooks";
 import { usePanelStore } from "@/stores/panel-store";
 import { useOwnsWindowChromeCorner, WindowChromeSafeArea } from "@/utils/desktop-window";
 import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
@@ -72,7 +71,6 @@ import {
   buildSettingsRoute,
 } from "@/utils/host-routes";
 import { openHostOverview } from "@/navigation/settings-navigation";
-import type { ShortcutKey } from "@/utils/format-shortcut";
 import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
@@ -103,14 +101,12 @@ interface SidebarSharedProps {
   handleHome: () => void;
   handleSettings: () => void;
   labels: SidebarLabels;
-  newWorkspaceKeys: ShortcutKey[][] | null;
   handleAddHost: () => void;
   handleOpenHostSettings: (serverId: string) => void;
 }
 
 interface SidebarLabels {
   addProject: string;
-  newWorkspace: string;
   hosts: string;
   home: string;
   settings: string;
@@ -175,15 +171,32 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   }, [isRevalidating, isManualRefresh]);
 
   const openProjectPicker = useOpenAddProject();
+  const activeWorkspaceSelection = useActiveWorkspaceSelection();
+  const addProjectTargetWorkspace = useMemo(
+    () =>
+      resolveAddProjectTargetWorkspace({
+        activeSelection: activeWorkspaceSelection ?? null,
+        pinnedWorkspaces: pinnedGroups.pinnedChats,
+        topLevelWorkspaces,
+      }),
+    [activeWorkspaceSelection, pinnedGroups.pinnedChats, topLevelWorkspaces],
+  );
+
+  const openProjectPickerForTarget = useCallback(() => {
+    // The host is pinned to the target's, since a project can only join a
+    // workspace on the same daemon.
+    openProjectPicker(
+      addProjectTargetWorkspace?.serverId,
+      addProjectTargetWorkspace ? { targetWorkspace: addProjectTargetWorkspace } : undefined,
+    );
+  }, [addProjectTargetWorkspace, openProjectPicker]);
 
   const handleOpenProjectMobile = useCallback(() => {
     showMobileAgent();
-    void openProjectPicker();
-  }, [showMobileAgent, openProjectPicker]);
+    openProjectPickerForTarget();
+  }, [showMobileAgent, openProjectPickerForTarget]);
 
-  const handleOpenProjectDesktop = useCallback(() => {
-    void openProjectPicker();
-  }, [openProjectPicker]);
+  const handleOpenProjectDesktop = openProjectPickerForTarget;
 
   const handleSettingsMobile = useCallback(() => {
     showMobileAgent();
@@ -232,11 +245,9 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     router.push(buildSchedulesRoute());
   }, []);
 
-  const newWorkspaceKeys = useShortcutKeys("new-workspace");
   const labels = useMemo(
     (): SidebarLabels => ({
       addProject: t("sidebar.actions.addProject"),
-      newWorkspace: t("sidebar.actions.newWorkspace"),
       hosts: t("sidebar.actions.hosts"),
       home: t("sidebar.actions.home"),
       settings: t("sidebar.actions.settings"),
@@ -268,7 +279,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     toggleWorkspaceCollapsed,
     handleRefresh,
     labels,
-    newWorkspaceKeys,
   };
 
   if (isCompactLayout) {
@@ -489,61 +499,6 @@ function IconTooltipContent({
   );
 }
 
-const SidebarNewWorkspaceHeaderRow = memo(function SidebarNewWorkspaceHeaderRow({
-  label,
-  testID,
-  variant,
-  shortcutKeys,
-  onBeforeNavigate,
-}: {
-  label: string;
-  testID: string;
-  variant: "header" | "compact";
-  shortcutKeys: ShortcutKey[][] | null;
-  onBeforeNavigate?: () => void;
-}) {
-  const activeWorkspaceSelection = useActiveWorkspaceSelection();
-  const activeWorkspaceServerId = activeWorkspaceSelection?.serverId ?? null;
-  const activeWorkspaceId = activeWorkspaceSelection?.workspaceId ?? null;
-  const activeWorkspace = useWorkspace(activeWorkspaceServerId, activeWorkspaceId);
-  const supportsWorkspaceMultiplicity = useHostFeature(
-    activeWorkspaceServerId,
-    "workspaceMultiplicity",
-  );
-  const canUseActiveWorkspaceContext = Boolean(
-    activeWorkspace &&
-    (supportsWorkspaceMultiplicity || canCreateWorktreeForProjectKind(activeWorkspace.projectKind)),
-  );
-
-  const handlePress = useCallback(() => {
-    onBeforeNavigate?.();
-    router.push(
-      activeWorkspaceServerId
-        ? buildNewWorkspaceRoute(
-            activeWorkspace && canUseActiveWorkspaceContext
-              ? {
-                  serverId: activeWorkspaceServerId,
-                  sourceDirectory: activeWorkspace.projectRootPath,
-                  projectId: activeWorkspace.projectId,
-                }
-              : { serverId: activeWorkspaceServerId },
-          )
-        : buildNewWorkspaceRoute(),
-    );
-  }, [activeWorkspace, activeWorkspaceServerId, canUseActiveWorkspaceContext, onBeforeNavigate]);
-
-  return (
-    <SidebarHeaderRow
-      icon={Plus}
-      label={label}
-      onPress={handlePress}
-      testID={testID}
-      variant={variant}
-      shortcutKeys={shortcutKeys}
-    />
-  );
-});
-
 function SidebarFooter({
   theme,
   handleOpenProject,
@@ -625,7 +580,6 @@ function MobileSidebar({
   shortcutIndexByWorkspaceKey,
   toggleWorkspaceCollapsed,
   handleRefresh,
-  newWorkspaceKeys,
   handleOpenProject,
   handleHome,
   handleSettings,
@@ -677,13 +631,6 @@ function MobileSidebar({
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
         <View style={styles.sidebarHeaderGroup}>
-          <SidebarNewWorkspaceHeaderRow
-            label={labels.newWorkspace}
-            testID="sidebar-global-new-workspace"
-            variant="compact"
-            shortcutKeys={newWorkspaceKeys}
-            onBeforeNavigate={closeSidebar}
-          />
           <SidebarHeaderRow
             icon={History}
             label={labels.sessions}
@@ -782,7 +729,6 @@ function DesktopSidebar({
   shortcutIndexByWorkspaceKey,
   toggleWorkspaceCollapsed,
   handleRefresh,
-  newWorkspaceKeys,
   handleOpenProject,
   handleHome,
   handleSettings,
@@ -894,12 +840,6 @@ function DesktopSidebar({
             <TitlebarDragRegion />
           )}
           <View style={sidebarHeaderGroupStyle}>
-            <SidebarNewWorkspaceHeaderRow
-              label={labels.newWorkspace}
-              testID="sidebar-global-new-workspace"
-              variant="compact"
-              shortcutKeys={newWorkspaceKeys}
-            />
             <SidebarHeaderRow
               icon={History}
               label={labels.sessions}
@@ -969,16 +909,29 @@ function DesktopSidebar({
 
 function WorkspacesSectionHeader() {
   const { theme } = useUnistyles();
+  const { t } = useTranslation();
   const setCommandCenterOpen = useKeyboardShortcutsStore((state) => state.setCommandCenterOpen);
   const commandCenterKeys = useShortcutKeys("toggle-command-center");
+  const createProjectlessWorkspace = useCreateProjectlessWorkspace();
   const handleSearchPress = useCallback(() => setCommandCenterOpen(true), [setCommandCenterOpen]);
-  const searchButtonStyle = useCallback(
+  const headerIconButtonStyle = useCallback(
     ({ hovered = false, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.workspacesHeaderIconButton,
       (hovered || pressed) && styles.workspacesHeaderIconButtonHovered,
     ],
     [],
   );
+  const handleNewWorkspacePress = useCallback(() => {
+    // The sidebar overlays the workspace on compact form factors, so the new
+    // workspace would open behind it.
+    usePanelStore.getState().showMobileAgent();
+    void (async () => {
+      const created = await createProjectlessWorkspace();
+      // Several hosts and no active workspace is a real choice; the /new screen
+      // is the surface that can ask which one.
+      if (!created) router.push(buildNewWorkspaceRoute());
+    })();
+  }, [createProjectlessWorkspace]);
 
   return (
     <View style={styles.workspacesSectionHeader}>
@@ -988,9 +941,34 @@ function WorkspacesSectionHeader() {
           <TooltipTrigger asChild>
             <Pressable
               accessibilityRole="button"
+              accessibilityLabel={t("sidebar.actions.newWorkspace")}
+              testID="sidebar-new-workspace"
+              style={headerIconButtonStyle}
+              onPress={handleNewWorkspacePress}
+            >
+              {({ hovered, pressed }) => (
+                <Plus
+                  size={14}
+                  color={
+                    hovered || pressed ? theme.colors.foreground : theme.colors.foregroundMuted
+                  }
+                />
+              )}
+            </Pressable>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" align="center" offset={8}>
+            {/* No shortcut chord here: Cmd+N opens the New Workspace screen, this
+                creates one outright. Same label, different actions. */}
+            <IconTooltipContent label={t("sidebar.actions.newWorkspace")} />
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip delayDuration={300}>
+          <TooltipTrigger asChild>
+            <Pressable
+              accessibilityRole="button"
               accessibilityLabel="Open command center"
               testID="sidebar-command-center-search"
-              style={searchButtonStyle}
+              style={headerIconButtonStyle}
               onPress={handleSearchPress}
             >
               {({ hovered, pressed }) => (

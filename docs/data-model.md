@@ -460,7 +460,7 @@ Array of workspace records. A workspace is a named container holding one or more
 | `autoArchivedChangeRequestUrl` | `string \| null`                                | Change request whose merged state triggered auto-archive. Restore replaces it with the current merged change request, when present, so repeated snapshots cannot archive the workspace again. |
 | `labels`                       | `string[]?`                                     | Normalized display names assigned from this host's shared label catalog. Missing means unlabelled.                                                                                            |
 | `pinnedAt`                     | `string \| null` (ISO 8601)                     | Pinned-to-top-of-sidebar timestamp; null means "not pinned"                                                                                                                                   |
-| `members`                      | `WorkspaceProject[]?`                           | Ordered project placements (below). Missing or empty means one implicit member derived from the scalar fields. COMPAT(workspaceMembers): added in v0.7.0.                                     |
+| `members`                      | `WorkspaceProject[]?`                           | Ordered project placements (below). Missing means one implicit member derived from the scalar fields; an explicit `[]` is a projectless workspace. COMPAT(workspaceMembers): added in v0.7.0. |
 
 ### Workspace projects (members)
 

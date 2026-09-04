@@ -150,6 +150,7 @@ import {
 import { useHasWindowChromeObstruction } from "@/utils/desktop-window";
 import {
   resolveWorkspaceHeaderRenderState,
+  shouldRenderMissingWorkspaceDirectory,
   type WorkspaceHeaderCheckoutState,
 } from "@/screens/workspace/workspace-header-source";
 import {
@@ -1658,7 +1659,10 @@ function WorkspaceScreenContent({
     (state) => state.sessions[normalizedServerId]?.serverInfo?.features?.providersSnapshot === true,
   );
   const workspaceDirectory = workspaceDescriptor?.workspaceDirectory || null;
-  const isMissingWorkspaceDirectory = Boolean(workspaceDescriptor) && !workspaceDirectory;
+  const workspaceMemberCount = getWorkspaceMemberCount(workspaceDescriptor);
+  const isMissingWorkspaceDirectory = shouldRenderMissingWorkspaceDirectory({
+    workspace: workspaceDescriptor,
+  });
   const [isImportSheetVisible, setIsImportSheetVisible] = useState(false);
   const canOpenImportSheet = [client, isConnected, workspaceDirectory].every(Boolean);
   const openImportSheet = useCallback(() => {
@@ -1801,7 +1805,7 @@ function WorkspaceScreenContent({
     normalizedServerId,
     normalizedWorkspaceId,
     workspaceDirectory,
-    workspaceMemberCount: getWorkspaceMemberCount(workspaceDescriptor),
+    workspaceMemberCount,
     workspaceScripts,
     hasHydratedWorkspaces,
     isMissingWorkspaceDirectory,
@@ -2120,9 +2124,8 @@ function WorkspaceScreenContent({
       return pending?.serverId === normalizedServerId && pending.lifecycle === "active";
     });
 
-    reconcileWorkspaceTabs(
-      persistenceKey,
-      buildWorkspaceTabSnapshot({
+    reconcileWorkspaceTabs(persistenceKey, {
+      ...buildWorkspaceTabSnapshot({
         agentVisibility: workspaceAgentVisibility,
         agentsHydrated: hasHydratedAgents,
         terminalsHydrated: terminalsQuery.isSuccess,
@@ -2132,7 +2135,8 @@ function WorkspaceScreenContent({
           createTerminalMutation.isPending || pendingTerminalCreateInput !== null,
         hasActivePendingDraftCreate: hasActivePendingDraftCreateInWorkspace,
       }),
-    );
+      isProjectless: workspaceMemberCount === 0,
+    });
   }, [
     hasHydratedAgents,
     hasHydratedWorkspaceLayoutStore,
@@ -2149,6 +2153,7 @@ function WorkspaceScreenContent({
     terminalsQuery.isSuccess,
     uiTabs,
     workspaceAgentVisibility,
+    workspaceMemberCount,
   ]);
 
   const activeTabId = focusedPaneTabState.activeTabId;

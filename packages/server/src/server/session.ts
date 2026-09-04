@@ -135,6 +135,7 @@ import {
   checkoutLiteFromGitSnapshot,
   checkoutFromPersistedWorkspacePlacement,
   deriveWorkspaceDisplayName,
+  isProjectlessWorkspace,
   workspaceMembers,
 } from "./workspace-registry-model.js";
 import { resolveWorkspaceIdForPath } from "./resolve-workspace-id-for-path.js";
@@ -1252,6 +1253,10 @@ export class Session {
   }
 
   async syncWorkspaceGitObserverForWorkspace(workspace: PersistedWorkspaceRecord): Promise<void> {
+    // A projectless workspace owns no checkout; its scalar cwd is the home
+    // directory for wire compatibility only. Observing it would watch an
+    // unrelated repository on this workspace's behalf.
+    if (isProjectlessWorkspace(workspace)) return;
     await this.workspaceGitObserver.syncObserverForWorkspace(workspace);
   }
 
@@ -5033,9 +5038,14 @@ export class Session {
       projectRecord ?? (await this.projectRegistry.get(workspace.projectId));
 
     let diffStat: { additions: number; deletions: number } | null = null;
-    const snapshot = this.workspaceGitService.peekSnapshot(workspace.cwd);
-    if (snapshot?.git.diffStat) {
-      diffStat = snapshot.git.diffStat;
+    // A projectless workspace owns no checkout. Its scalar cwd is the home
+    // directory for wire compatibility only, so reading a snapshot there would
+    // report an unrelated repository's diff as this workspace's.
+    if (!isProjectlessWorkspace(workspace)) {
+      const snapshot = this.workspaceGitService.peekSnapshot(workspace.cwd);
+      if (snapshot?.git.diffStat) {
+        diffStat = snapshot.git.diffStat;
+      }
     }
 
     const worktreeSlug =
@@ -5050,7 +5060,10 @@ export class Session {
       projectId: workspace.projectId,
       projectDisplayName: resolvedProjectRecord
         ? resolveProjectDisplayName(resolvedProjectRecord)
-        : workspace.projectId,
+        : // A projectless workspace resolves no project record, so name the
+          // scalar mirror after the workspace rather than leaking a raw id to
+          // clients older than v0.8.0, which render these scalars.
+          resolveWorkspaceDisplayName(workspace),
       projectCustomName: resolvedProjectRecord?.customName ?? null,
       projectCustomIconRevision: resolvedProjectRecord?.customIconRevision ?? null,
       projectRootPath: resolvedProjectRecord?.rootPath ?? workspace.cwd,
@@ -5063,6 +5076,10 @@ export class Session {
       pinnedAt: workspace.pinnedAt,
       ...(workspace.labels && workspace.labels.length > 0 ? { labels: workspace.labels } : {}),
       members,
+      // COMPAT(workspaceProjectless): added in v0.8.0, remove after 2028-03-01.
+      // This daemon always sends the complete member list, so an empty array
+      // means "no projects" rather than "old daemon, synthesize one".
+      membersAuthoritative: true,
       archivingAt: null,
       status: "done",
       statusEnteredAt: null,
@@ -6194,6 +6211,11 @@ export class Session {
         await this.handleWorkspaceCreateLocal(request);
         return;
       }
+      // COMPAT(workspaceProjectless): added in v0.8.0, remove after 2028-03-01.
+      if (request.source.kind === "empty") {
+        await this.handleWorkspaceCreateProjectless(request);
+        return;
+      }
       await this.handleWorkspaceCreateWorktree(request);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create workspace";
@@ -6280,6 +6302,34 @@ export class Session {
         { currentSelection: this.getFocusedAgentSelectionForCwd(workspace.cwd) },
       );
     }
+  }
+
+  /**
+   * COMPAT(workspaceProjectless): added in v0.8.0, remove after 2028-03-01.
+   * Creates a workspace holding no projects. There is no directory to validate,
+   * no git observer to sync and no snapshot to refresh — a projectless workspace
+   * owns no checkout. Panes acquire their own project once the user picks one.
+   */
+  private async handleWorkspaceCreateProjectless(
+    request: Extract<SessionInboundMessage, { type: "workspace.create.request" }>,
+  ): Promise<void> {
+    if (request.source.kind !== "empty") {
+      return;
+    }
+
+    const explicitTitle = request.title?.trim() || null;
+    const workspace = await this.workspaceProvisioning.createProjectlessWorkspace(explicitTitle);
+    const descriptor = await this.describeWorkspaceRecord(workspace);
+    this.emit({
+      type: "workspace.create.response",
+      payload: {
+        requestId: request.requestId,
+        workspace: descriptor,
+        setupTerminalId: null,
+        error: null,
+      },
+    });
+    await this.emitCreatedWorkspaceUpdate(descriptor);
   }
 
   private async handleWorkspaceCreateWorktree(

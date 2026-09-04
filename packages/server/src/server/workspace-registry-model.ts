@@ -77,12 +77,30 @@ export function workspaceMemberFromScalars(
  * Returns the workspace's project memberships. Records persisted before
  * cross-project workspaces carry no `members` list; they read as a single
  * implicit member derived from the scalar fields.
+ *
+ * COMPAT(workspaceProjectless): added in v0.8.0. An explicit `[]` means the
+ * workspace genuinely has no projects and must stay empty; only an absent list
+ * derives the legacy implicit member. Collapsing the two would resurrect a
+ * phantom member at the scalar cwd.
  */
 export function workspaceMembers(record: PersistedWorkspaceRecord): PersistedWorkspaceMember[] {
-  if (record.members && record.members.length > 0) {
-    return record.members;
-  }
+  if (record.members) return record.members;
   return [workspaceMemberFromScalars(record)];
+}
+
+/**
+ * COMPAT(workspaceProjectless): added in v0.8.0. True for a workspace that holds
+ * no projects — panes carry their own project, so the workspace is a pane
+ * arrangement only.
+ *
+ * Its scalar `cwd`/`projectId` still point at the daemon home directory so
+ * readers that predate `members` keep working, which means several projectless
+ * workspaces share one cwd. Any lookup answering "which workspace owns this
+ * path" must therefore skip them, or it will attribute work in the home
+ * directory to an arbitrary one.
+ */
+export function isProjectlessWorkspace(record: PersistedWorkspaceRecord): boolean {
+  return record.members?.length === 0;
 }
 
 /**

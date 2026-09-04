@@ -1183,3 +1183,87 @@ describe("workspace message schemas", () => {
     expect(newDirectory.source.kind).toBe("directory");
   });
 });
+
+// COMPAT(workspaceProjectless): added in v0.8.0, remove after 2028-03-01.
+// A projectless workspace holds no projects at all. `members: []` carries that,
+// and `membersAuthoritative` is what separates it from a pre-v0.7.0 daemon that
+// omits members entirely. The scalar project fields stay populated so a client
+// older than v0.8.0 still parses the descriptor instead of dropping the
+// workspace out of its list.
+describe("projectless workspaces", () => {
+  const projectlessDescriptor = {
+    id: "wks_empty",
+    // The daemon fills these from the home directory and the workspace's own id.
+    projectId: "wks_empty",
+    projectDisplayName: "New workspace",
+    projectRootPath: "/Users/me",
+    workspaceDirectory: "/Users/me",
+    projectKind: "non_git",
+    workspaceKind: "directory",
+    name: "New workspace",
+    status: "done",
+    activityAt: null,
+    scripts: [],
+    members: [],
+    membersAuthoritative: true,
+  } as const;
+
+  test("accepts the empty create source and still rejects an unknown one", () => {
+    const parsed = WorkspaceCreateRequestSchema.parse({
+      type: "workspace.create.request",
+      requestId: "req-empty",
+      source: { kind: "empty" },
+    });
+    expect(parsed.source.kind).toBe("empty");
+
+    expect(
+      WorkspaceCreateRequestSchema.safeParse({
+        type: "workspace.create.request",
+        requestId: "req-unknown",
+        source: { kind: "not-a-kind" },
+      }).success,
+    ).toBe(false);
+  });
+
+  test("carries an empty member list through the descriptor", () => {
+    const parsed = WorkspaceDescriptorPayloadSchema.parse(projectlessDescriptor);
+    expect(parsed.members).toEqual([]);
+    expect(parsed.membersAuthoritative).toBe(true);
+  });
+
+  test("leaves a legacy descriptor unmarked so the client still synthesizes a member", () => {
+    const parsed = WorkspaceDescriptorPayloadSchema.parse({
+      id: "wks_legacy",
+      projectId: "proj",
+      projectDisplayName: "repo",
+      projectRootPath: "/repo",
+      workspaceDirectory: "/repo",
+      projectKind: "git",
+      workspaceKind: "worktree",
+      name: "feature",
+      status: "done",
+      activityAt: null,
+      scripts: [],
+    });
+    expect(parsed.members).toBeUndefined();
+    expect(parsed.membersAuthoritative).toBeUndefined();
+  });
+
+  // The direct evidence for the back-compat rule: a client that predates the
+  // field must still parse a new daemon's projectless descriptor.
+  test("a pre-v0.8.0 client still parses a projectless descriptor", () => {
+    const LegacyWorkspaceDescriptorSchema = z.object({
+      id: z.string(),
+      projectId: z.string(),
+      projectDisplayName: z.string(),
+      projectRootPath: z.string(),
+      projectKind: z.enum(["git", "non_git", "directory"]),
+      workspaceKind: z.enum(["local_checkout", "worktree", "directory", "checkout"]),
+      name: z.string(),
+    });
+
+    const parsed = LegacyWorkspaceDescriptorSchema.parse(projectlessDescriptor);
+    expect(parsed.projectRootPath).toBe("/Users/me");
+    expect(parsed.name).toBe("New workspace");
+  });
+});

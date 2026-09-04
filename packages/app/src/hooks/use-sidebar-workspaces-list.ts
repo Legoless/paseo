@@ -1,3 +1,4 @@
+import equal from "fast-deep-equal";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import {
@@ -20,6 +21,7 @@ import {
   deriveProjectStatusBucket,
   deriveSidebarLoadingState,
   prependMissingOrderKeys,
+  selectProjectlessWorkspacePlacements,
   type ProjectStatusSession,
   type SidebarProjectEntry,
   type SidebarWorkspaceEntry,
@@ -115,12 +117,24 @@ export function useSidebarWorkspacesList(options?: {
 
   const hostProjects = useHostProjects(directoryServerIds);
 
+  // One collection-level subscription, deep-compared so the array keeps its identity through the
+  // workspace churn (diffs, status, git facts) that never changes a placement.
+  const projectlessWorkspaces = useStoreWithEqualityFn(
+    useSessionStore,
+    (state) =>
+      isActive
+        ? selectProjectlessWorkspacePlacements(state.sessions, directoryServerIds)
+        : EMPTY_WORKSPACES,
+    equal,
+  );
+
   const sidebarModel = useMemo(
     () =>
       buildSidebarWorkspacePlacementModel({
         projects: hostProjects,
+        projectlessWorkspaces,
       }),
-    [hostProjects],
+    [hostProjects, projectlessWorkspaces],
   );
 
   const projects = sidebarModel.projects.length > 0 ? sidebarModel.projects : EMPTY_PROJECTS;
