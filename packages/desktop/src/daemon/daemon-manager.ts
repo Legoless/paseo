@@ -44,7 +44,7 @@ import {
 } from "../integrations/legacy-skill-selection.js";
 import { tailFile } from "../diagnostics/tail-file.js";
 
-import { isNeo, NEO_PASEO_HOME, NEO_PASEO_LISTEN } from "../variant.js";
+import { APP_SCHEME, isNeo, NEO_PASEO_HOME, NEO_PASEO_LISTEN } from "../variant.js";
 
 const DAEMON_LOG_FILENAME = "daemon.log";
 const STARTUP_POLL_INTERVAL_MS = 200;
@@ -407,6 +407,10 @@ async function startDaemon(): Promise<DesktopDaemonStatus> {
       PASEO_DESKTOP_MANAGED: "1",
       PASEO_CLI: getBundledCliShimPath(),
       PASEO_WEB_UI_ENABLED: "false",
+      // The renderer connects from `<scheme>://app`, which the daemon has to
+      // accept as a CORS origin. The scheme is per-variant, so tell the daemon
+      // rather than leaving it to guess a single hardcoded one.
+      PASEO_APP_SCHEME: APP_SCHEME,
       ...(isNeo ? { PASEO_HOME: NEO_PASEO_HOME, PASEO_LISTEN: NEO_PASEO_LISTEN } : {}),
     },
     stdio: ["ignore", "ignore", "ignore"],
