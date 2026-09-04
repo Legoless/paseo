@@ -42,6 +42,7 @@ import { WorkspaceActions } from "@/git/workspace-actions";
 import { WorkspaceOpenInEditorButton } from "@/workspace/open-in-editor/button";
 import { WorkspaceScriptsButton } from "@/screens/workspace/workspace-scripts-button";
 import { ImportSessionSheet } from "@/components/import-session-sheet";
+import { HomeTiles } from "@/components/home-tiles";
 import { useToast } from "@/contexts/toast-context";
 import { getOrCreateClientId } from "@/utils/client-id";
 import { selectIsAgentListOpen, usePanelStore } from "@/stores/panel-store";
@@ -1189,11 +1190,11 @@ function renderWorkspaceContent(input: RenderWorkspaceContentInput): React.React
     );
   }
   if (!activeTabDescriptor) {
+    // A workspace that has run out of tabs needs somewhere to go, not a message
+    // telling it to. Same grid the home screen offers.
     return (
       <View style={styles.emptyState}>
-        <Text style={styles.emptyStateText}>
-          No tabs are available yet. Use New tab to create an agent or terminal.
-        </Text>
+        <HomeTiles />
       </View>
     );
   }
