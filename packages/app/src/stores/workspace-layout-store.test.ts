@@ -3374,7 +3374,7 @@ describe("workspace-layout-store actions", () => {
     expect(findPaneById(layout.root, "main")?.focusedTabId).toBe("agent_agent-1");
   });
 
-  it("reconcileTabs lands on a draft when the hydrated workspace is empty", () => {
+  it("reconcileTabs leaves an empty hydrated workspace on its launcher", () => {
     const workspaceKey = createWorkspaceKey();
 
     workspaceLayoutStore.getState().reconcileTabs(workspaceKey, {
@@ -3388,12 +3388,10 @@ describe("workspace-layout-store actions", () => {
       hasActivePendingDraftCreate: false,
     });
 
-    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
-    const mainTab = collectAllTabs(layout.root).find(
-      (tab) => findPaneContainingTab(layout.root, tab.tabId)?.id === "main",
-    );
-    expect(mainTab?.target.kind).toBe("draft");
-    expect(findPaneById(layout.root, "main")?.focusedTabId).toBe(mainTab?.tabId);
+    // Nothing to reconcile means nothing to write: the workspace keeps the launcher its
+    // default layout holds rather than gaining a draft composer it never asked for.
+    expect(workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]).toBeUndefined();
+    expect(contentTabs(workspaceLayoutStore.getState().getWorkspaceTabs(workspaceKey))).toEqual([]);
   });
 
   it("reconcileTabs stays stable when startup removes a duplicate agent kept in Explorer", () => {
@@ -3485,7 +3483,7 @@ describe("workspace-layout-store actions", () => {
       (tab) => findPaneContainingTab(afterThirdReconcile.root, tab.tabId)?.id === "main",
     );
     expect(mainTabs).toEqual([
-      expect.objectContaining({ target: expect.objectContaining({ kind: "draft" }) }),
+      expect.objectContaining({ target: expect.objectContaining({ kind: "new_tab" }) }),
     ]);
   });
 
