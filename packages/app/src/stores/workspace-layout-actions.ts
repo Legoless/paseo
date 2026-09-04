@@ -37,6 +37,13 @@ export interface WorkspaceLayout {
   root: SplitNode;
   focusedPaneId: string | null;
   parentTabIdByTabId?: Record<string, string>;
+  /**
+   * The workspace has already been offered its opening draft composer. Closing
+   * that draft leaves the pane holding a `new_tab`, which does not count as
+   * content — without this the next reconcile pass would read the workspace as
+   * freshly empty and seed another draft, so the row could never be dismissed.
+   */
+  draftSeeded?: boolean;
 }
 
 interface SplitPaneInternal extends SplitPane {
@@ -1644,6 +1651,9 @@ export function closeTabInLayout(input: CloseTabInLayoutInput): WorkspaceLayout 
   const nextLayout = {
     root: nextRoot,
     focusedPaneId: nextFocusedPaneId,
+    // Closing a tab must not read as "this workspace was never offered a draft",
+    // or the reconciler seeds a replacement and the close looks like a no-op.
+    ...(input.layout.draftSeeded === true ? { draftSeeded: true } : {}),
   };
   const nextLayoutWithParentMap = parentTabIdByTabId
     ? { ...nextLayout, parentTabIdByTabId }
@@ -2541,22 +2551,22 @@ function seedDraftForEmptyWorkspace(input: {
     creatingContent ||
     hasWorkspaceEntities ||
     hasContentTab ||
-    input.snapshot.isProjectless === true
+    input.snapshot.isProjectless === true ||
+    input.layout.draftSeeded === true
   ) {
     return input.layout;
   }
 
   const draftId = generateDraftId();
-  return (
-    createTabInLayout({
-      layout: input.layout,
-      target: { kind: "draft", draftId },
-      now: Date.now(),
-      placement: FOCUSED_PANE_PLACEMENT,
-      explorerSidebarPaneId: input.explorerSidebarPaneId,
-      createTabId: () => draftId,
-    })?.layout ?? input.layout
-  );
+  const seeded = createTabInLayout({
+    layout: input.layout,
+    target: { kind: "draft", draftId },
+    now: Date.now(),
+    placement: FOCUSED_PANE_PLACEMENT,
+    explorerSidebarPaneId: input.explorerSidebarPaneId,
+    createTabId: () => draftId,
+  })?.layout;
+  return seeded ? { ...seeded, draftSeeded: true } : input.layout;
 }
 
 export function reconcileWorkspaceTabs(
