@@ -2118,7 +2118,6 @@ function WorkspaceScreenContent({
           createTerminalMutation.isPending || pendingTerminalCreateInput !== null,
         hasActivePendingDraftCreate: hasActivePendingDraftCreateInWorkspace,
       }),
-      isProjectless: workspaceMemberCount === 0,
     });
   }, [
     hasHydratedAgents,
@@ -2136,7 +2135,6 @@ function WorkspaceScreenContent({
     terminalsQuery.isSuccess,
     uiTabs,
     workspaceAgentVisibility,
-    workspaceMemberCount,
   ]);
 
   const activeTabId = focusedPaneTabState.activeTabId;
