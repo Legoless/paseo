@@ -47,8 +47,7 @@ function useTerminalPanelDescriptor(
     }),
   );
   const workspaceDirectory = workspaceFields?.workspaceDirectory ?? null;
-  const terminalListRoot =
-    workspaceFields && workspaceFields.memberCount > 1 ? null : workspaceDirectory;
+  const terminalListRoot = workspaceFields?.memberCount === 1 ? workspaceDirectory : null;
   const terminalsQuery = useQuery(
     {
       queryKey: buildTerminalsQueryKey(
@@ -56,10 +55,10 @@ function useTerminalPanelDescriptor(
         terminalListRoot,
         context.workspaceId || null,
       ),
-      enabled: Boolean(client && workspaceDirectory),
+      enabled: Boolean(client && context.workspaceId),
       queryFn: async (): Promise<ListTerminalsPayload> => {
-        if (!client || !workspaceDirectory) {
-          throw new Error("Workspace directory not found");
+        if (!client) {
+          throw new Error("Workspace terminals are unavailable");
         }
         return client.listTerminals(terminalListRoot ?? undefined, undefined, {
           workspaceId: context.workspaceId || undefined,
@@ -95,16 +94,17 @@ function TerminalPanel() {
     memberCount: w.members.length,
   }));
   const primaryWorkspaceDirectory = workspaceFields?.workspaceDirectory || null;
-  const terminalListRoot =
-    workspaceFields && workspaceFields.memberCount > 1 ? null : primaryWorkspaceDirectory;
+  // A workspace with no single project root has nothing to scope the listing by; the terminal's
+  // own cwd — read off the listing below — is the one this pane runs in.
+  const terminalListRoot = workspaceFields?.memberCount === 1 ? primaryWorkspaceDirectory : null;
   const terminalsQuery = useQuery(
     {
       queryKey: buildTerminalsQueryKey(serverId, terminalListRoot, workspaceId || null),
-      enabled: Boolean(primaryWorkspaceDirectory),
+      enabled: Boolean(workspaceId),
       queryFn: async (): Promise<ListTerminalsPayload> => {
         const client = useSessionStore.getState().sessions[serverId]?.client ?? null;
-        if (!client || !primaryWorkspaceDirectory) {
-          throw new Error("Workspace directory not found");
+        if (!client) {
+          throw new Error("Workspace terminals are unavailable");
         }
         return client.listTerminals(terminalListRoot ?? undefined, undefined, {
           workspaceId: workspaceId || undefined,

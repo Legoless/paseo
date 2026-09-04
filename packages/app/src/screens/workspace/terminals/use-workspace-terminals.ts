@@ -5,6 +5,7 @@ import type { TerminalProfile } from "@getpaseo/protocol/messages";
 import { resolveTerminalProfileLaunch } from "@getpaseo/protocol/terminal-profiles";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
 import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selection-store";
+import { useHostHomeDirectory } from "@/workspace-tabs/launcher/project-selector";
 import { useTranslation } from "react-i18next";
 import { useReplicaQuery } from "@/data/query";
 import { workspaceTerminalsPushRoute } from "@/data/push-router";
@@ -75,14 +76,25 @@ export function useWorkspaceTerminals(input: UseWorkspaceTerminalsInput) {
     normalizedServerId,
     normalizedWorkspaceId || null,
   );
-  const terminalCreateCwd = selectedProject.cwd ?? workspaceDirectory;
-  const terminalListRoot = workspaceMemberCount > 1 ? null : workspaceDirectory;
+  // A projectless workspace has no directory of its own, so its terminals launch into the daemon
+  // home — the same path the launcher's "No project" option resolves to.
+  const homeDirectory = useHostHomeDirectory(normalizedServerId);
+  const terminalCreateCwd = selectedProject.cwd ?? workspaceDirectory ?? homeDirectory;
+  // Only a single-project workspace has one root to scope the listing by; with none or several,
+  // terminals live in unrelated directories and the workspace id is the only thing they share.
+  const terminalListRoot = workspaceMemberCount === 1 ? workspaceDirectory : null;
   const [pendingCreateInput, setPendingCreateInput] = useState<PendingTerminalCreateInput | null>(
     null,
   );
   const canCreateNow = useMemo(
-    () => canCreateWorkspaceTerminal({ isRouteFocused, client, isConnected, workspaceDirectory }),
-    [isRouteFocused, client, isConnected, workspaceDirectory],
+    () =>
+      canCreateWorkspaceTerminal({
+        isRouteFocused,
+        client,
+        isConnected,
+        workspaceDirectory: terminalCreateCwd,
+      }),
+    [isRouteFocused, client, isConnected, terminalCreateCwd],
   );
   const queryKey = useMemo(
     () =>
@@ -102,7 +114,7 @@ export function useWorkspaceTerminals(input: UseWorkspaceTerminalsInput) {
       ...(paneWorkspaceId ? { workspaceId: paneWorkspaceId } : {}),
     }),
     queryFn: async () => {
-      if (!client || !workspaceDirectory) {
+      if (!client) {
         throw new Error(t("workspace.terminal.hostDisconnected"));
       }
       if (paneWorkspaceId) {

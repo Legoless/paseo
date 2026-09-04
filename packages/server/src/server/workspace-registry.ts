@@ -65,6 +65,13 @@ const PersistedWorkspaceRecordSchema = z
   .object({
     workspaceId: z.string(),
     projectId: z.string(),
+    // A projectless workspace (`members: []`) still carries scalars, pointed at
+    // the daemon home directory. They are a legacy mirror for readers that
+    // predate `members`; `members` is the truth. Never "" — `path.resolve("")`
+    // silently yields the daemon's own cwd, which would aim archive, git status
+    // and terminal ownership at the Paseo checkout. Lookups that mean "which
+    // workspace owns this path" must skip projectless records; see
+    // isProjectlessWorkspace.
     cwd: z.string(),
     kind: z.enum(["local_checkout", "worktree", "directory"]),
     displayName: z.string(),

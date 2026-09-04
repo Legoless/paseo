@@ -575,6 +575,9 @@ export class DirectorySync {
 
   private buildLegacyProjectSnapshot(snapshot: WorkspaceDirectorySnapshot): void {
     for (const workspace of snapshot.workspaces.values()) {
+      // A projectless workspace's scalar projectId is synthetic and matches no project record, so
+      // synthesizing from it would grow a ghost project for every one of them.
+      if (workspace.members.length === 0) continue;
       if (!snapshot.projects.has(workspace.projectId)) {
         const project = legacyProjectDescriptorFromWorkspace(workspace);
         snapshot.projects.set(project.projectId, project);

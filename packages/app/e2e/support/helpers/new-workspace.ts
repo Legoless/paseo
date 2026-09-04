@@ -6,6 +6,7 @@ import { daemonWsRoutePattern } from "./daemon-port";
 import { projectEquivalenceViewKey } from "./project-view-key";
 import { expectWorkspaceHeader } from "./workspace-ui";
 import { withProjectOwnership } from "./project-ownership";
+import { openCommandCenter } from "./command-center";
 
 type NewWorkspaceDaemonClient = Pick<
   InternalDaemonClient,
@@ -191,8 +192,12 @@ export async function openNewWorkspaceComposer(
   });
 }
 
+// The sidebar's "+" creates a projectless workspace outright, so the command
+// center is now the global entry that opens this composer. It dispatches the
+// same `workspace.new` action the Cmd+N shortcut does.
 export async function openGlobalNewWorkspaceComposer(page: Page): Promise<void> {
-  await page.getByTestId("sidebar-global-new-workspace").click();
+  const panel = await openCommandCenter(page);
+  await panel.getByText("New workspace", { exact: true }).first().click();
 
   await expect(page).toHaveURL(/\/new(?:\?.*)?$/, {
     timeout: 30_000,

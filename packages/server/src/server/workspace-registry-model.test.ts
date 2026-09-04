@@ -8,6 +8,7 @@ import {
   generateProjectId,
   initialWorkspacePlacement,
   reconcileWorkspacePlacement,
+  isProjectlessWorkspace,
   workspaceMembers,
   workspaceScalarsFromPrimaryMember,
 } from "./workspace-registry-model.js";
@@ -254,5 +255,47 @@ describe("workspace members", () => {
       isPaseoOwnedWorktree: false,
       mainRepoRoot: null,
     });
+  });
+});
+
+// COMPAT(workspaceProjectless): added in v0.8.0, remove after 2028-03-01.
+describe("projectless workspaces", () => {
+  function projectlessRecord() {
+    return createPersistedWorkspaceRecord({
+      workspaceId: "workspace-empty",
+      // The scalar mirror points at the home directory with the workspace's own
+      // id standing in for a project, so pre-v0.8.0 clients can still parse the
+      // descriptor. `members` is the truth.
+      projectId: "workspace-empty",
+      cwd: "/Users/me",
+      kind: "directory",
+      displayName: "New workspace",
+      members: [],
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+    });
+  }
+
+  test("keeps an explicitly empty member list instead of deriving one from the scalars", () => {
+    const record = projectlessRecord();
+
+    expect(record.members).toEqual([]);
+    expect(workspaceMembers(record)).toEqual([]);
+    expect(isProjectlessWorkspace(record)).toBe(true);
+  });
+
+  test("a record that omits members is not projectless", () => {
+    const record = createPersistedWorkspaceRecord({
+      workspaceId: "workspace-legacy",
+      projectId: "project-one",
+      cwd: "/repo",
+      kind: "local_checkout",
+      displayName: "main",
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+    });
+
+    expect(isProjectlessWorkspace(record)).toBe(false);
+    expect(workspaceMembers(record)).toHaveLength(1);
   });
 });

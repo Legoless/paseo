@@ -143,9 +143,15 @@ export interface WorkspaceDescriptor {
   forge?: WorkspaceDescriptorPayload["forge"];
   project?: ProjectPlacementPayload;
   /**
-   * Project placements inside this workspace, primary first. Always non-empty after
-   * normalization — the implicit single member is synthesized when the daemon omits
-   * the field. The scalar project and workspaceDirectory fields mirror the primary member.
+   * Project placements inside this workspace, primary first. The implicit single
+   * member is synthesized when a pre-v0.7.0 daemon omits the field, so this is
+   * non-empty for every workspace that holds a project, and the scalar project
+   * and workspaceDirectory fields mirror the primary member.
+   *
+   * Empty means a projectless workspace: a pane arrangement whose panes each
+   * carry their own project. Its scalar project fields still point at the daemon
+   * home directory — required on the wire for older clients — so read this list,
+   * never the scalars, to decide whether a workspace has a project.
    */
   members: WorkspaceMemberDescriptor[];
 }
@@ -203,10 +209,11 @@ export function normalizeWorkspaceMembers(
     | "worktreeSlug"
     | "gitRuntime"
     | "diffStat"
+    | "membersAuthoritative"
   >,
 ): WorkspaceMemberDescriptor[] {
-  const wire = payload.members ?? [];
-  if (wire.length > 0) {
+  const wire = payload.members;
+  if (wire && wire.length > 0) {
     return wire.map((member) => ({
       projectId: member.projectId,
       projectDisplayName: member.projectDisplayName,
@@ -219,6 +226,13 @@ export function normalizeWorkspaceMembers(
       diffStat: member.diffStat ?? null,
     }));
   }
+  // COMPAT(workspaceProjectless): added in v0.8.0, remove after 2028-03-01.
+  // A v0.8.0+ daemon sends the complete member list, so an empty one means the
+  // workspace genuinely holds no projects. Without this flag an empty list is
+  // indistinguishable from a pre-v0.7.0 daemon that omits members entirely, and
+  // synthesizing here would give a projectless workspace a phantom project
+  // pointed at the daemon home directory.
+  if (payload.membersAuthoritative) return [];
   // COMPAT(workspaceMultiProject): daemons before v0.7.0 omit members; synthesize the
   // implicit single member from the scalar placement fields.
   return [

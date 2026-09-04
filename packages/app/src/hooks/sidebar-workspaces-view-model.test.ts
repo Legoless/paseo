@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Agent, WorkspaceDescriptor } from "@/stores/session-store";
 import type { WorkspaceStructureProject } from "@/projects/workspace-structure";
+import { buildSidebarWorkspaceGroupModel } from "@/projects/workspace-groups";
 import { buildWorkspaceAgentActivityIndex } from "@/utils/workspace-agent-activity";
 import {
   appendMissingOrderKeys,
@@ -12,6 +13,7 @@ import {
   createSidebarWorkspaceEntry,
   deriveProjectStatusBucket,
   deriveSidebarLoadingState,
+  selectProjectlessWorkspacePlacements,
   shouldShowSidebarHostLabels,
   type ProjectStatusSession,
   type SidebarProjectEntry,
@@ -517,6 +519,87 @@ describe("shared sidebar workspace model", () => {
     });
 
     expect(entries.get("srv:clone-a")?.projectViewKey).toBe(projectKey);
+  });
+});
+
+describe("projectless workspaces", () => {
+  const projectless: WorkspaceDescriptor = {
+    ...workspace({
+      id: "ws-empty",
+      name: "panes",
+      // A projectless workspace's scalar mirror fields still point somewhere (the daemon home),
+      // and its projectId names no project record.
+      projectId: "ws-empty",
+      projectDisplayName: "ws-empty",
+    }),
+    members: [],
+  };
+  const normal = workspace({
+    id: "ws-main",
+    name: "main",
+    projectId: "project-1",
+    projectDisplayName: "Project 1",
+  });
+  const workspaces = new Map([
+    ["ws-empty", projectless],
+    ["ws-main", normal],
+  ]);
+
+  it("adds one top-level placement that joins no project group", () => {
+    const placements = selectProjectlessWorkspacePlacements({ srv: { workspaces } }, ["srv"]);
+    const model = buildSidebarWorkspacePlacementModel({
+      projects: [project({ projectKey: "project-1", workspaceKeys: ["srv:ws-main"] })],
+      projectlessWorkspaces: placements,
+    });
+
+    expect(placements).toEqual([
+      expect.objectContaining({
+        workspaceKey: "srv:ws-empty",
+        serverId: "srv",
+        workspaceId: "ws-empty",
+        projectViewKey: "",
+        projectName: "",
+      }),
+    ]);
+    expect(model.workspaces.map((placement) => placement.workspaceKey)).toEqual([
+      "srv:ws-main",
+      "srv:ws-empty",
+    ]);
+    // The normal workspace is untouched, and nothing was keyed under the "" sentinel.
+    expect(model.projects.map((entry) => entry.viewKey)).toEqual(["project-1"]);
+    expect(model.projects[0]?.workspaces.map((placement) => placement.workspaceKey)).toEqual([
+      "srv:ws-main",
+    ]);
+    expect(model.projectNamesByViewKey.has("")).toBe(false);
+  });
+
+  it("names no project on the row and renders no member rows", () => {
+    const entries = buildSidebarWorkspaceEntries({
+      placements: buildSidebarWorkspacePlacementModel({
+        projects: [project({ projectKey: "project-1", workspaceKeys: ["srv:ws-main"] })],
+        projectlessWorkspaces: selectProjectlessWorkspacePlacements({ srv: { workspaces } }, [
+          "srv",
+        ]),
+      }).workspaces,
+      sessions: [{ serverId: "srv", workspaceAgentActivity: new Map(), workspaces }],
+    });
+    const sections = buildSidebarWorkspaceGroupModel({
+      sessions: [{ serverId: "srv", workspaces, agents: new Map(), projects: new Map() }],
+    }).sectionsByWorkspaceKey;
+
+    expect(entries.get("srv:ws-empty")).toMatchObject({
+      name: "panes",
+      projectName: "",
+      projectViewKey: "",
+      projectCount: 0,
+    });
+    expect(sections.get("srv:ws-empty")?.members).toEqual([]);
+    expect(entries.get("srv:ws-main")).toMatchObject({
+      projectName: "Project 1",
+      projectViewKey: "project-1",
+      projectCount: 1,
+    });
+    expect(sections.get("srv:ws-main")?.members).toHaveLength(1);
   });
 });
 

@@ -15,6 +15,7 @@ export function buildTerminalsQueryKey(
   return ["terminals", serverId, workspaceDirectory, workspaceId ?? null] as const;
 }
 
+/** `workspaceDirectory` is the cwd the caller works in — for a create, the terminal's launch cwd. */
 export function canCreateWorkspaceTerminal(input: {
   isRouteFocused: boolean;
   client: unknown;

@@ -44,7 +44,8 @@ function areHeaderLabelsEquivalent(
 /**
  * The scalar project fields mirror the primary member only. A workspace holding several projects
  * has no single project to name, so the subtitle drops out rather than advertising whichever one
- * the workspace happened to be created from.
+ * the workspace happened to be created from. A projectless workspace has none to name either — its
+ * scalar mirror carries the workspace's own name, which the title already shows.
  */
 export function resolveWorkspaceHeader(input: { workspace: WorkspaceDescriptor }): {
   title: string;
@@ -52,7 +53,7 @@ export function resolveWorkspaceHeader(input: { workspace: WorkspaceDescriptor }
 } {
   return {
     title: input.workspace.name,
-    subtitle: input.workspace.members.length > 1 ? "" : input.workspace.projectDisplayName,
+    subtitle: input.workspace.members.length === 1 ? input.workspace.projectDisplayName : "",
   };
 }
 
@@ -81,6 +82,20 @@ export function resolveWorkspaceHeaderRenderState(input: {
     isGitCheckout: checkout?.isGit ?? false,
     currentBranchName,
   };
+}
+
+/**
+ * Whether the workspace ought to have a directory and hasn't got one — a descriptor that arrived
+ * without the path its projects live in. A projectless workspace legitimately has none: its panes
+ * carry their own project, so it opens on the launcher instead of an error.
+ */
+export function shouldRenderMissingWorkspaceDirectory(input: {
+  workspace: WorkspaceDescriptor | null;
+}): boolean {
+  if (!input.workspace) {
+    return false;
+  }
+  return input.workspace.members.length > 0 && !input.workspace.workspaceDirectory;
 }
 
 export function shouldRenderMissingWorkspaceDescriptor(input: {

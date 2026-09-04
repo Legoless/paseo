@@ -271,6 +271,8 @@ export interface WorkspaceTabSnapshot {
   standaloneTerminalIds: Iterable<string>;
   hasActivePendingTerminalCreate?: boolean;
   hasActivePendingDraftCreate?: boolean;
+  /** True when the workspace holds no projects, so no draft can know where to run. */
+  isProjectless?: boolean;
 }
 
 export const DEFAULT_PANE_ID = "main";
@@ -2532,7 +2534,15 @@ function seedDraftForEmptyWorkspace(input: {
   const hasContentTab = collectAllTabs(input.layout.root).some(
     (tab) => tab.target.kind !== "new_tab" && !explorerTabIds.has(tab.tabId),
   );
-  if (!ready || creatingContent || hasWorkspaceEntities || hasContentTab) {
+  // A projectless workspace keeps the launcher: the draft composer would have to pick a project
+  // for the user, and picking one per pane is the whole point of such a workspace.
+  if (
+    !ready ||
+    creatingContent ||
+    hasWorkspaceEntities ||
+    hasContentTab ||
+    input.snapshot.isProjectless === true
+  ) {
     return input.layout;
   }
 
