@@ -279,6 +279,7 @@ const WorkspaceLayoutStorageSchema: z.ZodType<WorkspaceLayout> = z.strictObject(
   root: SplitNodeStorageSchema,
   focusedPaneId: z.string().nullable(),
   parentTabIdByTabId: z.record(z.string(), z.string()).optional(),
+  draftSeeded: z.boolean().optional(),
 });
 const WorkspaceLayoutPersistedStateSchema = z.strictObject({
   layoutByWorkspace: z.record(z.string(), WorkspaceLayoutStorageSchema),
@@ -446,6 +447,7 @@ function migrateVersionOneWorkspaceLayout(input: {
       },
       focusedPaneId,
       parentTabIdByTabId: strippedLayout.parentTabIdByTabId,
+      draftSeeded: strippedLayout.draftSeeded,
     }),
     explorerPaneId: EXPLORER_SIDEBAR_PANE_ID,
     sidePaneId: preservedSide.sidePaneId,
