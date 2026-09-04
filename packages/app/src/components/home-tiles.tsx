@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { View, Text, Pressable } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useRouter, type Href } from "expo-router";
-import { FolderOpen, Inbox, LayoutGrid, Plug, Smartphone } from "lucide-react-native";
+import { FolderOpen, Inbox, LayoutGrid, Plug, Smartphone, SquarePen } from "lucide-react-native";
 import { ImportSessionSheet } from "@/components/import-session-sheet";
 import { PairDeviceModal } from "@/desktop/components/pair-device-modal";
 import { useCreateProjectlessWorkspace } from "@/hooks/use-create-projectless-workspace";
@@ -25,9 +25,11 @@ import {
  * a fresh install — it needs somewhere to go — so it gets the same grid rather
  * than a dead-end message.
  *
- * Owns the sheets its tiles open, so a caller only has to place it.
+ * Owns the sheets its tiles open, so a caller only has to place it. A workspace
+ * that already holds a project passes `onAddAgent`, which adds the agent tile
+ * and makes it the primary action.
  */
-export function HomeTiles() {
+export function HomeTiles({ onAddAgent }: { onAddAgent?: () => void }) {
   const { t } = useTranslation();
   const router = useRouter();
   const openProjectPicker = useOpenAddProject();
@@ -91,13 +93,23 @@ export function HomeTiles() {
   return (
     <>
       <View style={styles.tiles}>
+        {onAddAgent ? (
+          <HomeTile
+            icon={SquarePen}
+            title={t("openProject.tiles.addAgent.title")}
+            description={t("openProject.tiles.addAgent.description")}
+            onPress={onAddAgent}
+            testID="open-project-add-agent"
+            accent
+          />
+        ) : null}
         <HomeTile
           icon={FolderOpen}
           title={t("openProject.tiles.addProject.title")}
           description={t("openProject.tiles.addProject.description")}
           onPress={handleOpenPicker}
           testID="open-project-submit"
-          accent
+          accent={!onAddAgent}
         />
         <HomeTile
           icon={LayoutGrid}

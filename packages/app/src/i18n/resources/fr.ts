@@ -1495,6 +1495,10 @@ export const fr: TranslationResources = {
   },
   openProject: {
     tiles: {
+      addAgent: {
+        title: "Nouvel agent",
+        description: "Décrivez une tâche et choisissez un projet",
+      },
       addProject: {
         title: "Ajouter un projet",
         description: "Ouvrez un dossier sur votre machine",

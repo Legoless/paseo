@@ -1458,6 +1458,10 @@ export const en = {
   },
   openProject: {
     tiles: {
+      addAgent: {
+        title: "New agent",
+        description: "Describe a task and pick a project",
+      },
       addProject: {
         title: "Add a project",
         description: "Open a folder on your machine",

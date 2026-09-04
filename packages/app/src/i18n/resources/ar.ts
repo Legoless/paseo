@@ -1449,6 +1449,10 @@ export const ar: TranslationResources = {
   },
   openProject: {
     tiles: {
+      addAgent: {
+        title: "وكيل جديد",
+        description: "صف مهمة واختر مشروعًا",
+      },
       addProject: {
         title: "أضف مشروعًا",
         description: "افتح مجلدًا على جهازك",

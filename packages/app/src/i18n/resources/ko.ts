@@ -1458,6 +1458,10 @@ export const ko: TranslationResources = {
   },
   openProject: {
     tiles: {
+      addAgent: {
+        title: "새 에이전트",
+        description: "작업을 설명하고 프로젝트를 선택합니다",
+      },
       addProject: {
         title: "프로젝트 추가",
         description: "내 컴퓨터의 폴더를 엽니다",
