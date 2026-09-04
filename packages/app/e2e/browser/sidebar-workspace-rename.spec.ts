@@ -7,11 +7,11 @@ function workspaceRowTestId(workspaceId: string): string {
   return `sidebar-workspace-row-${getServerId()}:${workspaceId}`;
 }
 
-function workspaceRenameModalTestId(workspaceId: string, suffix: string): string {
-  return `sidebar-workspace-rename-modal-${getServerId()}:${workspaceId}-${suffix}`;
+function workspaceNameInput(page: Page, workspaceId: string) {
+  return page.getByTestId(`sidebar-workspace-name-input-${getServerId()}:${workspaceId}`);
 }
 
-async function openRenameModal(page: Page, workspaceId: string) {
+async function openRenameFromKebab(page: Page, workspaceId: string) {
   const serverId = getServerId();
   const row = page.getByTestId(`sidebar-workspace-row-${serverId}:${workspaceId}`);
   await expect(row).toBeVisible({ timeout: 30_000 });
@@ -25,7 +25,7 @@ async function openRenameModal(page: Page, workspaceId: string) {
   await expect(renameItem).toBeVisible({ timeout: 10_000 });
   await renameItem.click();
 
-  const input = page.getByTestId(workspaceRenameModalTestId(workspaceId, "input"));
+  const input = workspaceNameInput(page, workspaceId);
   await expect(input).toBeVisible({ timeout: 10_000 });
   return input;
 }
@@ -33,6 +33,7 @@ async function openRenameModal(page: Page, workspaceId: string) {
 // In Model B the workspace title is its identity: renaming sets a custom title
 // layered over the derived branch/directory name, and reconciliation never
 // touches it. The sidebar row shows the title verbatim — no branch mutation.
+// Renaming happens in place on the row; there is no dialog.
 test.describe("Sidebar workspace rename", () => {
   test("renaming via kebab sets a custom title that survives reload", async ({ page }) => {
     const workspace = await seedWorkspace({ repoPrefix: "sidebar-rename-" });
@@ -45,12 +46,12 @@ test.describe("Sidebar workspace rename", () => {
         timeout: 30_000,
       });
 
-      const input = await openRenameModal(page, workspace.workspaceId);
+      const input = await openRenameFromKebab(page, workspace.workspaceId);
       await expect(input).toHaveValue("main");
 
       const customTitle = "Payments Refactor";
       await input.fill(customTitle);
-      await page.getByTestId(workspaceRenameModalTestId(workspace.workspaceId, "submit")).click();
+      await input.press("Enter");
 
       await expect(input).toHaveCount(0, { timeout: 15_000 });
       // The title is shown exactly as typed — not slugified into a branch name.
@@ -68,6 +69,29 @@ test.describe("Sidebar workspace rename", () => {
         customTitle,
         { timeout: 30_000 },
       );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  test("double-clicking the title opens the editor in place", async ({ page }) => {
+    const workspace = await seedWorkspace({ repoPrefix: "sidebar-rename-dblclick-" });
+
+    try {
+      await gotoAppShell(page);
+      const row = page.getByTestId(workspaceRowTestId(workspace.workspaceId));
+      await expect(row).toBeVisible({ timeout: 30_000 });
+
+      await row.getByText(workspace.workspaceName, { exact: true }).dblclick();
+
+      const input = workspaceNameInput(page, workspace.workspaceId);
+      await expect(input).toBeVisible({ timeout: 10_000 });
+      await expect(input).toHaveValue(workspace.workspaceName);
+
+      // Escape leaves the name alone — the workspace already has a usable one.
+      await input.press("Escape");
+      await expect(input).toHaveCount(0, { timeout: 10_000 });
+      await expect(row).toContainText(workspace.workspaceName, { timeout: 10_000 });
     } finally {
       await workspace.cleanup();
     }

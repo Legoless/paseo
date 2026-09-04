@@ -4,7 +4,9 @@ import {
   Text,
   View,
   type GestureResponderEvent,
+  type NativeSyntheticEvent,
   type StyleProp,
+  type TextInputKeyPressEventData,
   type TextStyle,
 } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -29,7 +31,11 @@ import { TrailingActionScrim } from "@/components/ui/trailing-action-scrim";
 import { useWorkspaceLabelDefinitions } from "@/workspace-labels";
 import { AdaptiveTextInput } from "@/components/adaptive-text-input";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
-import { useWorkspaceRenameIntentStore } from "@/stores/workspace-rename-intent-store";
+import {
+  requestWorkspaceRename,
+  useWorkspaceRenameIntentStore,
+} from "@/stores/workspace-rename-intent-store";
+import { WorkspaceTitleRenameTarget } from "@/components/sidebar/workspace-title-rename-target";
 import { resolveWorkspaceRenameOutcome } from "@/components/sidebar/workspace-inline-rename";
 
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -142,6 +148,14 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   const isRenaming = useWorkspaceRenameIntentStore(
     (state) => state.workspaceKey === workspace.workspaceKey,
   );
+  const handleRequestRename = useCallback(
+    () =>
+      requestWorkspaceRename({
+        serverId: workspace.serverId,
+        workspaceId: workspace.workspaceId,
+      }),
+    [workspace.serverId, workspace.workspaceId],
+  );
   // The workspace carries label names; their colors live in its host's catalog, so the row is
   // where the two meet — the meta line is handed finished definitions.
   const labels = useWorkspaceLabelDefinitions(workspace.serverId, workspace.labels);
@@ -181,9 +195,11 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
             {isRenaming ? (
               <WorkspaceInlineNameEditor workspace={workspace} style={workspaceBranchTextStyle} />
             ) : (
-              <Text style={workspaceBranchTextStyle} numberOfLines={1}>
-                {workspaceLabel}
-              </Text>
+              <WorkspaceTitleRenameTarget onRequestRename={handleRequestRename}>
+                <Text style={workspaceBranchTextStyle} numberOfLines={1}>
+                  {workspaceLabel}
+                </Text>
+              </WorkspaceTitleRenameTarget>
             )}
             <View style={sidebarWorkspaceRowStyles.rowRight}>{children}</View>
           </View>
@@ -250,12 +266,20 @@ function WorkspaceInlineNameEditor({
     valueRef.current = next;
   }, []);
 
+  const handleKeyPress = useCallback(
+    (event: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
+      if (event.nativeEvent.key === "Escape") finish();
+    },
+    [finish],
+  );
+
   return (
     <AdaptiveTextInput
       initialValue={workspace.title ?? workspace.name}
       onChangeText={handleChangeText}
       onSubmitEditing={handleSubmit}
       onBlur={finish}
+      onKeyPress={handleKeyPress}
       autoFocus
       selectTextOnFocus
       autoCapitalize="none"

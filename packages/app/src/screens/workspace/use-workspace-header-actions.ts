@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { RenamableWorkspace } from "@/components/workspace-rename-modal";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
+import { requestWorkspaceRename } from "@/stores/workspace-rename-intent-store";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
 import { redirectIfArchivingActiveWorkspace } from "@/utils/sidebar-workspace-archive-redirect";
@@ -18,9 +18,6 @@ export interface WorkspaceHeaderActions {
   archiveLabel: string;
   archivePendingLabel: string;
   archiveStatus: "idle" | "pending";
-  isRenameOpen: boolean;
-  onCloseRename: () => void;
-  renameTarget: RenamableWorkspace | null;
 }
 
 /**
@@ -35,12 +32,14 @@ export function useWorkspaceHeaderActions(input: {
 }): WorkspaceHeaderActions {
   const { serverId, workspaceId, workspace } = input;
   const { t } = useTranslation();
-  const [isRenameOpen, setIsRenameOpen] = useState(false);
   const [isHiding, setIsHiding] = useState(false);
   const activeWorkspaceSelection = useActiveWorkspaceSelection();
 
-  const onRename = useCallback(() => setIsRenameOpen(true), []);
-  const onCloseRename = useCallback(() => setIsRenameOpen(false), []);
+  // Renaming happens in place on the workspace's sidebar row.
+  const onRename = useCallback(
+    () => requestWorkspaceRename({ serverId, workspaceId }),
+    [serverId, workspaceId],
+  );
 
   const onArchiveStarted = useCallback(() => {
     redirectIfArchivingActiveWorkspace({ serverId, workspaceId, activeWorkspaceSelection });
@@ -71,11 +70,6 @@ export function useWorkspaceHeaderActions(input: {
     openAddProject(serverId, { targetWorkspace: { serverId, workspaceId } });
   }, [openAddProject, serverId, workspaceId]);
 
-  const renameTarget = useMemo<RenamableWorkspace | null>(
-    () => (workspace ? { serverId, workspaceId, name: workspace.name } : null),
-    [serverId, workspace, workspaceId],
-  );
-
   return {
     workspaceKey: `${serverId}:${workspaceId}`,
     workspaceLabels: workspace?.labels ?? EMPTY_LABELS,
@@ -85,8 +79,5 @@ export function useWorkspaceHeaderActions(input: {
     archiveLabel: t("sidebar.workspace.actions.archive"),
     archivePendingLabel: t("sidebar.workspace.actions.archiving"),
     archiveStatus: isArchiving ? "pending" : "idle",
-    isRenameOpen,
-    onCloseRename,
-    renameTarget,
   };
 }
