@@ -1463,6 +1463,10 @@ export const ja: TranslationResources = {
   },
   openProject: {
     tiles: {
+      addAgent: {
+        title: "新しいエージェント",
+        description: "タスクを説明してプロジェクトを選ぶ",
+      },
       addProject: {
         title: "プロジェクトを追加",
         description: "マシン上のフォルダを開く",

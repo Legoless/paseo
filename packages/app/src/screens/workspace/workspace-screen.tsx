@@ -1154,6 +1154,7 @@ interface RenderWorkspaceContentInput {
   focusedPaneTabDescriptorMap: Map<string, WorkspaceTabDescriptor>;
   isRouteFocused: boolean;
   focusedPaneId: string | null;
+  onAddAgent: (() => void) | undefined;
   buildMobilePaneContentModel: (input: {
     paneId: string | null;
     tab: WorkspaceTabDescriptor;
@@ -1170,6 +1171,7 @@ function renderWorkspaceContent(input: RenderWorkspaceContentInput): React.React
     focusedPaneTabDescriptorMap,
     isRouteFocused,
     focusedPaneId,
+    onAddAgent,
     buildMobilePaneContentModel,
   } = input;
 
@@ -1191,10 +1193,11 @@ function renderWorkspaceContent(input: RenderWorkspaceContentInput): React.React
   }
   if (!activeTabDescriptor) {
     // A workspace that has run out of tabs needs somewhere to go, not a message
-    // telling it to. Same grid the home screen offers.
+    // telling it to. Same grid the home screen offers, plus the agent composer
+    // when the workspace already holds a project to run it in.
     return (
       <View style={styles.emptyState}>
-        <HomeTiles />
+        <HomeTiles onAddAgent={onAddAgent} />
       </View>
     );
   }
@@ -3791,6 +3794,14 @@ function WorkspaceScreenContent({
     focusedPaneTabDescriptorMap,
     isRouteFocused,
     focusedPaneId,
+    // The composer can only run somewhere — without a project member there is
+    // nowhere to point it, so the tile stays off the grid.
+    onAddAgent:
+      workspaceMemberCount > 0
+        ? () => {
+            openWorkspaceDraftTab();
+          }
+        : undefined,
     buildMobilePaneContentModel,
   });
 

@@ -1431,6 +1431,10 @@ export const zhCN: TranslationResources = {
   },
   openProject: {
     tiles: {
+      addAgent: {
+        title: "新建 Agent",
+        description: "描述任务并选择 project",
+      },
       addProject: {
         title: "添加 project",
         description: "打开此机器上的文件夹",
