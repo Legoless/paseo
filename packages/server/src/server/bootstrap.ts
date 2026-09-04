@@ -581,6 +581,17 @@ function readPaneLayoutFields(
   };
 }
 
+/**
+ * The CORS origin a packaged desktop renderer connects from. The custom protocol
+ * scheme differs per build variant ("paseo", "paseo-neo"), so the desktop app
+ * passes its own when it spawns the daemon; a standalone daemon keeps the
+ * default. Without the right one the app cannot reach the daemon it just started.
+ */
+export function resolveDesktopAppOrigin(env: NodeJS.ProcessEnv): string {
+  const scheme = env.PASEO_APP_SCHEME?.trim();
+  return `${scheme && scheme.length > 0 ? scheme : "paseo"}://app`;
+}
+
 export async function createPaseoDaemon(
   config: PaseoDaemonConfig,
   rootLogger: Logger,
@@ -730,7 +741,9 @@ export async function createPaseoDaemon(
 
   // CORS - allow same-origin + configured origins
   const fixedAllowedOrigins = [
-    // Packaged desktop renderers use the custom paseo:// protocol scheme.
+    resolveDesktopAppOrigin(process.env),
+    // The official scheme stays allowed regardless, so a variant's daemon can
+    // still serve the official app pointed at it.
     "paseo://app",
     // For TCP, add localhost variants
     ...(listenTarget.type === "tcp"
