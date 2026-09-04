@@ -20,7 +20,6 @@ import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
 import { getSidebarRowBackdrop } from "@/components/sidebar/sidebar-row-backdrop";
 import { type GestureType } from "react-native-gesture-handler";
 import * as Clipboard from "expo-clipboard";
-import { WorkspaceRenameModal } from "@/components/workspace-rename-modal";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
 import { DraggableList, type DraggableRenderItemInfo } from "./draggable-list";
 import type { DraggableListDragHandleProps } from "./draggable-list.types";
@@ -60,6 +59,7 @@ import { useShowShortcutBadges } from "@/hooks/use-show-shortcut-badges";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { ProjectStatusIndicator } from "@/components/sidebar/project-leading-visual";
 import { useToast } from "@/contexts/toast-context";
+import { requestWorkspaceRename } from "@/stores/workspace-rename-intent-store";
 import { toWorktreeArchiveRisk } from "@/git/worktree-archive-warning";
 import { hasVisibleOrderChanged, mergeWithRemainder } from "@/utils/sidebar-reorder";
 import { SidebarStatusWorkspaceList } from "@/components/sidebar/sidebar-status-list";
@@ -520,7 +520,6 @@ function WorkspaceRowWithMenu({
   const { t } = useTranslation();
   const toast = useToast();
   const [isHidingWorkspace, setIsHidingWorkspace] = useState(false);
-  const [isRenameOpen, setIsRenameOpen] = useState(false);
   const isArchiving = workspace.archivingAt !== null || isHidingWorkspace;
   const redirectAfterArchive = useCallback(() => {
     redirectIfArchivingActiveWorkspace({
@@ -548,12 +547,11 @@ function WorkspaceRowWithMenu({
   }, [archiveController, isArchiving]);
 
   const handleOpenRename = useCallback(() => {
-    setIsRenameOpen(true);
-  }, []);
-
-  const handleCloseRename = useCallback(() => {
-    setIsRenameOpen(false);
-  }, []);
+    requestWorkspaceRename({
+      serverId: workspace.serverId,
+      workspaceId: workspace.workspaceId,
+    });
+  }, [workspace.serverId, workspace.workspaceId]);
 
   const openAddProject = useOpenAddProject();
   const handleAddProject = useCallback(() => {
@@ -591,41 +589,33 @@ function WorkspaceRowWithMenu({
   });
 
   return (
-    <>
-      <WorkspaceRowInner
-        workspace={workspace}
-        hostBadge={hostBadge}
-        leadingProjectName={leadingProjectName}
-        leadingProjectIconDataUri={leadingProjectIconDataUri}
-        selected={selected}
-        shortcutNumber={shortcutNumber}
-        showShortcutBadge={showShortcutBadge}
-        onPress={onPress}
-        drag={drag}
-        isDragging={isDragging}
-        isArchiving={isArchiving}
-        isCreating={isCreating}
-        dragHandleProps={dragHandleProps}
-        archiveLabel={t("sidebar.workspace.actions.archive")}
-        archiveStatus={isArchiving ? "pending" : "idle"}
-        archivePendingLabel={t("sidebar.workspace.actions.archiving")}
-        onArchive={handleArchive}
-        onRename={handleOpenRename}
-        onMarkAsRead={hasClearableAttention ? handleMarkAsRead : undefined}
-        onAddProject={onAddProject}
-        archiveShortcutKeys={selected ? archiveShortcutKeys : null}
-        isPinned={isPinned}
-        onTogglePin={onTogglePin}
-        reserveIdleStatusIndicatorSpace={reserveIdleStatusIndicatorSpace}
-        collapseAccessory={collapseAccessory}
-      />
-      <WorkspaceRenameModal
-        visible={isRenameOpen}
-        workspace={workspace}
-        onClose={handleCloseRename}
-        testID={`sidebar-workspace-rename-modal-${workspace.workspaceKey}`}
-      />
-    </>
+    <WorkspaceRowInner
+      workspace={workspace}
+      hostBadge={hostBadge}
+      leadingProjectName={leadingProjectName}
+      leadingProjectIconDataUri={leadingProjectIconDataUri}
+      selected={selected}
+      shortcutNumber={shortcutNumber}
+      showShortcutBadge={showShortcutBadge}
+      onPress={onPress}
+      drag={drag}
+      isDragging={isDragging}
+      isArchiving={isArchiving}
+      isCreating={isCreating}
+      dragHandleProps={dragHandleProps}
+      archiveLabel={t("sidebar.workspace.actions.archive")}
+      archiveStatus={isArchiving ? "pending" : "idle"}
+      archivePendingLabel={t("sidebar.workspace.actions.archiving")}
+      onArchive={handleArchive}
+      onRename={handleOpenRename}
+      onMarkAsRead={hasClearableAttention ? handleMarkAsRead : undefined}
+      onAddProject={onAddProject}
+      archiveShortcutKeys={selected ? archiveShortcutKeys : null}
+      isPinned={isPinned}
+      onTogglePin={onTogglePin}
+      reserveIdleStatusIndicatorSpace={reserveIdleStatusIndicatorSpace}
+      collapseAccessory={collapseAccessory}
+    />
   );
 }
 

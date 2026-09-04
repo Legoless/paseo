@@ -200,11 +200,7 @@ import type { SurfaceBackdrop } from "@/styles/surface-backdrop";
 import { buildHostRootRoute, buildSettingsHostRoute } from "@/utils/host-routes";
 import { useWorkspaceTerminals } from "@/screens/workspace/terminals/use-workspace-terminals";
 import type { ListTerminalsResponse, TerminalProfile } from "@getpaseo/protocol/messages";
-import { WorkspaceRenameModal } from "@/components/workspace-rename-modal";
-import {
-  useWorkspaceHeaderActions,
-  type WorkspaceHeaderActions,
-} from "@/screens/workspace/use-workspace-header-actions";
+import { useWorkspaceHeaderActions } from "@/screens/workspace/use-workspace-header-actions";
 import {
   WorkspaceHeaderMenuDesktop,
   WorkspaceHeaderMenuMobile,
@@ -1027,20 +1023,6 @@ interface WorkspaceHeaderTitleBarProps {
   onScriptTerminalStarted: (terminalId: string) => void;
   onViewScriptTerminal: (terminalId: string) => void;
   onOpenUrlInBrowserTab: (url: string) => void;
-}
-
-function WorkspaceHeaderRenameModal({ actions }: { actions: WorkspaceHeaderActions }) {
-  if (!actions.renameTarget) {
-    return null;
-  }
-  return (
-    <WorkspaceRenameModal
-      visible={actions.isRenameOpen}
-      workspace={actions.renameTarget}
-      onClose={actions.onCloseRename}
-      testID={`workspace-header-rename-modal-${actions.workspaceKey}`}
-    />
-  );
 }
 
 function WorkspaceHeaderTitleBar({
@@ -4284,7 +4266,6 @@ function WorkspaceScreenContent({
           onSubmit={handleRenameModalSubmit}
           onClose={handleRenameModalClose}
         />
-        <WorkspaceHeaderRenameModal actions={workspaceHeaderActions} />
       </View>
     </RenderProfile>
   );
