@@ -106,6 +106,7 @@ interface SidebarSharedProps {
 }
 
 interface SidebarLabels {
+  newWorkspace: string;
   addProject: string;
   hosts: string;
   home: string;
@@ -247,6 +248,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
 
   const labels = useMemo(
     (): SidebarLabels => ({
+      newWorkspace: t("sidebar.actions.newWorkspace"),
       addProject: t("sidebar.actions.addProject"),
       hosts: t("sidebar.actions.hosts"),
       home: t("sidebar.actions.home"),
@@ -631,6 +633,7 @@ function MobileSidebar({
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
         <View style={styles.sidebarHeaderGroup}>
+          <SidebarNewWorkspaceHeaderRow label={labels.newWorkspace} onBeforeCreate={closeSidebar} />
           <SidebarHeaderRow
             icon={History}
             label={labels.sessions}
@@ -840,6 +843,7 @@ function DesktopSidebar({
             <TitlebarDragRegion />
           )}
           <View style={sidebarHeaderGroupStyle}>
+            <SidebarNewWorkspaceHeaderRow label={labels.newWorkspace} />
             <SidebarHeaderRow
               icon={History}
               label={labels.sessions}
@@ -906,6 +910,34 @@ function DesktopSidebar({
     </Animated.View>
   );
 }
+
+const SidebarNewWorkspaceHeaderRow = memo(function SidebarNewWorkspaceHeaderRow({
+  label,
+  onBeforeCreate,
+}: {
+  label: string;
+  onBeforeCreate?: () => void;
+}) {
+  const createProjectlessWorkspace = useCreateProjectlessWorkspace();
+  const handlePress = useCallback(() => {
+    onBeforeCreate?.();
+    void (async () => {
+      // Several hosts and no active workspace is a real choice; the New
+      // Workspace screen is the surface that can ask which one.
+      if (!(await createProjectlessWorkspace())) router.push(buildNewWorkspaceRoute());
+    })();
+  }, [createProjectlessWorkspace, onBeforeCreate]);
+
+  return (
+    <SidebarHeaderRow
+      icon={Plus}
+      label={label}
+      onPress={handlePress}
+      testID="sidebar-global-new-workspace"
+      variant="compact"
+    />
+  );
+});
 
 function WorkspacesSectionHeader() {
   const { theme } = useUnistyles();

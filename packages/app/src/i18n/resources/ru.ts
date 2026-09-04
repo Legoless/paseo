@@ -1478,6 +1478,10 @@ export const ru: TranslationResources = {
         title: "Добавить проект",
         description: "Откройте папку на своем компьютере",
       },
+      newWorkspace: {
+        title: "Новое рабочее пространство",
+        description: "Начните с пустого и добавьте проекты позже",
+      },
       importSession: {
         title: "Импортировать сессию",
         description: "Импортируйте недавние сессии из внешних CLI",

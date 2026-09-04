@@ -1467,6 +1467,10 @@ export const ja: TranslationResources = {
         title: "プロジェクトを追加",
         description: "マシン上のフォルダを開く",
       },
+      newWorkspace: {
+        title: "新しいワークスペース",
+        description: "空の状態で始めて、後でプロジェクトを追加",
+      },
       importSession: {
         title: "セッションをインポート",
         description: "最近の外部CLIセッションを取り込む",

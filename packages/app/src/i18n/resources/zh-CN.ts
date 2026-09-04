@@ -1435,6 +1435,10 @@ export const zhCN: TranslationResources = {
         title: "添加 project",
         description: "打开此机器上的文件夹",
       },
+      newWorkspace: {
+        title: "新建 workspace",
+        description: "从空白开始，稍后添加 project",
+      },
       importSession: {
         title: "导入会话",
         description: "导入最近的外部 CLI 会话",

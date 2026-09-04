@@ -1462,6 +1462,10 @@ export const en = {
         title: "Add a project",
         description: "Open a folder on your machine",
       },
+      newWorkspace: {
+        title: "New workspace",
+        description: "Start empty and add projects later",
+      },
       importSession: {
         title: "Import session",
         description: "Bring in recent external CLI sessions",

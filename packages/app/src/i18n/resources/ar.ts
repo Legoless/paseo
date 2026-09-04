@@ -1453,6 +1453,10 @@ export const ar: TranslationResources = {
         title: "أضف مشروعًا",
         description: "افتح مجلدًا على جهازك",
       },
+      newWorkspace: {
+        title: "مساحة عمل جديدة",
+        description: "ابدأ فارغًا وأضف المشاريع لاحقًا",
+      },
       importSession: {
         title: "جلسة الاستيراد",
         description: "أحضر جلسات CLI الخارجية الأخيرة",
