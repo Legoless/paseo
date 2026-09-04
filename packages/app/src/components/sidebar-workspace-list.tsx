@@ -808,6 +808,7 @@ function WorkspaceRow({
 function WorkspaceMemberRow({
   member,
   serverId,
+  workspaceId,
   iconDataUri,
   canRemove,
   onRemove,
@@ -819,6 +820,7 @@ function WorkspaceMemberRow({
 }: {
   member: SidebarWorkspaceMemberRow;
   serverId: string;
+  workspaceId: string;
   iconDataUri: string | null;
   canRemove: boolean;
   onRemove: () => void;
@@ -902,6 +904,7 @@ function WorkspaceMemberRow({
             <WorkspaceMemberKebabMenu
               member={member}
               serverId={serverId}
+              workspaceId={workspaceId}
               onFocus={handleKebabFocus}
               onBlur={handleKebabBlur}
               canRemove={canRemove}
@@ -918,6 +921,7 @@ function WorkspaceMemberRow({
           <WorkspaceMemberMenuItems
             member={member}
             serverId={serverId}
+            workspaceId={workspaceId}
             surface="context"
             canRemove={canRemove}
             onCopyPath={onCopyPath}
@@ -1137,6 +1141,7 @@ function WorkspaceMemberBlock({
       <WorkspaceMemberRow
         member={member}
         serverId={serverId}
+        workspaceId={workspaceId}
         iconDataUri={iconDataUri}
         canRemove={canRemove}
         onRemove={handleRemove}
