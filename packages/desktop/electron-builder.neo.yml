@@ -35,7 +35,7 @@ mac:
   notarize: false
   extraResources:
     - from: bin/paseo
-      to: bin/paseo
+      to: bin/paseoneo
     - from: assets/icon.png
       to: icon.png
   target:
@@ -48,7 +48,7 @@ linux:
   vendor: "Paseo"
   extraResources:
     - from: bin/paseo
-      to: bin/paseo
+      to: bin/paseoneo
   target:
     - AppImage
     - deb
@@ -59,7 +59,7 @@ win:
   icon: assets/icon.ico
   extraResources:
     - from: bin/paseo.cmd
-      to: bin/paseo.cmd
+      to: bin/paseoneo.cmd
   target:
     - target: nsis
       arch:
