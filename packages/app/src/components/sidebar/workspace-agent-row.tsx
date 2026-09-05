@@ -740,8 +740,8 @@ const styles = StyleSheet.create((theme) => ({
   },
   agentTitle: {
     color: theme.colors.foreground,
-    fontSize: theme.fontSize.sm,
-    lineHeight: 16,
+    fontSize: theme.fontSize.base,
+    lineHeight: 20,
     minWidth: 0,
     flexShrink: 1,
     flex: 1,
