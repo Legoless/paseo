@@ -19,6 +19,14 @@ function createClient(response: {
       workspace: null,
       error: null,
     }),
+    moveWorkspaceMember: async () => ({
+      requestId: "req-1",
+      source: null,
+      target: null,
+      movedAgentIds: [],
+      movedTerminalIds: [],
+      error: null,
+    }),
   };
 }
 
@@ -75,6 +83,14 @@ describe("addWorkspaceMemberCompletion", () => {
       removeWorkspaceMember: async () => ({
         requestId: "req-1",
         workspace: null,
+        error: null,
+      }),
+      moveWorkspaceMember: async () => ({
+        requestId: "req-1",
+        source: null,
+        target: null,
+        movedAgentIds: [],
+        movedTerminalIds: [],
         error: null,
       }),
     };

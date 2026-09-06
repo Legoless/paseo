@@ -1171,6 +1171,8 @@ export const ptBR: TranslationResources = {
         openFolderFailed: "Couldn't open folder",
         remove: "Remover projeto",
         removeFromWorkspace: "Remover do workspace",
+        moveToWorkspace: "Mover para workspace",
+        noOtherWorkspaces: "Nenhum outro workspace",
         removing: "Removendo...",
       },
       confirmations: {

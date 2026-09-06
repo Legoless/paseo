@@ -1162,6 +1162,8 @@ export const ru: TranslationResources = {
         openFolderFailed: "Не удалось открыть папку",
         remove: "Удалить проект",
         removeFromWorkspace: "Удалить из рабочего пространства",
+        moveToWorkspace: "Переместить в рабочее пространство",
+        noOtherWorkspaces: "Нет других рабочих пространств",
         removing: "Удаление...",
       },
       confirmations: {

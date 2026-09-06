@@ -1136,6 +1136,8 @@ export const zhCN: TranslationResources = {
         openFolderFailed: "Couldn't open folder",
         remove: "移除 project",
         removeFromWorkspace: "从工作区中移除",
+        moveToWorkspace: "移动到 workspace",
+        noOtherWorkspaces: "没有其他 workspace",
         removing: "正在移除...",
       },
       confirmations: {

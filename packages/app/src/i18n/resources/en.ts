@@ -1155,6 +1155,8 @@ export const en = {
         openFolderFailed: "Couldn't open folder",
         remove: "Remove project",
         removeFromWorkspace: "Remove from workspace",
+        moveToWorkspace: "Move to workspace",
+        noOtherWorkspaces: "No other workspaces",
         removing: "Removing...",
       },
       confirmations: {

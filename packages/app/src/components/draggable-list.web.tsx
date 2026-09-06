@@ -1,5 +1,14 @@
-import { memo, useCallback, useMemo, useRef, type ReactElement } from "react";
+import {
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  type ReactElement,
+} from "react";
 import { ScrollView, View } from "react-native";
+import invariant from "tiny-invariant";
 import {
   DndContext,
   closestCenter,
@@ -19,6 +28,10 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import type { DraggableListProps, DraggableRenderItemInfo } from "./draggable-list.types";
 import { getDragActivationConstraints, useDragReorderState } from "./drag-reorder";
+import {
+  ExternalDndActiveIdContext,
+  ExternalDndListRegistryContext,
+} from "./drag-reorder/external-dnd-registry";
 
 export type { DraggableListProps, DraggableRenderItemInfo };
 
@@ -33,6 +46,11 @@ const DRAG_ACTIVATION_CONFIG = {
   touchHoldDelayMs: 180,
   touchHoldTolerance: 8,
 };
+
+function computeDragOpacity(externalDndContext: boolean, isDragging: boolean): number {
+  if (!isDragging) return 1;
+  return externalDndContext ? 0.3 : 0.9;
+}
 
 function areRecordsEqual(
   left: Record<string, unknown> | undefined,
@@ -96,6 +114,8 @@ interface SortableItemProps<T> {
   renderItem: (info: DraggableRenderItemInfo<T>) => ReactElement;
   activeId: string | null;
   useDragHandle: boolean;
+  itemData?: Record<string, unknown>;
+  externalDndContext: boolean;
 }
 
 function SortableItemInner<T>({
@@ -105,6 +125,8 @@ function SortableItemInner<T>({
   renderItem,
   activeId,
   useDragHandle,
+  itemData,
+  externalDndContext,
 }: SortableItemProps<T>) {
   const {
     attributes,
@@ -114,7 +136,7 @@ function SortableItemInner<T>({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, data: itemData });
 
   const dragRef = useRef<(() => void) | null>(null);
 
@@ -132,20 +154,25 @@ function SortableItemInner<T>({
   // differently-sized droppable. For variable-height rows this can look like
   // the "ghost" stretches. Keep the dragged item's size stable by zeroing
   // out the dnd-kit scaling component.
-  const baseTransform = CSS.Transform.toString(
-    transform && isDragging ? { ...transform, scaleX: 1, scaleY: 1 } : transform,
-  );
-  const scaleTransform = isDragging ? "scale(1.02)" : "";
+  // External contexts render their own insertion affordance, so the row stays
+  // static and the DragOverlay carries the moving chip.
+  const baseTransform = externalDndContext
+    ? undefined
+    : CSS.Transform.toString(
+        transform && isDragging ? { ...transform, scaleX: 1, scaleY: 1 } : transform,
+      );
+  const scaleTransform = !externalDndContext && isDragging ? "scale(1.02)" : "";
   const combinedTransform = [baseTransform, scaleTransform].filter(Boolean).join(" ");
 
+  const dragOpacity = computeDragOpacity(externalDndContext, isDragging);
   const style = useMemo(
     () => ({
       transform: combinedTransform || undefined,
       transition,
-      opacity: isDragging ? 0.9 : 1,
+      opacity: dragOpacity,
       zIndex: isDragging ? 1000 : 1,
     }),
-    [combinedTransform, transition, isDragging],
+    [combinedTransform, transition, dragOpacity, isDragging],
   );
   const stableAttributes = useShallowStableRecord(attributes as unknown as Record<string, unknown>);
   const stableListeners = useStableListenerRecord(
@@ -203,13 +230,44 @@ export function DraggableList<T>({
   // simultaneousGestureRef is native-only, ignored on web
   onDragBegin,
   nestable: _nestable = false,
+  externalDndContext = false,
+  getItemData,
+  externalListId,
 }: DraggableListProps<T>) {
-  const { activeId, items, handlers } = useDragReorderState({
+  const {
+    activeId: internalActiveId,
+    items: managedItems,
+    handlers,
+  } = useDragReorderState({
     data,
     keyExtractor,
     onDragEnd,
     onDragBegin,
   });
+  const registry = useContext(ExternalDndListRegistryContext);
+  const externalActiveId = useContext(ExternalDndActiveIdContext);
+  invariant(
+    !externalDndContext || registry !== null,
+    "externalDndContext requires an ExternalDndListRegistryContext provider",
+  );
+
+  // The owning context reorders this list through the registry on a same-list drop.
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  const onDragEndRef = useRef(onDragEnd);
+  onDragEndRef.current = onDragEnd;
+  useEffect(() => {
+    if (!externalDndContext || !externalListId || !registry) {
+      return;
+    }
+    registry.registerList(externalListId, {
+      getData: () => dataRef.current,
+      keyExtractor: (item, index) => keyExtractor(item as T, index),
+      commit: (items) => onDragEndRef.current(items as T[]),
+    });
+    return () => registry.unregisterList(externalListId);
+  }, [externalDndContext, externalListId, registry, keyExtractor]);
+
   const activationConstraints = getDragActivationConstraints(useDragHandle, DRAG_ACTIVATION_CONFIG);
 
   const sensors = useSensors(
@@ -224,6 +282,8 @@ export function DraggableList<T>({
     }),
   );
 
+  const items = externalDndContext ? data : managedItems;
+  const activeId = externalDndContext ? externalActiveId : internalActiveId;
   const ids = useMemo(
     () => items.map((item, index) => keyExtractor(item, index)),
     [items, keyExtractor],
@@ -236,6 +296,38 @@ export function DraggableList<T>({
     ],
     [scrollEnabled, containerStyle],
   );
+
+  const sortableItems = (
+    <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+      {items.map((item, index) => {
+        const id = keyExtractor(item, index);
+        return (
+          <SortableItem
+            key={id}
+            id={id}
+            item={item}
+            index={index}
+            renderItem={renderItem}
+            activeId={activeId}
+            useDragHandle={useDragHandle}
+            itemData={getItemData?.(item, index)}
+            externalDndContext={externalDndContext}
+          />
+        );
+      })}
+    </SortableContext>
+  );
+
+  if (externalDndContext) {
+    return (
+      <View style={wrapperStyle} testID={testID}>
+        {ListHeaderComponent}
+        {items.length === 0 && ListEmptyComponent}
+        {sortableItems}
+        {ListFooterComponent}
+      </View>
+    );
+  }
 
   return (
     <View style={wrapperStyle}>
@@ -268,6 +360,7 @@ export function DraggableList<T>({
                     renderItem={renderItem}
                     activeId={activeId}
                     useDragHandle={useDragHandle}
+                    externalDndContext={false}
                   />
                 );
               })}
@@ -299,6 +392,7 @@ export function DraggableList<T>({
                     renderItem={renderItem}
                     activeId={activeId}
                     useDragHandle={useDragHandle}
+                    externalDndContext={false}
                   />
                 );
               })}

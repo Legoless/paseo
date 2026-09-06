@@ -60,6 +60,19 @@ export interface DraggableListProps<T> {
   /** Called when drag interaction ends (finger released). */
   onDragRelease?: () => void;
   /**
+   * Web-only: bind items to a DndContext an ancestor owns instead of one per list,
+   * which is the only way a drag can resolve a drop target in another list. The
+   * ancestor's handlers own reorder/move routing; this list renders and registers.
+   */
+  externalDndContext?: boolean;
+  /** dnd-kit data attached to each item so the owning context can route the drop. */
+  getItemData?: (item: T, index: number) => Record<string, unknown>;
+  /**
+   * Registers this list's data and commit callback with the owning context under
+   * this id, so a same-list drop can still reorder it.
+   */
+  externalListId?: string;
+  /**
    * Native-only: use the nestable draggable-flatlist variant for nested drag
    * lists coordinated by a shared NestableScrollContainer.
    */
