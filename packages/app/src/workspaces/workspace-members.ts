@@ -10,10 +10,15 @@ export interface WorkspaceMemberAddDirectorySource {
 export interface WorkspaceMembersClient {
   addWorkspaceMember: DaemonClient["addWorkspaceMember"];
   removeWorkspaceMember: DaemonClient["removeWorkspaceMember"];
+  moveWorkspaceMember: DaemonClient["moveWorkspaceMember"];
 }
 
 export type WorkspaceMemberOperationResult =
   | { ok: true; workspace: WorkspaceDescriptorPayload }
+  | { ok: false; errorCode: string | null; error: string | null };
+
+export type WorkspaceMemberMoveResult =
+  | { ok: true; source: WorkspaceDescriptorPayload; target: WorkspaceDescriptorPayload }
   | { ok: false; errorCode: string | null; error: string | null };
 
 export async function addWorkspaceMemberDirectory(input: {
@@ -38,4 +43,21 @@ export async function removeWorkspaceMember(input: {
     return { ok: false, errorCode: payload.errorCode ?? null, error: payload.error };
   }
   return { ok: true, workspace: payload.workspace };
+}
+
+export async function moveWorkspaceMember(input: {
+  client: WorkspaceMembersClient;
+  sourceWorkspaceId: string;
+  targetWorkspaceId: string;
+  cwd: string;
+}): Promise<WorkspaceMemberMoveResult> {
+  const payload = await input.client.moveWorkspaceMember(
+    input.sourceWorkspaceId,
+    input.targetWorkspaceId,
+    input.cwd,
+  );
+  if (payload.error || !payload.source || !payload.target) {
+    return { ok: false, errorCode: payload.errorCode ?? null, error: payload.error };
+  }
+  return { ok: true, source: payload.source, target: payload.target };
 }

@@ -27,6 +27,11 @@ import { ContextMenuSeparator } from "@/components/ui/context-menu";
 import { WorkspaceMenuItem } from "@/components/sidebar/workspace-menu-item";
 import { OpenInFileManagerMenuItem } from "@/workspace/open-in-file-manager/menu-item";
 import { WORKSPACE_LABEL_PAGE_ID } from "@/workspace-labels/picker";
+import {
+  MOVE_MEMBER_ICON,
+  MOVE_MEMBER_PAGE_ID,
+  useMoveMemberMenuPages,
+} from "@/workspaces/move-member-menu-page";
 import { TerminalProfileIcon } from "@/components/terminal-profile-icon";
 import { useLaunchProjectTab } from "@/hooks/use-launch-project-tab";
 
@@ -143,18 +148,23 @@ export function WorkspaceMemberMenuItems({
         testID={`sidebar-member-menu-open-folder-${member.memberKey}`}
         surface={surface}
       />
+      <Separator />
+      <DropdownMenuSubTrigger
+        id={MOVE_MEMBER_PAGE_ID}
+        leading={MOVE_MEMBER_ICON}
+        testID={`sidebar-member-menu-move-${member.memberKey}`}
+      >
+        {t("sidebar.project.actions.moveToWorkspace")}
+      </DropdownMenuSubTrigger>
       {canRemove ? (
-        <>
-          <Separator />
-          <WorkspaceMenuItem
-            surface={surface}
-            testID={`sidebar-member-menu-remove-${member.memberKey}`}
-            leading={trash2LeadingIcon}
-            onSelect={onRemove}
-          >
-            {t("sidebar.project.actions.removeFromWorkspace")}
-          </WorkspaceMenuItem>
-        </>
+        <WorkspaceMenuItem
+          surface={surface}
+          testID={`sidebar-member-menu-remove-${member.memberKey}`}
+          leading={trash2LeadingIcon}
+          onSelect={onRemove}
+        >
+          {t("sidebar.project.actions.removeFromWorkspace")}
+        </WorkspaceMenuItem>
       ) : null}
     </>
   );
@@ -174,6 +184,12 @@ export function WorkspaceMemberKebabMenu({
   onBlur: () => void;
 }) {
   const { t } = useTranslation();
+  const movePages = useMoveMemberMenuPages({
+    serverId,
+    sourceWorkspaceId: workspaceId,
+    cwd: member.workspaceDirectory,
+    projectName: member.projectName,
+  });
   return (
     <DropdownMenu compactMode="sheet">
       <DropdownMenuTrigger
@@ -187,7 +203,12 @@ export function WorkspaceMemberKebabMenu({
       >
         {renderKebabTriggerIcon}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" width={220} sheetTitle={t("sidebar.project.actions.menu")}>
+      <DropdownMenuContent
+        align="end"
+        width={220}
+        sheetTitle={t("sidebar.project.actions.menu")}
+        pages={movePages}
+      >
         <WorkspaceMemberMenuItems
           member={member}
           serverId={serverId}

@@ -1158,6 +1158,8 @@ export const ja: TranslationResources = {
         openFolderFailed: "Couldn't open folder",
         remove: "プロジェクトを削除",
         removeFromWorkspace: "ワークスペースから削除",
+        moveToWorkspace: "ワークスペースに移動",
+        noOtherWorkspaces: "他のワークスペースがありません",
         removing: "削除中...",
       },
       confirmations: {

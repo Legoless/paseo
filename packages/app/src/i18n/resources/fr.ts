@@ -1180,6 +1180,8 @@ export const fr: TranslationResources = {
         openFolderFailed: "Couldn't open folder",
         remove: "Supprimer le projet",
         removeFromWorkspace: "Retirer de l’espace de travail",
+        moveToWorkspace: "Déplacer vers un espace de travail",
+        noOtherWorkspaces: "Aucun autre espace de travail",
         removing: "Suppression...",
       },
       confirmations: {

@@ -42,6 +42,14 @@ import type {
 } from "@/projects/workspace-groups";
 import { WorkspaceAgentRow, WorkspaceNewAgentRow } from "@/components/sidebar/workspace-agent-row";
 import { useRemoveWorkspaceMember } from "@/workspaces/use-remove-workspace-member";
+import { useMoveMemberMenuPages } from "@/workspaces/move-member-menu-page";
+import { useMoveWorkspaceMember } from "@/workspaces/use-move-workspace-member";
+import { moveWorkspaceMemberErrorMessage } from "@/workspaces/move-workspace-member-message";
+import {
+  SidebarMemberMoveDndProvider,
+  useSidebarMemberMoveDragState,
+  type SidebarMemberMoveInput,
+} from "@/components/sidebar/member-move-dnd";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { parseHostWorkspaceRouteFromPathname } from "@/utils/host-routes";
 import {
@@ -852,6 +860,12 @@ function WorkspaceMemberRow({
     "aria-roledescription": _dragRoleDescription,
     ...dragAttributes
   } = dragHandleProps?.attributes ?? {};
+  const movePages = useMoveMemberMenuPages({
+    serverId,
+    sourceWorkspaceId: workspaceId,
+    cwd: member.workspaceDirectory,
+    projectName: member.projectName,
+  });
 
   return (
     <View
@@ -907,6 +921,7 @@ function WorkspaceMemberRow({
           align="start"
           width={220}
           testID={`sidebar-member-context-menu-${member.memberKey}`}
+          pages={movePages}
         >
           <WorkspaceMemberMenuItems
             member={member}
@@ -1227,6 +1242,22 @@ function WorkspaceSectionBlock({
     },
     [placement.workspaceKey, setMemberOrder],
   );
+  const getMemberDragData = useCallback(
+    (member: SidebarWorkspaceMemberRow) => ({
+      kind: "member",
+      workspaceKey: placement.workspaceKey,
+      memberKey: member.memberKey,
+      cwd: member.workspaceDirectory,
+      projectName: member.projectName,
+      label: member.projectName,
+    }),
+    [placement.workspaceKey],
+  );
+  const memberMoveDragState = useSidebarMemberMoveDragState();
+  const isMemberMoveTarget =
+    memberMoveDragState.activeKind === "member" &&
+    memberMoveDragState.overWorkspaceKey === placement.workspaceKey &&
+    memberMoveDragState.activeWorkspaceKey !== placement.workspaceKey;
   const renderMember = useCallback(
     ({
       item,
@@ -1258,7 +1289,12 @@ function WorkspaceSectionBlock({
   );
 
   return (
-    <View style={!collapsed && section ? styles.workspaceSectionExpanded : undefined}>
+    <View
+      style={[
+        !collapsed && section ? styles.workspaceSectionExpanded : undefined,
+        isMemberMoveTarget && styles.workspaceSectionDropTarget,
+      ]}
+    >
       <MemoWorkspaceRowItem
         workspace={placement}
         workspaceEntry={workspaceEntry}
@@ -1295,6 +1331,9 @@ function WorkspaceSectionBlock({
             scrollEnabled={false}
             useDragHandle
             nestable={platformIsNative}
+            externalDndContext
+            externalListId={`members:${placement.workspaceKey}`}
+            getItemData={getMemberDragData}
           />
         </>
       ) : null}
@@ -1669,6 +1708,52 @@ function WorkspaceSectionList({
     [getTopLevelWorkspaceOrder, setTopLevelWorkspaceOrder],
   );
 
+  const toast = useToast();
+  const moveWorkspaceMember = useMoveWorkspaceMember();
+  const placementByWorkspaceKey = useMemo(
+    () => new Map(topLevelWorkspaces.map((workspace) => [workspace.workspaceKey, workspace])),
+    [topLevelWorkspaces],
+  );
+  const handleMoveMember = useCallback(
+    (input: SidebarMemberMoveInput) => {
+      const source = placementByWorkspaceKey.get(input.sourceWorkspaceKey);
+      const target = placementByWorkspaceKey.get(input.targetWorkspaceKey);
+      if (!source || !target) {
+        return;
+      }
+      const targetTitle =
+        workspaceEntriesByKey.get(target.workspaceKey)?.title?.trim() || target.name;
+      if (source.serverId !== target.serverId) {
+        toast.error(
+          moveWorkspaceMemberErrorMessage({
+            errorCode: "cross_host",
+            error: null,
+            projectName: input.projectName,
+            targetTitle,
+          }),
+        );
+        return;
+      }
+      void moveWorkspaceMember({
+        client: getHostRuntimeStore().getClient(source.serverId),
+        sourceWorkspaceId: source.workspaceId,
+        targetWorkspaceId: target.workspaceId,
+        cwd: input.cwd,
+        projectName: input.projectName,
+        targetTitle,
+      });
+    },
+    [moveWorkspaceMember, placementByWorkspaceKey, toast, workspaceEntriesByKey],
+  );
+  const getWorkspaceDragData = useCallback(
+    (workspace: SidebarWorkspacePlacement) => ({
+      kind: "workspace",
+      workspaceKey: workspace.workspaceKey,
+      label: workspace.name,
+    }),
+    [],
+  );
+
   const renderWorkspaceSection = useCallback(
     ({
       item,
@@ -1770,20 +1855,27 @@ function WorkspaceSectionList({
   let workspaceBody: ReactElement | null = null;
   if (hasVisibleRows) {
     workspaceBody = (
-      <DraggableList
-        testID="sidebar-project-list"
-        data={topLevelWorkspaces}
-        keyExtractor={workspaceKeyExtractor}
-        renderItem={renderWorkspaceSection}
-        onDragEnd={handleWorkspaceDragEnd}
-        extraData={activeWorkspaceSelectionKey(activeWorkspaceSelection)}
-        scrollEnabled={false}
-        useDragHandle
-        nestable={platformIsNative}
-        simultaneousGestureRef={parentGestureRef}
-        gestureHostPresented={dragGestureHostPresented}
-        containerStyle={styles.workspaceListContainer}
-      />
+      // One shared context owns workspace reorder, member reorder, and the
+      // member-to-workspace move — per-list contexts could never see each other.
+      <SidebarMemberMoveDndProvider onMoveMember={handleMoveMember}>
+        <DraggableList
+          testID="sidebar-project-list"
+          data={topLevelWorkspaces}
+          keyExtractor={workspaceKeyExtractor}
+          renderItem={renderWorkspaceSection}
+          onDragEnd={handleWorkspaceDragEnd}
+          extraData={activeWorkspaceSelectionKey(activeWorkspaceSelection)}
+          scrollEnabled={false}
+          useDragHandle
+          nestable={platformIsNative}
+          simultaneousGestureRef={parentGestureRef}
+          gestureHostPresented={dragGestureHostPresented}
+          containerStyle={styles.workspaceListContainer}
+          externalDndContext
+          externalListId="workspaces"
+          getItemData={getWorkspaceDragData}
+        />
+      </SidebarMemberMoveDndProvider>
     );
   } else if (!hasProjectsBeforeFilter) {
     workspaceBody = <SidebarProjectEmptyState onAddProject={onAddProject} />;
@@ -1881,6 +1973,13 @@ const styles = StyleSheet.create((theme) => ({
   // than margin, and only while it has children: a collapsed workspace gives the gap back.
   workspaceSectionExpanded: {
     paddingBottom: theme.spacing[3],
+  },
+  // The section a dragged member is hovering: a ring on the whole block says the
+  // drop lands in this workspace, and the border's own box keeps the rows still.
+  workspaceSectionDropTarget: {
+    borderWidth: 1,
+    borderColor: theme.colors.borderAccent,
+    borderRadius: theme.borderRadius.lg,
   },
   // One level under the workspace header: the icon sits under the header's title, on the same
   // rail the grouped rows used. Padding rather than margin so the hover and pressed fills stay

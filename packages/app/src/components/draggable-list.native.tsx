@@ -34,6 +34,11 @@ export function DraggableList<T>({
   waitFor,
   onDragBegin: onDragBeginProp,
   nestable = false,
+  // Cross-list drags do not exist on native (the move lives in the member menu),
+  // so the external-context props are accepted and ignored here.
+  externalDndContext: _externalDndContext = false,
+  getItemData: _getItemData,
+  externalListId: _externalListId,
 }: DraggableListProps<T>) {
   const { theme } = useUnistyles();
   const [isDragging, setIsDragging] = useState(false);

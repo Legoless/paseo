@@ -1153,6 +1153,8 @@ export const ko: TranslationResources = {
         openFolderFailed: "폴더를 열 수 없습니다.",
         remove: "프로젝트 제거",
         removeFromWorkspace: "워크스페이스에서 제거",
+        moveToWorkspace: "워크스페이스로 이동",
+        noOtherWorkspaces: "다른 워크스페이스가 없습니다",
         removing: "제거하는 중...",
       },
       confirmations: {
