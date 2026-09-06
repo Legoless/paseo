@@ -571,6 +571,83 @@ test("workspace member add and remove use the dotted member RPCs", async () => {
   await client.close();
 });
 
+test("workspace member move uses the dotted member RPC", async () => {
+  const { client, ws } = await connectClient();
+  const sourceWorkspace = createWorkspace();
+  const targetWorkspace = createWorkspace({
+    id: "workspace_target",
+    name: "target",
+    members: [
+      {
+        projectId: "project_two",
+        projectDisplayName: "Two",
+        projectCustomName: null,
+        projectRootPath: "/repo/two",
+        workspaceDirectory: "/repo/two",
+        workspaceKind: "local_checkout",
+        worktreeSlug: null,
+        branch: "feature/two",
+      },
+    ],
+  });
+
+  const movePromise = client.workspaces.moveWorkspaceMember(
+    "workspace_sdk",
+    "workspace_target",
+    "/repo/two",
+  );
+  const moveRequest = parseSentSessionMessage(ws.sent.at(-1));
+  expect(moveRequest).toMatchObject({
+    type: "workspace.member.move.request",
+    sourceWorkspaceId: "workspace_sdk",
+    targetWorkspaceId: "workspace_target",
+    cwd: "/repo/two",
+  });
+  ws.message(
+    sessionMessage({
+      type: "workspace.member.move.response",
+      payload: {
+        requestId: moveRequest.requestId,
+        source: sourceWorkspace,
+        target: targetWorkspace,
+        movedAgentIds: ["agent_sdk"],
+        movedTerminalIds: ["terminal_sdk"],
+        error: null,
+      },
+    }),
+  );
+  await expect(movePromise).resolves.toEqual({
+    source: sourceWorkspace,
+    target: targetWorkspace,
+    movedAgentIds: ["agent_sdk"],
+    movedTerminalIds: ["terminal_sdk"],
+  });
+
+  const errorPromise = client.workspaces.moveWorkspaceMember(
+    "workspace_sdk",
+    "workspace_missing",
+    "/repo/two",
+  );
+  const errorRequest = parseSentSessionMessage(ws.sent.at(-1));
+  ws.message(
+    sessionMessage({
+      type: "workspace.member.move.response",
+      payload: {
+        requestId: errorRequest.requestId,
+        source: null,
+        target: null,
+        movedAgentIds: [],
+        movedTerminalIds: [],
+        error: "Unknown workspace workspace_missing",
+        errorCode: "unknown_workspace",
+      },
+    }),
+  );
+  await expect(errorPromise).rejects.toThrow("Unknown workspace");
+
+  await client.close();
+});
+
 test("plugin-shaped PR workspace create and agent create use the existing daemon RPCs", async () => {
   const { client, ws } = await connectClient();
   const createdWorkspace = createWorkspace({ id: "workspace_fresh", name: "Issue 42" });
