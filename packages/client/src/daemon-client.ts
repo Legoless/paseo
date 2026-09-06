@@ -440,6 +440,10 @@ type WorkspaceMemberRemovePayload = Extract<
   SessionOutboundMessage,
   { type: "workspace.member.remove.response" }
 >["payload"];
+type WorkspaceMemberMovePayload = Extract<
+  SessionOutboundMessage,
+  { type: "workspace.member.move.response" }
+>["payload"];
 type FileExplorerPayload = FileExplorerResponse["payload"];
 export type FileExplorerDirectoryPayload = NonNullable<FileExplorerPayload["directory"]>;
 type LegacyFileExplorerFilePayload = NonNullable<FileExplorerPayload["file"]>;
@@ -4266,6 +4270,24 @@ export class DaemonClient {
         cwd,
       },
       responseType: "workspace.member.remove.response",
+    });
+  }
+
+  async moveWorkspaceMember(
+    sourceWorkspaceId: string,
+    targetWorkspaceId: string,
+    cwd: string,
+    requestId?: string,
+  ): Promise<WorkspaceMemberMovePayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "workspace.member.move.request",
+        sourceWorkspaceId,
+        targetWorkspaceId,
+        cwd,
+      },
+      responseType: "workspace.member.move.response",
     });
   }
 

@@ -126,6 +126,13 @@ export interface PaseoWorkspaceArchiveResult {
   error: string | null;
 }
 
+export interface PaseoWorkspaceMemberMoveResult {
+  source: PaseoWorkspace;
+  target: PaseoWorkspace;
+  movedAgentIds: string[];
+  movedTerminalIds: string[];
+}
+
 export type PaseoWorkspaceUpdate = Extract<
   SessionOutboundMessage,
   { type: "workspace_update" }
@@ -183,6 +190,13 @@ export interface PaseoWorkspaceActions {
     cwd: string,
     requestId?: string,
   ): Promise<PaseoWorkspace>;
+  /** Moves one project membership (by directory) to another workspace. */
+  moveWorkspaceMember(
+    source: string | PaseoWorkspaceHandle,
+    target: string | PaseoWorkspaceHandle,
+    cwd: string,
+    requestId?: string,
+  ): Promise<PaseoWorkspaceMemberMoveResult>;
   /**
    * Local event subscription over the low-level driver's workspace_update stream.
    * The returned function only removes this SDK listener.
@@ -509,6 +523,23 @@ export function createPaseoApi(daemonClient: DaemonClient): PaseoApi {
           throw new Error(result.error ?? "The daemon did not remove the workspace member");
         }
         return result.workspace;
+      },
+      moveWorkspaceMember: async (source, target, cwd, requestId) => {
+        const result = await daemonClient.moveWorkspaceMember(
+          resolveWorkspaceId(source),
+          resolveWorkspaceId(target),
+          cwd,
+          requestId,
+        );
+        if (result.error || !result.source || !result.target) {
+          throw new Error(result.error ?? "The daemon did not move the workspace member");
+        }
+        return {
+          source: result.source,
+          target: result.target,
+          movedAgentIds: result.movedAgentIds,
+          movedTerminalIds: result.movedTerminalIds,
+        };
       },
       subscribe: (handler) =>
         daemonClient.on("workspace_update", (message) => {
