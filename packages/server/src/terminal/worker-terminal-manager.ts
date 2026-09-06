@@ -761,6 +761,21 @@ export function createWorkerTerminalManager(
       return true;
     },
 
+    setTerminalWorkspaceId(id: string, workspaceId: string): boolean {
+      const record = recordsById.get(id);
+      if (!record) {
+        return false;
+      }
+      // The parent-side mirror is the only place terminal ownership lives; the
+      // worker process never reads workspaceId back.
+      record.info = { ...record.info, workspaceId };
+      emitTerminalsChanged({
+        cwd: record.info.cwd,
+        terminals: listTerminalItemsForCwd(record.info.cwd),
+      });
+      return true;
+    },
+
     async setTerminalActivity(id: string, state: TerminalActivityState): Promise<boolean> {
       const record = recordsById.get(id);
       if (!record) {

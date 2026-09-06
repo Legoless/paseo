@@ -2518,6 +2518,8 @@ export class Session {
         return this.handleWorkspaceMemberAddRequest(msg);
       case "workspace.member.remove.request":
         return this.handleWorkspaceMemberRemoveRequest(msg);
+      case "workspace.member.move.request":
+        return this.handleWorkspaceMemberMoveRequest(msg);
       default:
         return undefined;
     }
@@ -3543,6 +3545,140 @@ export class Session {
           requestId,
           workspace: null,
           error: getErrorMessageOr(error, "Failed to remove workspace member"),
+          ...(error instanceof WorkspaceProvisioningError ? { errorCode: error.code } : {}),
+        },
+      });
+    }
+  }
+
+  /**
+   * Agents rooted at a moved member's directory. Ownership follows the member —
+   * unlike a removal nothing is archived, and archived agents move too, or they
+   * would stay filed under a workspace that no longer holds their directory.
+   * Runs after the registry move committed, so a failure is logged and the move
+   * continues: the worst case is an agent bucketed under the source workspace
+   * until its next state emission.
+   */
+  private async moveAgentsForMovedMember(input: {
+    sourceWorkspaceId: string;
+    targetWorkspaceId: string;
+    memberCwd: string;
+  }): Promise<string[]> {
+    let records: StoredAgentRecord[];
+    try {
+      records = (await this.agentStorage.listByWorkspace(input.sourceWorkspaceId)).filter(
+        (record) => areEquivalentPaths(record.cwd, input.memberCwd),
+      );
+    } catch (error) {
+      this.sessionLogger.warn(
+        { err: error, ...input },
+        "session: failed to list agents during a workspace member move; continuing",
+      );
+      return [];
+    }
+    const results = await Promise.allSettled(
+      records.map((record) =>
+        this.agentManager.setAgentWorkspaceId(record.id, input.targetWorkspaceId),
+      ),
+    );
+    const movedAgentIds: string[] = [];
+    results.forEach((result, index) => {
+      const record = records[index];
+      if (!record) {
+        return;
+      }
+      if (result.status === "rejected") {
+        this.sessionLogger.warn(
+          { err: result.reason, ...input, agentId: record.id },
+          "session: failed to re-parent an agent during a workspace member move; continuing",
+        );
+        return;
+      }
+      movedAgentIds.push(record.id);
+    });
+    return movedAgentIds;
+  }
+
+  private async moveTerminalsForMovedMember(input: {
+    sourceWorkspaceId: string;
+    targetWorkspaceId: string;
+    memberCwd: string;
+  }): Promise<string[]> {
+    if (!this.terminalManager) {
+      return [];
+    }
+    try {
+      const terminals = await this.terminalManager.getTerminals(input.memberCwd, {
+        workspaceId: input.sourceWorkspaceId,
+      });
+      const movedTerminalIds: string[] = [];
+      for (const terminal of terminals) {
+        if (this.terminalManager.setTerminalWorkspaceId(terminal.id, input.targetWorkspaceId)) {
+          movedTerminalIds.push(terminal.id);
+        }
+      }
+      return movedTerminalIds;
+    } catch (error) {
+      this.sessionLogger.warn(
+        { err: error, ...input },
+        "session: failed to re-parent terminals during a workspace member move; continuing",
+      );
+      return [];
+    }
+  }
+
+  private async handleWorkspaceMemberMoveRequest(
+    request: Extract<SessionInboundMessage, { type: "workspace.member.move.request" }>,
+  ): Promise<void> {
+    const { sourceWorkspaceId, targetWorkspaceId, requestId } = request;
+    this.sessionLogger.info(
+      { sourceWorkspaceId, targetWorkspaceId, requestId },
+      "session: workspace.member.move.request",
+    );
+
+    try {
+      const cwd = resolve(expandTilde(request.cwd));
+      const { source, target } = await this.workspaceProvisioning.moveWorkspaceMember({
+        sourceWorkspaceId,
+        targetWorkspaceId,
+        cwd,
+      });
+      const movedAgentIds = await this.moveAgentsForMovedMember({
+        sourceWorkspaceId,
+        targetWorkspaceId,
+        memberCwd: cwd,
+      });
+      const movedTerminalIds = await this.moveTerminalsForMovedMember({
+        sourceWorkspaceId,
+        targetWorkspaceId,
+        memberCwd: cwd,
+      });
+      this.emit({
+        type: "workspace.member.move.response",
+        payload: {
+          requestId,
+          source: await this.describeWorkspaceRecord(source),
+          target: await this.describeWorkspaceRecord(target),
+          movedAgentIds,
+          movedTerminalIds,
+          error: null,
+        },
+      });
+      await this.emitWorkspaceUpdatesForWorkspaceIds([sourceWorkspaceId, targetWorkspaceId]);
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, sourceWorkspaceId, targetWorkspaceId, requestId },
+        "session: workspace.member.move.request error",
+      );
+      this.emit({
+        type: "workspace.member.move.response",
+        payload: {
+          requestId,
+          source: null,
+          target: null,
+          movedAgentIds: [],
+          movedTerminalIds: [],
+          error: getErrorMessageOr(error, "Failed to move workspace member"),
           ...(error instanceof WorkspaceProvisioningError ? { errorCode: error.code } : {}),
         },
       });

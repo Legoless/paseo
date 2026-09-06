@@ -8512,6 +8512,7 @@ test("workspace.title.set.request returns accepted=false when workspace is not f
 });
 
 const MEMBER_CWD = path.resolve("/tmp/member-repo");
+const TARGET_CWD = path.resolve("/tmp/target-repo");
 
 function createMemberTestRegistries(options?: { withMember?: boolean; memberCwd?: string }): {
   projects: Map<string, PersistedProjectRecord>;
@@ -8633,6 +8634,38 @@ function createMemberTestRegistries(options?: { withMember?: boolean; memberCwd?
       };
     },
   };
+}
+
+function addTargetWorkspaceToMemberRegistries(
+  registries: ReturnType<typeof createMemberTestRegistries>,
+  options?: { cwd?: string },
+): void {
+  const targetCwd = options?.cwd ?? TARGET_CWD;
+  registries.projects.set(
+    "proj-3",
+    createPersistedProjectRecord({
+      projectId: "proj-3",
+      rootPath: targetCwd,
+      kind: "git",
+      displayName: "target-repo",
+      createdAt: "2026-03-01T12:00:00.000Z",
+      updatedAt: "2026-03-01T12:00:00.000Z",
+    }),
+  );
+  registries.workspaces.set(
+    "ws-2",
+    createPersistedWorkspaceRecord({
+      workspaceId: "ws-2",
+      projectId: "proj-3",
+      cwd: targetCwd,
+      kind: "local_checkout",
+      displayName: "target",
+      branch: "main",
+      worktreeRoot: targetCwd,
+      createdAt: "2026-03-01T12:00:00.000Z",
+      updatedAt: "2026-03-01T12:00:00.000Z",
+    }),
+  );
 }
 
 function createMemberGitService(): ReturnType<typeof createNoopWorkspaceGitService> {
@@ -8968,6 +9001,174 @@ test("workspace.member.remove.request refuses while a live terminal runs on the 
   } finally {
     rmSync(memberCwd, { recursive: true, force: true });
   }
+});
+
+test("workspace.member.move.request re-parents the member, its agents, and its terminals", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const memberCwd = mkdtempSync(path.join(tmpdir(), "paseo-member-move-"));
+  const otherCwd = mkdtempSync(path.join(tmpdir(), "paseo-member-move-other-"));
+  const terminalManager = createTerminalManager();
+  terminalManagers.push(terminalManager);
+  const setAgentWorkspaceIdCalls: Array<{ agentId: string; workspaceId: string }> = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({
+      onMessage: (message) => emitted.push(message),
+      terminalManager,
+      agentStorage: {
+        listByWorkspace: async (workspaceId: string) =>
+          workspaceId === "ws-1"
+            ? [
+                { id: "agent-member", cwd: memberCwd, workspaceId: "ws-1", archivedAt: null },
+                { id: "agent-stays", cwd: otherCwd, workspaceId: "ws-1", archivedAt: null },
+              ]
+            : [],
+      },
+      agentManager: {
+        setAgentWorkspaceId: async (agentId: string, workspaceId: string) => {
+          setAgentWorkspaceIdCalls.push({ agentId, workspaceId });
+          return null;
+        },
+      },
+    }),
+  );
+  const registries = createMemberTestRegistries({ withMember: true, memberCwd });
+  addTargetWorkspaceToMemberRegistries(registries);
+  registries.apply(session);
+  activateWorkspaceUpdatesSubscription(session);
+  const movedTerminal = await terminalManager.createTerminal({
+    cwd: memberCwd,
+    workspaceId: "ws-1",
+  });
+  const stayingTerminal = await terminalManager.createTerminal({
+    cwd: otherCwd,
+    workspaceId: "ws-1",
+  });
+
+  try {
+    await session.handleMessage({
+      type: "workspace.member.move.request",
+      sourceWorkspaceId: "ws-1",
+      targetWorkspaceId: "ws-2",
+      cwd: memberCwd,
+      requestId: "req-member-move",
+    });
+
+    const response = findByType(emitted, "workspace.member.move.response");
+    expect(response?.payload.error).toBeNull();
+    expect(response?.payload.source?.id).toBe("ws-1");
+    expect(response?.payload.source?.members).toHaveLength(1);
+    expect(response?.payload.target?.id).toBe("ws-2");
+    expect(response?.payload.target?.members).toHaveLength(2);
+    expect(response?.payload.target?.members?.[1]).toMatchObject({
+      projectId: "proj-2",
+      projectRootPath: memberCwd,
+      workspaceDirectory: memberCwd,
+    });
+    expect(response?.payload.movedAgentIds).toEqual(["agent-member"]);
+    expect(response?.payload.movedTerminalIds).toEqual([movedTerminal.id]);
+
+    // Only the agent rooted at the moved directory changes ownership.
+    expect(setAgentWorkspaceIdCalls).toEqual([{ agentId: "agent-member", workspaceId: "ws-2" }]);
+    expect(movedTerminal.workspaceId).toBe("ws-2");
+    expect(stayingTerminal.workspaceId).toBe("ws-1");
+
+    expect(registries.workspaces.get("ws-1")?.members).toHaveLength(1);
+    expect(registries.workspaces.get("ws-2")?.members).toHaveLength(2);
+
+    const updatedWorkspaceIds = filterByType(emitted, "workspace_update").map((update) =>
+      update.payload.kind === "upsert" ? update.payload.workspace.id : null,
+    );
+    expect(updatedWorkspaceIds).toContain("ws-1");
+    expect(updatedWorkspaceIds).toContain("ws-2");
+  } finally {
+    rmSync(memberCwd, { recursive: true, force: true });
+    rmSync(otherCwd, { recursive: true, force: true });
+  }
+});
+
+test("workspace.member.move.request leaves the source projectless when its last member moves", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({ onMessage: (message) => emitted.push(message) }),
+  );
+  const registries = createMemberTestRegistries();
+  addTargetWorkspaceToMemberRegistries(registries);
+  registries.apply(session);
+
+  await session.handleMessage({
+    type: "workspace.member.move.request",
+    sourceWorkspaceId: "ws-1",
+    targetWorkspaceId: "ws-2",
+    cwd: REPO_CWD,
+    requestId: "req-member-move-last",
+  });
+
+  const response = findByType(emitted, "workspace.member.move.response");
+  expect(response?.payload.error).toBeNull();
+  expect(response?.payload.source?.members).toEqual([]);
+  expect(response?.payload.target?.members).toHaveLength(2);
+  expect(registries.workspaces.get("ws-1")).toMatchObject({
+    projectId: "ws-1",
+    members: [],
+  });
+  expect(registries.workspaces.get("ws-2")?.members).toHaveLength(2);
+});
+
+test("workspace.member.move.request refuses a member the target already holds", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({ onMessage: (message) => emitted.push(message) }),
+  );
+  const registries = createMemberTestRegistries({ withMember: true });
+  addTargetWorkspaceToMemberRegistries(registries, { cwd: MEMBER_CWD });
+  registries.apply(session);
+
+  await session.handleMessage({
+    type: "workspace.member.move.request",
+    sourceWorkspaceId: "ws-1",
+    targetWorkspaceId: "ws-2",
+    cwd: MEMBER_CWD,
+    requestId: "req-member-move-duplicate",
+  });
+
+  const response = findByType(emitted, "workspace.member.move.response");
+  expect(response?.payload).toMatchObject({
+    requestId: "req-member-move-duplicate",
+    source: null,
+    target: null,
+    movedAgentIds: [],
+    movedTerminalIds: [],
+    errorCode: "duplicate_member",
+  });
+  expect(response?.payload.error).toBeTruthy();
+  expect(registries.workspaces.get("ws-1")?.members).toHaveLength(2);
+});
+
+test("workspace.member.move.request reports an unknown workspace", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({ onMessage: (message) => emitted.push(message) }),
+  );
+  createMemberTestRegistries({ withMember: true }).apply(session);
+
+  await session.handleMessage({
+    type: "workspace.member.move.request",
+    sourceWorkspaceId: "ws-1",
+    targetWorkspaceId: "ws-missing",
+    cwd: MEMBER_CWD,
+    requestId: "req-member-move-missing",
+  });
+
+  const response = findByType(emitted, "workspace.member.move.response");
+  expect(response?.payload).toMatchObject({
+    requestId: "req-member-move-missing",
+    source: null,
+    target: null,
+    movedAgentIds: [],
+    movedTerminalIds: [],
+    errorCode: "workspace_not_found",
+  });
+  expect(response?.payload.error).toBeTruthy();
 });
 
 test("project.remove.request strips a non-primary membership instead of archiving the workspace", async () => {

@@ -73,6 +73,7 @@ export interface TerminalManager {
     options?: TerminalStateSnapshotOptions,
   ): Promise<TerminalStateSnapshot | null>;
   setTerminalTitle(id: string, title: string): boolean;
+  setTerminalWorkspaceId(id: string, workspaceId: string): boolean;
   setTerminalActivity(id: string, state: TerminalActivityState): Promise<boolean>;
   clearTerminalAttention(id: string): Promise<boolean>;
   killTerminal(id: string): void;
@@ -404,6 +405,17 @@ export function createTerminalManager(
       }
 
       session.setTitle(title);
+      return true;
+    },
+
+    setTerminalWorkspaceId(id: string, workspaceId: string): boolean {
+      const session = terminalsById.get(id);
+      if (!session) {
+        return false;
+      }
+
+      session.workspaceId = workspaceId;
+      emitTerminalsChanged({ cwd: session.cwd });
       return true;
     },
 

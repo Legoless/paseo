@@ -2147,6 +2147,44 @@ export class AgentManager {
     );
   }
 
+  /**
+   * Re-parents an agent to another workspace (workspace member move). A live
+   * agent must be mutated here, not only in storage: the next snapshot flush
+   * projects the live object back onto the record and would otherwise restore
+   * the old workspaceId.
+   */
+  async setAgentWorkspaceId(
+    agentId: string,
+    workspaceId: string,
+  ): Promise<StoredAgentRecord | null> {
+    return this.runLifecycleMutation(agentId, async () => {
+      const liveAgent = this.agents.get(agentId);
+      if (liveAgent) {
+        liveAgent.workspaceId = workspaceId;
+        this.touchUpdatedAt(liveAgent);
+        await this.persistSnapshot(liveAgent);
+        this.emitState(liveAgent, { persist: false });
+        return this.registry ? await this.registry.get(agentId) : null;
+      }
+
+      const registry = this.requireRegistry();
+      const record = await registry.get(agentId);
+      if (!record) {
+        return null;
+      }
+      const nextRecord: StoredAgentRecord = {
+        ...record,
+        workspaceId,
+        updatedAt: this.nextStoredUpdatedAt(record),
+      };
+      await registry.upsert(nextRecord);
+      if (!nextRecord.internal) {
+        this.dispatch({ type: "stored_agent_state", record: nextRecord });
+      }
+      return nextRecord;
+    });
+  }
+
   private async updateAgentMetadataUnlocked(
     agentId: string,
     updates: {
