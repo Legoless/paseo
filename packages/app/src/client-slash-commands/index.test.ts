@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CLIENT_SLASH_COMMANDS,
   buildDraftAgentSetup,
+  buildProviderSwitchDraftSetup,
+  replaceOpenAgentWithDraft,
   resolveClientSlashCommand,
 } from "@/client-slash-commands";
 import type { Agent } from "@/stores/session-store";
@@ -135,5 +137,71 @@ describe("buildDraftAgentSetup", () => {
       model: "runtime-model",
       thinkingOptionId: "runtime-thinking",
     });
+  });
+});
+
+describe("buildProviderSwitchDraftSetup", () => {
+  it("seeds a fresh draft with the new provider and model only", () => {
+    expect(
+      buildProviderSwitchDraftSetup({
+        cwd: "/repo",
+        provider: "grok",
+        model: "grok-4",
+      }),
+    ).toEqual({
+      provider: "grok",
+      cwd: "/repo",
+      modeId: null,
+      model: "grok-4",
+      thinkingOptionId: null,
+      featureValues: {},
+    });
+  });
+});
+
+describe("replaceOpenAgentWithDraft", () => {
+  it("retargets the tab then archives the previous agent", async () => {
+    const order: string[] = [];
+    const retargetCurrentTab = vi.fn((target) => {
+      order.push("retarget");
+      expect(target).toEqual({
+        kind: "draft",
+        draftId: "draft-1",
+        setup: buildProviderSwitchDraftSetup({
+          cwd: "/repo",
+          provider: "grok",
+          model: "grok-4",
+        }),
+      });
+    });
+    const unpinWorkspaceAgent = vi.fn(() => {
+      order.push("unpin");
+    });
+    const hideWorkspaceAgent = vi.fn(() => {
+      order.push("hide");
+    });
+    const archiveAgent = vi.fn(async () => {
+      order.push("archive");
+    });
+
+    await replaceOpenAgentWithDraft({
+      serverId: "server-1",
+      agentId: "agent-1",
+      workspaceId: "workspace-1",
+      setup: buildProviderSwitchDraftSetup({
+        cwd: "/repo",
+        provider: "grok",
+        model: "grok-4",
+      }),
+      draftId: "draft-1",
+      retargetCurrentTab,
+      unpinWorkspaceAgent,
+      hideWorkspaceAgent,
+      archiveAgent,
+    });
+
+    expect(unpinWorkspaceAgent).toHaveBeenCalledWith("server-1:workspace-1", "agent-1");
+    expect(hideWorkspaceAgent).toHaveBeenCalledWith("server-1:workspace-1", "agent-1");
+    expect(order).toEqual(["unpin", "hide", "retarget", "archive"]);
   });
 });

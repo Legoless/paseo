@@ -28,14 +28,16 @@ import { getAgentFeatureIcon, ThinkingIcon } from "@/agent-controls/icons";
 import { formatThinkingOptionLabel } from "@/agent-controls/labels";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
 import { CombinedModelSelector } from "@/components/combined-model-selector";
-import {
-  buildProviderSelectorProviders,
-  buildSelectableProviderSelectorProviders,
-  type ProviderSelectorProvider,
-} from "@/provider-selection/provider-selection";
+import type { ProviderSelectorProvider } from "@/provider-selection/provider-selection";
 import { filterSelectableModels } from "@/provider-selection/model-catalog";
 import { useSessionStore } from "@/stores/session-store";
+import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
+import { generateDraftId } from "@/stores/draft-keys";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
+import { useArchiveAgent } from "@/hooks/use-archive-agent";
+import { usePaneContext } from "@/panels/pane-context";
+import { buildProviderSwitchDraftSetup, replaceOpenAgentWithDraft } from "@/client-slash-commands";
+import { buildLiveAgentModelSelectorProviders, resolveLiveAgentModelPick } from "./live-model-pick";
 import { resolveProviderDefinition } from "@/utils/provider-definitions";
 import { mergeProviderPreferences, useFormPreferences } from "@/hooks/use-form-preferences";
 import { Combobox, ComboboxItem, type ComboboxOption } from "@/components/ui/combobox";
@@ -390,7 +392,7 @@ function pickDesktopModel({
 
 type AgentControlsSlice = {
   provider: string;
-  cwd: string | null;
+  cwd: string;
   runtimeModelId: string | null;
   model: string | null | undefined;
   features: AgentFeature[] | undefined;
@@ -1546,6 +1548,10 @@ export const AgentControls = memo(function AgentControls({
   );
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
   const toast = useToast();
+  const { workspaceId, retargetCurrentTab } = usePaneContext();
+  const { archiveAgent } = useArchiveAgent();
+  const hideWorkspaceAgent = useWorkspaceLayoutStore((state) => state.hideAgent);
+  const unpinWorkspaceAgent = useWorkspaceLayoutStore((state) => state.unpinAgent);
   const modeControl = useLiveAgentModeControl(serverId, agentId);
   const commandCenterModes = toCommandCenterModes(modeControl);
   const modeProviderDefinitions = getModeProviderDefinitions(modeControl);
@@ -1575,15 +1581,16 @@ export const AgentControls = memo(function AgentControls({
     () => buildAgentProviderModels(agent?.provider, models),
     [agent?.provider, models],
   );
-  const agentModelSelectorProviders = useMemo(() => {
-    if (snapshotSelectedEntry) {
-      return buildSelectableProviderSelectorProviders([snapshotSelectedEntry]);
-    }
-    return buildProviderSelectorProviders({
-      providerDefinitions: agentProviderDefinitions,
-      modelsByProvider: agentProviderModels,
-    });
-  }, [agentProviderDefinitions, agentProviderModels, snapshotSelectedEntry]);
+  const agentModelSelectorProviders = useMemo(
+    () =>
+      buildLiveAgentModelSelectorProviders({
+        snapshotEntries,
+        snapshotSelectedEntry,
+        providerDefinitions: agentProviderDefinitions,
+        modelsByProvider: agentProviderModels,
+      }),
+    [agentProviderDefinitions, agentProviderModels, snapshotEntries, snapshotSelectedEntry],
+  );
 
   const modelSelection = resolveAgentModelSelection({
     models,
@@ -1627,13 +1634,65 @@ export const AgentControls = memo(function AgentControls({
     },
     [agentId, agentProvider, client, toast, updatePreferences],
   );
-  const handleSelectCommandCenterModel = useCallback(
-    (_provider: AgentProvider, modelId: string) => handleSelectModel(modelId),
-    [handleSelectModel],
+  const handleSelectProviderAndModel = useCallback(
+    (nextProvider: AgentProvider, modelId: string) => {
+      if (!agent) {
+        return;
+      }
+      const pick = resolveLiveAgentModelPick({
+        currentProvider: agent.provider,
+        nextProvider,
+        modelId,
+      });
+      if (pick.kind === "set-model") {
+        void handleSelectModel(pick.modelId);
+        return;
+      }
+      void updatePreferences((current) =>
+        mergeProviderPreferences({
+          preferences: current,
+          provider: pick.provider,
+          updates: { model: pick.modelId },
+        }),
+      ).catch((error) => {
+        console.warn("[AgentControls] persist provider preference failed", error);
+      });
+      void replaceOpenAgentWithDraft({
+        serverId,
+        agentId,
+        workspaceId,
+        setup: buildProviderSwitchDraftSetup({
+          cwd: agent.cwd,
+          provider: pick.provider,
+          model: pick.modelId,
+        }),
+        draftId: generateDraftId(),
+        retargetCurrentTab,
+        unpinWorkspaceAgent,
+        hideWorkspaceAgent,
+        archiveAgent,
+      }).catch((error) => {
+        console.warn("[AgentControls] switch provider failed", error);
+        toast.error(toErrorMessage(error));
+      });
+    },
+    [
+      agent,
+      agentId,
+      archiveAgent,
+      handleSelectModel,
+      hideWorkspaceAgent,
+      retargetCurrentTab,
+      serverId,
+      toast,
+      unpinWorkspaceAgent,
+      updatePreferences,
+      workspaceId,
+    ],
   );
 
-  // A running agent is one provider's process, so only that provider's profiles
-  // can apply to it.
+  // Profiles still apply to the running provider process. Switching provider
+  // from the model picker archives this agent and opens a fresh draft.
   const profileProviders = useMemo(() => (agentProvider ? [agentProvider] : []), [agentProvider]);
   const profileModeIds = useMemo(
     () => resolveSnapshotModeIds(snapshotSelectedEntry),
@@ -1720,7 +1779,7 @@ export const AgentControls = memo(function AgentControls({
         providers: agentModelSelectorProviders,
         selectedProvider: agentProvider,
         selectedModelId: activeModelId,
-        select: handleSelectCommandCenterModel,
+        select: handleSelectProviderAndModel,
       },
       thinking: {
         options: modelSelection.thinkingOptions,
@@ -1740,7 +1799,7 @@ export const AgentControls = memo(function AgentControls({
       agentModelSelectorProviders,
       agentProvider,
       commandCenterModes,
-      handleSelectCommandCenterModel,
+      handleSelectProviderAndModel,
       handleSelectThinkingOption,
       handleSetFeature,
       modeProviderDefinitions,
@@ -1783,6 +1842,7 @@ export const AgentControls = memo(function AgentControls({
         modelOptions={modelOptions}
         selectedModelId={modelSelection.activeModelId ?? undefined}
         onSelectModel={handleSelectModel}
+        onSelectProviderAndModel={handleSelectProviderAndModel}
         agentProfiles={agentProfiles}
         onApplyAgentProfile={agentProfiles?.applyProfile}
         onEditAgentProfiles={handleEditAgentProfiles}

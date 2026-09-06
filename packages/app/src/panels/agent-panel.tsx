@@ -106,7 +106,11 @@ import { derivePendingPermissionKey, normalizeAgentSnapshot } from "@/utils/agen
 import { applyLegacyDaemonWorkspaceOwnership } from "@/workspace/legacy-daemon-workspaces";
 import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
-import { buildDraftAgentSetup, type ClientSlashCommand } from "@/client-slash-commands";
+import {
+  buildDraftAgentSetup,
+  replaceOpenAgentWithDraft,
+  type ClientSlashCommand,
+} from "@/client-slash-commands";
 import { useWorkspaceLabelDefinitions, workspaceLabels } from "@/workspace-labels";
 import { useToast } from "@/contexts/toast-context";
 
@@ -1691,18 +1695,24 @@ function ActiveAgentComposer({
       }
 
       const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId });
+      if (command.kind === "replace-agent-with-draft") {
+        await replaceOpenAgentWithDraft({
+          serverId,
+          agentId,
+          workspaceId,
+          setup: buildDraftAgentSetup(agent),
+          draftId: generateDraftId(),
+          retargetCurrentTab,
+          unpinWorkspaceAgent,
+          hideWorkspaceAgent,
+          archiveAgent,
+        });
+        return;
+      }
+
       if (workspaceKey) {
         unpinWorkspaceAgent(workspaceKey, agentId);
         hideWorkspaceAgent(workspaceKey, agentId);
-      }
-
-      if (command.kind === "replace-agent-with-draft") {
-        retargetCurrentTab({
-          kind: "draft",
-          draftId: generateDraftId(),
-          setup: buildDraftAgentSetup(agent),
-        });
-      } else if (workspaceKey) {
         closeWorkspaceTab(workspaceKey, tabId);
       }
 
