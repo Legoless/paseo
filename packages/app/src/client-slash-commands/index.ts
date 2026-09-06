@@ -1,5 +1,10 @@
+import type { AgentProvider } from "@getpaseo/protocol/agent-types";
 import type { Agent } from "@/stores/session-store";
-import type { WorkspaceDraftTabSetup } from "@/workspace-tabs/model";
+import {
+  buildWorkspaceTabPersistenceKey,
+  type WorkspaceDraftTabSetup,
+  type WorkspaceTabTarget,
+} from "@/workspace-tabs/model";
 
 export type ClientSlashCommandKind = "archive-agent" | "replace-agent-with-draft";
 export type ClientSlashCommandExecution = "immediate" | "insert";
@@ -78,4 +83,50 @@ export function buildDraftAgentSetup(agent: Agent): WorkspaceDraftTabSetup {
     thinkingOptionId: agent.thinkingOptionId ?? agent.runtimeInfo?.thinkingOptionId ?? null,
     featureValues,
   };
+}
+
+export function buildProviderSwitchDraftSetup(input: {
+  cwd: string;
+  provider: AgentProvider;
+  model: string;
+}): WorkspaceDraftTabSetup {
+  return {
+    provider: input.provider,
+    cwd: input.cwd,
+    modeId: null,
+    model: input.model,
+    thinkingOptionId: null,
+    featureValues: {},
+  };
+}
+
+export interface ReplaceOpenAgentWithDraftInput {
+  serverId: string;
+  agentId: string;
+  workspaceId: string;
+  setup: WorkspaceDraftTabSetup;
+  draftId: string;
+  retargetCurrentTab: (target: WorkspaceTabTarget) => void;
+  unpinWorkspaceAgent: (workspaceKey: string, agentId: string) => void;
+  hideWorkspaceAgent: (workspaceKey: string, agentId: string) => void;
+  archiveAgent: (input: { serverId: string; agentId: string }) => Promise<unknown>;
+}
+
+export async function replaceOpenAgentWithDraft(
+  input: ReplaceOpenAgentWithDraftInput,
+): Promise<void> {
+  const workspaceKey = buildWorkspaceTabPersistenceKey({
+    serverId: input.serverId,
+    workspaceId: input.workspaceId,
+  });
+  if (workspaceKey) {
+    input.unpinWorkspaceAgent(workspaceKey, input.agentId);
+    input.hideWorkspaceAgent(workspaceKey, input.agentId);
+  }
+  input.retargetCurrentTab({
+    kind: "draft",
+    draftId: input.draftId,
+    setup: input.setup,
+  });
+  await input.archiveAgent({ serverId: input.serverId, agentId: input.agentId });
 }

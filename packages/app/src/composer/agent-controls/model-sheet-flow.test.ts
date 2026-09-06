@@ -20,6 +20,16 @@ describe("model sheet opening", () => {
     ).toEqual({ kind: "all" });
   });
 
+  it("opens a running agent at providers when switching is enabled", () => {
+    expect(
+      resolveModelSheetOpening({
+        canSwitchProvider: true,
+        providers: [claude, codex],
+        selectedProvider: "codex",
+      }),
+    ).toEqual({ kind: "all" });
+  });
+
   it("opens a running agent directly at its fixed provider", () => {
     expect(
       resolveModelSheetOpening({
