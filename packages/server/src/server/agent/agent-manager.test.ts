@@ -4102,6 +4102,78 @@ test("updateAgentMetadata bumps updatedAt for stored agents", async () => {
   expect(Date.parse(after!.updatedAt)).toBeGreaterThan(Date.parse(before!.updatedAt));
 });
 
+test("setAgentWorkspaceId re-parents a live agent and persists the new owner", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-workspace-move-live-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000141",
+  });
+  let agentId: string | null = null;
+  try {
+    const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: "ws-1",
+    });
+    agentId = snapshot.id;
+    const events: AgentManagerEvent[] = [];
+    manager.subscribe((event) => events.push(event), { replayState: false });
+
+    const record = await manager.setAgentWorkspaceId(snapshot.id, "ws-2");
+
+    expect(manager.getAgent(snapshot.id)?.workspaceId).toBe("ws-2");
+    expect(record?.workspaceId).toBe("ws-2");
+    await manager.flush();
+    // The live object owns the value: a snapshot flush after the move must not
+    // resurrect the old workspaceId on the record.
+    expect((await storage.get(snapshot.id))?.workspaceId).toBe("ws-2");
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "agent_state",
+        agent: expect.objectContaining({ id: snapshot.id, workspaceId: "ws-2" }),
+      }),
+    );
+  } finally {
+    if (agentId) await manager.closeAgent(agentId).catch(() => undefined);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("setAgentWorkspaceId re-parents a stored agent and dispatches stored_agent_state", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-workspace-move-stored-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000142",
+  });
+  try {
+    const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: "ws-1",
+    });
+    await manager.closeAgent(snapshot.id);
+    expect(manager.getAgent(snapshot.id)).toBeNull();
+    const events: AgentManagerEvent[] = [];
+    manager.subscribe((event) => events.push(event), { replayState: false });
+
+    const record = await manager.setAgentWorkspaceId(snapshot.id, "ws-2");
+
+    expect(record?.workspaceId).toBe("ws-2");
+    expect((await storage.get(snapshot.id))?.workspaceId).toBe("ws-2");
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "stored_agent_state",
+        record: expect.objectContaining({ id: snapshot.id, workspaceId: "ws-2" }),
+      }),
+    );
+    await expect(manager.setAgentWorkspaceId("agent-missing", "ws-2")).resolves.toBeNull();
+  } finally {
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("persists live mode, model, and thinking changes without an external snapshot subscriber", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-live-persist-"));
   const storagePath = join(workdir, "agents");

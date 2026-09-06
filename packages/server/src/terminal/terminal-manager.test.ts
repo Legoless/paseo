@@ -128,6 +128,26 @@ it("includes only stamped terminals in workspace-scoped queries", async () => {
   expect(unscoped.map((terminal) => terminal.id)).toEqual([legacy.id, owned.id, sibling.id]);
 });
 
+it("re-parents a terminal across workspaces", async () => {
+  manager = createTerminalManager();
+  const cwd = realpathSync(tmpdir());
+  const owned = await manager.createTerminal({ cwd, workspaceId: "ws-owned" });
+  const sibling = await manager.createTerminal({ cwd, workspaceId: "ws-sibling" });
+  const terminalsChanged: string[] = [];
+  const unsubscribe = manager.subscribeTerminalsChanged((event) => {
+    terminalsChanged.push(event.cwd);
+  });
+
+  expect(manager.setTerminalWorkspaceId(owned.id, "ws-sibling")).toBe(true);
+  expect(manager.setTerminalWorkspaceId("terminal-missing", "ws-sibling")).toBe(false);
+
+  expect(owned.workspaceId).toBe("ws-sibling");
+  const scoped = await manager.getTerminals(cwd, { workspaceId: "ws-sibling" });
+  expect(scoped.map((terminal) => terminal.id).sort()).toEqual([owned.id, sibling.id].sort());
+  expect(terminalsChanged).toEqual([cwd]);
+  unsubscribe();
+});
+
 it("creates additional terminal with auto-incrementing name", async () => {
   manager = createTerminalManager();
   const cwd = realpathSync(tmpdir());

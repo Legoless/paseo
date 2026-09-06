@@ -415,6 +415,37 @@ it("does not surface fire-and-forget send timeouts as unhandled rejections", asy
   expect(unhandledRejections).toEqual([]);
 });
 
+it("re-parents a terminal across workspaces in the parent-side mirror", async () => {
+  const worker = new FakeTerminalWorker();
+  manager = createWorkerTerminalManager({ forkWorker: () => worker });
+
+  worker.emitWorkerMessage({
+    type: "terminalCreated",
+    terminal: {
+      id: "terminal-1",
+      name: "Terminal",
+      cwd: "/tmp",
+      workspaceId: "ws-owned",
+      activity: { state: "idle", changedAt: 0 },
+    },
+    state: createTerminalState(),
+  });
+  const terminalsChanged: string[] = [];
+  const unsubscribe = manager.subscribeTerminalsChanged((event) => {
+    terminalsChanged.push(event.cwd);
+  });
+
+  expect(manager.setTerminalWorkspaceId("terminal-1", "ws-sibling")).toBe(true);
+  expect(manager.setTerminalWorkspaceId("terminal-missing", "ws-sibling")).toBe(false);
+
+  expect(manager.getTerminal("terminal-1")?.workspaceId).toBe("ws-sibling");
+  const scoped = await manager.getTerminals("/tmp", { workspaceId: "ws-sibling" });
+  expect(scoped.map((terminal) => terminal.id)).toEqual(["terminal-1"]);
+  expect(await manager.getTerminals("/tmp", { workspaceId: "ws-owned" })).toEqual([]);
+  expect(terminalsChanged).toEqual(["/tmp"]);
+  unsubscribe();
+});
+
 it("keeps registered cwd env inheritance behind the worker manager interface", async () => {
   manager = createWorkerTerminalManager();
   const cwd = mkdtempSync(join(tmpdir(), "worker-terminal-manager-env-"));

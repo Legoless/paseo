@@ -64,6 +64,17 @@ export interface RemoveWorkspaceMemberInput {
   cwd: string;
 }
 
+export interface MoveWorkspaceMemberInput {
+  sourceWorkspaceId: string;
+  targetWorkspaceId: string;
+  cwd: string;
+}
+
+export interface MoveWorkspaceMemberResult {
+  source: PersistedWorkspaceRecord;
+  target: PersistedWorkspaceRecord;
+}
+
 export interface WorkspaceProvisioningService {
   runInImportWorkspace<T>(
     input: ImportWorkspaceInput,
@@ -91,6 +102,7 @@ export interface WorkspaceProvisioningService {
   ): Promise<PersistedWorkspaceRecord>;
   addWorkspaceMember(input: AddWorkspaceMemberInput): Promise<PersistedWorkspaceRecord>;
   removeWorkspaceMember(input: RemoveWorkspaceMemberInput): Promise<PersistedWorkspaceRecord>;
+  moveWorkspaceMember(input: MoveWorkspaceMemberInput): Promise<MoveWorkspaceMemberResult>;
 }
 
 export type WorkspaceProvisioningErrorCode =
@@ -618,6 +630,142 @@ export function createWorkspaceProvisioningService(deps: {
     return updated;
   }
 
+  async function moveWorkspaceMember(
+    input: MoveWorkspaceMemberInput,
+  ): Promise<MoveWorkspaceMemberResult> {
+    const normalizedCwd = resolve(input.cwd);
+    const source = await workspaceRegistry.get(input.sourceWorkspaceId);
+    if (!source) {
+      throw new WorkspaceProvisioningError(
+        "workspace_not_found",
+        `Unknown workspace: ${input.sourceWorkspaceId}`,
+      );
+    }
+    if (source.archivedAt) {
+      throw new WorkspaceProvisioningError(
+        "archived_workspace",
+        `Archived workspace: ${input.sourceWorkspaceId}`,
+      );
+    }
+    const target = await workspaceRegistry.get(input.targetWorkspaceId);
+    if (!target) {
+      throw new WorkspaceProvisioningError(
+        "workspace_not_found",
+        `Unknown workspace: ${input.targetWorkspaceId}`,
+      );
+    }
+    if (target.archivedAt) {
+      throw new WorkspaceProvisioningError(
+        "archived_workspace",
+        `Archived workspace: ${input.targetWorkspaceId}`,
+      );
+    }
+    // Fast-path guards ahead of the git/project side effects; the updaters below
+    // repeat them under the registry's mutation queue.
+    if (
+      !workspaceMembers(source).some((candidate) =>
+        areEquivalentPaths(candidate.cwd, normalizedCwd),
+      )
+    ) {
+      throw new WorkspaceProvisioningError(
+        "member_not_found",
+        `Workspace ${input.sourceWorkspaceId} has no member at ${normalizedCwd}`,
+      );
+    }
+    if (
+      workspaceMembers(target).some((candidate) => areEquivalentPaths(candidate.cwd, normalizedCwd))
+    ) {
+      throw new WorkspaceProvisioningError(
+        "duplicate_member",
+        `Workspace ${input.targetWorkspaceId} already has a member at ${normalizedCwd}`,
+      );
+    }
+    const checkout = await workspaceGitService.getCheckout(normalizedCwd);
+    const project = await findOrCreateProjectForDirectory(normalizedCwd);
+    const member: PersistedWorkspaceMember = {
+      projectId: project.projectId,
+      ...initialWorkspacePlacement({ source: "checkout", cwd: normalizedCwd, checkout }),
+    };
+    const timestamp = new Date().toISOString();
+    // Append before strip: a concurrent failure mid-move leaves the member in
+    // both workspaces (removable) rather than in neither (lost).
+    const updatedTarget = await workspaceRegistry.update(input.targetWorkspaceId, (current) => {
+      if (current.archivedAt) {
+        throw new WorkspaceProvisioningError(
+          "archived_workspace",
+          `Archived workspace: ${input.targetWorkspaceId}`,
+        );
+      }
+      const members = workspaceMembers(current);
+      if (members.some((candidate) => areEquivalentPaths(candidate.cwd, normalizedCwd))) {
+        throw new WorkspaceProvisioningError(
+          "duplicate_member",
+          `Workspace ${input.targetWorkspaceId} already has a member at ${normalizedCwd}`,
+        );
+      }
+      return { ...current, members: [...members, member], updatedAt: timestamp };
+    });
+    if (!updatedTarget) {
+      throw new WorkspaceProvisioningError(
+        "workspace_not_found",
+        `Unknown workspace: ${input.targetWorkspaceId}`,
+      );
+    }
+    const updatedSource = await workspaceRegistry.update(input.sourceWorkspaceId, (current) => {
+      if (current.archivedAt) {
+        throw new WorkspaceProvisioningError(
+          "archived_workspace",
+          `Archived workspace: ${input.sourceWorkspaceId}`,
+        );
+      }
+      const members = workspaceMembers(current);
+      const remaining = members.filter(
+        (candidate) => !areEquivalentPaths(candidate.cwd, normalizedCwd),
+      );
+      if (remaining.length === members.length) {
+        throw new WorkspaceProvisioningError(
+          "member_not_found",
+          `Workspace ${input.sourceWorkspaceId} has no member at ${normalizedCwd}`,
+        );
+      }
+      if (remaining.length === 0) {
+        // Moving the last member out is allowed (unlike remove): the source
+        // becomes a projectless workspace, so the scalar mirror takes the same
+        // stand-in shape createProjectlessWorkspace writes.
+        return {
+          ...current,
+          projectId: current.workspaceId,
+          cwd: homedir(),
+          kind: "directory",
+          displayName: current.title?.trim() || current.displayName,
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+          members: [],
+          updatedAt: timestamp,
+        };
+      }
+      const removedWasPrimary = areEquivalentPaths(members[0].cwd, normalizedCwd);
+      return {
+        ...current,
+        // The schema syncs the primary member from the scalar fields on every
+        // write, so a primary change must re-mirror the scalars in the same update.
+        ...(removedWasPrimary ? workspaceScalarsFromPrimaryMember(remaining[0]) : {}),
+        members: remaining,
+        updatedAt: timestamp,
+      };
+    });
+    if (!updatedSource) {
+      throw new WorkspaceProvisioningError(
+        "workspace_not_found",
+        `Unknown workspace: ${input.sourceWorkspaceId}`,
+      );
+    }
+    return { source: updatedSource, target: updatedTarget };
+  }
+
   return {
     runInImportWorkspace,
     findOrCreateWorkspaceForDirectory,
@@ -629,5 +777,6 @@ export function createWorkspaceProvisioningService(deps: {
     ensureWorkspaceRecordUnarchived,
     addWorkspaceMember,
     removeWorkspaceMember,
+    moveWorkspaceMember,
   };
 }
