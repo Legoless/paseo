@@ -2338,6 +2338,32 @@ describe("workspace-layout-store actions", () => {
     ]);
   });
 
+  it("replaceTab repoints a provider-less draft at another project", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+
+    const draftTabId = store.openTab({
+      workspaceKey: workspaceKey,
+      target: { kind: "draft", draftId: "draft-repoint", cwd: "/repo/a" },
+      intent: "reveal",
+    });
+    const nextTabId = store.replaceTab(workspaceKey, draftTabId!, {
+      kind: "draft",
+      draftId: "draft-repoint",
+      cwd: "/repo/b",
+    });
+    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+
+    expect(nextTabId).toBe(draftTabId);
+    expect(collectContentTabs(layout.root)).toEqual([
+      {
+        tabId: draftTabId!,
+        target: { kind: "draft", draftId: "draft-repoint", cwd: "/repo/b" },
+        createdAt: expect.any(Number),
+      },
+    ]);
+  });
+
   it("replaceTab gives a non-draft tab the new target identity", () => {
     const workspaceKey = createWorkspaceKey();
     const store = workspaceLayoutStore.getState();

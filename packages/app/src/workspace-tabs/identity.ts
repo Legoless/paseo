@@ -145,8 +145,11 @@ function workspaceCreationTabTargetsEqual(
   right: WorkspaceTabTarget,
 ): boolean | null {
   if (left.kind === "draft" && right.kind === "draft") {
+    // A provider-less draft's project lives on the bare `cwd`, so it is identity: without it,
+    // repointing compares equal and the layout store's replace silently no-ops.
     return (
       left.draftId === right.draftId &&
+      (left.cwd ?? null) === (right.cwd ?? null) &&
       workspaceDraftTabSetupsEqual(left.setup, right.setup) &&
       workspaceTabLabelsEqual(left.labels, right.labels)
     );
