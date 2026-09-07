@@ -2520,6 +2520,8 @@ export class Session {
         return this.handleWorkspaceMemberRemoveRequest(msg);
       case "workspace.member.move.request":
         return this.handleWorkspaceMemberMoveRequest(msg);
+      case "agent.workspace.move.request":
+        return this.handleAgentWorkspaceMoveRequest(msg);
       default:
         return undefined;
     }
@@ -3679,6 +3681,90 @@ export class Session {
           movedAgentIds: [],
           movedTerminalIds: [],
           error: getErrorMessageOr(error, "Failed to move workspace member"),
+          ...(error instanceof WorkspaceProvisioningError ? { errorCode: error.code } : {}),
+        },
+      });
+    }
+  }
+
+  /**
+   * Moves one agent to another workspace that already holds the agent's own project.
+   * The membership is untouched on both sides — only the agent's `workspaceId` changes —
+   * so this refuses any target that does not already have a member at the agent's
+   * directory. That guard is what keeps an agent inside its project: the sidebar can
+   * offer the drop only where the same project exists twice, and the daemon enforces it
+   * rather than trusting the client's view of the membership.
+   */
+  private async handleAgentWorkspaceMoveRequest(
+    request: Extract<SessionInboundMessage, { type: "agent.workspace.move.request" }>,
+  ): Promise<void> {
+    const { agentId, targetWorkspaceId, requestId } = request;
+    this.sessionLogger.info(
+      { agentId, targetWorkspaceId, requestId },
+      "session: agent.workspace.move.request",
+    );
+
+    const fail = (errorCode: string, error: string) => {
+      this.emit({
+        type: "agent.workspace.move.response",
+        payload: { requestId, agentId, targetWorkspaceId: null, error, errorCode },
+      });
+    };
+
+    try {
+      const record = await this.agentStorage.get(agentId);
+      if (!record) {
+        fail("agent_not_found", `Unknown agent: ${agentId}`);
+        return;
+      }
+      const sourceWorkspaceId = record.workspaceId;
+      if (sourceWorkspaceId === targetWorkspaceId) {
+        fail("same_workspace", `Agent ${agentId} already belongs to ${targetWorkspaceId}`);
+        return;
+      }
+      const target = await this.workspaceRegistry.get(targetWorkspaceId);
+      if (!target) {
+        fail("workspace_not_found", `Unknown workspace: ${targetWorkspaceId}`);
+        return;
+      }
+      if (target.archivedAt) {
+        fail("archived_workspace", `Archived workspace: ${targetWorkspaceId}`);
+        return;
+      }
+      const holdsProject = workspaceMembers(target).some((member) =>
+        areEquivalentPaths(member.cwd, record.cwd),
+      );
+      if (!holdsProject) {
+        fail("member_not_found", `Workspace ${targetWorkspaceId} has no member at ${record.cwd}`);
+        return;
+      }
+
+      const moved = await this.agentManager.setAgentWorkspaceId(agentId, targetWorkspaceId);
+      if (!moved) {
+        fail("agent_not_found", `Unknown agent: ${agentId}`);
+        return;
+      }
+      this.emit({
+        type: "agent.workspace.move.response",
+        payload: { requestId, agentId, targetWorkspaceId, error: null },
+      });
+      await this.emitWorkspaceUpdatesForWorkspaceIds(
+        [sourceWorkspaceId, targetWorkspaceId].filter(
+          (workspaceId): workspaceId is string => typeof workspaceId === "string",
+        ),
+      );
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, agentId, targetWorkspaceId, requestId },
+        "session: agent.workspace.move.request error",
+      );
+      this.emit({
+        type: "agent.workspace.move.response",
+        payload: {
+          requestId,
+          agentId,
+          targetWorkspaceId: null,
+          error: getErrorMessageOr(error, "Failed to move the agent"),
           ...(error instanceof WorkspaceProvisioningError ? { errorCode: error.code } : {}),
         },
       });

@@ -2602,6 +2602,17 @@ export const WorkspaceMemberMoveRequestSchema = z.object({
   requestId: z.string(),
 });
 
+// Re-parents one agent to another workspace that already holds the agent's own project.
+// Narrower than a member move on purpose: the membership stays put in both workspaces, so
+// only the agent's workspaceId changes. The daemon refuses a target that does not already
+// have a member at the agent's directory — an agent never leaves its project.
+export const AgentWorkspaceMoveRequestSchema = z.object({
+  type: z.literal("agent.workspace.move.request"),
+  agentId: z.string(),
+  targetWorkspaceId: z.string(),
+  requestId: z.string(),
+});
+
 // Highlighted diff token schema
 // Note: style can be a compound class name (e.g., "heading meta") from the syntax highlighter
 const HighlightTokenSchema = z.object({
@@ -3194,6 +3205,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   WorkspaceMemberAddRequestSchema,
   WorkspaceMemberRemoveRequestSchema,
   WorkspaceMemberMoveRequestSchema,
+  AgentWorkspaceMoveRequestSchema,
   FileExplorerRequestSchema,
   FileSubscribeRequestSchema,
   FileUnsubscribeRequestSchema,
@@ -3495,6 +3507,8 @@ export const ServerInfoStatusPayloadSchema = z
         workspaceMultiProject: z.boolean().optional(),
         // COMPAT(workspaceMemberMove): added in v0.7.0, remove gate after 2027-03-01.
         workspaceMemberMove: z.boolean().optional(),
+        // COMPAT(agentWorkspaceMove): added in v0.8.0, remove gate after 2028-03-01.
+        agentWorkspaceMove: z.boolean().optional(),
         // COMPAT(workspaceProjectless): added in v0.8.0, remove gate after 2028-03-01.
         workspaceProjectless: z.boolean().optional(),
         // COMPAT(projectRemove): added in v0.1.97, drop the gate when floor >= v0.1.97.
@@ -4708,6 +4722,18 @@ export const WorkspaceMemberMoveResponseSchema = z.object({
     // What actually moved, so a client can migrate its own tabs without guessing.
     movedAgentIds: z.array(z.string()),
     movedTerminalIds: z.array(z.string()),
+    error: z.string().nullable(),
+    errorCode: z.string().optional(),
+  }),
+});
+
+export const AgentWorkspaceMoveResponseSchema = z.object({
+  type: z.literal("agent.workspace.move.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    // The workspace the agent now belongs to; null on error.
+    targetWorkspaceId: z.string().nullable(),
     error: z.string().nullable(),
     errorCode: z.string().optional(),
   }),
@@ -6556,6 +6582,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   WorkspaceMemberAddResponseSchema,
   WorkspaceMemberRemoveResponseSchema,
   WorkspaceMemberMoveResponseSchema,
+  AgentWorkspaceMoveResponseSchema,
   SendAgentMessageResponseMessageSchema,
   SetVoiceModeResponseMessageSchema,
   DaemonGetStatusResponseSchema,
@@ -6798,6 +6825,8 @@ export type WorkspaceMemberRemoveRequest = z.infer<typeof WorkspaceMemberRemoveR
 export type WorkspaceMemberRemoveResponse = z.infer<typeof WorkspaceMemberRemoveResponseSchema>;
 export type WorkspaceMemberMoveRequest = z.infer<typeof WorkspaceMemberMoveRequestSchema>;
 export type WorkspaceMemberMoveResponse = z.infer<typeof WorkspaceMemberMoveResponseSchema>;
+export type AgentWorkspaceMoveRequest = z.infer<typeof AgentWorkspaceMoveRequestSchema>;
+export type AgentWorkspaceMoveResponse = z.infer<typeof AgentWorkspaceMoveResponseSchema>;
 export type ProjectRenameResponsePayload = z.infer<typeof ProjectRenameResponsePayloadSchema>;
 export type ProjectRemoveResponsePayload = z.infer<typeof ProjectRemoveResponsePayloadSchema>;
 export type WaitForFinishResponseMessage = z.infer<typeof WaitForFinishResponseMessageSchema>;

@@ -9,6 +9,7 @@ import {
   type ReactElement,
 } from "react";
 import { Text, View } from "react-native";
+import { createPortal } from "react-dom";
 import {
   DndContext,
   DragOverlay,
@@ -35,22 +36,27 @@ import {
 import {
   asSidebarDndItemData,
   routeSidebarDragEnd,
+  type SidebarAgentMoveInput,
   type SidebarMemberMoveDragState,
   type SidebarMemberMoveInput,
 } from "./member-move-dnd-model";
 
-export type { SidebarMemberMoveInput, SidebarMemberMoveDragState };
+export type { SidebarAgentMoveInput, SidebarMemberMoveInput, SidebarMemberMoveDragState };
+
+const DRAG_OVERLAY_STYLE = { pointerEvents: "none" as const };
 
 const INACTIVE_DRAG_STATE: SidebarMemberMoveDragState = {
   activeId: null,
   activeKind: null,
   activeWorkspaceKey: null,
+  activeCwd: null,
   overWorkspaceKey: null,
+  overMemberKey: null,
 };
 
 const DragStateContext = createContext<SidebarMemberMoveDragState>(INACTIVE_DRAG_STATE);
 
-function sidebarDndKind(entry: { data?: unknown }): "workspace" | "member" | null {
+function sidebarDndKind(entry: { data?: unknown }): "workspace" | "member" | "agent" | null {
   const container = (entry as { data?: { droppableContainer?: { data?: { current?: unknown } } } })
     .data?.droppableContainer?.data?.current;
   return asSidebarDndItemData(container)?.kind ?? null;
@@ -67,35 +73,60 @@ function sidebarDndKind(entry: { data?: unknown }): "workspace" | "member" | nul
 const sidebarCollisionDetection: CollisionDetection = (args) => {
   const activeKind = asSidebarDndItemData(args.active?.data.current)?.kind ?? null;
   const within = pointerWithin(args);
+  const agentHits = within.filter((entry) => sidebarDndKind(entry) === "agent");
   const memberHits = within.filter((entry) => sidebarDndKind(entry) === "member");
   const workspaceHits = within.filter((entry) => sidebarDndKind(entry) === "workspace");
+  if (activeKind === "agent") {
+    // An agent row first, then the project header behind it — dropping on a collapsed or
+    // empty copy of the project has to resolve to the member row. No center fallback: a
+    // release over blank canvas must not re-parent an agent.
+    if (agentHits.length > 0) {
+      return agentHits;
+    }
+    return memberHits;
+  }
   if (activeKind === "member") {
     if (memberHits.length > 0) {
       return memberHits;
     }
     return workspaceHits;
   }
-  if (activeKind === "workspace" && workspaceHits.length > 0) {
-    return workspaceHits;
+  if (activeKind === "workspace") {
+    if (workspaceHits.length > 0) {
+      return workspaceHits;
+    }
+    // Released past the last row or above the first: fall back to the nearest workspace
+    // rather than the nearest droppable, which is usually a member row and routes to none.
+    return closestCenter({
+      ...args,
+      droppableContainers: args.droppableContainers.filter(
+        (container) => asSidebarDndItemData(container.data.current)?.kind === "workspace",
+      ),
+    });
   }
   return closestCenter(args);
 };
 
-/** Drop-target state for workspace rows; only moves during an active member drag. */
+/** Drop-target state for workspace and member rows during an active member or agent drag. */
 export function useSidebarMemberMoveDragState(): SidebarMemberMoveDragState {
   return useContext(DragStateContext);
 }
 
 /**
- * One DndContext for the whole workspace list: workspace-reorder rows, every
- * member list, and the member-to-workspace move all route through it. Per-list
- * contexts would shadow each other — a member row's useSortable binds to the
- * nearest ancestor context, which would otherwise be its own workspace's list.
+ * One DndContext for the whole workspace list: workspace-reorder rows, every member list,
+ * every agent bucket, the member-to-workspace move and the agent-to-other-copy-of-its-project
+ * move all route through it. Per-list contexts would shadow each other — a row's useSortable
+ * binds to the nearest ancestor context, which would otherwise be its own list, and a drag
+ * could never resolve a drop target outside it.
  */
 export function SidebarMemberMoveDndProvider({
   children,
   onMoveMember,
-}: PropsWithChildren<{ onMoveMember: (input: SidebarMemberMoveInput) => void }>): ReactElement {
+  onMoveAgent,
+}: PropsWithChildren<{
+  onMoveMember: (input: SidebarMemberMoveInput) => void;
+  onMoveAgent: (input: SidebarAgentMoveInput) => void;
+}>): ReactElement {
   const [dragState, setDragState] = useState<SidebarMemberMoveDragState>(INACTIVE_DRAG_STATE);
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
   const listsRef = useRef(new Map<string, ExternalDndListRegistration>());
@@ -116,22 +147,37 @@ export function SidebarMemberMoveDndProvider({
       activeId: String(event.active.id),
       activeKind: data?.kind ?? null,
       activeWorkspaceKey: data?.workspaceKey ?? null,
+      activeCwd: data && data.kind !== "workspace" ? data.cwd : null,
       overWorkspaceKey: null,
+      overMemberKey: null,
     });
   }, []);
 
   const handleDragOver = useCallback((event: DragOverEvent) => {
     const over = asSidebarDndItemData(event.over?.data.current);
     setDragState((current) => {
-      if (current.activeKind !== "member") {
-        return current;
+      if (current.activeKind === "member") {
+        // The row the member already belongs to is not a target — hovering it just reorders.
+        const overKey = over?.workspaceKey ?? null;
+        const overWorkspaceKey = overKey === current.activeWorkspaceKey ? null : overKey;
+        return current.overWorkspaceKey === overWorkspaceKey
+          ? current
+          : { ...current, overWorkspaceKey };
       }
-      // The row the member already belongs to is not a target — hovering it just reorders.
-      const overKey = over?.workspaceKey ?? null;
-      const overWorkspaceKey = overKey === current.activeWorkspaceKey ? null : overKey;
-      return current.overWorkspaceKey === overWorkspaceKey
-        ? current
-        : { ...current, overWorkspaceKey };
+      if (current.activeKind === "agent") {
+        // Only the same project's bucket in another workspace lights up, so the highlight
+        // never promises a drop `routeSidebarDragEnd` will refuse.
+        const isTarget =
+          over !== null &&
+          over.kind !== "workspace" &&
+          current.activeCwd !== null &&
+          current.activeCwd.length > 0 &&
+          over.cwd === current.activeCwd &&
+          over.workspaceKey !== current.activeWorkspaceKey;
+        const overMemberKey = isTarget && over !== null ? over.memberKey : null;
+        return current.overMemberKey === overMemberKey ? current : { ...current, overMemberKey };
+      }
+      return current;
     });
   }, []);
 
@@ -161,9 +207,13 @@ export function SidebarMemberMoveDndProvider({
       }
       if (route.kind === "move") {
         onMoveMember(route.input);
+        return;
+      }
+      if (route.kind === "moveAgent") {
+        onMoveAgent(route.input);
       }
     },
-    [clearDrag, onMoveMember, registry],
+    [clearDrag, onMoveAgent, onMoveMember, registry],
   );
 
   return (
@@ -179,15 +229,20 @@ export function SidebarMemberMoveDndProvider({
             onDragEnd={handleDragEnd}
           >
             {children}
-            <DragOverlay dropAnimation={null}>
-              {activeLabel ? (
-                <View style={styles.overlayChip}>
-                  <Text style={styles.overlayLabel} numberOfLines={1}>
-                    {activeLabel}
-                  </Text>
-                </View>
-              ) : null}
-            </DragOverlay>
+            {typeof document !== "undefined"
+              ? createPortal(
+                  <DragOverlay dropAnimation={null} style={DRAG_OVERLAY_STYLE} zIndex={10000}>
+                    {activeLabel ? (
+                      <View style={styles.overlayChip}>
+                        <Text style={styles.overlayLabel} numberOfLines={1}>
+                          {activeLabel}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </DragOverlay>,
+                  document.body,
+                )
+              : null}
           </DndContext>
         </ExternalDndActiveIdContext.Provider>
       </DragStateContext.Provider>
@@ -204,9 +259,12 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface2,
     borderWidth: 1,
     borderColor: theme.colors.borderAccent,
+    pointerEvents: "none",
+    ...theme.shadow.md,
   },
   overlayLabel: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.base,
+    userSelect: "none",
   },
 }));

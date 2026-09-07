@@ -56,6 +56,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/mobile-panels.md](docs/mobile-panels.md)                       | Compact left/center/right panel ownership, worklet motion, gesture revisions, and Fabric constraints                           |
 | [docs/pane-layouts.md](docs/pane-layouts.md)                         | Named pane arrangements — the `$PASEO_HOME/layouts/` file format, rows/columns, and what applying one does to open tabs        |
 | [docs/explorer-sidebar.md](docs/explorer-sidebar.md)                 | Explorer sidebar and ordinary side-pane host contracts, lifecycle, placement, and routing preferences                          |
+| [docs/sidebar-drag-and-drop.md](docs/sidebar-drag-and-drop.md)       | Global sidebar drag rules — what workspaces, projects and agents may land on, the single DndContext, key and order gotchas     |
 | [docs/ad-hoc-daemon-testing.md](docs/ad-hoc-daemon-testing.md)       | Isolated in-process daemon test harness                                                                                        |
 | [docs/browser-capture-harness.md](docs/browser-capture-harness.md)   | Real-Electron browser screenshot harness and compositor-surface gotcha                                                         |
 | [docs/android.md](docs/android.md)                                   | App variants, local/cloud builds, EAS workflows, version codes, F-Droid source builds and store metadata                       |
@@ -115,7 +116,7 @@ See [docs/development.md](docs/development.md) for full setup, build sync requir
 - **NEVER add auth checks to tests** — agent providers handle their own auth.
 - **Before changing app routes, startup routing, remembered workspace restore, or active workspace selection, read [docs/expo-router.md](docs/expo-router.md).**
 - **NEVER run the full test suite locally.** The test suites are heavy and will freeze the machine, especially if multiple agents run them in parallel. Rules:
-  - Run only the specific test file you changed: `npx vitest run <file> --bail=1`
+  - Run only the specific test file you changed: `npx vitest run <file> --bail=1`, from the package that owns it rather than the repo root — see [docs/testing.md](docs/testing.md).
   - Never run `npm run test` for an entire workspace unless explicitly asked.
   - If you must run a broad suite, pipe output to a file and read it afterward: `npx vitest run <file> --bail=1 > /tmp/test-output.txt 2>&1` then read the file.
   - Never re-run a test suite that another agent already ran and reported green — trust the result.
