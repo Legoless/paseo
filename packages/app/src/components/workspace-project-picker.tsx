@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown, FolderGit2 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { WorkspaceMemberDescriptor } from "@/stores/session-store";
+import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
 import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selection-store";
 import {
   DropdownMenu,
@@ -28,6 +29,54 @@ export function buildWorkspaceProjectPickerOptions(
     label: member.projectCustomName ?? member.projectDisplayName,
     path: shortenPath(member.workspaceDirectory),
   }));
+}
+
+/**
+ * The sidebar shows members in stored drag order (memberOrderByWorkspace, new members appended in
+ * name order), so the selector sorts the same list the same way.
+ */
+export function orderWorkspaceProjectPickerOptions(
+  options: WorkspaceProjectPickerOption[],
+  memberOrder: readonly string[],
+): WorkspaceProjectPickerOption[] {
+  if (options.length <= 1 || memberOrder.length === 0) return options;
+  const keyByCwd = new Map(options.map((option) => [option.cwd, option]));
+  const storedOrder = memberOrder
+    .map((key) => key.slice(key.indexOf("#") + 1))
+    .filter((cwd) => keyByCwd.has(cwd));
+  if (storedOrder.length === 0) return options;
+  const storedSet = new Set(storedOrder);
+  const unstored = options.filter((option) => !storedSet.has(option.cwd));
+  return [
+    ...unstored,
+    ...storedOrder.flatMap((cwd) => {
+      const option = keyByCwd.get(cwd);
+      return option ? [option] : [];
+    }),
+  ];
+}
+
+/** Sidebar order for one workspace's members, or null when no drag order is stored yet. */
+export function useWorkspaceMemberOrder(
+  serverId: string | null,
+  workspaceId: string | null,
+): readonly string[] | null {
+  return useSidebarOrderStore((state) => {
+    if (!serverId?.trim() || !workspaceId?.trim()) return null;
+    return state.memberOrderByWorkspace[`${serverId}:${workspaceId}`] ?? null;
+  });
+}
+
+export function useOrderedWorkspaceProjectPickerOptions(
+  serverId: string | null,
+  workspaceId: string | null,
+  members: WorkspaceMemberDescriptor[],
+): WorkspaceProjectPickerOption[] {
+  const memberOrder = useWorkspaceMemberOrder(serverId, workspaceId);
+  return useMemo(() => {
+    const options = buildWorkspaceProjectPickerOptions(members);
+    return memberOrder ? orderWorkspaceProjectPickerOptions(options, memberOrder) : options;
+  }, [members, memberOrder]);
 }
 
 interface WorkspaceProjectMenuItemsProps {
@@ -111,7 +160,7 @@ export function WorkspaceProjectPicker({
 }: WorkspaceProjectPickerProps) {
   const { t } = useTranslation();
   const { member, members, setSelected } = useSelectedWorkspaceProject(serverId, workspaceId);
-  const options = useMemo(() => buildWorkspaceProjectPickerOptions(members), [members]);
+  const options = useOrderedWorkspaceProjectPickerOptions(serverId, workspaceId, members);
   const [isOpen, setIsOpen] = useState(false);
   const triggerStyle = useCallback(
     ({ hovered, pressed, open }: { hovered: boolean; pressed: boolean; open: boolean }) => [
@@ -154,7 +203,14 @@ export function WorkspaceProjectPicker({
           </View>
         )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" minWidth={240} side="bottom" testID={`${testID}-content`}>
+      <DropdownMenuContent
+        align="start"
+        minWidth={240}
+        maxHeight={400}
+        scrollable
+        side="bottom"
+        testID={`${testID}-content`}
+      >
         <WorkspaceProjectMenuItems
           options={options}
           selectedCwd={member.workspaceDirectory}
