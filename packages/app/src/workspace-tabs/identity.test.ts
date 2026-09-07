@@ -40,6 +40,36 @@ describe("Draft tab labels", () => {
   });
 });
 
+describe("Draft tab project cwd", () => {
+  it("participates in draft target equality", () => {
+    expect(
+      workspaceTabTargetsEqual(
+        { kind: "draft", draftId: "draft-1", cwd: "/repo/a" },
+        { kind: "draft", draftId: "draft-1", cwd: "/repo/b" },
+      ),
+    ).toBe(false);
+    expect(
+      workspaceTabTargetsEqual(
+        { kind: "draft", draftId: "draft-1", cwd: "/repo/a" },
+        { kind: "draft", draftId: "draft-1", cwd: "/repo/a" },
+      ),
+    ).toBe(true);
+  });
+
+  it("treats an absent and a set cwd as different targets", () => {
+    expect(
+      workspaceTabTargetsEqual(
+        { kind: "draft", draftId: "draft-1" },
+        {
+          kind: "draft",
+          draftId: "draft-1",
+          cwd: "/repo/a",
+        },
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("provider subagent tab identity", () => {
   test("normalizes and compares the parent and provider child as one tab identity", () => {
     const target = normalizeWorkspaceTabTarget({
