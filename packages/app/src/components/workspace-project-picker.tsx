@@ -1,71 +1,28 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, FolderGit2 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { WorkspaceMemberDescriptor } from "@/stores/session-store";
-import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
 import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selection-store";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  buildWorkspaceProjectPickerOptions,
+  useWorkspaceMemberOrder,
+  orderWorkspaceProjectPickerOptions,
+  toWorkspaceProjectComboboxOptions,
+  type WorkspaceProjectPickerOption,
+} from "@/components/workspace-project-picker-order";
+import { Combobox } from "@/components/ui/combobox";
+import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
 import { shortenPath } from "@/utils/shorten-path";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
 
-export interface WorkspaceProjectPickerOption {
-  cwd: string;
-  label: string;
-  path: string;
-}
-
-export function buildWorkspaceProjectPickerOptions(
-  members: WorkspaceMemberDescriptor[],
-): WorkspaceProjectPickerOption[] {
-  return members.map((member) => ({
-    cwd: member.workspaceDirectory,
-    label: member.projectCustomName ?? member.projectDisplayName,
-    path: shortenPath(member.workspaceDirectory),
-  }));
-}
-
-/**
- * The sidebar shows members in stored drag order (memberOrderByWorkspace, new members appended in
- * name order), so the selector sorts the same list the same way.
- */
-export function orderWorkspaceProjectPickerOptions(
-  options: WorkspaceProjectPickerOption[],
-  memberOrder: readonly string[],
-): WorkspaceProjectPickerOption[] {
-  if (options.length <= 1 || memberOrder.length === 0) return options;
-  const keyByCwd = new Map(options.map((option) => [option.cwd, option]));
-  const storedOrder = memberOrder
-    .map((key) => key.slice(key.indexOf("#") + 1))
-    .filter((cwd) => keyByCwd.has(cwd));
-  if (storedOrder.length === 0) return options;
-  const storedSet = new Set(storedOrder);
-  const unstored = options.filter((option) => !storedSet.has(option.cwd));
-  return [
-    ...unstored,
-    ...storedOrder.flatMap((cwd) => {
-      const option = keyByCwd.get(cwd);
-      return option ? [option] : [];
-    }),
-  ];
-}
-
-/** Sidebar order for one workspace's members, or null when no drag order is stored yet. */
-export function useWorkspaceMemberOrder(
-  serverId: string | null,
-  workspaceId: string | null,
-): readonly string[] | null {
-  return useSidebarOrderStore((state) => {
-    if (!serverId?.trim() || !workspaceId?.trim()) return null;
-    return state.memberOrderByWorkspace[`${serverId}:${workspaceId}`] ?? null;
-  });
-}
+export type { WorkspaceProjectPickerOption } from "@/components/workspace-project-picker-order";
+export {
+  buildWorkspaceProjectPickerOptions,
+  orderWorkspaceProjectPickerOptions,
+  toWorkspaceProjectComboboxOptions,
+} from "@/components/workspace-project-picker-order";
 
 export function useOrderedWorkspaceProjectPickerOptions(
   serverId: string | null,
@@ -77,62 +34,6 @@ export function useOrderedWorkspaceProjectPickerOptions(
     const options = buildWorkspaceProjectPickerOptions(members);
     return memberOrder ? orderWorkspaceProjectPickerOptions(options, memberOrder) : options;
   }, [members, memberOrder]);
-}
-
-interface WorkspaceProjectMenuItemsProps {
-  options: WorkspaceProjectPickerOption[];
-  selectedCwd: string | null;
-  onSelect: (cwd: string) => void;
-  testIDPrefix: string;
-}
-
-interface WorkspaceProjectMenuItemProps {
-  option: WorkspaceProjectPickerOption;
-  selected: boolean;
-  onSelect: (cwd: string) => void;
-  testID: string;
-}
-
-function WorkspaceProjectMenuItem({
-  option,
-  selected,
-  onSelect,
-  testID,
-}: WorkspaceProjectMenuItemProps) {
-  const handleSelect = useCallback(() => onSelect(option.cwd), [onSelect, option.cwd]);
-  return (
-    <DropdownMenuItem
-      selected={selected}
-      showSelectedCheck
-      description={option.path}
-      onSelect={handleSelect}
-      testID={testID}
-    >
-      {option.label}
-    </DropdownMenuItem>
-  );
-}
-
-/** One item list for every workspace project picker so the triggers can't drift. */
-export function WorkspaceProjectMenuItems({
-  options,
-  selectedCwd,
-  onSelect,
-  testIDPrefix,
-}: WorkspaceProjectMenuItemsProps) {
-  return (
-    <>
-      {options.map((option) => (
-        <WorkspaceProjectMenuItem
-          key={option.cwd}
-          option={option}
-          selected={option.cwd === selectedCwd}
-          onSelect={onSelect}
-          testID={`${testIDPrefix}-option-${encodeURIComponent(option.cwd)}`}
-        />
-      ))}
-    </>
-  );
 }
 
 interface WorkspaceProjectPickerProps {
@@ -160,65 +61,72 @@ export function WorkspaceProjectPicker({
 }: WorkspaceProjectPickerProps) {
   const { t } = useTranslation();
   const { member, members, setSelected } = useSelectedWorkspaceProject(serverId, workspaceId);
-  const options = useOrderedWorkspaceProjectPickerOptions(serverId, workspaceId, members);
+  const orderedOptions = useOrderedWorkspaceProjectPickerOptions(serverId, workspaceId, members);
+  const options = useMemo(
+    () => toWorkspaceProjectComboboxOptions(orderedOptions),
+    [orderedOptions],
+  );
   const [isOpen, setIsOpen] = useState(false);
+  const anchorRef = useRef<View | null>(null);
+  const handleOpen = useCallback(() => setIsOpen(true), []);
+  const handleSelect = useCallback((id: string) => setSelected(id), [setSelected]);
   const triggerStyle = useCallback(
-    ({ hovered, pressed, open }: { hovered: boolean; pressed: boolean; open: boolean }) => [
+    ({ hovered, pressed }: { hovered: boolean; pressed: boolean }) => [
       styles.trigger,
-      (hovered || pressed || open) && styles.triggerActive,
+      (hovered || pressed || isOpen) && styles.triggerActive,
     ],
-    [],
+    [isOpen],
   );
 
-  if (options.length <= 1 || !member) {
+  if (orderedOptions.length <= 1 || !member) {
     return null;
   }
 
+  const selectedLabel =
+    orderedOptions.find((option) => option.cwd === member.workspaceDirectory)?.label ??
+    member.projectDisplayName;
+
   return (
-    <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
-      <DropdownMenuTrigger
+    <>
+      <ComboboxTrigger
+        ref={anchorRef}
         accessibilityRole="button"
         accessibilityLabel={t("workspace.tabs.projectPicker.selectProject")}
         style={triggerStyle}
+        onPress={handleOpen}
         testID={`${testID}-trigger`}
+        chevron={null}
+        block
       >
-        {({ hovered, pressed, open }) => (
-          <View style={styles.triggerRow}>
-            <ThemedFolder
-              size={ICON_SIZE.sm}
-              uniProps={
-                hovered || pressed || open ? foregroundColorMapping : foregroundMutedColorMapping
-              }
-            />
-            <View style={styles.triggerText}>
-              <Text style={styles.triggerLabel} numberOfLines={1} testID={`${testID}-label`}>
-                {options.find((option) => option.cwd === member.workspaceDirectory)?.label ??
-                  member.projectDisplayName}
-              </Text>
-              <Text style={styles.triggerPath} numberOfLines={1}>
-                {shortenPath(member.workspaceDirectory)}
-              </Text>
-            </View>
-            <ThemedChevronDown size={ICON_SIZE.sm} uniProps={foregroundMutedColorMapping} />
-          </View>
-        )}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="start"
-        minWidth={240}
-        maxHeight={400}
-        scrollable
-        side="bottom"
-        testID={`${testID}-content`}
-      >
-        <WorkspaceProjectMenuItems
-          options={options}
-          selectedCwd={member.workspaceDirectory}
-          onSelect={setSelected}
-          testIDPrefix={testID}
+        <ThemedFolder
+          size={ICON_SIZE.sm}
+          uniProps={isOpen ? foregroundColorMapping : foregroundMutedColorMapping}
         />
-      </DropdownMenuContent>
-    </DropdownMenu>
+        <View style={styles.triggerText}>
+          <Text style={styles.triggerLabel} numberOfLines={1} testID={`${testID}-label`}>
+            {selectedLabel}
+          </Text>
+          <Text style={styles.triggerPath} numberOfLines={1}>
+            {shortenPath(member.workspaceDirectory)}
+          </Text>
+        </View>
+        <ThemedChevronDown size={ICON_SIZE.sm} uniProps={foregroundMutedColorMapping} />
+      </ComboboxTrigger>
+      <Combobox
+        options={options}
+        value={member.workspaceDirectory}
+        onSelect={handleSelect}
+        searchable
+        searchPlaceholder={t("workspace.tabs.projectSelector.searchPlaceholder")}
+        title={t("workspace.tabs.projectSelector.label")}
+        emptyText={t("workspace.tabs.projectSelector.empty")}
+        open={isOpen}
+        onOpenChange={setIsOpen}
+        anchorRef={anchorRef}
+        desktopPlacement="bottom-start"
+        desktopMinWidth={280}
+      />
+    </>
   );
 }
 
@@ -232,11 +140,6 @@ const styles = StyleSheet.create((theme) => ({
   },
   triggerActive: {
     backgroundColor: theme.colors.surfaceSidebarHover,
-  },
-  triggerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
   },
   triggerText: {
     flex: 1,

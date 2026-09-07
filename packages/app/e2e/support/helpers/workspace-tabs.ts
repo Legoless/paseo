@@ -162,11 +162,12 @@ export async function openNewTabLauncher(
   await expect(panel).toBeVisible({ timeout: 10_000 });
   if (options?.project !== "none") {
     await panel.getByTestId("workspace-new-tab-project-selector-trigger").click();
-    const content = visibleTestId(page, "workspace-new-tab-project-selector-content").first();
-    await content
+    const option = page
       .locator('[data-testid^="workspace-new-tab-project-selector-option-"]')
-      .first()
-      .click();
+      .filter({ visible: true })
+      .first();
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await option.click();
   }
   return panel;
 }
