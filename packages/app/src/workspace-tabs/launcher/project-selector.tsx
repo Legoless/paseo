@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useState, type ReactElement } from "react";
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Folder, FolderGit2 } from "lucide-react-native";
@@ -11,9 +11,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  buildWorkspaceProjectPickerOptions,
+  useOrderedWorkspaceProjectPickerOptions,
   WorkspaceProjectMenuItems,
 } from "@/components/workspace-project-picker";
+import type { WorkspaceMemberDescriptor } from "@/stores/session-store";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
 import { shortenPath } from "@/utils/shorten-path";
@@ -23,6 +24,8 @@ const ThemedFolder = withUnistyles(FolderGit2);
 /** A plain folder for "no project"; the git folder means a project is chosen. */
 const ThemedPlainFolder = withUnistyles(Folder);
 const ThemedChevronDown = withUnistyles(ChevronDown);
+
+const EMPTY_MEMBERS: WorkspaceMemberDescriptor[] = [];
 
 const mutedMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
@@ -57,8 +60,11 @@ export function NewTabProjectSelector({
   const [isOpen, setIsOpen] = useState(false);
   const homeDirectory = useHostHomeDirectory(serverId);
   const members = useWorkspaceFields(serverId, workspaceId, (workspace) => workspace.members);
-  const options = useMemo(() => buildWorkspaceProjectPickerOptions(members ?? []), [members]);
-
+  const options = useOrderedWorkspaceProjectPickerOptions(
+    serverId,
+    workspaceId,
+    members ?? EMPTY_MEMBERS,
+  );
   const selectHome = useCallback(() => onSelect(null), [onSelect]);
   const triggerStyle = useCallback(
     ({ hovered, pressed, open }: { hovered: boolean; pressed: boolean; open: boolean }) => [
@@ -108,6 +114,8 @@ export function NewTabProjectSelector({
       <DropdownMenuContent
         align="start"
         minWidth={240}
+        maxHeight={400}
+        scrollable
         side="bottom"
         testID="workspace-new-tab-project-selector-content"
       >
