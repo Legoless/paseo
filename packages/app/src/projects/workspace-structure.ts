@@ -82,7 +82,46 @@ export function buildWorkspaceStructureProjects(input: {
   for (const session of input.sessions) {
     for (const workspace of session.workspaces) {
       const viewKey = viewKeyByServerProjectId.get(session.serverId)?.get(workspace.projectId);
-      if (!viewKey) continue;
+      if (!viewKey) {
+        // Orphan workspace: projectId names no project record. Create a synthetic
+        // project group so the workspace still renders in the sidebar.
+        const syntheticViewKey = allocatePlacementViewKey(
+          allocatedViewKeys,
+          session.serverId,
+          workspace.projectId,
+        );
+        getOrCreate(viewKeyByServerProjectId, session.serverId, () => new Map()).set(
+          workspace.projectId,
+          syntheticViewKey,
+        );
+        let draft = byProject.get(syntheticViewKey);
+        if (!draft) {
+          draft = {
+            viewKey: syntheticViewKey,
+            projectKey: null,
+            projectName:
+              workspace.projectDisplayName ?? projectDisplayNameFromProjectId(workspace.projectId),
+            hasCustomName: false,
+            projectKind: workspace.projectKind,
+            iconWorkingDir: workspace.projectRootPath,
+            hosts: new Map(),
+            workspaces: [],
+          };
+          byProject.set(syntheticViewKey, draft);
+        }
+        draft.hosts.set(session.serverId, {
+          serverId: session.serverId,
+          projectId: workspace.projectId,
+          iconWorkingDir: workspace.projectRootPath,
+          worktreeSupport: workspace.projectKind === "git" ? "supported" : "unsupported",
+        });
+        draft.workspaces.push({
+          workspaceId: workspace.id,
+          workspaceName: workspace.name,
+          workspaceKey: `${session.serverId}:${workspace.id}`,
+        });
+        continue;
+      }
       byProject.get(viewKey)?.workspaces.push({
         workspaceId: workspace.id,
         workspaceName: workspace.name,

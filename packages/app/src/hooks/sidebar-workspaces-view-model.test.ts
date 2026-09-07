@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Agent, WorkspaceDescriptor } from "@/stores/session-store";
+import type { Agent, ProjectDescriptor, WorkspaceDescriptor } from "@/stores/session-store";
 import type { WorkspaceStructureProject } from "@/projects/workspace-structure";
 import { buildSidebarWorkspaceGroupModel } from "@/projects/workspace-groups";
 import { buildWorkspaceAgentActivityIndex } from "@/utils/workspace-agent-activity";
@@ -584,7 +584,26 @@ describe("projectless workspaces", () => {
       sessions: [{ serverId: "srv", workspaceAgentActivity: new Map(), workspaces }],
     });
     const sections = buildSidebarWorkspaceGroupModel({
-      sessions: [{ serverId: "srv", workspaces, agents: new Map(), projects: new Map() }],
+      sessions: [
+        {
+          serverId: "srv",
+          workspaces,
+          agents: new Map(),
+          projects: new Map<string, ProjectDescriptor>([
+            [
+              "project-1",
+              {
+                projectId: "project-1",
+                projectDisplayName: "Project 1",
+                projectCustomName: null,
+                projectCustomIconRevision: null,
+                projectRootPath: "/repo/project-1",
+                projectKind: "git",
+              },
+            ],
+          ]),
+        },
+      ],
     }).sectionsByWorkspaceKey;
 
     expect(entries.get("srv:ws-empty")).toMatchObject({
@@ -742,6 +761,106 @@ describe("computeSidebarOrderUpdates", () => {
 
     expect(updates.projectOrder).toBeNull();
     expect(updates.workspaceOrders).toEqual([]);
+  });
+});
+
+describe("orphan workspace pipeline", () => {
+  const orphanWs: WorkspaceDescriptor = {
+    ...workspace({
+      id: "ws-orphan",
+      name: "Web",
+      projectId: "wks_orphan",
+      projectDisplayName: "Web",
+    }),
+    projectRootPath: "/Users/legoless",
+    workspaceDirectory: "/Users/legoless",
+  };
+  const normalWs = workspace({
+    id: "ws-main",
+    name: "main",
+    projectId: "project-1",
+    projectDisplayName: "Project 1",
+  });
+  const workspaces = new Map([
+    ["ws-orphan", orphanWs],
+    ["ws-main", normalWs],
+  ]);
+
+  it("flows an orphan workspace through structure → projects → placements → entries", () => {
+    // Step 1: structure produces a synthetic project group for the orphan.
+    const structureProjects = [
+      project({
+        projectKey: "project-1",
+        workspaceKeys: ["srv:ws-main"],
+      }),
+      // Simulate what buildWorkspaceStructureProjects now produces for an orphan:
+      // a synthetic project group with the orphan's workspace key.
+      project({
+        projectKey: JSON.stringify(["placement", "srv", "wks_orphan"]),
+        projectName: "Web",
+        iconWorkingDir: "/Users/legoless",
+        workspaceKeys: ["srv:ws-orphan"],
+      }),
+    ];
+
+    // Step 2: projects → sidebar project entries.
+    const sidebarProjects = buildSidebarProjectsFromStructure({
+      projects: structureProjects,
+    });
+    expect(sidebarProjects).toHaveLength(2);
+    const orphanProject = sidebarProjects.find((p) => p.projectName === "Web");
+    expect(orphanProject).toBeDefined();
+    expect(orphanProject!.workspaces).toHaveLength(1);
+    expect(orphanProject!.workspaces[0]!.workspaceKey).toBe("srv:ws-orphan");
+
+    // Step 3: placements model includes the orphan.
+    const model = buildSidebarWorkspacePlacementModel({
+      projects: structureProjects,
+    });
+    expect(model.workspaces.map((p) => p.workspaceKey).sort()).toEqual([
+      "srv:ws-main",
+      "srv:ws-orphan",
+    ]);
+
+    // Step 4: entries resolve the orphan workspace.
+    const entries = buildSidebarWorkspaceEntries({
+      placements: model.workspaces,
+      sessions: [{ serverId: "srv", workspaceAgentActivity: new Map(), workspaces }],
+    });
+    expect(entries.get("srv:ws-orphan")).toMatchObject({
+      name: "Web",
+      projectName: "Web",
+      workspaceKey: "srv:ws-orphan",
+    });
+    expect(entries.get("srv:ws-main")).toBeDefined();
+  });
+
+  it("excludes orphan workspaces from projectless placements (they have members)", () => {
+    const placements = selectProjectlessWorkspacePlacements({ srv: { workspaces } }, ["srv"]);
+    // The orphan has members.length === 1, so it must NOT appear in projectless.
+    expect(placements).toHaveLength(0);
+  });
+
+  it("does not change projectless behavior for genuinely empty workspaces", () => {
+    const emptyWs: WorkspaceDescriptor = {
+      ...workspace({
+        id: "ws-empty",
+        name: "panes",
+        projectId: "ws-empty",
+        projectDisplayName: "ws-empty",
+      }),
+      members: [],
+    };
+    const mixed = new Map([
+      ["ws-empty", emptyWs],
+      ["ws-orphan", orphanWs],
+      ["ws-main", normalWs],
+    ]);
+    const placements = selectProjectlessWorkspacePlacements({ srv: { workspaces: mixed } }, [
+      "srv",
+    ]);
+    expect(placements).toHaveLength(1);
+    expect(placements[0]!.workspaceId).toBe("ws-empty");
   });
 });
 

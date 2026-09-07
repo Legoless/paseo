@@ -113,7 +113,10 @@ function buildWorkspaceSection(input: {
   const workspaceId = input.workspace.id;
   const workspaceKey = `${input.serverId}:${workspaceId}`;
   const iconTargets: ProjectIconTarget[] = [];
-  const members = input.workspace.members.map<SidebarWorkspaceMemberRow>((member, index) => {
+  const realMembers = input.workspace.members.filter((member) =>
+    input.projects.has(member.projectId),
+  );
+  const members = realMembers.map<SidebarWorkspaceMemberRow>((member, index) => {
     const memberKey = `${workspaceKey}#${member.workspaceDirectory}`;
     const project = input.projects.get(member.projectId);
     const target = createProjectIconTarget({
