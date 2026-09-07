@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { migrateSidebarOrderState } from "./sidebar-order-store";
+/**
+ * jsdom: the store's persist middleware writes through AsyncStorage, which needs `window`.
+ * @vitest-environment jsdom
+ */
+import { beforeEach, describe, expect, it } from "vitest";
+import { migrateSidebarOrderState, useSidebarOrderStore } from "./sidebar-order-store";
 
 describe("migrateSidebarOrderState", () => {
   it("prefixes legacy per-server workspace order with the source server id", () => {
@@ -74,5 +78,47 @@ describe("migrateSidebarOrderState", () => {
       memberOrderByWorkspace: {},
       agentOrderByMember: {},
     });
+  });
+});
+
+describe("rekeyAgentOrder", () => {
+  beforeEach(() => {
+    useSidebarOrderStore.setState({ agentOrderByMember: {} });
+  });
+
+  it("carries a bucket's agent order to the key the move renames it to", () => {
+    const store = useSidebarOrderStore.getState();
+    store.setAgentOrder("srv:wks-a#/repo/one", ["agent:2", "agent:1"]);
+
+    store.rekeyAgentOrder("srv:wks-a#/repo/one", "srv:wks-b#/repo/one");
+
+    const next = useSidebarOrderStore.getState();
+    // The old bucket is gone rather than left to leak, and the drop order survived.
+    expect(next.getAgentOrder("srv:wks-a#/repo/one")).toEqual([]);
+    expect(next.getAgentOrder("srv:wks-b#/repo/one")).toEqual(["agent:2", "agent:1"]);
+    expect(Object.keys(next.agentOrderByMember)).toEqual(["srv:wks-b#/repo/one"]);
+  });
+
+  it("leaves the target untouched when the source bucket never had an order", () => {
+    const store = useSidebarOrderStore.getState();
+    store.setAgentOrder("srv:wks-b#/repo/one", ["agent:9"]);
+
+    store.rekeyAgentOrder("srv:wks-a#/repo/one", "srv:wks-b#/repo/one");
+
+    expect(useSidebarOrderStore.getState().getAgentOrder("srv:wks-b#/repo/one")).toEqual([
+      "agent:9",
+    ]);
+  });
+
+  it("ignores a no-op rename and blank keys", () => {
+    const store = useSidebarOrderStore.getState();
+    store.setAgentOrder("srv:wks-a#/repo/one", ["agent:1"]);
+
+    store.rekeyAgentOrder("srv:wks-a#/repo/one", "srv:wks-a#/repo/one");
+    store.rekeyAgentOrder("srv:wks-a#/repo/one", "  ");
+
+    expect(useSidebarOrderStore.getState().getAgentOrder("srv:wks-a#/repo/one")).toEqual([
+      "agent:1",
+    ]);
   });
 });

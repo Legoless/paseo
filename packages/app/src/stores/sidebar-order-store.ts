@@ -28,6 +28,12 @@ interface SidebarOrderStoreState {
   setMemberOrder: (workspaceKey: string, keys: string[]) => void;
   getAgentOrder: (memberKey: string) => string[];
   setAgentOrder: (memberKey: string, keys: string[]) => void;
+  /**
+   * Carries a bucket's remembered agent order to a new key. A member key embeds its
+   * workspace, so moving a project between workspaces renames the bucket; without this the
+   * old entry leaks forever and the project's agents come back in name order.
+   */
+  rekeyAgentOrder: (fromMemberKey: string, toMemberKey: string) => void;
 }
 
 interface SidebarOrderPersistedState {
@@ -230,6 +236,17 @@ export const useSidebarOrderStore = create<SidebarOrderStoreState>()(
             [scope]: normalized,
           },
         }));
+      },
+      rekeyAgentOrder: (fromMemberKey, toMemberKey) => {
+        const from = fromMemberKey.trim();
+        const to = toMemberKey.trim();
+        if (!from || !to || from === to) return;
+        set((state) => {
+          const carried = state.agentOrderByMember[from];
+          if (!carried) return state;
+          const { [from]: _dropped, ...rest } = state.agentOrderByMember;
+          return { agentOrderByMember: { ...rest, [to]: carried } };
+        });
       },
     }),
     {

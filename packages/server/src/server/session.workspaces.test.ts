@@ -9144,6 +9144,181 @@ test("workspace.member.move.request refuses a member the target already holds", 
   expect(registries.workspaces.get("ws-1")?.members).toHaveLength(2);
 });
 
+/**
+ * An agent move is narrower than a member move: both workspaces keep the membership and only
+ * the agent's workspaceId changes, so the daemon's whole job is refusing a target that does
+ * not already hold the agent's project. That guard is what keeps an agent inside its project.
+ */
+function createAgentMoveSession(input: {
+  emitted: SessionOutboundMessage[];
+  agentCwd: string;
+  agentWorkspaceId?: string | null;
+  setAgentWorkspaceIdCalls: Array<{ agentId: string; workspaceId: string }>;
+}) {
+  return asTestSession(
+    createSessionForWorkspaceTests({
+      onMessage: (message) => input.emitted.push(message),
+      agentStorage: {
+        get: async (agentId: string) =>
+          agentId === "agent-1"
+            ? {
+                id: "agent-1",
+                cwd: input.agentCwd,
+                workspaceId: input.agentWorkspaceId === undefined ? "ws-1" : input.agentWorkspaceId,
+                archivedAt: null,
+              }
+            : null,
+      },
+      agentManager: {
+        setAgentWorkspaceId: async (agentId: string, workspaceId: string) => {
+          input.setAgentWorkspaceIdCalls.push({ agentId, workspaceId });
+          return { id: agentId, workspaceId };
+        },
+      },
+    }),
+  );
+}
+
+test("agent.workspace.move.request re-parents an agent whose project the target also holds", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const setAgentWorkspaceIdCalls: Array<{ agentId: string; workspaceId: string }> = [];
+  const session = createAgentMoveSession({
+    emitted,
+    agentCwd: MEMBER_CWD,
+    setAgentWorkspaceIdCalls,
+  });
+  const registries = createMemberTestRegistries({ withMember: true });
+  // The same directory is a member of both workspaces — the only shape R3 allows.
+  addTargetWorkspaceToMemberRegistries(registries, { cwd: MEMBER_CWD });
+  registries.apply(session);
+  activateWorkspaceUpdatesSubscription(session);
+
+  await session.handleMessage({
+    type: "agent.workspace.move.request",
+    agentId: "agent-1",
+    targetWorkspaceId: "ws-2",
+    requestId: "req-agent-move",
+  });
+
+  const response = findByType(emitted, "agent.workspace.move.response");
+  expect(response?.payload).toMatchObject({
+    requestId: "req-agent-move",
+    agentId: "agent-1",
+    targetWorkspaceId: "ws-2",
+    error: null,
+  });
+  expect(setAgentWorkspaceIdCalls).toEqual([{ agentId: "agent-1", workspaceId: "ws-2" }]);
+
+  // The membership is untouched on both sides; only the agent moved. ws-2 derives its member
+  // from its own cwd, so an unset `members` is the proof nothing was written to it.
+  expect(registries.workspaces.get("ws-1")?.members).toHaveLength(2);
+  expect(registries.workspaces.get("ws-2")?.members).toBeUndefined();
+
+  const updatedWorkspaceIds = filterByType(emitted, "workspace_update").map((update) =>
+    update.payload.kind === "upsert" ? update.payload.workspace.id : null,
+  );
+  expect(updatedWorkspaceIds).toContain("ws-1");
+  expect(updatedWorkspaceIds).toContain("ws-2");
+});
+
+test("agent.workspace.move.request refuses a target that does not hold the agent's project", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const setAgentWorkspaceIdCalls: Array<{ agentId: string; workspaceId: string }> = [];
+  const session = createAgentMoveSession({
+    emitted,
+    agentCwd: MEMBER_CWD,
+    setAgentWorkspaceIdCalls,
+  });
+  const registries = createMemberTestRegistries({ withMember: true });
+  // ws-2 holds a different directory, so the agent would be leaving its project.
+  addTargetWorkspaceToMemberRegistries(registries);
+  registries.apply(session);
+
+  await session.handleMessage({
+    type: "agent.workspace.move.request",
+    agentId: "agent-1",
+    targetWorkspaceId: "ws-2",
+    requestId: "req-agent-move-foreign",
+  });
+
+  const response = findByType(emitted, "agent.workspace.move.response");
+  expect(response?.payload).toMatchObject({
+    requestId: "req-agent-move-foreign",
+    agentId: "agent-1",
+    targetWorkspaceId: null,
+    errorCode: "member_not_found",
+  });
+  expect(response?.payload.error).toBeTruthy();
+  expect(setAgentWorkspaceIdCalls).toEqual([]);
+});
+
+test("agent.workspace.move.request refuses a move into the agent's own workspace", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const setAgentWorkspaceIdCalls: Array<{ agentId: string; workspaceId: string }> = [];
+  const session = createAgentMoveSession({
+    emitted,
+    agentCwd: MEMBER_CWD,
+    setAgentWorkspaceIdCalls,
+  });
+  const registries = createMemberTestRegistries({ withMember: true });
+  addTargetWorkspaceToMemberRegistries(registries, { cwd: MEMBER_CWD });
+  registries.apply(session);
+
+  await session.handleMessage({
+    type: "agent.workspace.move.request",
+    agentId: "agent-1",
+    targetWorkspaceId: "ws-1",
+    requestId: "req-agent-move-self",
+  });
+
+  const response = findByType(emitted, "agent.workspace.move.response");
+  expect(response?.payload).toMatchObject({
+    requestId: "req-agent-move-self",
+    targetWorkspaceId: null,
+    errorCode: "same_workspace",
+  });
+  expect(setAgentWorkspaceIdCalls).toEqual([]);
+});
+
+test("agent.workspace.move.request reports an unknown agent and an unknown workspace", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const setAgentWorkspaceIdCalls: Array<{ agentId: string; workspaceId: string }> = [];
+  const session = createAgentMoveSession({
+    emitted,
+    agentCwd: MEMBER_CWD,
+    setAgentWorkspaceIdCalls,
+  });
+  const registries = createMemberTestRegistries({ withMember: true });
+  addTargetWorkspaceToMemberRegistries(registries, { cwd: MEMBER_CWD });
+  registries.apply(session);
+
+  await session.handleMessage({
+    type: "agent.workspace.move.request",
+    agentId: "agent-missing",
+    targetWorkspaceId: "ws-2",
+    requestId: "req-agent-move-no-agent",
+  });
+  await session.handleMessage({
+    type: "agent.workspace.move.request",
+    agentId: "agent-1",
+    targetWorkspaceId: "ws-missing",
+    requestId: "req-agent-move-no-workspace",
+  });
+
+  const responses = filterByType(emitted, "agent.workspace.move.response");
+  expect(responses[0]?.payload).toMatchObject({
+    requestId: "req-agent-move-no-agent",
+    targetWorkspaceId: null,
+    errorCode: "agent_not_found",
+  });
+  expect(responses[1]?.payload).toMatchObject({
+    requestId: "req-agent-move-no-workspace",
+    targetWorkspaceId: null,
+    errorCode: "workspace_not_found",
+  });
+  expect(setAgentWorkspaceIdCalls).toEqual([]);
+});
+
 test("workspace.member.move.request reports an unknown workspace", async () => {
   const emitted: SessionOutboundMessage[] = [];
   const session = asTestSession(

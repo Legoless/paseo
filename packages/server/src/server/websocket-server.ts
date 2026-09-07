@@ -1695,6 +1695,10 @@ export class VoiceAssistantWebSocketServer {
         workspaceMultiplicity: true,
         // COMPAT(workspaceMultiProject): added in v0.7.0, remove gate after 2027-02-28.
         workspaceMultiProject: true,
+        // COMPAT(workspaceMemberMove): added in v0.7.0, remove gate after 2027-03-01.
+        workspaceMemberMove: true,
+        // COMPAT(agentWorkspaceMove): added in v0.8.0, remove gate after 2028-03-01.
+        agentWorkspaceMove: true,
         // COMPAT(workspaceProjectless): added in v0.8.0, remove gate after 2028-03-01.
         workspaceProjectless: true,
         // COMPAT(projectRemove): added in v0.1.97, drop the gate when floor >= v0.1.97.

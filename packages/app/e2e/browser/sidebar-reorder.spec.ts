@@ -56,6 +56,31 @@ async function quickDragFirstRowAfterSecond(
   await expect.poll(() => rowTestIds(rows)).toEqual([before[1], before[0]]);
 }
 
+/**
+ * Drags one row onto another that lives in a different list. Unlike
+ * {@link quickDragFirstRowAfterSecond} the assertion is the caller's: a cross-list drop is a
+ * daemon round trip, so what proves it landed is the target's rows, not a swap in place.
+ */
+async function dragRowOnto(
+  source: Locator,
+  target: Locator,
+  pressRow: (row: Locator) => Promise<void>,
+) {
+  const sourceBox = await visibleBoundingBox(source);
+  const targetBox = await visibleBoundingBox(target);
+  const page = source.page();
+
+  const from = { x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 };
+  const to = { x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 };
+
+  await page.mouse.move(from.x, from.y);
+  await pressRow(source);
+  // Clear the 6px activation distance before travelling, so the drag is picked up.
+  await page.mouse.move(from.x, from.y + 7);
+  await page.mouse.move(to.x, to.y, { steps: 8 });
+  await page.mouse.up();
+}
+
 test("workspaces and pinned chats reorder with an immediate mouse drag", async ({ page }) => {
   const firstProject = await seedWorkspace({ repoPrefix: "sidebar-reorder-first-" });
   const secondProject = await seedWorkspace({ repoPrefix: "sidebar-reorder-second-" });
@@ -158,5 +183,113 @@ test("project members reorder within one workspace and persist across reload", a
   } finally {
     await firstProject.cleanup();
     await secondProject.cleanup();
+  }
+});
+
+test("a project drags from one workspace to another, taking its agent along", async ({ page }) => {
+  const project = await seedMockAgentWorkspace({
+    repoPrefix: "sidebar-member-move-",
+    title: "Moving agent",
+  });
+
+  try {
+    // A separate repo, so the target workspace does not already hold the dragged project.
+    const target = await seedWorkspace({
+      repoPrefix: "sidebar-member-move-target-",
+      title: "Move target",
+    });
+
+    try {
+      // The source keeps a second project, so moving the first does not leave it projectless —
+      // a projectless workspace files itself under a synthetic project the seed never cleans up.
+      const added = await project.client.addWorkspaceMember(project.workspaceId, {
+        kind: "directory",
+        path: target.repoPath,
+        projectId: target.projectId,
+      });
+      if (!added.workspace) throw new Error(added.error ?? "Failed to add the second member");
+
+      await gotoAppShell(page);
+      const serverId = getServerId();
+      const memberRow = page.getByTestId(
+        `sidebar-member-row-${serverId}:${project.workspaceId}#${project.cwd}`,
+      );
+      const targetWorkspaceRow = page.getByTestId(
+        `sidebar-workspace-row-${serverId}:${target.workspaceId}`,
+      );
+      await expect(memberRow).toBeVisible();
+      await expect(targetWorkspaceRow).toBeVisible();
+
+      // A member row has no trailing scrim, so it presses like the other project rows.
+      await dragRowOnto(memberRow, targetWorkspaceRow, pressProjectRow);
+
+      // The membership — and the agent under it — now hangs off the target workspace.
+      await expect(
+        page.getByTestId(`sidebar-member-row-${serverId}:${target.workspaceId}#${project.cwd}`),
+      ).toBeVisible();
+      await expect(memberRow).toHaveCount(0);
+      await expect(page.getByTestId(`sidebar-agent-row-${project.agentId}`)).toBeVisible();
+    } finally {
+      await target.cleanup();
+    }
+  } finally {
+    await project.cleanup();
+  }
+});
+
+test("an agent drags to the same project in another workspace, and stays put elsewhere", async ({
+  page,
+}) => {
+  const project = await seedMockAgentWorkspace({
+    repoPrefix: "sidebar-agent-move-",
+    title: "Travelling agent",
+  });
+
+  try {
+    // The same directory mounted in a second workspace is the only shape R3 allows.
+    const mirror = await project.client.createWorkspace({
+      source: { kind: "directory", path: project.cwd },
+      title: "Mirror workspace",
+    });
+    if (!mirror.workspace) {
+      throw new Error(mirror.error ?? "Failed to seed the mirror workspace");
+    }
+    const stranger = await seedWorkspace({ repoPrefix: "sidebar-agent-move-stranger-" });
+
+    try {
+      await gotoAppShell(page);
+      const serverId = getServerId();
+      const agentRow = page.getByTestId(`sidebar-agent-row-${project.agentId}`);
+      const mirrorMemberRow = page.getByTestId(
+        `sidebar-member-row-${serverId}:${mirror.workspace.id}#${project.cwd}`,
+      );
+      const strangerMemberRow = page.getByTestId(
+        `sidebar-member-row-${serverId}:${stranger.workspaceId}#${stranger.repoPath}`,
+      );
+      await expect(agentRow).toBeVisible();
+      await expect(mirrorMemberRow).toBeVisible();
+      await expect(strangerMemberRow).toBeVisible();
+
+      // A different project refuses the drop: the agent never leaves its own project.
+      await dragRowOnto(agentRow, strangerMemberRow, pressProjectRow);
+      await expect(
+        page.getByTestId(`sidebar-agent-list-${serverId}:${project.workspaceId}#${project.cwd}`),
+      ).toContainText("Travelling agent");
+
+      // The same project in the other workspace accepts it.
+      await dragRowOnto(agentRow, mirrorMemberRow, pressProjectRow);
+      await expect
+        .poll(() =>
+          page
+            .getByTestId(`sidebar-agent-list-${serverId}:${mirror.workspace!.id}#${project.cwd}`)
+            .getByTestId(`sidebar-agent-row-${project.agentId}`)
+            .count(),
+        )
+        .toBe(1);
+    } finally {
+      await stranger.cleanup();
+    }
+  } finally {
+    await project.cleanup();
   }
 });

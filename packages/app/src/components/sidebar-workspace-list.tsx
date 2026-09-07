@@ -45,11 +45,20 @@ import { useRemoveWorkspaceMember } from "@/workspaces/use-remove-workspace-memb
 import { useMoveMemberMenuPages } from "@/workspaces/move-member-menu-page";
 import { useMoveWorkspaceMember } from "@/workspaces/use-move-workspace-member";
 import { moveWorkspaceMemberErrorMessage } from "@/workspaces/move-workspace-member-message";
+import { useMoveAgentWorkspace } from "@/workspaces/use-move-agent-workspace";
+import { moveAgentWorkspaceErrorMessage } from "@/workspaces/move-agent-workspace-message";
+import { selectHostFeature } from "@/runtime/host-features";
+import { useSessionStore } from "@/stores/session-store";
 import {
   SidebarMemberMoveDndProvider,
   useSidebarMemberMoveDragState,
+  type SidebarAgentMoveInput,
   type SidebarMemberMoveInput,
 } from "@/components/sidebar/member-move-dnd";
+import {
+  sidebarAgentListId,
+  sidebarMemberListId,
+} from "@/components/sidebar/member-move-dnd-model";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { parseHostWorkspaceRouteFromPathname } from "@/utils/host-routes";
 import {
@@ -69,7 +78,11 @@ import { ProjectStatusIndicator } from "@/components/sidebar/project-leading-vis
 import { useToast } from "@/contexts/toast-context";
 import { requestWorkspaceRename } from "@/stores/workspace-rename-intent-store";
 import { toWorktreeArchiveRisk } from "@/git/worktree-archive-warning";
-import { hasVisibleOrderChanged, mergeWithRemainder } from "@/utils/sidebar-reorder";
+import {
+  hasVisibleOrderChanged,
+  memberOrderAfterMove,
+  mergeWithRemainder,
+} from "@/utils/sidebar-reorder";
 import { SidebarStatusWorkspaceList } from "@/components/sidebar/sidebar-status-list";
 import type { SidebarWorkspaceGroup } from "@/components/sidebar/sidebar-labels";
 import {
@@ -961,6 +974,7 @@ function hasUncategorizedRows(section: SidebarWorkspaceSection): boolean {
  */
 function SidebarAgentItemList({
   orderKey,
+  bucketCwd,
   newAgents,
   agents,
   diffStat,
@@ -970,6 +984,12 @@ function SidebarAgentItemList({
   onWorkspacePress,
 }: {
   orderKey: string;
+  /**
+   * The bucket's project directory, empty for the uncategorized bucket. It is what makes an
+   * agent's drop target addressable: the same project in another workspace is the same
+   * directory under a different workspace key.
+   */
+  bucketCwd: string;
   newAgents: readonly SidebarWorkspaceNewAgentRow[] | undefined;
   agents: readonly SidebarWorkspaceAgentRow[];
   diffStat: { additions: number; deletions: number } | null;
@@ -982,6 +1002,7 @@ function SidebarAgentItemList({
     (state) => state.agentOrderByMember[orderKey] ?? EMPTY_ORDER,
   );
   const setAgentOrder = useSidebarOrderStore((state) => state.setAgentOrder);
+  const workspaceKey = `${serverId}:${workspaceId}`;
   const agentItems = useMemo(() => {
     const items: SidebarMemberAgentItem[] = [
       ...(newAgents ?? []).map((newAgent) => ({ kind: "new" as const, newAgent })),
@@ -991,9 +1012,27 @@ function SidebarAgentItemList({
   }, [agents, newAgents, storedAgentOrder]);
   const handleAgentDragEnd = useCallback(
     (items: SidebarMemberAgentItem[]) => {
-      setAgentOrder(orderKey, items.map(memberAgentKey));
+      // Merge rather than overwrite: an archived agent is absent from the rows but still
+      // owns a slot, and a reorder of its visible siblings must not forget it.
+      const reorderedVisibleKeys = items.map(memberAgentKey);
+      const currentOrder = useSidebarOrderStore.getState().getAgentOrder(orderKey);
+      if (!hasVisibleOrderChanged({ currentOrder, reorderedVisibleKeys })) {
+        return;
+      }
+      setAgentOrder(orderKey, mergeWithRemainder({ currentOrder, reorderedVisibleKeys }));
     },
     [orderKey, setAgentOrder],
+  );
+  const getAgentDragData = useCallback(
+    (item: SidebarMemberAgentItem) => ({
+      kind: "agent",
+      workspaceKey,
+      memberKey: orderKey,
+      cwd: bucketCwd,
+      agentId: item.kind === "agent" ? item.agent.agentId : null,
+      label: item.kind === "agent" ? item.agent.title : "",
+    }),
+    [bucketCwd, orderKey, workspaceKey],
   );
   const renderAgent = useCallback(
     ({
@@ -1044,6 +1083,9 @@ function SidebarAgentItemList({
       scrollEnabled={false}
       useDragHandle
       nestable={platformIsNative}
+      externalDndContext
+      externalListId={sidebarAgentListId(orderKey)}
+      getItemData={getAgentDragData}
     />
   );
 }
@@ -1072,6 +1114,7 @@ function WorkspaceUncategorizedBlock({
       </View>
       <SidebarAgentItemList
         orderKey={uncategorized.memberKey}
+        bucketCwd=""
         newAgents={uncategorized.newAgents}
         agents={uncategorized.agents}
         diffStat={null}
@@ -1141,8 +1184,11 @@ function WorkspaceMemberBlock({
     onWorkspacePress?.();
     navigateToWorkspace({ serverId, workspaceId });
   }, [onWorkspacePress, serverId, workspaceId]);
+  // An agent dragged out of this project's copy in another workspace lands here, so the whole
+  // bucket — header and agents — is what lights up, not the header row alone.
+  const isAgentMoveTarget = useSidebarMemberMoveDragState().overMemberKey === member.memberKey;
   return (
-    <>
+    <View style={isAgentMoveTarget ? styles.memberBlockDropTarget : undefined}>
       <WorkspaceMemberRow
         member={member}
         serverId={serverId}
@@ -1158,6 +1204,7 @@ function WorkspaceMemberBlock({
       />
       <SidebarAgentItemList
         orderKey={member.memberKey}
+        bucketCwd={member.workspaceDirectory}
         newAgents={member.newAgents}
         agents={member.agents}
         diffStat={member.diffStat}
@@ -1166,7 +1213,7 @@ function WorkspaceMemberBlock({
         workspaceId={workspaceId}
         onWorkspacePress={onWorkspacePress}
       />
-    </>
+    </View>
   );
 }
 
@@ -1238,7 +1285,17 @@ function WorkspaceSectionBlock({
   );
   const handleMemberDragEnd = useCallback(
     (members: SidebarWorkspaceMemberRow[]) => {
-      setMemberOrder(placement.workspaceKey, members.map(memberKey));
+      // Merge rather than overwrite, so a project the project filter currently hides keeps
+      // the slot it had instead of being dropped from the remembered order.
+      const reorderedVisibleKeys = members.map(memberKey);
+      const currentOrder = useSidebarOrderStore.getState().getMemberOrder(placement.workspaceKey);
+      if (!hasVisibleOrderChanged({ currentOrder, reorderedVisibleKeys })) {
+        return;
+      }
+      setMemberOrder(
+        placement.workspaceKey,
+        mergeWithRemainder({ currentOrder, reorderedVisibleKeys }),
+      );
     },
     [placement.workspaceKey, setMemberOrder],
   );
@@ -1254,10 +1311,16 @@ function WorkspaceSectionBlock({
     [placement.workspaceKey],
   );
   const memberMoveDragState = useSidebarMemberMoveDragState();
+  // A workspace that already holds the dragged project is not a target: the daemon refuses
+  // the duplicate, so highlighting it would promise a drop that can only fail.
+  const alreadyHoldsDraggedProject =
+    memberMoveDragState.activeCwd !== null &&
+    orderedMembers.some((member) => member.workspaceDirectory === memberMoveDragState.activeCwd);
   const isMemberMoveTarget =
     memberMoveDragState.activeKind === "member" &&
     memberMoveDragState.overWorkspaceKey === placement.workspaceKey &&
-    memberMoveDragState.activeWorkspaceKey !== placement.workspaceKey;
+    memberMoveDragState.activeWorkspaceKey !== placement.workspaceKey &&
+    !alreadyHoldsDraggedProject;
   const renderMember = useCallback(
     ({
       item,
@@ -1332,7 +1395,7 @@ function WorkspaceSectionBlock({
             useDragHandle
             nestable={platformIsNative}
             externalDndContext
-            externalListId={`members:${placement.workspaceKey}`}
+            externalListId={sidebarMemberListId(placement.workspaceKey)}
             getItemData={getMemberDragData}
           />
         </>
@@ -1715,7 +1778,7 @@ function WorkspaceSectionList({
     [topLevelWorkspaces],
   );
   const handleMoveMember = useCallback(
-    (input: SidebarMemberMoveInput) => {
+    async (input: SidebarMemberMoveInput) => {
       const source = placementByWorkspaceKey.get(input.sourceWorkspaceKey);
       const target = placementByWorkspaceKey.get(input.targetWorkspaceKey);
       if (!source || !target) {
@@ -1723,18 +1786,33 @@ function WorkspaceSectionList({
       }
       const targetTitle =
         workspaceEntriesByKey.get(target.workspaceKey)?.title?.trim() || target.name;
-      if (source.serverId !== target.serverId) {
+      const refuse = (errorCode: string) => {
         toast.error(
           moveWorkspaceMemberErrorMessage({
-            errorCode: "cross_host",
+            errorCode,
             error: null,
             projectName: input.projectName,
             targetTitle,
           }),
         );
+      };
+      if (source.serverId !== target.serverId) {
+        refuse("cross_host");
         return;
       }
-      void moveWorkspaceMember({
+      // COMPAT(workspaceMemberMove): added in v0.7.0, remove gate after 2027-03-01.
+      if (!selectHostFeature(useSessionStore.getState(), source.serverId, "workspaceMemberMove")) {
+        refuse("unsupported_host");
+        return;
+      }
+      // The daemon refuses a duplicate too, but it would arrive as an error toast after a
+      // round trip for a drop the sidebar could have declined outright.
+      const targetSection = sectionsByWorkspaceKey.get(target.workspaceKey);
+      if (targetSection?.members.some((member) => member.workspaceDirectory === input.cwd)) {
+        refuse("duplicate_member");
+        return;
+      }
+      const moved = await moveWorkspaceMember({
         client: getHostRuntimeStore().getClient(source.serverId),
         sourceWorkspaceId: source.workspaceId,
         targetWorkspaceId: target.workspaceId,
@@ -1742,8 +1820,72 @@ function WorkspaceSectionList({
         projectName: input.projectName,
         targetTitle,
       });
+      if (!moved) {
+        return;
+      }
+      const movedMemberKey = `${input.targetWorkspaceKey}#${input.cwd}`;
+      const orderStore = useSidebarOrderStore.getState();
+      // A member key embeds its workspace, so the bucket is renamed by the move. Carry the
+      // remembered agent order over rather than leaving the old entry to leak.
+      orderStore.rekeyAgentOrder(`${input.sourceWorkspaceKey}#${input.cwd}`, movedMemberKey);
+      orderStore.setMemberOrder(
+        input.targetWorkspaceKey,
+        memberOrderAfterMove({
+          storedOrder: orderStore.getMemberOrder(input.targetWorkspaceKey),
+          baselineMemberKeys: targetSection?.members.map((member) => member.memberKey) ?? [],
+          movedMemberKey,
+          dropOnMemberKey: input.targetMemberKey,
+        }),
+      );
     },
-    [moveWorkspaceMember, placementByWorkspaceKey, toast, workspaceEntriesByKey],
+    [
+      moveWorkspaceMember,
+      placementByWorkspaceKey,
+      sectionsByWorkspaceKey,
+      toast,
+      workspaceEntriesByKey,
+    ],
+  );
+  const moveAgentWorkspace = useMoveAgentWorkspace();
+  const handleMoveAgent = useCallback(
+    (input: SidebarAgentMoveInput) => {
+      const source = placementByWorkspaceKey.get(input.sourceWorkspaceKey);
+      const target = placementByWorkspaceKey.get(input.targetWorkspaceKey);
+      if (!source || !target) {
+        return;
+      }
+      const targetTitle =
+        workspaceEntriesByKey.get(target.workspaceKey)?.title?.trim() || target.name;
+      const refuse = (errorCode: string) => {
+        toast.error(
+          moveAgentWorkspaceErrorMessage({
+            errorCode,
+            error: null,
+            agentTitle: input.label,
+            targetTitle,
+          }),
+        );
+      };
+      if (source.serverId !== target.serverId) {
+        refuse("cross_host");
+        return;
+      }
+      // COMPAT(agentWorkspaceMove): added in v0.8.0, remove gate after 2028-03-01.
+      if (!selectHostFeature(useSessionStore.getState(), source.serverId, "agentWorkspaceMove")) {
+        refuse("unsupported_host");
+        return;
+      }
+      void moveAgentWorkspace({
+        client: getHostRuntimeStore().getClient(source.serverId),
+        agentId: input.agentId,
+        targetWorkspaceId: target.workspaceId,
+        agentTitle: input.label,
+        targetTitle,
+        sourceMemberKey: input.sourceMemberKey,
+        targetMemberKey: input.targetMemberKey,
+      });
+    },
+    [moveAgentWorkspace, placementByWorkspaceKey, toast, workspaceEntriesByKey],
   );
   const getWorkspaceDragData = useCallback(
     (workspace: SidebarWorkspacePlacement) => ({
@@ -1857,7 +1999,7 @@ function WorkspaceSectionList({
     workspaceBody = (
       // One shared context owns workspace reorder, member reorder, and the
       // member-to-workspace move — per-list contexts could never see each other.
-      <SidebarMemberMoveDndProvider onMoveMember={handleMoveMember}>
+      <SidebarMemberMoveDndProvider onMoveMember={handleMoveMember} onMoveAgent={handleMoveAgent}>
         <DraggableList
           testID="sidebar-project-list"
           data={topLevelWorkspaces}
@@ -1977,6 +2119,11 @@ const styles = StyleSheet.create((theme) => ({
   // The section a dragged member is hovering: a ring on the whole block says the
   // drop lands in this workspace, and the border's own box keeps the rows still.
   workspaceSectionDropTarget: {
+    borderWidth: 1,
+    borderColor: theme.colors.borderAccent,
+    borderRadius: theme.borderRadius.lg,
+  },
+  memberBlockDropTarget: {
     borderWidth: 1,
     borderColor: theme.colors.borderAccent,
     borderRadius: theme.borderRadius.lg,
