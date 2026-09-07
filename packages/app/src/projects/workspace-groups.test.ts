@@ -127,6 +127,27 @@ function project(input: {
   };
 }
 
+const SYNTHETIC_ORPHAN_PROJECT_IDS = new Set(["ws-orphan"]);
+
+function projectRegistryFor(
+  workspaces: WorkspaceDescriptor[],
+  explicit: ProjectDescriptor[] = [],
+): Map<string, ProjectDescriptor> {
+  const derived = new Map<string, ProjectDescriptor>();
+  for (const descriptor of workspaces) {
+    for (const placement of descriptor.members) {
+      if (SYNTHETIC_ORPHAN_PROJECT_IDS.has(placement.projectId)) continue;
+      if (!derived.has(placement.projectId)) {
+        derived.set(placement.projectId, project({ projectId: placement.projectId }));
+      }
+    }
+  }
+  for (const entry of explicit) {
+    derived.set(entry.projectId, entry);
+  }
+  return derived;
+}
+
 function session(input: {
   serverId?: string;
   workspaces: WorkspaceDescriptor[];
@@ -137,7 +158,7 @@ function session(input: {
     serverId: input.serverId ?? "srv",
     workspaces: new Map(input.workspaces.map((entry) => [entry.id, entry])),
     agents: new Map((input.agents ?? []).map((entry) => [entry.id, entry])),
-    projects: new Map((input.projects ?? []).map((entry) => [entry.projectId, entry])),
+    projects: projectRegistryFor(input.workspaces, input.projects),
   };
 }
 
@@ -550,6 +571,66 @@ describe("buildSidebarWorkspaceGroupModel", () => {
     });
 
     expect([...model.sectionsByWorkspaceKey.keys()].sort()).toEqual(["host-a:ws-1", "host-b:ws-9"]);
+  });
+
+  it("drops members whose project has no registry record, keeping the section", () => {
+    const model = buildSidebarWorkspaceGroupModel({
+      sessions: [
+        session({
+          workspaces: [
+            workspace({
+              id: "ws-orphan",
+              members: [
+                member({
+                  projectId: "ws-orphan",
+                  projectDisplayName: "ws-orphan",
+                  workspaceDirectory: "/home/user",
+                }),
+                member({
+                  projectId: "project-a",
+                  projectDisplayName: "Project A",
+                  workspaceDirectory: "/repo/project-a/ws-orphan",
+                }),
+              ],
+            }),
+          ],
+          projects: [project({ projectId: "project-a" })],
+        }),
+      ],
+    });
+
+    const section = model.sectionsByWorkspaceKey.get("srv:ws-orphan");
+    expect(section?.members.map((entry) => entry.projectId)).toEqual(["project-a"]);
+    expect(model.memberIconTargets.map((entry) => entry.projectId)).toEqual(["project-a"]);
+  });
+
+  it("sends agents of a fully orphaned workspace to the uncategorized bucket", () => {
+    const model = buildSidebarWorkspaceGroupModel({
+      sessions: [
+        session({
+          workspaces: [
+            workspace({
+              id: "ws-orphan",
+              members: [
+                member({
+                  projectId: "ws-orphan",
+                  projectDisplayName: "ws-orphan",
+                  workspaceDirectory: "/home/user",
+                }),
+              ],
+            }),
+          ],
+          agents: [
+            agent({ id: "agent-a", workspaceId: "ws-orphan", cwd: "/home/user", title: "In Ws" }),
+          ],
+        }),
+      ],
+    });
+
+    const section = model.sectionsByWorkspaceKey.get("srv:ws-orphan");
+    expect(section?.members).toEqual([]);
+    expect(section?.uncategorized.agents.map((entry) => entry.agentId)).toEqual(["agent-a"]);
+    expect(section?.uncategorized.agents[0]?.matchesMemberDirectory).toBe(false);
   });
 });
 

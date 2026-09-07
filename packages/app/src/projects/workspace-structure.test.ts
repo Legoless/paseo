@@ -185,4 +185,92 @@ describe("buildWorkspaceStructureProjects", () => {
       placementShapedKey,
     );
   });
+
+  test("creates a synthetic project group for an orphan workspace whose projectId matches no project", () => {
+    const orphanWs = workspace("ws-orphan", "wks_orphan", "/Users/legoless");
+    orphanWs.projectDisplayName = "Web";
+    const result = buildWorkspaceStructureProjects({
+      sessions: [
+        {
+          serverId: "host-a",
+          projects: [project({ id: "prj_a", key: null, root: "/repos/a" })],
+          workspaces: [workspace("ws-a", "prj_a", "/repos/a"), orphanWs],
+        },
+      ],
+    });
+
+    expect(result).toHaveLength(2);
+    const orphan = result.find((item) => item.projectName === "Web");
+    expect(orphan).toBeDefined();
+    expect(orphan!.workspaceKeys).toEqual(["host-a:ws-orphan"]);
+    expect(orphan!.hosts).toEqual([
+      expect.objectContaining({
+        serverId: "host-a",
+        projectId: "wks_orphan",
+        iconWorkingDir: "/Users/legoless",
+      }),
+    ]);
+    // Normal workspace is untouched.
+    const normal = result.find((item) => item.workspaceKeys.includes("host-a:ws-a"));
+    expect(normal).toBeDefined();
+    expect(normal!.workspaceKeys).toEqual(["host-a:ws-a"]);
+  });
+
+  test("groups two orphan workspaces with the same projectId on the same server", () => {
+    const result = buildWorkspaceStructureProjects({
+      sessions: [
+        {
+          serverId: "host-a",
+          projects: [],
+          workspaces: [
+            workspace("ws-1", "wks_shared", "/repos/one"),
+            workspace("ws-2", "wks_shared", "/repos/two"),
+          ],
+        },
+      ],
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]!.workspaceKeys.sort()).toEqual(["host-a:ws-1", "host-a:ws-2"]);
+    expect(result[0]!.hosts).toHaveLength(1);
+  });
+
+  test("keeps orphan workspaces on different servers in separate groups", () => {
+    const result = buildWorkspaceStructureProjects({
+      sessions: [
+        {
+          serverId: "host-a",
+          projects: [],
+          workspaces: [workspace("ws-a", "wks_orphan", "/repos/a")],
+        },
+        {
+          serverId: "host-b",
+          projects: [],
+          workspaces: [workspace("ws-b", "wks_orphan", "/repos/b")],
+        },
+      ],
+    });
+
+    expect(result).toHaveLength(2);
+    expect(result.flatMap((item) => item.workspaceKeys).sort()).toEqual([
+      "host-a:ws-a",
+      "host-b:ws-b",
+    ]);
+  });
+
+  test("does not create a synthetic group for a workspace whose projectId matches a real project", () => {
+    const result = buildWorkspaceStructureProjects({
+      sessions: [
+        {
+          serverId: "host-a",
+          projects: [project({ id: "prj_a", key: null, root: "/repos/a" })],
+          workspaces: [workspace("ws-a", "prj_a", "/repos/a")],
+        },
+      ],
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]!.projectKey).toBeNull();
+    expect(result[0]!.workspaceKeys).toEqual(["host-a:ws-a"]);
+  });
 });
