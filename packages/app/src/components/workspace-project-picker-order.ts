@@ -9,10 +9,14 @@ export interface WorkspaceProjectPickerOption {
   path: string;
 }
 
+export function hasWorkspaceProjectRecord(member: WorkspaceMemberDescriptor): boolean {
+  return member.projectDisplayName !== member.projectId;
+}
+
 export function buildWorkspaceProjectPickerOptions(
   members: WorkspaceMemberDescriptor[],
 ): WorkspaceProjectPickerOption[] {
-  return members.map((member) => ({
+  return members.filter(hasWorkspaceProjectRecord).map((member) => ({
     cwd: member.workspaceDirectory,
     label: member.projectCustomName ?? member.projectDisplayName,
     path: shortenPath(member.workspaceDirectory),
