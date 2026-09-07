@@ -2,7 +2,9 @@ import { View, Text, ScrollView, type GestureResponderEvent } from "react-native
 import {
   memo,
   useCallback,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactElement,
   type MutableRefObject,
@@ -107,6 +109,10 @@ import {
   type SidebarWorkspaceCollapseAccessory,
 } from "@/components/sidebar/sidebar-workspace-row-content";
 import { useOpenKebabMenuVisibility } from "@/components/sidebar/use-open-kebab-menu-visibility";
+import {
+  resolveWorkspaceRowPressAction,
+  WORKSPACE_ROW_DOUBLE_PRESS_WINDOW_MS,
+} from "@/components/sidebar/workspace-row-press";
 import {
   SidebarFilterEmptyState,
   SidebarProjectEmptyState,
@@ -681,13 +687,65 @@ function WorkspaceRowItem({
   dragHandleProps,
   collapseAccessory,
 }: WorkspaceRowItemProps) {
+  const pendingToggleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectedRef = useRef(false);
+  selectedRef.current = isWorkspaceSelected({
+    selection: activeWorkspaceSelection,
+    serverId: workspace.serverId,
+    workspaceId: workspace.workspaceId,
+    enabled: selectionEnabled,
+  });
+  useEffect(() => {
+    return () => {
+      if (pendingToggleTimeoutRef.current !== null) {
+        clearTimeout(pendingToggleTimeoutRef.current);
+      }
+    };
+  }, []);
   const handlePress = useCallback(() => {
     if (!workspace.serverId) {
       return;
     }
+    const selected = isWorkspaceSelected({
+      selection: activeWorkspaceSelection,
+      serverId: workspace.serverId,
+      workspaceId: workspace.workspaceId,
+      enabled: selectionEnabled,
+    });
+    if (
+      resolveWorkspaceRowPressAction({
+        selected,
+        hasCollapseToggle: Boolean(collapseAccessory),
+      }) === "toggle"
+    ) {
+      if (platformIsNative) {
+        collapseAccessory?.onToggle();
+        return;
+      }
+      if (pendingToggleTimeoutRef.current !== null) {
+        clearTimeout(pendingToggleTimeoutRef.current);
+        pendingToggleTimeoutRef.current = null;
+        return;
+      }
+      const onToggle = collapseAccessory?.onToggle;
+      pendingToggleTimeoutRef.current = setTimeout(() => {
+        pendingToggleTimeoutRef.current = null;
+        if (selectedRef.current) {
+          onToggle?.();
+        }
+      }, WORKSPACE_ROW_DOUBLE_PRESS_WINDOW_MS);
+      return;
+    }
     onWorkspacePress?.();
     navigateToWorkspace({ serverId: workspace.serverId, workspaceId: workspace.workspaceId });
-  }, [onWorkspacePress, workspace.serverId, workspace.workspaceId]);
+  }, [
+    activeWorkspaceSelection,
+    collapseAccessory,
+    onWorkspacePress,
+    selectionEnabled,
+    workspace.serverId,
+    workspace.workspaceId,
+  ]);
 
   return (
     <WorkspaceRow
