@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
-import { ClaudeAgentClient } from "./agent.js";
+import { TestClaudeAgentClient as ClaudeAgentClient } from "./test-utils/catalog.js";
 import { streamSession } from "../test-utils/session-stream-adapter.js";
 import type { AgentSession, AgentStreamEvent } from "../../agent-sdk-types.js";
 

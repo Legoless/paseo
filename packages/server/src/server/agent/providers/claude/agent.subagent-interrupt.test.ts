@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
 import type { ProviderSubagentInputEvent } from "../../provider-subagents/store.js";
-import { ClaudeAgentClient } from "./agent.js";
+import { TestClaudeAgentClient as ClaudeAgentClient } from "./test-utils/catalog.js";
 
 /**
  * A subagent's lifecycle when its turn is interrupted.

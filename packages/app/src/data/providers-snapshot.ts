@@ -11,6 +11,10 @@ export function providersSnapshotQueryRoot(serverId: string | null) {
   return [PROVIDERS_SNAPSHOT_QUERY_ROOT, serverId] as const;
 }
 
+export function providerFeaturesQueryRoot(serverId: string | null) {
+  return ["providerFeatures", serverId] as const;
+}
+
 export function providersSnapshotQueryKey(serverId: string | null, cwd?: string | null) {
   const normalizedCwd = normalizeProvidersSnapshotCwd(cwd);
   return normalizedCwd

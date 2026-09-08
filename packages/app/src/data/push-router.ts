@@ -11,6 +11,7 @@ import { daemonPairingOfferQueryKey } from "@/data/daemon-pairing";
 import { providerSnapshotCache, type ProviderSnapshotCache } from "@/data/provider-snapshot-cache";
 import {
   normalizeProvidersSnapshotCwd,
+  providerFeaturesQueryRoot,
   providersSnapshotQueryKey,
   providersSnapshotQueryRoot,
 } from "@/data/providers-snapshot";
@@ -103,6 +104,7 @@ const RECONNECT_REPAIR_POLICIES: ReconnectRepairPolicy[] = [
     domain: "providersSnapshot",
     invalidate: ({ queryClient, serverId }) => {
       void queryClient.invalidateQueries({ queryKey: providersSnapshotQueryRoot(serverId) });
+      void queryClient.invalidateQueries({ queryKey: providerFeaturesQueryRoot(serverId) });
     },
   },
   {
@@ -195,6 +197,7 @@ export function applyProvidersSnapshotUpdate(input: {
     return;
   }
   const queryKey = providersSnapshotQueryKey(input.serverId, input.message.payload.cwd);
+  void input.queryClient.invalidateQueries({ queryKey: providerFeaturesQueryRoot(input.serverId) });
   input.queryClient.setQueryData(queryKey, {
     entries: input.message.payload.entries,
     generatedAt: input.message.payload.generatedAt,

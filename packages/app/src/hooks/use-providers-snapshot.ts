@@ -16,6 +16,7 @@ import {
 import { agentCommandsQueryRoot } from "@/hooks/agent-commands-query";
 import {
   isProvidersSnapshotHomeScope,
+  providerFeaturesQueryRoot,
   normalizeProvidersSnapshotCwd,
   providersSnapshotQueryKey,
   providersSnapshotQueryRoot,
@@ -79,6 +80,7 @@ export async function refreshAndApplyProvidersSnapshot(input: {
     cache: input.cache,
   });
   input.queryClient.setQueryData(providersSnapshotQueryKey(input.serverId, input.cwd), snapshot);
+  void input.queryClient.invalidateQueries({ queryKey: providerFeaturesQueryRoot(input.serverId) });
   void input.queryClient.invalidateQueries({
     queryKey: agentCommandsQueryRoot(input.serverId),
     exact: false,
@@ -90,22 +92,6 @@ export async function refreshAndApplyProvidersSnapshot(input: {
     });
   }
   return refreshResult;
-}
-
-export type SelectorOpenRefetchDecision = "refetch-stale" | "refetch-always";
-
-export function selectorOpenRefetchDecision(input: {
-  entries: ProviderSnapshotEntry[] | undefined;
-  selectedProvider: AgentProvider | null | undefined;
-}): SelectorOpenRefetchDecision {
-  if (!input.selectedProvider) {
-    return "refetch-stale";
-  }
-  const selectedEntry = input.entries?.find((entry) => entry.provider === input.selectedProvider);
-  if (!selectedEntry || selectedEntry.status === "loading") {
-    return "refetch-always";
-  }
-  return "refetch-stale";
 }
 
 interface UseProvidersSnapshotResult {
@@ -176,20 +162,10 @@ export function useProvidersSnapshot(
     [refreshSnapshot],
   );
 
-  const refetchIfStale = useCallback(
-    (selectedProvider?: AgentProvider | null) => {
-      const decision = selectorOpenRefetchDecision({
-        entries: snapshotQuery.data?.entries,
-        selectedProvider,
-      });
-      if (decision === "refetch-always") {
-        void queryClient.refetchQueries({ queryKey, type: "active" });
-        return;
-      }
-      void queryClient.refetchQueries({ queryKey, type: "active", stale: true });
-    },
-    [queryClient, queryKey, snapshotQuery.data?.entries],
-  );
+  // Replica queries stay fresh indefinitely; the daemon owns native catalog staleness.
+  const refetchIfStale = useCallback(() => {
+    void queryClient.refetchQueries({ queryKey, type: "active" });
+  }, [queryClient, queryKey]);
 
   return {
     entries: snapshotQuery.data?.entries ?? undefined,

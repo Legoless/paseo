@@ -109,7 +109,7 @@ interface CodexSessionTestAccess {
   handleNotification(method: string, params: unknown): void;
   loadPersistedHistory(): Promise<void>;
   refreshResolvedCollaborationMode(): void;
-  serviceTier: "fast" | null;
+  serviceTier: string | null;
   planModeEnabled: boolean;
   collaborationModes: CollaborationModeRecord[];
   config: AgentSessionConfig;
@@ -156,7 +156,16 @@ function createSession(
     () => {
       throw new Error("Test session cannot spawn Codex app-server");
     },
-    {},
+    {
+      readModelCatalog: () => [
+        {
+          provider: "codex",
+          id: "gpt-5.4",
+          label: "GPT 5.4",
+          metadata: { serviceTiers: [{ id: "priority", name: "Fast" }] },
+        },
+      ],
+    },
     false,
     options.goalsEnabled === true,
     options.autoReviewEnabled === true,
@@ -633,6 +642,8 @@ let buffer = "";
 
 function resultFor(method, params) {
   if (method === "initialize") return {};
+  if (method === "model/list") return { data: [{ id: "gpt-5.4", isDefault: true, defaultReasoningEffort: "medium" }] };
+  if (method === "config/read" || method === "getUserSavedConfig") return { config: {} };
   if (method === "collaborationMode/list") return { data: [] };
   if (method === "skills/list") {
     const cwds = params && params.cwds;
@@ -1646,7 +1657,7 @@ describe("Codex app-server provider", () => {
   test("rewinds the conversation to a freshly emitted Codex user message id", async () => {
     const appServer = createFakeCodexAppServer();
     const session = new CodexAppServerAgentSession(
-      createConfig({ cwd: "/workspace/project" }),
+      createConfig({ cwd: "/workspace/project", featureValues: { service_tier: "priority" } }),
       null,
       createTestLogger(),
       async () => appServer.child,
@@ -1661,6 +1672,9 @@ describe("Codex app-server provider", () => {
 
     await session.revertConversation({ messageId: "codex-first" });
 
+    expect(appServer.requests().find((request) => request.method === "thread/fork")).toMatchObject({
+      params: { serviceTier: "priority" },
+    });
     expect(appServer.recordedRollbacks).toEqual([{ threadId: "forked-thread", numTurns: 2 }]);
     await expect(session.getRuntimeInfo()).resolves.toMatchObject({
       sessionId: "forked-thread",
@@ -1805,7 +1819,14 @@ describe("Codex app-server provider", () => {
       throw new Error(`resumeSession timed out; thread requests: ${threadRequests.join(", ")}`);
     }
 
-    expect(threadRequests).toEqual(["config/read", "thread/loaded/list", "thread/resume"]);
+    expect(threadRequests).toEqual([
+      "model/list",
+      "getUserSavedConfig",
+      "config/read",
+      "config/read",
+      "thread/loaded/list",
+      "thread/resume",
+    ]);
     expect(outcome).toBe("rejected");
     appServer.assertNoErrors();
   });
@@ -4766,7 +4787,7 @@ describe("Codex app-server provider", () => {
 
   test("emits a synthetic plan approval permission after a successful Codex plan turn", () => {
     const session = createSession({
-      featureValues: { plan_mode: true, fast_mode: true },
+      featureValues: { plan_mode: true, service_tier: "priority" },
     });
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
@@ -4828,7 +4849,7 @@ describe("Codex app-server provider", () => {
 
   test("does not emit Codex plan thread items as timeline cards while plan approval is pending", () => {
     const session = createSession({
-      featureValues: { plan_mode: true, fast_mode: true },
+      featureValues: { plan_mode: true, service_tier: "priority" },
     });
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
@@ -5576,7 +5597,7 @@ describe("Codex app-server provider", () => {
 
   test("approving a synthetic Codex plan permission disables plan mode, preserves fast mode, and returns follow-up prompt", async () => {
     const session = createSession({
-      featureValues: { plan_mode: true, fast_mode: true },
+      featureValues: { plan_mode: true, service_tier: "priority" },
     });
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
@@ -5605,11 +5626,11 @@ describe("Codex app-server provider", () => {
       selectedActionId: "implement",
     });
 
-    expect(asInternals(session).serviceTier).toBe("fast");
+    expect(asInternals(session).serviceTier).toBe("priority");
     expect(asInternals(session).planModeEnabled).toBe(false);
     expect(asInternals(session).config.featureValues).toEqual({
       plan_mode: false,
-      fast_mode: true,
+      service_tier: "priority",
     });
     // The session returns the follow-up prompt instead of calling startTurn directly.
     // The caller (session/agent-manager) is responsible for sending it through streamAgent.
@@ -5630,7 +5651,7 @@ describe("Codex app-server provider", () => {
 
   test("approving a synthetic Codex plan permission keeps fast mode disabled when it started disabled", async () => {
     const session = createSession({
-      featureValues: { plan_mode: true, fast_mode: false },
+      featureValues: { plan_mode: true, service_tier: "" },
     });
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
@@ -5663,7 +5684,7 @@ describe("Codex app-server provider", () => {
     expect(asInternals(session).planModeEnabled).toBe(false);
     expect(asInternals(session).config.featureValues).toEqual({
       plan_mode: false,
-      fast_mode: false,
+      service_tier: "",
     });
     expect(result?.followUpPrompt).toEqual(
       expect.stringContaining("The user approved the plan. Implement it now."),
@@ -5672,7 +5693,7 @@ describe("Codex app-server provider", () => {
 
   test("follow-up implementation turn keeps fast service tier and switches back to code collaboration mode", async () => {
     const session = createSession({
-      featureValues: { plan_mode: true, fast_mode: true },
+      featureValues: { plan_mode: true, service_tier: "priority" },
     });
     asInternals(session).collaborationModes = [
       {
@@ -5733,7 +5754,7 @@ describe("Codex app-server provider", () => {
     const turnStartCall = request.mock.calls.find(([method]) => method === "turn/start");
     expect(turnStartCall?.[1]).toEqual(
       expect.objectContaining({
-        serviceTier: "fast",
+        serviceTier: "priority",
         collaborationMode: expect.objectContaining({
           mode: "code",
         }),

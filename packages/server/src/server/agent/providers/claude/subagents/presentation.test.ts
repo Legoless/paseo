@@ -11,11 +11,13 @@ describe("buildClaudeSubagentSubtitle", () => {
         effort: "high",
         usage: { totalTokens: 16_484 },
       }),
-    ).toBe("general-purpose · Opus 5 · High · 16.5k tokens");
+    ).toBe("general-purpose · claude-opus-5 · High · 16.5k tokens");
   });
 
   it("uses the manifest label for dated and context-window model variants", () => {
-    expect(buildClaudeSubagentSubtitle({ model: "claude-opus-4-8[1m]" })).toBe("Opus 4.8 1M");
+    expect(buildClaudeSubagentSubtitle({ model: "claude-opus-4-8[1m]" })).toBe(
+      "claude-opus-4-8[1m]",
+    );
   });
 
   it("keeps unknown compatible-provider model names visible", () => {

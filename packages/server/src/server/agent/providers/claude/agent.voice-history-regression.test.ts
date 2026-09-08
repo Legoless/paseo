@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
-import { ClaudeAgentClient } from "./agent.js";
+import { TestClaudeAgentClient as ClaudeAgentClient } from "./test-utils/catalog.js";
 import { claudeProjectDirSync } from "./project-dir.js";
 import { streamSession } from "../test-utils/session-stream-adapter.js";
 import type { AgentPersistenceHandle, AgentStreamEvent } from "../../agent-sdk-types.js";

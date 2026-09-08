@@ -1,4 +1,10 @@
 import { describe, expect, it } from "vitest";
+import type { AgentModelDefinition } from "@getpaseo/protocol/agent-types";
+import { resolveThinkingOptionId } from "@/provider-selection/resolve-agent-form";
+import {
+  buildDraftCommandConfig,
+  resolveEffectiveComposerThinkingOptionId,
+} from "@/provider-selection/provider-selection";
 import {
   getFeatureHighlightColor,
   getFeatureTooltip,
@@ -53,7 +59,93 @@ describe("normalizeModelId", () => {
 });
 
 describe("resolveAgentModelSelection", () => {
-  it("resolves a configured model alias to its canonical catalog model", () => {
+  it("inherits an unknown native effort default instead of selecting the first advertised level", () => {
+    const model: AgentModelDefinition = {
+      provider: "codex",
+      id: "native-reasoning-vNext",
+      label: "Future Model",
+      thinkingOptions: [
+        { id: "low", label: "Low" },
+        { id: "high", label: "High" },
+      ],
+    };
+    const thinkingOptionId = resolveThinkingOptionId({
+      availableModels: [model],
+      modelId: model.id,
+      requestedThinkingOptionId: "",
+    });
+    expect(thinkingOptionId).toBe("");
+    const display = resolveAgentModelSelection({
+      models: [model],
+      runtimeModelId: null,
+      configuredModelId: model.id,
+      explicitThinkingOptionId: null,
+    });
+    expect(display.selectedThinkingId).toBeNull();
+    expect(display.displayThinking).toBe("Default");
+    const selection = {
+      provider: model.provider,
+      modelId: model.id,
+      modeId: "",
+      thinkingOptionId,
+      availableModels: [model],
+      modeOptions: [],
+    };
+    expect(
+      buildDraftCommandConfig({
+        selection,
+        cwd: "/repo",
+        effectiveModelId: model.id,
+        effectiveThinkingOptionId: resolveEffectiveComposerThinkingOptionId(selection, model.id),
+      }),
+    ).toEqual({ provider: model.provider, cwd: "/repo", model: model.id });
+    expect(
+      resolveThinkingOptionId({
+        availableModels: [{ ...model, defaultThinkingOptionId: "high" }],
+        modelId: model.id,
+        requestedThinkingOptionId: "",
+      }),
+    ).toBe("high");
+    expect(
+      resolveThinkingOptionId({
+        availableModels: [model],
+        modelId: model.id,
+        requestedThinkingOptionId: "low",
+      }),
+    ).toBe("low");
+  });
+  it("keeps the requested pin while using a moving native alias only for display metadata", () => {
+    const model = {
+      provider: "codex",
+      id: "native-latest",
+      aliases: ["native-pinned-v9"],
+      label: "Future Model",
+    };
+    const selection = resolveAgentModelSelection({
+      models: [model],
+      runtimeModelId: "native-pinned-v9",
+      configuredModelId: "native-pinned-v9",
+      explicitThinkingOptionId: null,
+    });
+    expect(selection.activeModelId).toBe("native-pinned-v9");
+    expect(selection.selectedModel).toBe(model);
+    expect(selection.displayModel).toBe("Future Model");
+  });
+
+  it("preserves unknown saved model and reasoning IDs through a stale catalog", () => {
+    const selection = resolveAgentModelSelection({
+      models: [{ id: "old-default", provider: "codex", label: "Old default", isDefault: true }],
+      runtimeModelId: null,
+      configuredModelId: "future-model/native-alias",
+      explicitThinkingOptionId: "future-effort",
+    });
+    expect(selection.activeModelId).toBe("future-model/native-alias");
+    expect(selection.displayModel).toBe("future-model/native-alias");
+    expect(selection.selectedThinkingId).toBe("future-effort");
+    expect(selection.selectedModel).toBeNull();
+  });
+
+  it("uses alias metadata while preserving the configured model reference", () => {
     const selection = resolveAgentModelSelection({
       models: [
         {
@@ -70,12 +162,13 @@ describe("resolveAgentModelSelection", () => {
       explicitThinkingOptionId: null,
     });
 
-    expect(selection.activeModelId).toBe("claude-fable-5");
+    expect(selection.activeModelId).toBe("claude-fable-5[1m]");
+    expect(selection.selectedModel?.id).toBe("claude-fable-5");
     expect(selection.displayModel).toBe("Fable 5");
     expect(selection.selectedThinkingId).toBe("high");
   });
 
-  it("prefers runtime model over configured model", () => {
+  it("shows runtime metadata without replacing the configured request ID", () => {
     const selection = resolveAgentModelSelection({
       models: [
         {
@@ -91,7 +184,7 @@ describe("resolveAgentModelSelection", () => {
       explicitThinkingOptionId: null,
     });
 
-    expect(selection.activeModelId).toBe("a");
+    expect(selection.activeModelId).toBe("b");
     expect(selection.displayModel).toBe("Model A");
     expect(selection.selectedThinkingId).toBe("low");
   });
@@ -183,7 +276,7 @@ describe("resolveAgentModelSelection", () => {
 
     expect(selection.activeModelId).toBe("default");
     expect(selection.displayModel).toBe("Default (Sonnet 4.6)");
-    expect(selection.selectedThinkingId).toBe("low");
-    expect(selection.displayThinking).toBe("Low");
+    expect(selection.selectedThinkingId).toBeNull();
+    expect(selection.displayThinking).toBe("Default");
   });
 });

@@ -338,7 +338,7 @@ describe("replay runtime", () => {
     expect(observations.find((o) => o.kind === "subtitle")).toEqual({
       kind: "subtitle",
       id: TOOL_USE_ID,
-      subtitle: "general-purpose · Opus 5 · High",
+      subtitle: "general-purpose · claude-opus-5 · High",
     });
   });
 
@@ -359,7 +359,7 @@ describe("replay runtime", () => {
     });
 
     expect(observations.find((o) => o.kind === "subtitle")).toMatchObject({
-      subtitle: "general-purpose · Sonnet 5 · Low",
+      subtitle: "general-purpose · claude-sonnet-5 · Low",
     });
   });
 
@@ -443,7 +443,7 @@ describe("replay usage", () => {
       kind: "subtitle",
       id: TOOL_USE_ID,
       // 2293 + 0 + 65024 + 1376 — the last turn's context, matching the live path's total_tokens.
-      subtitle: "general-purpose · Opus 5 · 68.7k tokens",
+      subtitle: "general-purpose · claude-opus-5 · 68.7k tokens",
       timestamp: "2026-07-23T23:49:05.068Z",
     });
   });

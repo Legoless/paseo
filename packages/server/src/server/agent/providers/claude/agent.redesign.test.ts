@@ -3,7 +3,8 @@ import type { Logger } from "pino";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
 import { asInternals } from "../../../test-utils/class-mocks.js";
-import { ClaudeAgentClient, readEventIdentifiers } from "./agent.js";
+import { readEventIdentifiers } from "./agent.js";
+import { TestClaudeAgentClient as ClaudeAgentClient } from "./test-utils/catalog.js";
 import { streamSession } from "../test-utils/session-stream-adapter.js";
 import type { AgentStreamEvent, AgentTimelineItem } from "../../agent-sdk-types.js";
 

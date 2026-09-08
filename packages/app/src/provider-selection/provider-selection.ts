@@ -8,7 +8,8 @@ import type { AgentProviderDefinition } from "@getpaseo/protocol/provider-manife
 import type { DraftCommandConfig } from "@/hooks/use-agent-commands-query";
 import { i18n } from "@/i18n/i18next";
 import { compareMatchScores, scoreTextFields } from "@getpaseo/protocol/search/text-match";
-import { filterSelectableModels } from "./model-catalog";
+import { filterSelectableModels, findModelByReference } from "./model-catalog";
+import { normalizeAgentModelDefinition } from "@getpaseo/protocol/agent-types";
 
 export interface ProviderSelectionModelRow {
   /**
@@ -30,7 +31,7 @@ function buildModelRowKey(provider: string, modelId: string): string {
 }
 
 export type ProviderModelSelection =
-  | { kind: "models"; rows: ProviderSelectionModelRow[] }
+  | { kind: "models"; rows: ProviderSelectionModelRow[]; error?: string }
   | { kind: "loading" }
   | { kind: "error"; message: string };
 
@@ -104,11 +105,11 @@ function buildEntryModelSelection(
   entry: ProviderSnapshotEntry,
   label: string,
 ): ProviderModelSelection {
-  if ((entry.models?.length ?? 0) > 0) {
-    return buildModelSelection(entry.provider, label, entry.models ?? null);
-  }
-  if (entry.status === "ready") {
-    return buildModelSelection(entry.provider, label, entry.models ?? null);
+  if ((entry.models?.length ?? 0) > 0 || entry.status === "ready") {
+    const selection = buildModelSelection(entry.provider, label, entry.models ?? null);
+    return selection.kind === "models" && entry.error
+      ? { ...selection, error: entry.error }
+      : selection;
   }
   if (entry.status === "loading") {
     return { kind: "loading" };
@@ -281,9 +282,10 @@ export function resolveEffectiveComposerThinkingOptionId(
     return selectedThinkingOptionId;
   }
 
-  const selectedModelDefinition =
-    selection.availableModels.find((model) => model.id === effectiveModelId) ?? null;
-  return selectedModelDefinition?.defaultThinkingOptionId ?? "";
+  const selectedModelDefinition = findModelByReference(selection.availableModels, effectiveModelId);
+  return selectedModelDefinition
+    ? (normalizeAgentModelDefinition(selectedModelDefinition).defaultThinkingOptionId ?? "")
+    : "";
 }
 
 export function buildDraftCommandConfig(input: {

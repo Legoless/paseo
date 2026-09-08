@@ -736,6 +736,8 @@ export interface AgentClient {
     options: FetchCatalogOptions,
     context?: ProviderRefreshContext,
   ): Promise<ProviderCatalog>;
+  /** Share the resolved catalog, including configured overrides, with existing sessions. */
+  setModelCatalog?(models: AgentModelDefinition[], options?: FetchCatalogOptions): void;
   /** Apply provider-owned defaults to a model supplied through provider configuration. */
   resolveConfiguredModel?(model: AgentModelDefinition): AgentModelDefinition;
   resolveDefaultModeId?(input: ResolveAgentDefaultModeInput): Promise<string | undefined>;

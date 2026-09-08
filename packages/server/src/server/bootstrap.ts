@@ -172,7 +172,7 @@ import { createRelayRuntime, type RelayRuntime } from "./relay-runtime.js";
 import type { PushNotificationSender } from "./push/index.js";
 import { getOrCreateServerId } from "./server-id.js";
 import { resolveDaemonVersion } from "./daemon-version.js";
-import type { AgentClient, AgentProvider } from "./agent/agent-sdk-types.js";
+import type { AgentClient, AgentProvider, FetchCatalogOptions } from "./agent/agent-sdk-types.js";
 import type {
   AgentProfile,
   AgentSkillSelection,
@@ -946,6 +946,12 @@ export async function createPaseoDaemon(
     mcpAuthToken: agentMcpAuthToken,
     logger,
   });
+  const refreshProviderFeatures = (provider: AgentProvider, scope: FetchCatalogOptions) =>
+    agentManager.refreshProviderFeatures(
+      provider,
+      scope.scope === "workspace" ? scope.cwd : undefined,
+    );
+  providerSnapshotManager.on("catalog", refreshProviderFeatures);
   const workspaceLabelService = createWorkspaceLabelService({
     paseoHome: config.paseoHome,
     workspaceRegistry,
@@ -1772,6 +1778,7 @@ export async function createPaseoDaemon(
   };
 
   const stop = async () => {
+    providerSnapshotManager.off("catalog", refreshProviderFeatures);
     await pluginRuntime.stopAllPlugins();
     await hubRelationships.stop();
     workspaceReconciliation.dispose();

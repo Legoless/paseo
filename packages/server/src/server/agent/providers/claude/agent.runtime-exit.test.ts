@@ -10,7 +10,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
 import * as spawnUtils from "../../../../utils/spawn.js";
 import type { AgentStreamEvent } from "../../agent-sdk-types.js";
-import { ClaudeAgentClient } from "./agent.js";
+import { TestClaudeAgentClient as ClaudeAgentClient } from "./test-utils/catalog.js";
 import type { ClaudeQueryInput } from "./query.js";
 
 interface QueryMockOptions {

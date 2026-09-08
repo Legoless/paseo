@@ -960,7 +960,7 @@ function GroupProviderButton({
   }, [onDrillDown, provider.id, provider.label]);
 
   const stateNode = useMemo(() => {
-    if (selection.kind === "models") {
+    if (selection.kind === "models" && !selection.error) {
       const count = selection.rows.length;
       return (
         <Text style={styles.drillDownCount}>
@@ -1313,16 +1313,27 @@ function ProviderModelBrowserContent({
       />
     );
   }
-  if (visibleRows.length === 0) {
-    return profileHeader ?? <ModelSearchEmptyState />;
-  }
+  const header = selection.error ? (
+    <>
+      <ProviderErrorEmptyState
+        providerId={view.providerId}
+        message={selection.error}
+        onRetryProvider={onRetryProvider}
+        isRetryingProvider={isRetryingProvider}
+      />
+      {profileHeader}
+    </>
+  ) : (
+    profileHeader
+  );
+  if (visibleRows.length === 0) return header ?? <ModelSearchEmptyState />;
   return (
     <ModelRowList
       rows={visibleRows}
       selectedProvider={selectedProvider}
       selectedModel={selectedModel}
       onSelect={onSelect}
-      header={profileHeader}
+      header={header}
       scrolling={scrolling}
       profiledLookup={profiledLookup}
       onCreateProfile={onCreateProfile}

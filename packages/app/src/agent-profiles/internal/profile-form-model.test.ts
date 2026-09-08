@@ -289,7 +289,7 @@ describe("openAgentProfileForm", () => {
   });
 
   describe("model cascade", () => {
-    it("reseeds a thinking level the new model does not offer", () => {
+    it("inherits the native default when the new model does not offer the old effort", () => {
       const model = openWithCatalog({ mode: "create" });
       selectClaude(model);
       model.setModel("claude-opus-5", { label: "Opus 5" });
@@ -298,8 +298,8 @@ describe("openAgentProfileForm", () => {
       // Haiku offers only "think", so "think-hard" cannot survive the switch.
       model.setModel("claude-haiku-4-5", { label: "Haiku 4.5" });
 
-      expect(model.getState().thinkingOptionId).toBe("think");
-      expect(model.getState().thinkingDisplay).toEqual({ label: "Think" });
+      expect(model.getState().thinkingOptionId).toBe("");
+      expect(model.getState().thinkingDisplay).toBeNull();
     });
 
     it("keeps a thinking level the new model still offers", () => {
@@ -319,7 +319,7 @@ describe("openAgentProfileForm", () => {
 
       expect(model.getState().modelId).toBe("claude-opus-5");
       expect(optionValues(model.getState().thinkingOptions)).toEqual(["think", "think-hard"]);
-      expect(model.getState().thinkingOptionId).toBe("think");
+      expect(model.getState().thinkingOptionId).toBe("");
     });
 
     it("offers no way to unset a selection", () => {
@@ -343,7 +343,6 @@ describe("openAgentProfileForm", () => {
         provider: "claude",
         model: "claude-opus-5",
         modeId: "plan",
-        thinkingOptionId: "think",
       });
       const firstKey = model.getState().featureRequestKey;
 
@@ -354,7 +353,6 @@ describe("openAgentProfileForm", () => {
         provider: "claude",
         model: "claude-haiku-4-5",
         modeId: "plan",
-        thinkingOptionId: "think",
       });
     });
 

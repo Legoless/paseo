@@ -4,15 +4,12 @@ import { useTranslation } from "react-i18next";
 import type { AgentProvider, AgentSessionConfig } from "@getpaseo/protocol/agent-types";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { mergeProviderPreferences, useFormPreferences } from "./use-form-preferences";
-import {
-  applyFeatureValues,
-  pruneFeatureValues,
-  resolveFeatureValues,
-} from "./feature-preferences";
+import { providerFeaturesQueryRoot } from "@/data/providers-snapshot";
+import { applyFeatureValues, resolveFeatureValues } from "./feature-preferences";
 
 type DraftFeatureConfig = Pick<
   AgentSessionConfig,
-  "provider" | "cwd" | "modeId" | "model" | "thinkingOptionId"
+  "provider" | "cwd" | "modeId" | "model" | "thinkingOptionId" | "featureValues"
 >;
 
 export function useDraftAgentFeatures(input: {
@@ -40,6 +37,10 @@ export function useDraftAgentFeatures(input: {
     () => (provider ? (preferences.providerPreferences?.[provider]?.featureValues ?? {}) : {}),
     [preferences.providerPreferences, provider],
   );
+  const requestedFeatureValues = useMemo(
+    () => ({ ...persistedFeatureValues, ...localFeatureValues }),
+    [persistedFeatureValues, localFeatureValues],
+  );
 
   const draftConfig = useMemo<DraftFeatureConfig | null>(() => {
     if (!normalizedProvider || !normalizedCwd) {
@@ -52,18 +53,26 @@ export function useDraftAgentFeatures(input: {
       ...(modeId ? { modeId } : {}),
       ...(modelId ? { model: modelId } : {}),
       ...(thinkingOptionId ? { thinkingOptionId } : {}),
+      featureValues: requestedFeatureValues,
     };
-  }, [modeId, modelId, normalizedCwd, normalizedProvider, thinkingOptionId]);
+  }, [
+    modeId,
+    modelId,
+    normalizedCwd,
+    normalizedProvider,
+    thinkingOptionId,
+    requestedFeatureValues,
+  ]);
 
   const featuresQuery = useQuery({
     queryKey: [
-      "providerFeatures",
-      serverId ?? null,
+      ...providerFeaturesQueryRoot(serverId ?? null),
       normalizedProvider,
       normalizedCwd || null,
       modeId ?? null,
       modelId ?? null,
       thinkingOptionId ?? null,
+      requestedFeatureValues,
     ],
     enabled: Boolean(serverId && client && isConnected && draftConfig),
     staleTime: 5 * 60 * 1000,
@@ -104,16 +113,6 @@ export function useDraftAgentFeatures(input: {
       setLocalFeatureValues({});
     }
   }, [normalizedProvider]);
-
-  useEffect(() => {
-    if (availableFeaturesRaw === undefined) {
-      return;
-    }
-    const next = pruneFeatureValues(localFeatureValues, availableFeatures);
-    if (next !== localFeatureValues) {
-      setLocalFeatureValues(next);
-    }
-  }, [availableFeatures, availableFeaturesRaw, localFeatureValues]);
 
   const effectiveFeatureValues = Object.keys(featureValues).length > 0 ? featureValues : undefined;
   const setFeatureValue = useCallback(

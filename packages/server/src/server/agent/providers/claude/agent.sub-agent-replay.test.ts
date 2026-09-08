@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
 import type { AgentStreamEvent } from "../../agent-sdk-types.js";
-import { ClaudeAgentClient } from "./agent.js";
+import { TestClaudeAgentClient as ClaudeAgentClient } from "./test-utils/catalog.js";
 import { claudeProjectDirSync } from "./project-dir.js";
 
 /**
@@ -401,7 +401,7 @@ describe("ClaudeAgentSession persisted subagent replay", () => {
       status: "running",
     });
     expect(events).toContainEqual(
-      expect.objectContaining({ subtitle: "Workflow · Sonnet 5 · 20.4k tokens" }),
+      expect.objectContaining({ subtitle: "Workflow · claude-sonnet-5 · 20.4k tokens" }),
     );
     expect(events.at(-1)).toMatchObject({
       id: WORKFLOW_TOOL_USE_ID,

@@ -13,6 +13,7 @@ import {
   type ProviderSelectorProvider,
 } from "@/provider-selection/provider-selection";
 import { filterSelectableModels } from "@/provider-selection/model-catalog";
+import { filterAgentModesForModel, resolveAgentModeForModel } from "@/agent-controls/policy";
 import { OptimisticFormPreferences } from "@/create-agent-preferences/optimistic-preferences";
 import { applyAgentProfilePreferences } from "@/create-agent-preferences/preferences";
 import { useProvidersSnapshot } from "./use-providers-snapshot";
@@ -26,6 +27,7 @@ import {
   resolveEffectiveModel,
   normalizeSelectedModelId,
   resolveDefaultModelId,
+  resolveDefaultModel,
   mergeSelectedComposerPreferences,
   combineInitialValues,
   buildProviderDefinitionMap,
@@ -178,14 +180,12 @@ function buildProviderModelsByProvider(
 async function persistProviderPreferences(input: {
   provider: AgentProvider;
   formState: FormState;
-  availableModels: AgentModelDefinition[] | null;
   updatePreferences: (
     updates: Partial<FormPreferences> | ((current: FormPreferences) => FormPreferences),
   ) => Promise<FormPreferences>;
 }): Promise<void> {
-  const { provider, formState, availableModels, updatePreferences } = input;
-  const resolvedModel = resolveEffectiveModel(availableModels, formState.model);
-  const modelId = resolvedModel?.id ?? formState.model;
+  const { provider, formState, updatePreferences } = input;
+  const modelId = formState.model;
   await updatePreferences((current) =>
     mergeProviderPreferences({
       preferences: current,
@@ -319,10 +319,34 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
     snapshotSelectedEntry?.models ?? null,
   );
   const selectedProviderIsLoading = snapshotSelectedEntry?.status === "loading";
-  const snapshotSelectedProviderModes = resolveSelectedProviderModes({
-    selectedEntry: snapshotSelectedEntry,
-    provider: formState.provider,
-    providerDefinitionMap: snapshotProviderDefinitionMap,
+  const selectedModelDefinition = useMemo(() => {
+    const models = snapshotSelectedEntry?.models ?? null;
+    return formState.model
+      ? resolveEffectiveModel(models, formState.model)
+      : resolveDefaultModel(models);
+  }, [snapshotSelectedEntry, formState.model]);
+  const snapshotSelectedProviderModes = useMemo(() => {
+    return filterAgentModesForModel(
+      resolveSelectedProviderModes({
+        selectedEntry: snapshotSelectedEntry,
+        provider: formState.provider,
+        providerDefinitionMap: snapshotProviderDefinitionMap,
+      }),
+      selectedModelDefinition,
+    );
+  }, [
+    snapshotSelectedEntry,
+    selectedModelDefinition,
+    formState.provider,
+    snapshotProviderDefinitionMap,
+  ]);
+  const selectedMode = resolveAgentModeForModel({
+    modeId: formState.modeId,
+    modes: snapshotSelectedProviderModes,
+    defaultModeId:
+      snapshotSelectedEntry?.defaultModeId ??
+      snapshotProviderDefinitionMap.get(formState.provider ?? "")?.defaultModeId,
+    model: selectedModelDefinition,
   });
   const providerDefinitions = snapshotProviderDefinitions;
   const providerDefinitionMap = snapshotProviderDefinitionMap;
@@ -609,10 +633,9 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
     await persistProviderPreferences({
       provider: formState.provider,
       formState,
-      availableModels,
       updatePreferences: updateCurrentPreferences,
     });
-  }, [availableModels, formState, updateCurrentPreferences]);
+  }, [formState, updateCurrentPreferences]);
 
   const agentDefinition = formState.provider
     ? providerDefinitionMap.get(formState.provider)
@@ -634,7 +657,7 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
       setSelectedServerId,
       setSelectedServerIdFromUser,
       selectedProvider: formState.provider,
-      selectedMode: formState.modeId,
+      selectedMode,
       setModeFromUser,
       selectedModel: formState.model,
       setModelFromUser,
@@ -667,7 +690,7 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
     [
       formState.serverId,
       formState.provider,
-      formState.modeId,
+      selectedMode,
       formState.model,
       formState.thinkingOptionId,
       formState.workingDir,

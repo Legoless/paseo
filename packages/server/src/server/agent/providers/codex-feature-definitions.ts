@@ -1,15 +1,22 @@
-import type { AgentFeature, AgentFeatureToggle } from "../agent-sdk-types.js";
+import { z } from "zod";
+import type { AgentFeature, AgentFeatureToggle, AgentModelDefinition } from "../agent-sdk-types.js";
 
-const CODEX_FAST_MODE_SUPPORTED_MODEL_PREFIXES = ["gpt-5", "gpt-4.1", "o3", "o4-mini"] as const;
+export const CodexServiceTierSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+});
 
-export const CODEX_FAST_MODE_FEATURE: Omit<AgentFeatureToggle, "value"> = {
-  type: "toggle",
-  id: "fast_mode",
-  label: "Fast",
-  description: "Priority inference at 2x usage",
-  tooltip: "Toggle fast mode",
-  icon: "zap",
-};
+export type CodexServiceTier = z.infer<typeof CodexServiceTierSchema>;
+
+const CodexModelFeatureMetadataSchema = z.object({
+  serviceTiers: z.array(CodexServiceTierSchema).optional().default([]),
+  defaultServiceTier: z.string().nullable().optional().default(null),
+});
+
+export function codexModelFeatureMetadata(model: AgentModelDefinition | undefined) {
+  return CodexModelFeatureMetadataSchema.parse(model?.metadata ?? {});
+}
 
 export const CODEX_PLAN_MODE_FEATURE: Omit<AgentFeatureToggle, "value"> = {
   type: "toggle",
@@ -20,42 +27,52 @@ export const CODEX_PLAN_MODE_FEATURE: Omit<AgentFeatureToggle, "value"> = {
   icon: "list-todo",
 };
 
-function normalizeCodexModelId(modelId: string | null | undefined): string | null {
-  const normalized = typeof modelId === "string" ? modelId.trim() : "";
-  return normalized.length > 0 ? normalized : null;
-}
-
-export function codexModelSupportsFastMode(modelId: string | null | undefined): boolean {
-  const normalizedModelId = normalizeCodexModelId(modelId);
-  if (!normalizedModelId) {
-    return false;
+export function resolveCodexServiceTier(input: {
+  featureValues: Record<string, unknown> | undefined;
+  serviceTiers: CodexServiceTier[];
+}): string | null {
+  const selected = input.featureValues?.service_tier;
+  if (typeof selected === "string") {
+    return input.serviceTiers.some((tier) => tier.id === selected) ? selected : null;
   }
-  return CODEX_FAST_MODE_SUPPORTED_MODEL_PREFIXES.some(
-    (prefix) => normalizedModelId === prefix || normalizedModelId.startsWith(prefix),
-  );
+  // COMPAT(codexFastMode): added in v0.7.0, remove after 2027-03-08.
+  // Old saved agents/profiles stored a boolean; only an advertised tier can replace it.
+  if (input.featureValues?.fast_mode === true) {
+    const fast =
+      input.serviceTiers.find((tier) => tier.id === "priority") ??
+      input.serviceTiers.find((tier) => tier.name.toLowerCase() === "fast");
+    return fast?.id ?? null;
+  }
+  return null;
 }
 
 export function buildCodexFeatures(input: {
-  modelId: string | null | undefined;
-  fastModeEnabled: boolean;
+  serviceTiers: CodexServiceTier[];
+  serviceTier: string | null;
   planModeEnabled: boolean;
   planModeAvailable?: boolean;
 }): AgentFeature[] {
   const features: AgentFeature[] = [];
-
-  if (codexModelSupportsFastMode(input.modelId)) {
+  if (input.serviceTiers.length > 0) {
     features.push({
-      ...CODEX_FAST_MODE_FEATURE,
-      value: input.fastModeEnabled,
+      type: "select",
+      id: "service_tier",
+      label: "Speed",
+      tooltip: "Select inference speed",
+      icon: "zap",
+      value: input.serviceTier ?? "",
+      options: [
+        { id: "", label: "Default" },
+        ...input.serviceTiers.map((tier) => ({
+          id: tier.id,
+          label: tier.name,
+          ...(tier.description ? { description: tier.description } : {}),
+        })),
+      ],
     });
   }
-
   if (input.planModeAvailable !== false) {
-    features.push({
-      ...CODEX_PLAN_MODE_FEATURE,
-      value: input.planModeEnabled,
-    });
+    features.push({ ...CODEX_PLAN_MODE_FEATURE, value: input.planModeEnabled });
   }
-
   return features;
 }
