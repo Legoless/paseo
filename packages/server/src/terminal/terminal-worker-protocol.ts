@@ -62,6 +62,12 @@ export type TerminalWorkerRequest =
       terminalId: string;
     }
   | {
+      type: "setTitle";
+      requestId: string;
+      terminalId: string;
+      title: string;
+    }
+  | {
       type: "killTerminal";
       requestId: string;
       terminalId: string;

@@ -345,6 +345,51 @@ it("refreshes cached terminal title after worker title changes", async () => {
   expect(session.getState().title).toBe("Build Output");
 });
 
+it("keeps a renamed terminal's title when the shell emits a later OSC title", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "worker-terminal-manager-rename-"));
+  temporaryDirs.push(cwd);
+  manager = createWorkerTerminalManager();
+  // Every tick writes an OSC 0 title followed by a [n] marker, so a marker
+  // arriving is proof the title before it was parsed. The interval outruns the
+  // 150ms title debounce.
+  const session = trackTerminal(
+    await manager.createTerminal({
+      workspaceId: "ws-test",
+      cwd,
+      ...nodeTerminalCommand(`
+      let index = 0;
+      setInterval(() => {
+        index += 1;
+        process.stdout.write("\\u001b]0;Shell " + index + "\\u0007[" + index + "]");
+      }, 400);
+    `),
+    }),
+  );
+
+  const output: string[] = [];
+  session.subscribe((message) => {
+    if (message.type === "output") {
+      output.push(message.data);
+    }
+  });
+  const lastMarker = (): number => {
+    const matches = [...output.join("").matchAll(/\[(\d+)\]/g)];
+    const last = matches.at(-1)?.[1];
+    return last === undefined ? 0 : Number(last);
+  };
+
+  await waitForCondition(() => session.getTitle()?.startsWith("Shell ") === true, 10000);
+
+  expect(manager.setTerminalTitle(session.id, "My Terminal")).toBe(true);
+  await waitForCondition(() => session.getTitle() === "My Terminal", 10000);
+
+  const markerAtRename = lastMarker();
+  await waitForCondition(() => lastMarker() >= markerAtRename + 3, 10000);
+
+  expect(session.getTitle()).toBe("My Terminal");
+  expect(session.getState().title).toBe("My Terminal");
+});
+
 it("refreshes cached terminal size after worker resize", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "worker-terminal-manager-resize-"));
   temporaryDirs.push(cwd);

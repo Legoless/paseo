@@ -368,10 +368,16 @@ export function createWorkerTerminalManager(
         if (!manualTitle) {
           return;
         }
-        record.info = { ...record.info, title: manualTitle };
-        for (const listener of Array.from(record.titleChangeListeners)) {
-          listener(manualTitle);
-        }
+        // The pin lives in the worker: session.setTitle switches the session to
+        // manual mode and drops its OSC subscription, so the shell can no longer
+        // take the title back. Mirroring the title here instead would last until
+        // the next prompt redraw. The echoed terminalTitleChange updates the
+        // cached record and broadcasts terminals_changed.
+        sendBestEffortRequest({
+          type: "setTitle",
+          terminalId: record.info.id,
+          title: manualTitle,
+        });
       },
       getExitInfo(): TerminalExitInfo | null {
         return record.exitInfo;

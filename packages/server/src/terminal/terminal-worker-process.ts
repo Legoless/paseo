@@ -266,6 +266,12 @@ async function handleRequest(message: TerminalWorkerRequest): Promise<void> {
       return;
     }
 
+    case "setTitle": {
+      manager.setTerminalTitle(message.terminalId, message.title);
+      sendToParent({ type: "response", requestId: message.requestId, ok: true });
+      return;
+    }
+
     case "killTerminal": {
       manager.killTerminal(message.terminalId);
       // Removal is owned by session.onExit -> terminalExit; the parent mirror
