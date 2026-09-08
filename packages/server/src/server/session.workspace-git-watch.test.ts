@@ -44,6 +44,7 @@ function syncGitObserver(session: Session, cwd: string, workspaceId: string): vo
       id: workspaceId,
       workspaceDirectory: cwd,
       projectKind: "git",
+      members: [{ workspaceDirectory: cwd, workspaceKind: "local_checkout", branch: null }],
     } as unknown as WorkspaceDescriptorPayload,
   ]);
 }
@@ -231,6 +232,13 @@ function createSessionForWorkspaceGitWatchTests(options?: {
       existsOnDisk: async () => true,
       list: async () => Array.from(workspaces.values()),
       get: async (workspaceId: string) => workspaces.get(workspaceId) ?? null,
+      update: async (workspaceId, updater) => {
+        const existing = workspaces.get(workspaceId);
+        if (!existing) return null;
+        const updated = updater(existing);
+        workspaces.set(workspaceId, updated);
+        return updated;
+      },
       upsert: async (record: ReturnType<typeof createPersistedWorkspaceRecord>) => {
         workspaces.set(record.workspaceId, record);
       },
@@ -306,12 +314,22 @@ function seedGitWorkspace(input: {
     input.workspaceId,
     createPersistedWorkspaceRecord({
       workspaceId: input.workspaceId,
-      projectId: input.projectId,
-      cwd: input.cwd,
       displayName: input.name,
-      kind: "local_checkout",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-01T12:00:00.000Z",
+      members: [
+        {
+          projectId: input.projectId,
+          cwd: input.cwd,
+          kind: "local_checkout",
+          displayName: input.name,
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 }

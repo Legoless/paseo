@@ -168,23 +168,43 @@ function seedSameCwdWorkspaces(): { paseoHomeRoot: string; cwd: string } {
   });
   const workspaceA = createPersistedWorkspaceRecord({
     workspaceId: WORKSPACE_A,
-    projectId: project.projectId,
-    cwd,
-    kind: "directory",
     displayName: "workspace-a",
     createdAt: "2026-03-01T00:00:00.000Z",
     updatedAt: "2026-03-01T00:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd,
+        kind: "directory",
+        displayName: "workspace-a",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   // Created later so the deterministic-oldest cwd fallback would never pick B:
   // any correct attribution to B must follow the stamped workspaceId.
   const workspaceB = createPersistedWorkspaceRecord({
     workspaceId: WORKSPACE_B,
-    projectId: project.projectId,
-    cwd,
-    kind: "directory",
     displayName: "workspace-b",
     createdAt: "2026-03-02T00:00:00.000Z",
     updatedAt: "2026-03-02T00:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd,
+        kind: "directory",
+        displayName: "workspace-b",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   writeFileSync(path.join(projectsDir, "projects.json"), JSON.stringify([project]));
@@ -213,12 +233,22 @@ async function seedWorkspaceWithLegacyAgent(): Promise<{ paseoHomeRoot: string; 
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: LEGACY_OWNER_WORKSPACE,
-    projectId: project.projectId,
-    cwd,
-    kind: "directory",
     displayName: "original",
     createdAt: "2026-03-01T00:00:00.000Z",
     updatedAt: "2026-03-01T00:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd,
+        kind: "directory",
+        displayName: "original",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   writeFileSync(path.join(projectsDir, "projects.json"), JSON.stringify([project]));
@@ -327,6 +357,7 @@ test("daemon bootstrap migrates cwd-only legacy agents before same-cwd workspace
 test("workspace.create directory source with firstAgentContext generates a daemon-visible workspace title", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "paseo-named-local-dir-"));
   const daemon = await createTestPaseoDaemon({
+    isDev: true,
     agentClients: { mock: new MockLoadTestAgentClient() },
   });
   const client = new DaemonClient({
@@ -413,6 +444,7 @@ test("local workspace auto-title does not broadcast provider snapshot warm-up to
 test("create_agent_request with workspaceId does not retitle an existing workspace", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "paseo-agent-submit-title-"));
   const daemon = await createTestPaseoDaemon({
+    isDev: true,
     agentClients: { mock: new MockLoadTestAgentClient() },
   });
   const client = new DaemonClient({
@@ -456,6 +488,7 @@ test("create_agent_request with workspaceId does not retitle an existing workspa
 test("creating another same-cwd local workspace keeps running status on the owning workspace only", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "paseo-running-same-cwd-create-"));
   const daemon = await createTestPaseoDaemon({
+    isDev: true,
     agentClients: { mock: new MockLoadTestAgentClient() },
   });
   const client = new DaemonClient({

@@ -83,21 +83,41 @@ test("openProject preserves a worktree's exact-root project without rehoming it"
     await writeRegistry(workspacesPath, [
       createPersistedWorkspaceRecord({
         workspaceId: repoRoot,
-        projectId: repoRoot,
-        cwd: repoRoot,
-        kind: "local_checkout",
         displayName: "main",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: repoRoot,
+            cwd: repoRoot,
+            kind: "local_checkout",
+            displayName: "main",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
       createPersistedWorkspaceRecord({
         workspaceId: worktreeRoot,
-        projectId: worktreeRoot,
-        cwd: worktreeRoot,
-        kind: "directory",
         displayName: "desktop-daemon-settings",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: worktreeRoot,
+            cwd: worktreeRoot,
+            kind: "directory",
+            displayName: "desktop-daemon-settings",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     ]);
 
@@ -113,13 +133,21 @@ test("openProject preserves a worktree's exact-root project without rehoming it"
     const persistedWorkspaces = await readRegistry<PersistedWorkspaceRecord>(workspacesPath);
 
     expect(response.error).toBeNull();
-    expect(response.workspace?.projectId).toBe(worktreeRoot);
+    expect(response.workspace?.members).toEqual([
+      expect.objectContaining({ projectId: worktreeRoot, workspaceDirectory: worktreeRoot }),
+    ]);
+    expect(response.workspace?.id).toBe(worktreeRoot);
     expect(persistedProjects.find((project) => project.projectId === repoRoot)?.rootPath).toBe(
       repoRoot,
     );
-    expect(
-      persistedWorkspaces.find((workspace) => workspace.workspaceId === worktreeRoot)?.projectId,
-    ).toBe(worktreeRoot);
+    const persistedWorktreeWorkspace = persistedWorkspaces.find(
+      (workspace) => workspace.workspaceId === worktreeRoot,
+    );
+    expect(persistedWorktreeWorkspace?.members).toEqual([
+      expect.objectContaining({ projectId: worktreeRoot, cwd: worktreeRoot }),
+    ]);
+    expect(persistedWorktreeWorkspace).not.toHaveProperty("projectId");
+    expect(persistedWorktreeWorkspace).not.toHaveProperty("cwd");
   } finally {
     process.env.PASEO_SUPERVISED = previousSupervised;
   }
