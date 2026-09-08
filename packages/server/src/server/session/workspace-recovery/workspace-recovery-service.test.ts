@@ -19,6 +19,7 @@ import {
   createPersistedWorkspaceRecord,
   type PersistedProjectRecord,
   type PersistedWorkspaceRecord,
+  type PersistedWorkspaceMember,
 } from "../../workspace-registry.js";
 import { createWorkspaceRecoveryService } from "./workspace-recovery-service.js";
 
@@ -44,22 +45,30 @@ function createProject(overrides: Partial<PersistedProjectRecord> = {}): Persist
 }
 
 function createWorkspace(
-  overrides: Partial<PersistedWorkspaceRecord> = {},
+  overrides: Partial<PersistedWorkspaceRecord & PersistedWorkspaceMember> = {},
 ): PersistedWorkspaceRecord {
   return createPersistedWorkspaceRecord({
     workspaceId: "wks_15a1b5630ebaab33",
-    projectId: "/project",
-    cwd: "/worktrees/trigger-1525443412986298439",
-    kind: "worktree",
     displayName: "diagnose-repro-tdd",
     title: "TDD reproduction",
-    branch: "diagnose-repro-tdd",
-    worktreeRoot: "/worktrees/trigger-1525443412986298439",
-    isPaseoOwnedWorktree: true,
-    mainRepoRoot: "/repo",
     createdAt: NOW,
     updatedAt: NOW,
     archivedAt: NOW,
+    ...overrides,
+    members: [
+      {
+        projectId: "/project",
+        cwd: "/worktrees/trigger-1525443412986298439",
+        kind: "worktree",
+        displayName: "diagnose-repro-tdd",
+        branch: "diagnose-repro-tdd",
+        worktreeRoot: "/worktrees/trigger-1525443412986298439",
+        baseBranch: null,
+        isPaseoOwnedWorktree: true,
+        mainRepoRoot: "/repo",
+        ...overrides,
+      },
+    ],
     ...overrides,
   });
 }
@@ -90,6 +99,16 @@ function createHarness(input?: {
 }
 
 describe("workspace recovery", () => {
+  test("unarchives an empty container without requiring a project", async () => {
+    const workspace = createWorkspace({ members: [] });
+    const { service, unarchived } = createHarness({ workspace, project: null });
+    await expect(service.restore(workspace.workspaceId)).resolves.toEqual({
+      workspaceId: workspace.workspaceId,
+      action: "unarchive",
+    });
+    expect(unarchived).toEqual([workspace.workspaceId]);
+  });
+
   test("describes a missing archived worktree from persisted placement", async () => {
     const { service, unarchived } = createHarness();
 
@@ -107,7 +126,7 @@ describe("workspace recovery", () => {
     const workspace = createWorkspace({ kind: "directory", branch: null });
     const { service, unarchived } = createHarness({
       workspace,
-      directories: [workspace.cwd],
+      directories: [workspace.members[0]!.cwd],
     });
 
     await expect(service.restore(workspace.workspaceId)).resolves.toEqual({
@@ -125,7 +144,7 @@ describe("workspace recovery", () => {
       kind: "unavailable",
       workspaceId: workspace.workspaceId,
       reason: "workspace_directory_missing",
-      message: "The archived workspace directory no longer exists and cannot be recreated.",
+      message: `The project directory ${workspace.members[0]!.cwd} no longer exists and cannot be recreated.`,
     });
   });
 

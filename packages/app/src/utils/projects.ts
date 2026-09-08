@@ -133,7 +133,7 @@ function resolveHostRepoRoot(input: {
   projectRoot: string;
   workspaces: readonly WorkspaceDescriptor[];
 }): string {
-  return input.workspaces[0]?.projectRootPath || input.projectRoot;
+  return input.projectRoot;
 }
 
 /**
@@ -150,25 +150,24 @@ function toChangeRequestNumber(workspace: WorkspaceDescriptor): number | null {
   return pullRequest.number ?? selectPrHintFromStatus(pullRequest, workspace.forge)?.number ?? null;
 }
 
-function toWorkspaceSummary(workspace: WorkspaceDescriptor): WorkspaceSummary {
-  const currentBranch = workspace.gitRuntime?.currentBranch?.trim();
+function toWorkspaceSummary(workspace: WorkspaceDescriptor, projectId: string): WorkspaceSummary {
+  const member = workspace.members.find((entry) => entry.projectId === projectId)!;
+  const currentBranch = member.branch?.trim();
   return {
     id: workspace.id,
     name: workspace.name,
     ...(workspace.title ? { title: workspace.title } : {}),
-    workspaceKind: workspace.workspaceKind,
+    workspaceKind: member.workspaceKind,
     status: workspace.status,
     currentBranch: currentBranch && currentBranch !== "HEAD" ? currentBranch : null,
     ...(workspace.archivingAt ? { archivingAt: workspace.archivingAt } : {}),
-    changeRequestNumber: toChangeRequestNumber(workspace),
+    changeRequestNumber: workspace.members.length === 1 ? toChangeRequestNumber(workspace) : null,
   };
 }
 
 function toHostEntry(group: HostGroup): ProjectHostEntry {
   const repoRoot = resolveHostRepoRoot(group);
-  const canonical =
-    group.workspaces.find((workspace) => workspace.projectRootPath === repoRoot) ??
-    group.workspaces[0];
+  const canonical = group.workspaces.find((workspace) => workspace.members.length === 1);
   return {
     serverId: group.serverId,
     projectId: group.projectId,
@@ -178,7 +177,7 @@ function toHostEntry(group: HostGroup): ProjectHostEntry {
     isOnline: group.isOnline,
     repoRoot,
     workspaceCount: group.workspaces.length,
-    workspaces: group.workspaces.map(toWorkspaceSummary),
+    workspaces: group.workspaces.map((workspace) => toWorkspaceSummary(workspace, group.projectId)),
     gitRuntime: canonical?.gitRuntime,
     githubRuntime: canonical?.githubRuntime,
     customIconRevision: canonical?.projectCustomIconRevision ?? group.customIconRevision,
@@ -268,8 +267,11 @@ function attachHostWorkspaces(
   );
 
   for (const workspace of host.workspaces) {
-    const key = projectViewKeyByProjectId.get(workspace.projectId);
-    if (key) groups.get(key)?.hostsByServerId.get(host.serverId)?.workspaces.push(workspace);
+    const projectIds = new Set(workspace.members.map((member) => member.projectId));
+    for (const projectId of projectIds) {
+      const key = projectViewKeyByProjectId.get(projectId);
+      if (key) groups.get(key)?.hostsByServerId.get(host.serverId)?.workspaces.push(workspace);
+    }
   }
 }
 

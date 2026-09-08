@@ -84,7 +84,6 @@ export interface WorkspaceDirectoryDeps {
   isProviderVisibleToClient(provider: string): boolean;
   buildWorkspaceDescriptor(input: {
     workspace: PersistedWorkspaceRecord;
-    projectRecord?: PersistedProjectRecord | null;
     includeGitData: boolean;
   }): Promise<WorkspaceDescriptorPayload>;
 }
@@ -138,7 +137,11 @@ export function workspaceIdsOnCheckout(
 ): string[] {
   const resolvedCwd = resolve(cwd);
   return Array.from(workspaces)
-    .filter((workspace) => !workspace.archivedAt && resolve(workspace.cwd) === resolvedCwd)
+    .filter(
+      (workspace) =>
+        !workspace.archivedAt &&
+        workspace.members.some((member) => resolve(member.cwd) === resolvedCwd),
+    )
     .map((workspace) => workspace.workspaceId);
 }
 
@@ -148,7 +151,8 @@ export function workspaceIdsForProjects(
 ): string[] {
   const workspaceIds = new Set<string>();
   for (const workspace of workspaces) {
-    if (projectIds.has(workspace.projectId)) workspaceIds.add(workspace.workspaceId);
+    if (workspace.members.some((member) => projectIds.has(member.projectId)))
+      workspaceIds.add(workspace.workspaceId);
   }
   return Array.from(workspaceIds);
 }
@@ -204,31 +208,15 @@ export class WorkspaceDirectory {
     includeGitData: boolean;
     workspaceIds?: Iterable<string>;
   }): Promise<Map<string, WorkspaceDescriptorPayload>> {
-    const [
-      agents,
-      providerSubagentActivity,
-      persistedWorkspaces,
-      persistedProjects,
-      terminalContributions,
-    ] = await Promise.all([
-      this.deps.listAgentPayloads(),
-      this.deps.listProviderSubagentActivity(),
-      this.deps.workspaceRegistry.list(),
-      this.deps.projectRegistry.list(),
-      this.deps.listTerminalActivityContributions(),
-    ]);
+    const [agents, providerSubagentActivity, persistedWorkspaces, terminalContributions] =
+      await Promise.all([
+        this.deps.listAgentPayloads(),
+        this.deps.listProviderSubagentActivity(),
+        this.deps.workspaceRegistry.list(),
+        this.deps.listTerminalActivityContributions(),
+      ]);
 
-    const activeProjects = new Map(
-      persistedProjects
-        .filter((project) => !project.archivedAt)
-        .map((project) => [project.projectId, project] as const),
-    );
-    const archivedProjectIds = new Set(
-      persistedProjects.filter((project) => project.archivedAt).map((project) => project.projectId),
-    );
-    const activeRecords = persistedWorkspaces.filter(
-      (workspace) => !workspace.archivedAt && !archivedProjectIds.has(workspace.projectId),
-    );
+    const activeRecords = persistedWorkspaces.filter((workspace) => !workspace.archivedAt);
     const descriptorsByWorkspaceId = new Map<string, WorkspaceDescriptorPayload>();
     const workspaceIds = options.workspaceIds ? new Set(options.workspaceIds) : null;
     const activeWorkspaceIds = new Set(activeRecords.map((workspace) => workspace.workspaceId));
@@ -242,7 +230,6 @@ export class WorkspaceDirectory {
       includedWorkspaces.map((workspace) =>
         this.deps.buildWorkspaceDescriptor({
           workspace,
-          projectRecord: activeProjects.get(workspace.projectId) ?? null,
           includeGitData: options.includeGitData,
         }),
       ),
@@ -558,7 +545,7 @@ export class WorkspaceDirectory {
     const projectIdsWithActiveWorkspaces = new Set(
       persistedWorkspaces
         .filter((workspace) => !workspace.archivedAt)
-        .map((workspace) => workspace.projectId),
+        .flatMap((workspace) => workspace.members.map((member) => member.projectId)),
     );
     return persistedProjects
       .filter(
@@ -595,14 +582,21 @@ export class WorkspaceDirectory {
     }
 
     if (filter.projectId && filter.projectId.trim().length > 0) {
-      if (workspace.projectId !== filter.projectId.trim()) {
+      if (!workspace.members?.some((member) => member.projectId === filter.projectId?.trim())) {
         return false;
       }
     }
 
     if (filter.query && filter.query.trim().length > 0) {
       const query = filter.query.trim().toLocaleLowerCase();
-      const haystacks = [workspace.name, workspace.projectId, workspace.id];
+      const haystacks = [
+        workspace.name,
+        workspace.id,
+        ...(workspace.members ?? []).flatMap((member) => [
+          member.projectId,
+          member.projectDisplayName,
+        ]),
+      ];
       if (!haystacks.some((value) => value.toLocaleLowerCase().includes(query))) {
         return false;
       }

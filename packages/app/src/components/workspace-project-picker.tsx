@@ -78,13 +78,13 @@ export function WorkspaceProjectPicker({
     [isOpen],
   );
 
-  if (orderedOptions.length <= 1 || !member) {
+  if (orderedOptions.length <= 1) {
     return null;
   }
 
   const selectedLabel =
-    orderedOptions.find((option) => option.cwd === member.workspaceDirectory)?.label ??
-    member.projectDisplayName;
+    orderedOptions.find((option) => option.cwd === member?.workspaceDirectory)?.label ??
+    t("workspace.tabs.projectPicker.selectProject");
 
   return (
     <>
@@ -107,14 +107,14 @@ export function WorkspaceProjectPicker({
             {selectedLabel}
           </Text>
           <Text style={styles.triggerPath} numberOfLines={1}>
-            {shortenPath(member.workspaceDirectory)}
+            {member ? shortenPath(member.workspaceDirectory) : ""}
           </Text>
         </View>
         <ThemedChevronDown size={ICON_SIZE.sm} uniProps={foregroundMutedColorMapping} />
       </ComboboxTrigger>
       <Combobox
         options={options}
-        value={member.workspaceDirectory}
+        value={member?.workspaceDirectory ?? ""}
         onSelect={handleSelect}
         searchable
         searchPlaceholder={t("workspace.tabs.projectSelector.searchPlaceholder")}

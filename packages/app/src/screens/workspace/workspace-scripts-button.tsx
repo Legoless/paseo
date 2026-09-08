@@ -35,9 +35,16 @@ import {
   type WorkspaceScriptLinkTarget,
 } from "@/utils/workspace-script-links";
 import type { Theme } from "@/styles/theme";
+import { shortenPath } from "@/utils/shorten-path";
 import { useWorkspaceServiceRoutePreferencesStore } from "@/workspace-service-routes/store";
 import { buttonControlHeight, HEADER_CONTROL_HEIGHT } from "@/components/ui/control-geometry";
 import { extraMutedIconColorMapping } from "@/components/ui/icon-color";
+
+type WorkspaceScript = WorkspaceDescriptor["scripts"][number];
+
+function scriptKey(script: WorkspaceScript): string {
+  return JSON.stringify([script.cwd ?? null, script.scriptName]);
+}
 
 type RowActionIcon = "copy" | "open" | "restart" | "start" | "stop" | "terminal";
 
@@ -354,9 +361,9 @@ interface ScriptRowProps {
     : null;
   isStartPending: boolean;
   isStopPending: boolean;
-  onStartScript: (scriptName: string) => void;
-  onStopScript: (scriptName: string) => void;
-  onRestartScript: (scriptName: string) => void;
+  onStartScript: (script: WorkspaceScript) => void;
+  onStopScript: (script: WorkspaceScript) => void;
+  onRestartScript: (script: WorkspaceScript) => void;
   onCopyUrl: (url: string, label: string) => void;
   preferredRouteKind: WorkspaceScriptLinkKind | null;
   onSelectRouteKind: (kind: WorkspaceScriptLinkKind) => void;
@@ -424,16 +431,16 @@ function ScriptRow({
   }, [liveTerminalId, onViewTerminal]);
 
   const handleRun = useCallback(() => {
-    onStartScript(script.scriptName);
-  }, [onStartScript, script.scriptName]);
+    onStartScript(script);
+  }, [onStartScript, script]);
 
   const handleStop = useCallback(() => {
-    onStopScript(script.scriptName);
-  }, [onStopScript, script.scriptName]);
+    onStopScript(script);
+  }, [onStopScript, script]);
 
   const handleRestart = useCallback(() => {
-    onRestartScript(script.scriptName);
-  }, [onRestartScript, script.scriptName]);
+    onRestartScript(script);
+  }, [onRestartScript, script]);
 
   const scriptNameStyle = useMemo(
     () => (isRunning ? [styles.scriptName, styles.scriptNameActive] : styles.scriptName),
@@ -500,6 +507,7 @@ function ScriptRow({
         <ScriptIcon size={14} uniProps={iconColorMapping} style={styles.scriptIcon} />
         <Text style={scriptNameStyle} numberOfLines={1}>
           {script.scriptName}
+          {script.cwd ? ` · ${shortenPath(script.cwd)}` : ""}
         </Text>
         {showExitBadge ? <ExitCodeBadge code={exitCode} /> : null}
         <View style={styles.spacer} />
@@ -559,17 +567,21 @@ export function WorkspaceScriptsButton({
   const pendingRestartRef = useRef<Set<string>>(new Set());
 
   const startScriptMutation = useMutation({
-    mutationFn: async (scriptName: string) => {
+    mutationFn: async (script: WorkspaceScript) => {
+      const { scriptName } = script;
       if (!client) {
         throw new Error(t("common.errors.daemonClientUnavailable"));
       }
-      const result = await client.startWorkspaceScript(workspaceId, scriptName);
+      const result = await client.startWorkspaceScript(workspaceId, scriptName, undefined, {
+        cwd: script.cwd,
+      });
       if (result.error) {
         throw new Error(result.error);
       }
       return result;
     },
-    onError: (error, scriptName) => {
+    onError: (error, script) => {
+      const { scriptName } = script;
       toast.show(
         error instanceof Error
           ? error.message
@@ -588,11 +600,12 @@ export function WorkspaceScriptsButton({
   const startScript = startScriptMutation.mutate;
 
   const stopScriptMutation = useMutation({
-    mutationFn: async (scriptName: string) => {
+    mutationFn: async (script: WorkspaceScript) => {
+      const { scriptName } = script;
       if (!client) {
         throw new Error(t("common.errors.daemonClientUnavailable"));
       }
-      const terminalId = scripts.find((s) => s.scriptName === scriptName)?.terminalId;
+      const terminalId = script.terminalId;
       if (!terminalId) {
         throw new Error(t("workspace.scripts.states.stopFailed", { scriptName }));
       }
@@ -601,8 +614,9 @@ export function WorkspaceScriptsButton({
         throw new Error(t("workspace.scripts.states.stopFailed", { scriptName }));
       }
     },
-    onError: (error, scriptName) => {
-      pendingRestartRef.current.delete(scriptName);
+    onError: (error, script) => {
+      const { scriptName } = script;
+      pendingRestartRef.current.delete(scriptKey(script));
       toast.show(
         error instanceof Error
           ? error.message
@@ -620,9 +634,9 @@ export function WorkspaceScriptsButton({
     const pending = pendingRestartRef.current;
     if (pending.size === 0) return;
     for (const script of scripts) {
-      if (!pending.has(script.scriptName) || script.lifecycle === "running") continue;
-      pending.delete(script.scriptName);
-      startScript(script.scriptName);
+      if (!pending.has(scriptKey(script)) || script.lifecycle === "running") continue;
+      pending.delete(scriptKey(script));
+      startScript(script);
     }
   }, [scripts, startScript]);
 
@@ -636,19 +650,19 @@ export function WorkspaceScriptsButton({
   );
 
   const handleStartScript = useCallback(
-    (scriptName: string) => startScriptMutation.mutate(scriptName),
+    (script: WorkspaceScript) => startScriptMutation.mutate(script),
     [startScriptMutation],
   );
 
   const handleStopScript = useCallback(
-    (scriptName: string) => stopScriptMutation.mutate(scriptName),
+    (script: WorkspaceScript) => stopScriptMutation.mutate(script),
     [stopScriptMutation],
   );
 
   const handleRestartScript = useCallback(
-    (scriptName: string) => {
-      pendingRestartRef.current.add(scriptName);
-      stopScriptMutation.mutate(scriptName);
+    (script: WorkspaceScript) => {
+      pendingRestartRef.current.add(scriptKey(script));
+      stopScriptMutation.mutate(script);
     },
     [stopScriptMutation],
   );
@@ -708,7 +722,7 @@ export function WorkspaceScriptsButton({
           >
             {scripts.map((script) => (
               <ScriptRow
-                key={script.scriptName}
+                key={scriptKey(script)}
                 script={script}
                 liveTerminalIdSet={liveTerminalIdSet}
                 activeConnection={activeConnection}

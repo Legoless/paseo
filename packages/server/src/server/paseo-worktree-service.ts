@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 
 import type { WorkspaceGitService } from "./workspace-git-service.js";
 import { getRealpathAwareRelativePath } from "../utils/path.js";
-import type { PersistedWorkspaceRecord } from "./workspace-registry.js";
+import type { PersistedWorkspaceMember, PersistedWorkspaceRecord } from "./workspace-registry.js";
 import type { WorkspaceProvisioningService } from "./session/workspace-provisioning/workspace-provisioning-service.js";
 import {
   createWorktreeCore,
@@ -39,6 +39,7 @@ export interface CreatePaseoWorktreeResult {
   worktree: WorktreeConfig;
   intent: WorktreeCreationIntent;
   workspace: PersistedWorkspaceRecord;
+  member: PersistedWorkspaceMember;
   repoRoot: string;
   created: boolean;
 }
@@ -102,12 +103,15 @@ async function createPaseoWorktreeWithPriority(
       expectsInitialAgent: Boolean(input.firstAgentContext),
     });
 
+    const member = workspace.members.find((candidate) => candidate.cwd === workspaceCwd);
+    if (!member) throw new Error(`Created workspace is missing its checkout at ${workspaceCwd}`);
     deps.github.invalidate({ cwd: createdWorktree.worktree.worktreePath });
 
     return {
       worktree: createdWorktree.worktree,
       intent: createdWorktree.intent,
       workspace,
+      member,
       repoRoot: createdWorktree.repoRoot,
       created: createdWorktree.created,
     };

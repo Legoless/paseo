@@ -344,7 +344,7 @@ export class DirectorySync {
     if (this.workspaceRevision !== revision) return;
     const session = useSessionStore.getState().sessions[this.serverId];
     if (!session) return;
-    this.workspaces.commitCachedWorkspace(cached.workspace, cached.project);
+    this.workspaces.commitCachedWorkspace(cached.workspace, cached.projects);
   }
 
   private loadCachedDirectory(): Promise<void> {
@@ -454,11 +454,10 @@ export class DirectorySync {
       if (completion.snapshot.legacy) {
         const store = useSessionStore.getState();
         const workspaces = buildLegacyWorkspaces(completion.snapshot.entries);
+        const snapshot: WorkspaceDirectorySnapshot = { workspaces, projects: new Map() };
+        this.buildLegacyProjectSnapshot(snapshot);
         store.setWorkspaces(this.serverId, workspaces);
-        store.setProjects(
-          this.serverId,
-          Array.from(workspaces.values(), legacyProjectDescriptorFromWorkspace),
-        );
+        store.setProjects(this.serverId, snapshot.projects.values());
         store.setHasHydratedWorkspaces(this.serverId, true);
       }
       const deltas = completion.snapshot.legacy
@@ -575,12 +574,13 @@ export class DirectorySync {
 
   private buildLegacyProjectSnapshot(snapshot: WorkspaceDirectorySnapshot): void {
     for (const workspace of snapshot.workspaces.values()) {
-      // A projectless workspace's scalar projectId is synthetic and matches no project record, so
-      // synthesizing from it would grow a ghost project for every one of them.
-      if (workspace.members.length === 0) continue;
-      if (!snapshot.projects.has(workspace.projectId)) {
-        const project = legacyProjectDescriptorFromWorkspace(workspace);
-        snapshot.projects.set(project.projectId, project);
+      for (const member of workspace.members) {
+        if (!snapshot.projects.has(member.projectId)) {
+          snapshot.projects.set(member.projectId, {
+            ...member,
+            projectKind: member.projectKind ?? "directory",
+          });
+        }
       }
     }
   }
@@ -868,17 +868,6 @@ export class DirectorySync {
   private abortPendingSessionWaits(): void {
     for (const abort of this.abortSessionWaits) abort();
   }
-}
-
-function legacyProjectDescriptorFromWorkspace(workspace: WorkspaceDescriptor): ProjectDescriptor {
-  return {
-    projectId: workspace.projectId,
-    projectKey: null,
-    projectDisplayName: workspace.projectDisplayName,
-    projectCustomName: workspace.projectCustomName ?? null,
-    projectRootPath: workspace.projectRootPath,
-    projectKind: workspace.projectKind,
-  };
 }
 
 export class DirectoryRefreshSupersededError extends Error {}

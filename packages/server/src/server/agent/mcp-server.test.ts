@@ -169,9 +169,12 @@ async function waitForWorkspaceBranch(
   workspaceId: string,
   branch: string,
 ): Promise<void> {
-  await vi.waitFor(() => expect(workspaceRecords.get(workspaceId)?.branch).toBe(branch), {
-    timeout: 5_000,
-  });
+  await vi.waitFor(
+    () => expect(workspaceRecords.get(workspaceId)?.members[0]?.branch).toBe(branch),
+    {
+      timeout: 5_000,
+    },
+  );
 }
 
 async function waitForUnexpectedWorkspaceNamingSideEffects(): Promise<void> {
@@ -751,7 +754,9 @@ function createPaseoWorktreeForMcpTest(options: {
       logger: createTestLogger(),
     }),
     emitWorkspaceUpdateForCwd: async (cwd) => {
-      const workspace = Array.from(workspaces.values()).find((record) => record.cwd === cwd);
+      const workspace = Array.from(workspaces.values()).find((record) =>
+        record.members.some((member) => member.cwd === cwd),
+      );
       options.broadcasts.push(z.string().parse(workspace?.workspaceId));
     },
     emitWorkspaceUpdateForWorkspaceId: async (workspaceId) => {
@@ -1336,7 +1341,22 @@ describe("create_agent MCP tool", () => {
       agentStorage,
       providerSnapshotManager: createOpenCodeManager().manager,
       listActiveWorkspaces: async () => [
-        { workspaceId: "wks_existing", cwd: existingCwd, kind: "worktree" },
+        {
+          workspaceId: "wks_existing",
+          members: [
+            {
+              projectId: "test-project",
+              cwd: existingCwd,
+              kind: "worktree",
+              displayName: "workspace",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
+        },
       ],
       logger,
     });
@@ -1957,7 +1977,7 @@ describe("create_agent MCP tool", () => {
       expect(branchName).toBe("workspace-auto-title-flow");
       expect(workspace).toMatchObject({
         title: "Workspace Auto Title Flow",
-        branch: "workspace-auto-title-flow",
+        members: [expect.objectContaining({ branch: "workspace-auto-title-flow" })],
       });
     } finally {
       await removeTempDir(tempDir);
@@ -2056,7 +2076,7 @@ describe("create_agent MCP tool", () => {
       expect(branchName).toBe("generated-manual-race-title");
       expect(workspace).toMatchObject({
         title: "Manual Workspace Title",
-        branch: "generated-manual-race-title",
+        members: [expect.objectContaining({ branch: "generated-manual-race-title" })],
       });
     } finally {
       await removeTempDir(tempDir);
@@ -2139,7 +2159,7 @@ describe("create_agent MCP tool", () => {
       );
       expect(workspace).toMatchObject({
         title: "Generated Workspace Title",
-        branch: "generated-workspace-title",
+        members: [expect.objectContaining({ branch: "generated-workspace-title" })],
       });
     } finally {
       await removeTempDir(tempDir);
@@ -2205,19 +2225,29 @@ describe("create_agent MCP tool", () => {
         ensureWorkspaceForCreate: async (cwd, firstAgentContext) => {
           const workspace = createPersistedWorkspaceRecord({
             workspaceId: "workspace-directory-auto-title",
-            projectId: "project-directory-auto-title",
-            cwd,
-            kind: "directory",
             displayName: "workspace",
             title: firstAgentContext?.prompt ?? null,
             createdAt: "2026-07-03T00:00:00.000Z",
             updatedAt: "2026-07-03T00:00:00.000Z",
+            members: [
+              {
+                projectId: "project-directory-auto-title",
+                cwd,
+                kind: "directory",
+                displayName: "workspace",
+                branch: null,
+                worktreeRoot: null,
+                baseBranch: null,
+                isPaseoOwnedWorktree: false,
+                mainRepoRoot: null,
+              },
+            ],
           });
           workspaceRecords.set(workspace.workspaceId, workspace);
           if (firstAgentContext) {
             workspaceAutoName.scheduleForDirectory({
               workspaceId: workspace.workspaceId,
-              cwd: workspace.cwd,
+              cwd: workspace.members[0]!.cwd,
               firstAgentContext,
             });
           }
@@ -2249,7 +2279,7 @@ describe("create_agent MCP tool", () => {
       );
       expect(workspaceRecords.get("workspace-directory-auto-title")).toMatchObject({
         title: "Directory Workspace Title",
-        branch: null,
+        members: [expect.objectContaining({ branch: null })],
       });
       expect(broadcasts).toEqual(["workspace-directory-auto-title"]);
     } finally {
@@ -2355,7 +2385,7 @@ describe("create_agent MCP tool", () => {
       ).toBe("existing-feature");
       expect(workspaceRecords.get(workspaceId)).toMatchObject({
         title: "Generated Checkout Workspace Title",
-        branch: "existing-feature",
+        members: [expect.objectContaining({ branch: "existing-feature" })],
       });
       expect(readPaseoWorktreeMetadata(agentCwd)).toMatchObject({
         version: 1,
@@ -2389,13 +2419,23 @@ describe("create_agent MCP tool", () => {
         },
         workspace: {
           workspaceId: "ws-pr-123",
-          projectId: REPO_CWD,
-          cwd: "/tmp/worktrees/pr-123",
-          kind: "worktree" as const,
           displayName: "pr-123",
           createdAt: "2026-04-30T00:00:00.000Z",
           updatedAt: "2026-04-30T00:00:00.000Z",
           archivedAt: null,
+          members: [
+            {
+              projectId: REPO_CWD,
+              cwd: "/tmp/worktrees/pr-123",
+              kind: "worktree" as const,
+              displayName: "pr-123",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
         },
         repoRoot: REPO_CWD,
         created: true,
@@ -2409,6 +2449,19 @@ describe("create_agent MCP tool", () => {
               },
             }
           : {}),
+        member: [
+          {
+            projectId: REPO_CWD,
+            cwd: "/tmp/worktrees/pr-123",
+            kind: "worktree" as const,
+            displayName: "pr-123",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ][0]!,
       }),
     );
     const workspaceGitService = {
@@ -2521,8 +2574,8 @@ describe("create_agent MCP tool", () => {
         baseBranch: "main",
       });
 
-      expect(response.structuredContent.isolation).toBe("worktree");
-      expect(response.structuredContent.cwd).toContain("tool-worktree");
+      expect(response.structuredContent.members[0].isolation).toBe("worktree");
+      expect(response.structuredContent.members[0].cwd).toContain("tool-worktree");
       expect(response.structuredContent.workspaceId).toBe(broadcasts[0]);
       expect(workspaceGitService.getSnapshot).not.toHaveBeenCalled();
       expect(setupContinuations).toEqual([undefined]);
@@ -2551,16 +2604,39 @@ describe("create_agent MCP tool", () => {
         intent: { kind: "branch-off", branchName: "project-worktree", baseBranch: "main" },
         workspace: createPersistedWorkspaceRecord({
           workspaceId: "ws-project-source",
-          projectId: project.projectId,
-          cwd: TARGET_CWD,
-          kind: "worktree",
           displayName: "project-worktree",
           title: input.title ?? null,
           createdAt: "2026-07-18T00:00:00.000Z",
           updatedAt: "2026-07-18T00:00:00.000Z",
+          members: [
+            {
+              projectId: project.projectId,
+              cwd: TARGET_CWD,
+              kind: "worktree",
+              displayName: "project-worktree",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
         }),
         repoRoot: REPO_CWD,
         created: true,
+        member: [
+          {
+            projectId: project.projectId,
+            cwd: TARGET_CWD,
+            kind: "worktree",
+            displayName: "project-worktree",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ][0]!,
       };
     };
     const server = await createAgentMcpServer({
@@ -2605,15 +2681,38 @@ describe("create_agent MCP tool", () => {
       },
       workspace: createPersistedWorkspaceRecord({
         workspaceId: "ws-selected",
-        projectId: "project-1",
-        cwd: "/tmp/worktrees/selected",
-        kind: "worktree",
         displayName: "selected",
         createdAt: "2026-07-18T00:00:00.000Z",
         updatedAt: "2026-07-18T00:00:00.000Z",
+        members: [
+          {
+            projectId: "project-1",
+            cwd: "/tmp/worktrees/selected",
+            kind: "worktree",
+            displayName: "selected",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
       repoRoot: REPO_CWD,
       created: true,
+      member: [
+        {
+          projectId: "project-1",
+          cwd: "/tmp/worktrees/selected",
+          kind: "worktree",
+          displayName: "selected",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ][0]!,
     }));
     const server = await createAgentMcpServer({
       agentManager,
@@ -2737,9 +2836,24 @@ describe("create_agent MCP tool", () => {
         worktreeSlug: "archive-tool-worktree",
         baseBranch: "main",
       });
-      const createdWorktreePath = z.string().parse(created.structuredContent.cwd);
+      const createdWorktreePath = z.string().parse(created.structuredContent.members[0].cwd);
       listActiveWorkspaces.mockImplementation(async () => [
-        { workspaceId: "ws-archive-tool-worktree", cwd: createdWorktreePath, kind: "worktree" },
+        {
+          workspaceId: "ws-archive-tool-worktree",
+          members: [
+            {
+              projectId: "test-project",
+              cwd: createdWorktreePath,
+              kind: "worktree",
+              displayName: "workspace",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
+        },
       ]);
       archiveWorkspaceRecord.mockImplementation(async () => {
         listActiveWorkspaces.mockResolvedValueOnce([]);
@@ -2850,13 +2964,43 @@ describe("create_agent MCP tool", () => {
         worktreeSlug: "archive-multi-worktree",
         baseBranch: "main",
       });
-      const worktreePath = z.string().parse(created.structuredContent.cwd);
+      const worktreePath = z.string().parse(created.structuredContent.members[0].cwd);
 
       // Populate the active workspaces with the real created path so archiveByScope
       // matches it against the worktree directory.
       activeWorkspaces = [
-        { workspaceId: "ws-mcp-A", cwd: worktreePath, kind: "worktree" as const },
-        { workspaceId: "ws-mcp-B", cwd: worktreePath, kind: "worktree" as const },
+        {
+          workspaceId: "ws-mcp-A",
+          members: [
+            {
+              projectId: "test-project",
+              cwd: worktreePath,
+              kind: "worktree" as const,
+              displayName: "workspace",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
+        },
+        {
+          workspaceId: "ws-mcp-B",
+          members: [
+            {
+              projectId: "test-project",
+              cwd: worktreePath,
+              kind: "worktree" as const,
+              displayName: "workspace",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
+        },
       ];
 
       await archiveTool.handler({
@@ -2930,12 +3074,22 @@ describe("create_agent MCP tool", () => {
     const { agentManager, agentStorage } = createTestDeps();
     const workspace = createPersistedWorkspaceRecord({
       workspaceId: "ws-feature",
-      projectId: "project-1",
-      cwd: "/tmp/paseo/worktrees/repo/feature",
-      kind: "worktree",
       displayName: "feature",
       createdAt: "2026-07-17T00:00:00.000Z",
       updatedAt: "2026-07-17T00:00:00.000Z",
+      members: [
+        {
+          projectId: "project-1",
+          cwd: "/tmp/paseo/worktrees/repo/feature",
+          kind: "worktree",
+          displayName: "feature",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
     const server = await createAgentMcpServer({
       agentManager,
@@ -2953,7 +3107,10 @@ describe("create_agent MCP tool", () => {
     const response = await tool.handler({});
 
     expect(response.structuredContent.workspaces).toEqual([
-      expect.objectContaining({ workspaceId: "ws-feature", isolation: "worktree" }),
+      expect.objectContaining({
+        workspaceId: "ws-feature",
+        members: [expect.objectContaining({ isolation: "worktree" })],
+      }),
     ]);
   });
 
@@ -3835,12 +3992,22 @@ describe("rename_workspace MCP tool", () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     const workspace = createPersistedWorkspaceRecord({
       workspaceId: "wks_parent",
-      projectId: "proj_parent",
-      cwd: REPO_CWD,
-      kind: "local_checkout",
       displayName: "main",
       createdAt: "2026-07-03T09:00:00.000Z",
       updatedAt: "2026-07-03T09:00:00.000Z",
+      members: [
+        {
+          projectId: "proj_parent",
+          cwd: REPO_CWD,
+          kind: "local_checkout",
+          displayName: "main",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
     const workspaces = new Map([[workspace.workspaceId, workspace]]);
     const upsertedWorkspaces: PersistedWorkspaceRecord[] = [];
@@ -3894,21 +4061,41 @@ describe("rename_workspace MCP tool", () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     const parentWorkspace = createPersistedWorkspaceRecord({
       workspaceId: "wks_parent",
-      projectId: "proj_parent",
-      cwd: REPO_CWD,
-      kind: "local_checkout",
       displayName: "main",
       createdAt: "2026-07-03T09:00:00.000Z",
       updatedAt: "2026-07-03T09:00:00.000Z",
+      members: [
+        {
+          projectId: "proj_parent",
+          cwd: REPO_CWD,
+          kind: "local_checkout",
+          displayName: "main",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
     const otherWorkspace = createPersistedWorkspaceRecord({
       workspaceId: "wks_other",
-      projectId: "proj_other",
-      cwd: TARGET_CWD,
-      kind: "local_checkout",
       displayName: "other",
       createdAt: "2026-07-03T09:00:00.000Z",
       updatedAt: "2026-07-03T09:00:00.000Z",
+      members: [
+        {
+          projectId: "proj_other",
+          cwd: TARGET_CWD,
+          kind: "local_checkout",
+          displayName: "other",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
     const workspaces = new Map([
       [parentWorkspace.workspaceId, parentWorkspace],
@@ -3966,13 +4153,23 @@ describe("rename_workspace MCP tool", () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     const workspace = createPersistedWorkspaceRecord({
       workspaceId: "wks_archived",
-      projectId: "proj_parent",
-      cwd: REPO_CWD,
-      kind: "local_checkout",
       displayName: "main",
       archivedAt: "2026-07-03T10:00:00.000Z",
       createdAt: "2026-07-03T09:00:00.000Z",
       updatedAt: "2026-07-03T10:00:00.000Z",
+      members: [
+        {
+          projectId: "proj_parent",
+          cwd: REPO_CWD,
+          kind: "local_checkout",
+          displayName: "main",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
     const workspaces = new Map([[workspace.workspaceId, workspace]]);
     const upsertedWorkspaces: PersistedWorkspaceRecord[] = [];
@@ -5831,4 +6028,88 @@ describe("agent snapshot MCP serialization", () => {
     expect(content).not.toContain("second answer");
     expect(content).not.toContain("first answer");
   });
+});
+
+it("workspace script tools carry explicit and caller-scoped project directories", async () => {
+  const { agentManager, agentStorage, spies } = createTestDeps();
+  const script = {
+    scriptName: "dev",
+    cwd: REPO_CWD,
+    type: "script" as const,
+    hostname: "dev",
+    port: null,
+    proxyUrl: null,
+    lifecycle: "stopped" as const,
+    health: null,
+    exitCode: null,
+    terminalId: null,
+  };
+  const workspaceScripts = {
+    list: vi.fn(async () => [script]),
+    launch: vi.fn(async () => script),
+    stop: vi.fn(async () => script),
+  };
+  const server = await createAgentMcpServer({
+    agentManager,
+    agentStorage,
+    providerSnapshotManager: createOpenCodeManager().manager,
+    workspaceScripts,
+    logger: createTestLogger(),
+  });
+  await invokeToolWithParsedInput(registeredTool(server, "list_workspace_scripts"), {
+    workspaceId: "container",
+    cwd: REPO_CWD,
+  });
+  await invokeToolWithParsedInput(registeredTool(server, "start_workspace_script"), {
+    workspaceId: "container",
+    cwd: REPO_CWD,
+    scriptName: "dev",
+  });
+  await invokeToolWithParsedInput(registeredTool(server, "stop_workspace_script"), {
+    workspaceId: "container",
+    cwd: REPO_CWD,
+    scriptName: "dev",
+  });
+  expect(workspaceScripts.list).toHaveBeenCalledWith("container", REPO_CWD);
+  expect(workspaceScripts.launch).toHaveBeenCalledWith({
+    workspaceId: "container",
+    cwd: REPO_CWD,
+    scriptName: "dev",
+  });
+  expect(workspaceScripts.stop).toHaveBeenCalledWith({
+    workspaceId: "container",
+    cwd: REPO_CWD,
+    scriptName: "dev",
+  });
+  spies.agentManager.getAgent.mockReturnValue({
+    id: "caller",
+    cwd: REPO_CWD,
+    workspaceId: "container",
+    provider: "codex",
+  } as ManagedAgent);
+  const scopedServer = await createAgentMcpServer({
+    agentManager,
+    agentStorage,
+    providerSnapshotManager: createOpenCodeManager().manager,
+    workspaceScripts,
+    callerAgentId: "caller",
+    resolveCallerContext: () => ({ lockedCwd: REPO_CWD, allowCustomCwd: true }),
+    logger: createTestLogger(),
+  });
+  await invokeToolWithParsedInput(registeredTool(scopedServer, "start_workspace_script"), {
+    workspaceId: "container",
+    scriptName: "dev",
+  });
+  expect(workspaceScripts.launch).toHaveBeenLastCalledWith({
+    workspaceId: "container",
+    cwd: REPO_CWD,
+    scriptName: "dev",
+  });
+  await expect(
+    invokeToolWithParsedInput(registeredTool(scopedServer, "stop_workspace_script"), {
+      workspaceId: "container",
+      cwd: TARGET_CWD,
+      scriptName: "dev",
+    }),
+  ).rejects.toThrow();
 });

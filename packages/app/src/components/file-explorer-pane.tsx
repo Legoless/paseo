@@ -419,8 +419,7 @@ export function FileExplorerPane({
   const { t } = useTranslation();
   const isCompact = useIsCompactFormFactor();
 
-  // Multi-project workspaces explorer-switch which member feeds the tree; the
-  // selection store falls back to the primary member, which matches the prop.
+  // Project selection feeds the workspace explorer; pane-scoped explorers supply a fixed root.
   const selectedProject = useSelectedWorkspaceProject(serverId, workspaceId ?? null);
   const normalizedWorkspaceRoot = useMemo(
     () => (fixedWorkspaceRoot ?? selectedProject.cwd ?? workspaceRoot).trim(),

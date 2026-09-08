@@ -17,12 +17,22 @@ function deferred(): { promise: Promise<void>; resolve(): void } {
 test("auto-name preserves workspace archival that lands during its metadata write", async () => {
   let workspace = createPersistedWorkspaceRecord({
     workspaceId: "workspace-auto-name",
-    projectId: "project-auto-name",
-    cwd: "/workspace",
-    kind: "directory",
     displayName: "workspace",
     createdAt: "2026-08-08T00:00:00.000Z",
     updatedAt: "2026-08-08T00:00:00.000Z",
+    members: [
+      {
+        projectId: "project-auto-name",
+        cwd: "/workspace",
+        kind: "directory",
+        displayName: "workspace",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const mutationStarted = deferred();
   const allowMutation = deferred();
@@ -50,7 +60,7 @@ test("auto-name preserves workspace archival that lands during its metadata writ
 
   autoName.scheduleForDirectory({
     workspaceId: workspace.workspaceId,
-    cwd: workspace.cwd,
+    cwd: workspace.members[0]!.cwd,
     firstAgentContext: { prompt: "Name this workspace" },
   });
   await mutationStarted.promise;

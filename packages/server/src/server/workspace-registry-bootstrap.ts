@@ -65,21 +65,17 @@ export async function bootstrapWorkspaceRegistries(options: {
   // 2027-02-15. Older worktrees did not pin branch-off/check-out branch identity.
   // Seed it from the registry value clients already display, never from live Git.
   for (const workspace of await options.workspaceRegistry.list()) {
-    if (
-      workspace.archivedAt ||
-      !workspace.isPaseoOwnedWorktree ||
-      !workspace.worktreeRoot ||
-      !workspace.branch
-    ) {
-      continue;
-    }
-    try {
-      pinPaseoWorktreeBranchIdentityIfMissing(workspace.worktreeRoot, workspace.branch);
-    } catch (error) {
-      options.logger.warn(
-        { err: error, workspaceId: workspace.workspaceId },
-        "Failed to pin legacy worktree branch identity; PR association remains disabled",
-      );
+    if (workspace.archivedAt) continue;
+    for (const member of workspace.members) {
+      if (!member.isPaseoOwnedWorktree || !member.worktreeRoot || !member.branch) continue;
+      try {
+        pinPaseoWorktreeBranchIdentityIfMissing(member.worktreeRoot, member.branch);
+      } catch (error) {
+        options.logger.warn(
+          { err: error, workspaceId: workspace.workspaceId },
+          "Failed to pin legacy worktree branch identity; PR association remains disabled",
+        );
+      }
     }
   }
 
@@ -88,11 +84,10 @@ export async function bootstrapWorkspaceRegistries(options: {
     return;
   }
 
-  const existingWorkspaceIdsByCwd = new Map(
-    (await options.workspaceRegistry.list()).map((workspace) => [
-      path.resolve(workspace.cwd),
-      workspace.workspaceId,
-    ]),
+  const existingWorkspacesByCwd = new Map(
+    (await options.workspaceRegistry.list()).flatMap((workspace) =>
+      workspace.members.map((member) => [path.resolve(member.cwd), { workspace, member }] as const),
+    ),
   );
   const records = await options.agentStorage.list();
   // A legacy agent can outlive its working directory. Reconciliation treats a
@@ -117,11 +112,15 @@ export async function bootstrapWorkspaceRegistries(options: {
     activeRecords.map(async (record) => {
       const normalizedCwd = path.resolve(record.cwd);
       const checkout = await options.workspaceGitService.getCheckout(normalizedCwd);
-      const membership = classifyDirectoryForProjectMembership({
+      const classified = classifyDirectoryForProjectMembership({
         cwd: normalizedCwd,
         checkout,
         serverId: options.serverId,
       });
+      const existing = existingWorkspacesByCwd.get(classified.checkout.cwd);
+      const membership = existing
+        ? { ...classified, projectId: existing.member.projectId }
+        : classified;
       return { record, membership, directoryKey: membership.workspaceDirectoryKey };
     }),
   );
@@ -162,7 +161,8 @@ export async function bootstrapWorkspaceRegistries(options: {
     projectRanges.set(membership.projectKey, existingProjectRange);
 
     workspaceUpsertInputs.push({
-      workspaceId: existingWorkspaceIdsByCwd.get(workspaceCwd) ?? generateWorkspaceId(),
+      workspaceId:
+        existingWorkspacesByCwd.get(workspaceCwd)?.workspace.workspaceId ?? generateWorkspaceId(),
       membership,
       workspaceCwd,
       createdAt,
@@ -178,17 +178,29 @@ export async function bootstrapWorkspaceRegistries(options: {
           updatedAt: null,
         };
         return [
-          options.workspaceRegistry.upsert(
-            createPersistedWorkspaceRecord({
-              workspaceId,
-              projectId: membership.projectId,
-              cwd: workspaceCwd,
-              kind: membership.workspaceKind,
-              displayName: membership.workspaceDisplayName,
-              createdAt,
-              updatedAt,
-            }),
-          ),
+          existingWorkspacesByCwd.has(workspaceCwd)
+            ? undefined
+            : options.workspaceRegistry.upsert(
+                createPersistedWorkspaceRecord({
+                  workspaceId,
+                  displayName: membership.workspaceDisplayName,
+                  members: [
+                    {
+                      projectId: membership.projectId,
+                      cwd: workspaceCwd,
+                      kind: membership.workspaceKind,
+                      displayName: membership.workspaceDisplayName,
+                      branch: membership.checkout.currentBranch,
+                      worktreeRoot: membership.checkout.worktreeRoot,
+                      baseBranch: null,
+                      isPaseoOwnedWorktree: membership.checkout.isPaseoOwnedWorktree,
+                      mainRepoRoot: membership.checkout.mainRepoRoot,
+                    },
+                  ],
+                  createdAt,
+                  updatedAt,
+                }),
+              ),
           options.projectRegistry.upsert(
             createPersistedProjectRecord({
               projectId: membership.projectId,

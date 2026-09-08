@@ -23,37 +23,67 @@ class WorkspaceStatus {
 
   private readonly workspace: PersistedWorkspaceRecord = {
     workspaceId: "workspace-1",
-    projectId: this.project.projectId,
-    cwd: this.project.rootPath,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: NOW,
     updatedAt: NOW,
     archivedAt: null,
+    members: [
+      {
+        projectId: this.project.projectId,
+        cwd: this.project.rootPath,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   };
 
   private readonly worktreeWorkspace: PersistedWorkspaceRecord = {
     workspaceId: "workspace-worktree",
-    projectId: this.project.projectId,
-    cwd: "/workspace/project/.paseo/worktrees/feature",
-    kind: "worktree",
     displayName: "feature",
     createdAt: NOW,
     updatedAt: NOW,
     archivedAt: null,
+    members: [
+      {
+        projectId: this.project.projectId,
+        cwd: "/workspace/project/.paseo/worktrees/feature",
+        kind: "worktree",
+        displayName: "feature",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   };
 
   // Second workspace sharing the SAME cwd as `workspace`. Created later so the
   // deterministic-oldest fallback never attributes a stamped agent to it by cwd.
   private readonly sameCwdWorkspace: PersistedWorkspaceRecord = {
     workspaceId: "workspace-1-sibling",
-    projectId: this.project.projectId,
-    cwd: this.project.rootPath,
-    kind: "local_checkout",
     displayName: "main-2",
     createdAt: "2026-03-02T12:00:00.000Z",
     updatedAt: "2026-03-02T12:00:00.000Z",
     archivedAt: null,
+    members: [
+      {
+        projectId: this.project.projectId,
+        cwd: this.project.rootPath,
+        kind: "local_checkout",
+        displayName: "main-2",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   };
 
   private readonly workspaces = [this.workspace];
@@ -75,13 +105,13 @@ class WorkspaceStatus {
     isProviderVisibleToClient: () => true,
     buildWorkspaceDescriptor: async ({ workspace }) => ({
       id: workspace.workspaceId,
-      projectId: workspace.projectId,
+      projectId: workspace.members[0].projectId,
       projectDisplayName: "project",
       projectCustomName: null,
       projectRootPath: this.project.rootPath,
-      workspaceDirectory: workspace.cwd,
+      workspaceDirectory: workspace.members[0].cwd,
       projectKind: "git",
-      workspaceKind: workspace.kind,
+      workspaceKind: workspace.members[0].kind,
       name: workspace.displayName,
       archivingAt: null,
       status: "done",
@@ -97,7 +127,7 @@ class WorkspaceStatus {
     this.agents.push(
       createAgent({
         ...input,
-        cwd: this.workspace.cwd,
+        cwd: this.workspace.members[0].cwd,
         workspaceId: this.workspace.workspaceId,
       }),
     );
@@ -112,7 +142,7 @@ class WorkspaceStatus {
   // computed per id: only the owning workspace reflects this agent's bucket.
   hasStampedRootAgent(input: AgentState & { workspaceId: string }): void {
     this.agents.push(
-      createAgent({ ...input, cwd: this.workspace.cwd, workspaceId: input.workspaceId }),
+      createAgent({ ...input, cwd: this.workspace.members[0].cwd, workspaceId: input.workspaceId }),
     );
   }
 
@@ -120,7 +150,7 @@ class WorkspaceStatus {
     this.agents.push(
       createAgent({
         ...input,
-        cwd: this.workspace.cwd,
+        cwd: this.workspace.members[0].cwd,
         workspaceId: this.workspace.workspaceId,
         labels: { [PARENT_AGENT_ID_LABEL]: "parent-agent" },
       }),
@@ -139,7 +169,7 @@ class WorkspaceStatus {
     this.agents.push(
       createAgent({
         ...input,
-        cwd: this.worktreeWorkspace.cwd,
+        cwd: this.worktreeWorkspace.members[0].cwd,
         workspaceId: this.worktreeWorkspace.workspaceId,
         labels: { [PARENT_AGENT_ID_LABEL]: "parent-agent" },
       }),
@@ -150,7 +180,7 @@ class WorkspaceStatus {
     this.agents.push(
       createAgent({
         ...input,
-        cwd: this.worktreeWorkspace.cwd,
+        cwd: this.worktreeWorkspace.members[0].cwd,
         workspaceId: this.worktreeWorkspace.workspaceId,
       }),
     );
@@ -174,7 +204,7 @@ class WorkspaceStatus {
 
   hasWorkingTerminal(changedAt: number): void {
     this.terminals.push({
-      cwd: this.workspace.cwd,
+      cwd: this.workspace.members[0].cwd,
       workspaceId: this.workspace.workspaceId,
       activity: { state: "working", changedAt },
     });
@@ -185,7 +215,7 @@ class WorkspaceStatus {
   // reflects this terminal's activity.
   hasStampedWorkingTerminal(input: { workspaceId: string; changedAt: number }): void {
     this.terminals.push({
-      cwd: this.workspace.cwd,
+      cwd: this.workspace.members[0].cwd,
       workspaceId: input.workspaceId,
       activity: { state: "working", changedAt: input.changedAt },
     });
@@ -195,7 +225,7 @@ class WorkspaceStatus {
   // (stamped at creation); the subdir cwd is cosmetic, ownership is the id.
   hasWorkingTerminalInSubdirectory(changedAt: number): void {
     this.terminals.push({
-      cwd: `${this.workspace.cwd}/packages/app`,
+      cwd: `${this.workspace.members[0].cwd}/packages/app`,
       workspaceId: this.workspace.workspaceId,
       activity: { state: "working", changedAt },
     });
@@ -203,7 +233,7 @@ class WorkspaceStatus {
 
   hasIdleTerminal(changedAt: number): void {
     this.terminals.push({
-      cwd: this.workspace.cwd,
+      cwd: this.workspace.members[0].cwd,
       workspaceId: this.workspace.workspaceId,
       activity: { state: "idle", changedAt },
     });
@@ -211,7 +241,7 @@ class WorkspaceStatus {
 
   hasFinishedTerminal(changedAt: number): void {
     this.terminals.push({
-      cwd: this.workspace.cwd,
+      cwd: this.workspace.members[0].cwd,
       workspaceId: this.workspace.workspaceId,
       activity: { state: "idle", attentionReason: "finished", changedAt },
     });
@@ -219,7 +249,7 @@ class WorkspaceStatus {
 
   hasUnknownTerminal(): void {
     this.terminals.push({
-      cwd: this.workspace.cwd,
+      cwd: this.workspace.members[0].cwd,
       workspaceId: this.workspace.workspaceId,
       activity: null,
     });
@@ -564,13 +594,13 @@ describe("WorkspaceDirectory empty projects", () => {
       isProviderVisibleToClient: () => true,
       buildWorkspaceDescriptor: async ({ workspace }) => ({
         id: workspace.workspaceId,
-        projectId: workspace.projectId,
+        projectId: workspace.members[0].projectId,
         projectDisplayName: "project",
         projectCustomName: null,
         projectRootPath: "/workspace/project",
-        workspaceDirectory: workspace.cwd,
+        workspaceDirectory: workspace.members[0].cwd,
         projectKind: "non_git",
-        workspaceKind: workspace.kind,
+        workspaceKind: workspace.members[0].kind,
         name: workspace.displayName,
         archivingAt: null,
         status: "done",
@@ -626,10 +656,20 @@ describe("WorkspaceDirectory empty projects", () => {
       workspaces: [
         {
           workspaceId: "ws-1",
-          projectId: "with-ws",
-          cwd: "/workspace/with-ws",
-          kind: "directory",
           displayName: "main",
+          members: [
+            {
+              projectId: "with-ws",
+              cwd: "/workspace/with-ws",
+              kind: "directory",
+              displayName: "main",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
           createdAt: NOW,
           updatedAt: NOW,
           archivedAt: null,

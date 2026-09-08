@@ -84,9 +84,15 @@ export function setupAutoArchiveOnMerge(
         return;
       }
 
-      const attachedWorkspaces = (await options.listActiveWorkspaces()).filter(
-        (workspace) => deps.resolvePath(workspace.cwd) === snapshotCwd,
-      );
+      const attachedWorkspaces = [];
+      for (const workspace of await options.listActiveWorkspaces()) {
+        // A merged member must not close unrelated projects or panes in its container.
+        let matches = workspace.members.length > 0;
+        for (const member of workspace.members) {
+          if (deps.resolvePath(member.cwd) !== snapshotCwd) matches = false;
+        }
+        if (matches) attachedWorkspaces.push(workspace);
+      }
       for (const workspace of attachedWorkspaces) {
         await deps.archiveIfSafe({
           workspaceId: workspace.workspaceId,

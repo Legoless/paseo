@@ -28,9 +28,9 @@ function resolveLegacyWorkspaceOwner(
 ): string | null {
   const normalizedCwd = resolve(cwd);
   const userHome = resolve(homedir());
-  const candidateWorkspaces = Array.from(workspaces).filter(
-    (workspace) => options?.includeArchived === true || !workspace.archivedAt,
-  );
+  const candidateWorkspaces = Array.from(workspaces)
+    .filter((workspace) => options?.includeArchived === true || !workspace.archivedAt)
+    .flatMap((workspace) => workspace.members.map((member) => ({ ...workspace, cwd: member.cwd })));
   const exactMatches = candidateWorkspaces.filter(
     (workspace) => resolve(workspace.cwd) === normalizedCwd,
   );

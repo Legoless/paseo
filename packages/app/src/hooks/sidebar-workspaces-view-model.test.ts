@@ -65,6 +65,17 @@ function workspaceWithForge(forge: string | undefined, prUrl: string): Workspace
 }
 
 describe("createSidebarWorkspaceEntry forge threading", () => {
+  it("shows a shared workspace once even when it belongs to several project groups", () => {
+    const model = buildSidebarWorkspacePlacementModel({
+      projects: [
+        project({ projectKey: "project-a", workspaceKeys: ["srv:shared"] }),
+        project({ projectKey: "project-b", workspaceKeys: ["srv:shared"] }),
+      ],
+    });
+    expect(model.workspaces.map((entry) => entry.workspaceKey)).toEqual(["srv:shared"]);
+    expect(model.projects.map((entry) => entry.workspaces.length)).toEqual([1, 1]);
+  });
+
   it("threads a gitlab summary forge onto the prHint", () => {
     const entry = createSidebarWorkspaceEntry({
       serverId: "srv",
@@ -100,8 +111,8 @@ describe("createSidebarWorkspaceEntry workspace directory label", () => {
 
   it("uses the daemon-provided slug for a Paseo-owned worktree", () => {
     const descriptor = workspaceWithForge(undefined, "https://github.com/acme/repo/pull/42");
-    descriptor.workspaceDirectory = "/worktrees/feature/packages/app";
-    descriptor.worktreeSlug = "feature";
+    descriptor.members[0]!.workspaceDirectory = "/worktrees/feature/packages/app";
+    descriptor.members[0]!.worktreeSlug = "feature";
 
     const entry = createSidebarWorkspaceEntry({ serverId: "srv", workspace: descriptor });
 
@@ -110,7 +121,7 @@ describe("createSidebarWorkspaceEntry workspace directory label", () => {
 
   it("shortens the workspace path when the daemon omits a worktree slug", () => {
     const descriptor = workspaceWithForge(undefined, "https://github.com/acme/repo/pull/42");
-    descriptor.workspaceDirectory = "/home/alice/external/feature";
+    descriptor.members[0]!.workspaceDirectory = "/home/alice/external/feature";
 
     const entry = createSidebarWorkspaceEntry({ serverId: "srv", workspace: descriptor });
 

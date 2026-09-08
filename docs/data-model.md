@@ -2,7 +2,7 @@
 
 ## Project identity
 
-Projects are allocated for the exact root selected by the caller, normalized lexically with `path.resolve` (never `realpath`). New project IDs are opaque `prj_<16 hex>` values. Existing remote-shaped or path-shaped IDs are retained as readable compatibility records and are never rekeyed. An active exact root is idempotent; archived-only matches do not resurrect an old project. Workspace `projectId` is stable membership: reconciliation may update git-derived kind and branch metadata, but never rehomes a workspace or changes a project's root, ID, or default name.
+Projects are allocated for the exact root selected by the caller, normalized lexically with `path.resolve` (never `realpath`). New project IDs are opaque `prj_<16 hex>` values. Existing remote-shaped or path-shaped IDs are retained as readable compatibility records and are never rekeyed. An active exact root is idempotent; archived-only matches do not resurrect an old project. Member `projectId` is stable membership: reconciliation may update git-derived kind and branch metadata, but never rehomes a workspace or changes a project's root, ID, or default name.
 
 `projectKey` is a persisted, opaque equivalence key used only to group the same logical project
 across hosts. It is separate from the host-local `projectId`; today's producer prefers a normalized
@@ -12,23 +12,16 @@ older records where the field is absent—there is no migration.
 
 `kind` and `projectKey` are mutable metadata, not identity. Workspace reconciliation watches active project roots and
 updates those fields and `updatedAt` when Git facts change, preserving the project's ID, root path,
-names, and workspace foreign keys. Attached workspaces are independently refreshed
+names, and member foreign keys. Attached members are independently refreshed
 from their own cwd, so an explicit project root never implies a workspace checkout. Empty projects
 are observed too.
 
-The workspace registry model defines placement once: initial directory/worktree construction,
-mutable reconciliation fields, and the persisted-to-wire checkout projection. Its update policy
-preserves `displayName` and `baseBranch`. `WorkspaceProvisioningService` owns the corresponding
-registry writes, so directory opens, agent imports, and worktree creation all enter through that
-service instead of constructing records independently. The workspace record is then the durable
-placement authority: `cwd` is the exact execution directory, while `worktreeRoot` is the backing
-checkout root. They intentionally differ for an exact subproject inside a worktree. Archive,
-restore, branch auto-name, and descriptor flows consume those persisted facts rather than
-rediscovering ownership from a directory that may already be gone. Reconciliation may refresh
-mutable placement facts, but never changes `projectId`, `cwd`, `displayName`, or `baseBranch`.
-Workspace archive runs lifecycle teardown from the exact `cwd` but removes only the backing
-`worktreeRoot` after its last active reference disappears. Worktree recovery recreates that backing
-checkout from `mainRepoRoot`, then restores the relative path from `worktreeRoot` to `cwd`.
+Workspace placement belongs to members, never to the container. Each member persists its exact
+execution `cwd` separately from its backing `worktreeRoot`; an exact subproject can differ from the
+checkout root. Archive and recovery use those persisted facts even after the worktree is deleted.
+Teardown runs from the member's `cwd` and removes a managed `worktreeRoot` only after its last active
+reference disappears. Recovery restores the relative path from that root to the execution directory.
+Reconciliation updates member Git facts without changing project identity or the workspace name.
 
 Paseo uses **file-based JSON persistence** instead of a traditional database. All data is validated at runtime with Zod schemas. Most stores write atomically (write to temp file, then rename); a few still use plain `writeFile` — see each section. There is no schema-versioning/migration framework — schemas rely on optional fields with defaults for forward compatibility, with a small amount of inline normalization in `persisted-config.ts` for legacy provider/speech entries.
 
@@ -427,7 +420,7 @@ project.
 
 Active exact roots are idempotent using lexical platform-equivalence semantics. Existing legacy
 remote-shaped and path-shaped IDs remain readable, including duplicate roots; reconciliation never
-merges them, transfers names, archives them, or moves workspace foreign keys. An explicit
+merges them, transfers names, archives them, or moves member foreign keys. An explicit
 workspace `projectId` is authoritative when it names an active project, regardless of cwd
 containment. Archived-only exact-root records are not resurrected by explicit add/open; a fresh
 opaque project is allocated instead. Agent restore is separate and restores the agent's existing
@@ -439,36 +432,31 @@ workspace together with its owning project.
 
 **Path:** `$PASEO_HOME/projects/workspaces.json`
 
-Array of workspace records. A workspace is a named container holding one or more workspace projects (members); each member is a specific working directory within a project.
+A workspace is an independent named container with zero or more project memberships. It has no
+root project, working directory, or Git branch. Adding, moving, or removing members preserves the
+container's identity and name; removing the last member leaves an empty workspace.
 
-| Field                          | Type                                            | Description                                                                                                                                                                                   |
-| ------------------------------ | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workspaceId`                  | `string`                                        | Opaque stable identifier (`wks_<hex>`), generated independently of the directory. MUST NOT be treated as a path; compare by exact equality. Use the `cwd` field for directory access.         |
-| `projectId`                    | `string`                                        | FK to Project.projectId; mirrors the primary member's project                                                                                                                                 |
-| `cwd`                          | `string`                                        | Primary member's exact execution directory; the default for agents, files, scripts, and setup                                                                                                 |
-| `kind`                         | `"local_checkout" \| "worktree" \| "directory"` | Mutable checkout classification                                                                                                                                                               |
-| `displayName`                  | `string`                                        | The human name (the generated/derived title). Decoupled from `branch` by construction.                                                                                                        |
-| `title`                        | `string \| null`                                | User-set name override layered over `displayName`. Null means "use `displayName`".                                                                                                            |
-| `branch`                       | `string \| null`                                | The current Git branch for git-backed workspaces. Separate from `displayName`/`title`; a background branch refresh never rewrites the name.                                                   |
-| `worktreeRoot`                 | `string \| null`                                | Backing checkout/worktree root. May differ from `cwd` for exact subprojects and remains persisted after the worktree is deleted so restore can reproduce the placement.                       |
-| `baseBranch`                   | `string \| null`                                | Normalized branch the Paseo worktree was created from; null for directories, local checkouts, and checkout-branch worktrees                                                                   |
-| `isPaseoOwnedWorktree`         | `boolean`                                       | Whether Paseo owns and may remove/recreate the backing `worktreeRoot`                                                                                                                         |
-| `mainRepoRoot`                 | `string \| null`                                | Main repository root for worktree checkouts, independent of both exact `cwd` and backing `worktreeRoot`                                                                                       |
-| `createdAt`                    | `string` (ISO 8601)                             |                                                                                                                                                                                               |
-| `updatedAt`                    | `string` (ISO 8601)                             |                                                                                                                                                                                               |
-| `archivedAt`                   | `string \| null` (ISO 8601)                     | Soft-delete; required nullable                                                                                                                                                                |
-| `autoArchivedChangeRequestUrl` | `string \| null`                                | Change request whose merged state triggered auto-archive. Restore replaces it with the current merged change request, when present, so repeated snapshots cannot archive the workspace again. |
-| `labels`                       | `string[]?`                                     | Normalized display names assigned from this host's shared label catalog. Missing means unlabelled.                                                                                            |
-| `pinnedAt`                     | `string \| null` (ISO 8601)                     | Pinned-to-top-of-sidebar timestamp; null means "not pinned"                                                                                                                                   |
-| `members`                      | `WorkspaceProject[]?`                           | Ordered project placements (below). Missing means one implicit member derived from the scalar fields; an explicit `[]` is a projectless workspace. COMPAT(workspaceMembers): added in v0.7.0. |
+The record holds `workspaceId`, `displayName`, `title`, `members`, creation/update/archive timestamps,
+`autoArchivedChangeRequestUrl`, `pinnedAt`, and optional `labels`. `workspaceId` is opaque identity,
+never a filesystem path.
 
 ### Workspace projects (members)
 
-Each member carries the placement fields the record carries scalar: `projectId`, `cwd`, `kind`, `displayName`, `branch`, `worktreeRoot`, `baseBranch`, `isPaseoOwnedWorktree`, `mainRepoRoot`. The first member is primary: the scalar fields and the primary member always carry the same values, whichever side a write lands on, because older daemons and clients read only the scalars. `workspaceMembers()` in `packages/server/src/server/workspace-registry-model.ts` is the read path; it derives the implicit member when the field is absent, so existing files need no migration.
+Each member owns `projectId`, `cwd`, `kind`, `displayName`, `branch`, `worktreeRoot`, `baseBranch`,
+`isPaseoOwnedWorktree`, and `mainRepoRoot`. No member is primary. Commands that need a project use
+an explicit member directory; a workspace with several projects cannot silently select one.
 
-Agents bind to the workspace by `workspaceId` and run in any member `cwd` (default: the primary's). Archive tears down every member — agents and terminals by `workspaceId`, each member's Paseo-owned worktree by its own placement facts. Removing a project strips non-primary memberships from workspaces and archives a workspace only when its last member disappears.
+The registry normalizes legacy records on read. An explicit member list, including `[]`, is
+complete. Only a missing list derives membership from the old scalar placement. Known synthetic
+members whose project ID equals an opaque `wks_<hex>` workspace ID are discarded. Legacy
+path-shaped project and workspace IDs may match and remain valid. Normalized writes contain no
+scalar placement fields. Old wire descriptors still carry a tagged compatibility projection for
+clients that require those fields; runtime ownership never reads that projection.
 
-> **Opaque-ID invariant:** `workspaceId` is opaque identity, never a filesystem path. Filesystem and git operations take `cwd`/`workspaceDirectory` only — never the id. A compatibility-only first-materialization bootstrap still groups pre-registry agent records by path and Git remote so existing installs retain their legacy records. That grouping never runs against a live registry, and its keys are not runtime project or workspace identity.
+Agents bind to `workspaceId` and retain their own execution directory. Directory listings and live
+updates resolve each agent's member, so a missing project record cannot remove a healthy agent.
+Archive tears down every member's resources. Removing a project removes its memberships and
+associated agents, preserving the containers and their other members.
 
 ### Workspace label catalog
 

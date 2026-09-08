@@ -1,3 +1,4 @@
+import { areEquivalentPaths } from "../utils/path.js";
 import { v4 as uuidv4 } from "uuid";
 import type { Logger } from "pino";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
@@ -845,7 +846,8 @@ async function acquireWorkspaceScriptTerminal(params: {
   } = params;
   let reusableTerminal: TerminalSession | null = null;
   if (!serviceScript && existingRuntimeEntry?.terminalId) {
-    reusableTerminal = terminalManager.getTerminal(existingRuntimeEntry.terminalId) ?? null;
+    const candidate = terminalManager.getTerminal(existingRuntimeEntry.terminalId);
+    if (candidate && areEquivalentPaths(candidate.cwd, repoRoot)) reusableTerminal = candidate;
   }
   const terminal =
     reusableTerminal ??
@@ -937,6 +939,7 @@ export async function spawnWorkspaceScript(
 
     runtimeStore.set({
       workspaceId,
+      cwd: repoRoot,
       scriptName,
       type: scriptType,
       lifecycle: "running",
@@ -959,6 +962,7 @@ export async function spawnWorkspaceScript(
       }
       runtimeStore.set({
         workspaceId,
+        cwd: repoRoot,
         scriptName,
         type: scriptType,
         lifecycle: "stopped",

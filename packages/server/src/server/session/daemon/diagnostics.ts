@@ -197,7 +197,12 @@ async function collectWorkspaceEntries(
     },
     {
       label: "Workspaces by kind",
-      value: formatCountMap(countBy(activeWorkspaces, (workspace) => workspace.kind)),
+      value: formatCountMap(
+        countBy(
+          activeWorkspaces.flatMap((workspace) => workspace.members),
+          (member) => member.kind,
+        ),
+      ),
     },
   ];
 }

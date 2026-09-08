@@ -17,16 +17,16 @@ export function buildWorkspaceArchiveRedirectRoute(input: {
 
   const archivedWorkspace =
     Array.from(input.workspaces).find((workspace) => workspace.id === archivedWorkspaceId) ?? null;
-  const sourceDirectory =
-    archivedWorkspace?.projectRootPath || archivedWorkspace?.workspaceDirectory;
-  if (!sourceDirectory) {
+  const member = archivedWorkspace?.members.length === 1 ? archivedWorkspace.members[0] : null;
+  const sourceDirectory = member?.projectRootPath || member?.workspaceDirectory;
+  if (!member || !sourceDirectory) {
     return buildHostRootRoute(input.serverId);
   }
 
   return buildNewWorkspaceRoute({
     serverId: input.serverId,
     sourceDirectory,
-    displayName: archivedWorkspace.projectDisplayName,
-    projectId: archivedWorkspace.projectId,
+    displayName: member.projectDisplayName,
+    projectId: member.projectId,
   });
 }

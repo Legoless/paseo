@@ -10,6 +10,43 @@ import {
 } from "./messages.js";
 
 describe("workspace message schemas", () => {
+  test("accepts an empty workspace without a synthetic project identity", () => {
+    const workspace = WorkspaceDescriptorPayloadSchema.parse({
+      id: "wks_empty",
+      name: "Web",
+      projectId: "",
+      projectDisplayName: "",
+      projectRootPath: "",
+      workspaceDirectory: "",
+      projectKind: "non_git",
+      workspaceKind: "directory",
+      members: [],
+      membersAuthoritative: true,
+      status: "done",
+      activityAt: null,
+      diffStat: null,
+      scripts: [],
+    });
+    expect(workspace.members).toEqual([]);
+    expect(workspace.projectId).toBe("");
+    expect(workspace.membersAuthoritative).toBe(true);
+  });
+
+  test("preserves an optional project directory on script requests", () => {
+    for (const type of [
+      "workspace.script.list.request",
+      "workspace.script.start.request",
+      "workspace.script.stop.request",
+      "start_workspace_script_request",
+    ]) {
+      const legacy = { type, workspaceId: "workspace", scriptName: "dev", requestId: "request" };
+      expect(SessionInboundMessageSchema.parse(legacy)).not.toHaveProperty("cwd");
+      expect(SessionInboundMessageSchema.parse({ ...legacy, cwd: "/repo/second" })).toMatchObject({
+        cwd: "/repo/second",
+      });
+    }
+  });
+
   test("parses fetch_workspaces_request", () => {
     const parsed = SessionInboundMessageSchema.parse({
       type: "fetch_workspaces_request",

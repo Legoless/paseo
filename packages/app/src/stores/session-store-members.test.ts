@@ -9,6 +9,7 @@ const SCALARS = {
   projectDisplayName: "repo",
   projectCustomName: null,
   projectRootPath: "/repo",
+  projectKind: "git" as const,
   workspaceDirectory: "/repo",
   workspaceKind: "worktree" as const,
   gitRuntime: null,

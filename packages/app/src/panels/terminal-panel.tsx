@@ -42,7 +42,8 @@ function useTerminalPanelDescriptor(
     context.serverId,
     context.workspaceId,
     (workspace) => ({
-      workspaceDirectory: workspace.workspaceDirectory,
+      workspaceDirectory:
+        workspace.members.length === 1 ? workspace.members[0]!.workspaceDirectory : null,
       memberCount: workspace.members.length,
     }),
   );
@@ -89,8 +90,8 @@ function TerminalPanel() {
   const { isWorkspaceFocused, isPaneFocused } = usePaneFocus();
   invariant(target.kind === "terminal", "TerminalPanel requires terminal target");
   const workspaceFields = useWorkspaceFields(serverId, workspaceId, (w) => ({
-    workspaceDirectory: w.workspaceDirectory,
-    isGitCheckout: w.projectKind === "git",
+    workspaceDirectory: w.members.length === 1 ? w.members[0]!.workspaceDirectory : null,
+    members: w.members,
     memberCount: w.members.length,
   }));
   const primaryWorkspaceDirectory = workspaceFields?.workspaceDirectory || null;
@@ -116,7 +117,9 @@ function TerminalPanel() {
   );
   const terminal = terminalsQuery.data?.terminals.find((entry) => entry.id === target.terminalId);
   const workspaceDirectory = terminal?.cwd ?? primaryWorkspaceDirectory;
-  const isGitCheckout = workspaceFields?.isGitCheckout ?? false;
+  const isGitCheckout =
+    workspaceFields?.members.find((member) => member.workspaceDirectory === workspaceDirectory)
+      ?.projectKind === "git";
   const openCompactFileExplorer = usePanelStore((state) => state.openCompactFileExplorer);
   const handleOpenFileExplorer = useCallback(() => {
     if (!workspaceDirectory) {

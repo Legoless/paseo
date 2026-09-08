@@ -1,7 +1,6 @@
 import { homedir } from "node:os";
 import { resolve, sep } from "node:path";
 
-import { isProjectlessWorkspace } from "./workspace-registry-model.js";
 import type { PersistedWorkspaceRecord } from "./workspace-registry.js";
 
 // external path→workspace adapter, not ownership.
@@ -19,13 +18,12 @@ export function resolveWorkspaceIdForPath(
   cwd: string,
   workspaces: Iterable<PersistedWorkspaceRecord>,
 ): string | null {
-  // COMPAT(workspaceProjectless): added in v0.8.0. A projectless workspace owns
-  // no directory; its scalar cwd is the home directory only so pre-v0.8.0
-  // clients can parse the descriptor. Several share that one path, so letting
-  // them match here would archive an arbitrary empty workspace when a client
-  // asks about the home directory. The prefix loop below already skips home.
-  const workspaceRecords = Array.from(workspaces).filter(
-    (workspace) => !isProjectlessWorkspace(workspace),
+  const workspaceRecords = Array.from(workspaces).flatMap((workspace) =>
+    workspace.members.map((member) => ({
+      ...member,
+      workspaceId: workspace.workspaceId,
+      archivedAt: workspace.archivedAt,
+    })),
   );
   const resolvedCwd = resolve(cwd);
   const exactMatch = workspaceRecords.find((workspace) => resolve(workspace.cwd) === resolvedCwd);
@@ -35,7 +33,7 @@ export function resolveWorkspaceIdForPath(
 
   const userHome = resolve(homedir());
   let bestMatchLength = 0;
-  let bestMatch: PersistedWorkspaceRecord | null = null;
+  let bestMatch: { workspaceId: string } | null = null;
   for (const workspace of workspaceRecords) {
     if (workspace.archivedAt) continue;
     const workspaceCwd = resolve(workspace.cwd);

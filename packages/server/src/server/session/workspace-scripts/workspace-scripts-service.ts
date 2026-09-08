@@ -13,6 +13,7 @@ import type { WorkspaceGitService } from "../../workspace-git-service.js";
 import type {
   PersistedProjectRecord,
   PersistedWorkspaceRecord,
+  PersistedWorkspaceMember,
   ProjectRegistry,
   WorkspaceRegistry,
 } from "../../workspace-registry.js";
@@ -26,6 +27,8 @@ import {
 } from "../../script-status-projection.js";
 import { deriveProjectServiceSlug, deriveProjectSlug } from "../../workspace-git-metadata.js";
 import type { PaseoServicePortAllocation } from "@getpaseo/protocol/paseo-config-schema";
+
+import { areEquivalentPaths } from "../../../utils/path.js";
 
 type WorkspaceScriptsPayload = WorkspaceDescriptorPayload["scripts"];
 
@@ -42,11 +45,20 @@ export interface WorkspaceScriptsService {
   buildSnapshot(
     workspace: PersistedWorkspaceRecord,
     project?: PersistedProjectRecord | null,
+    cwd?: string,
   ): WorkspaceScriptsPayload;
   emitStatusUpdate(workspaceId: string, workspaceDirectory: string): Promise<void>;
-  list(workspaceId: string): Promise<WorkspaceScriptPayload[]>;
-  launch(input: { workspaceId: string; scriptName: string }): Promise<WorkspaceScriptPayload>;
-  stop(input: { workspaceId: string; scriptName: string }): Promise<WorkspaceScriptPayload>;
+  list(workspaceId: string, cwd?: string): Promise<WorkspaceScriptPayload[]>;
+  launch(input: {
+    workspaceId: string;
+    scriptName: string;
+    cwd?: string;
+  }): Promise<WorkspaceScriptPayload>;
+  stop(input: {
+    workspaceId: string;
+    scriptName: string;
+    cwd?: string;
+  }): Promise<WorkspaceScriptPayload>;
   start(request: StartWorkspaceScriptRequest): Promise<void>;
 }
 
@@ -86,7 +98,7 @@ export function createWorkspaceScriptsService(deps: {
   } = deps;
 
   function resolveGitMetadata(
-    workspace: PersistedWorkspaceRecord,
+    workspace: PersistedWorkspaceMember,
     project: { projectId: string; rootPath: string } | null,
   ) {
     const snapshot = workspaceGitService.peekSnapshot(workspace.cwd);
@@ -109,31 +121,49 @@ export function createWorkspaceScriptsService(deps: {
   function buildSnapshot(
     workspace: PersistedWorkspaceRecord,
     project: PersistedProjectRecord | null = null,
+    cwd?: string,
   ): WorkspaceScriptsPayload {
+    if (!cwd)
+      return workspace.members.flatMap((member) => buildSnapshot(workspace, null, member.cwd));
+    const member = workspace.members.find((candidate) => areEquivalentPaths(candidate.cwd, cwd));
+    if (!member) return [];
     if (!serviceProxy || !scriptRuntimeStore) {
       return [];
     }
     return buildWorkspaceScriptPayloads({
       workspaceId: workspace.workspaceId,
-      workspaceDirectory: workspace.cwd,
-      paseoConfig: readPaseoConfigForProjection(workspace.cwd, logger),
+      workspaceDirectory: member.cwd,
+      paseoConfig: readPaseoConfigForProjection(member.cwd, logger),
       serviceProxy,
       runtimeStore: scriptRuntimeStore,
       daemonPort: getDaemonTcpPort?.() ?? null,
       serviceProxyPublicBaseUrl,
-      gitMetadata: resolveGitMetadata(workspace, project),
+      gitMetadata: resolveGitMetadata(
+        member,
+        project ?? {
+          projectId: member.projectId,
+          rootPath: member.mainRepoRoot ?? member.worktreeRoot ?? member.cwd,
+        },
+      ),
       resolveHealth: resolveScriptHealth ?? undefined,
-    });
+    }).map((script) => Object.assign(script, { cwd: member.cwd }));
   }
 
-  async function emitStatusUpdate(workspaceId: string, _workspaceDirectory: string): Promise<void> {
+  async function emitStatusUpdate(workspaceId: string, workspaceDirectory: string): Promise<void> {
     try {
       const workspace = await workspaceRegistry.get(workspaceId);
       if (!workspace) return;
-      const project = await projectRegistry.get(workspace.projectId);
+      const member = workspace.members.find((candidate) =>
+        areEquivalentPaths(candidate.cwd, workspaceDirectory),
+      );
+      const project = member ? await projectRegistry.get(member.projectId) : null;
       emit({
         type: "script_status_update",
-        payload: { workspaceId, scripts: buildSnapshot(workspace, project) },
+        payload: {
+          workspaceId,
+          cwd: workspaceDirectory,
+          scripts: buildSnapshot(workspace, project, workspaceDirectory),
+        },
       });
     } catch (error) {
       logger.warn({ err: error, workspaceId }, "Failed to project workspace script status");
@@ -148,6 +178,22 @@ export function createWorkspaceScriptsService(deps: {
     return workspace;
   }
 
+  function selectMember(
+    workspace: PersistedWorkspaceRecord,
+    cwd?: string,
+  ): PersistedWorkspaceMember {
+    let member: PersistedWorkspaceMember | undefined;
+    if (cwd) member = workspace.members.find((candidate) => areEquivalentPaths(candidate.cwd, cwd));
+    else if (workspace.members.length === 1) member = workspace.members[0];
+    if (!member)
+      throw new Error(
+        cwd
+          ? `Workspace has no project at ${cwd}`
+          : "Choose a project directory for this workspace script",
+      );
+    return member;
+  }
+
   function requireAvailable(): {
     serviceProxy: ServiceProxySubsystem;
     runtimeStore: WorkspaceScriptRuntimeStore;
@@ -159,20 +205,33 @@ export function createWorkspaceScriptsService(deps: {
     return { serviceProxy, runtimeStore: scriptRuntimeStore, terminalManager };
   }
 
-  async function list(workspaceId: string): Promise<WorkspaceScriptPayload[]> {
+  async function list(workspaceId: string, cwd?: string): Promise<WorkspaceScriptPayload[]> {
     requireAvailable();
     const workspace = await getWorkspace(workspaceId);
-    const project = await projectRegistry.get(workspace.projectId);
-    return buildSnapshot(workspace, project);
+    if (!cwd) return buildSnapshot(workspace);
+    const member = selectMember(workspace, cwd);
+    const project = await projectRegistry.get(member.projectId);
+    return buildSnapshot(workspace, project, member.cwd);
   }
 
-  async function launchProcess(input: { workspaceId: string; scriptName: string }) {
+  async function launchProcess(input: { workspaceId: string; scriptName: string; cwd?: string }) {
     const available = requireAvailable();
     const workspace = await getWorkspace(input.workspaceId);
-    const project = await projectRegistry.get(workspace.projectId);
-    const gitMetadata = resolveGitMetadata(workspace, project);
+    const member = selectMember(workspace, input.cwd);
+    const project = await projectRegistry.get(member.projectId);
+    const runtime = available.runtimeStore.get(input);
+    const terminal = runtime ? available.terminalManager.getTerminal(runtime.terminalId) : null;
+    // ponytail: script names are unique within a workspace; add cwd to runtime/proxy keys for concurrent same-name scripts.
+    if (
+      runtime?.lifecycle === "running" &&
+      terminal &&
+      !areEquivalentPaths(terminal.cwd, member.cwd)
+    ) {
+      throw new Error(`Script '${input.scriptName}' is already running in ${terminal.cwd}`);
+    }
+    const gitMetadata = resolveGitMetadata(member, project);
     const result = await spawnWorkspaceScript({
-      repoRoot: workspace.cwd,
+      repoRoot: member.cwd,
       workspaceId: workspace.workspaceId,
       projectSlug: gitMetadata.projectSlug,
       branchName: gitMetadata.currentBranch,
@@ -186,34 +245,37 @@ export function createWorkspaceScriptsService(deps: {
       globalServicePorts,
       logger,
       onLifecycleChanged: () => {
-        void emitStatusUpdate(workspace.workspaceId, workspace.cwd);
+        void emitStatusUpdate(workspace.workspaceId, member.cwd);
       },
     });
-    return { workspace, project, terminalId: result.terminalId };
+    return { workspace, member, project, terminalId: result.terminalId };
   }
 
   async function launch(input: {
     workspaceId: string;
     scriptName: string;
+    cwd?: string;
   }): Promise<WorkspaceScriptPayload> {
-    const { workspace, project } = await launchProcess(input);
-    const script = buildSnapshot(workspace, project).find(
+    const { workspace, member, project } = await launchProcess(input);
+    const script = buildSnapshot(workspace, project, member.cwd).find(
       (entry) => entry.scriptName === input.scriptName,
     );
     if (!script) {
       throw new Error(`Script '${input.scriptName}' did not produce a status record`);
     }
-    void emitStatusUpdate(workspace.workspaceId, workspace.cwd);
+    void emitStatusUpdate(workspace.workspaceId, member.cwd);
     return script;
   }
 
   async function stop(input: {
     workspaceId: string;
     scriptName: string;
+    cwd?: string;
   }): Promise<WorkspaceScriptPayload> {
     const available = requireAvailable();
     const workspace = await getWorkspace(input.workspaceId);
-    const project = await projectRegistry.get(workspace.projectId);
+    const member = selectMember(workspace, input.cwd);
+    const project = await projectRegistry.get(member.projectId);
     const runtime = available.runtimeStore.get(input);
     if (!runtime || runtime.lifecycle !== "running") {
       throw new Error(`Script '${input.scriptName}' is not running`);
@@ -222,23 +284,30 @@ export function createWorkspaceScriptsService(deps: {
       throw new Error(`Terminal for script '${input.scriptName}' is no longer available`);
     }
 
+    const terminal = available.terminalManager.getTerminal(runtime.terminalId)!;
+    if (!areEquivalentPaths(terminal.cwd, member.cwd)) {
+      throw new Error(
+        `Script '${input.scriptName}' is running in ${terminal.cwd}, not ${member.cwd}`,
+      );
+    }
+
     // The launcher's terminal exit listener owns route removal and runtime state updates.
     await available.terminalManager.killTerminalAndWait(runtime.terminalId);
 
-    const script = buildSnapshot(workspace, project).find(
+    const script = buildSnapshot(workspace, project, member.cwd).find(
       (entry) => entry.scriptName === input.scriptName,
     );
     if (!script) {
       throw new Error(`Script '${input.scriptName}' did not produce a status record`);
     }
-    void emitStatusUpdate(workspace.workspaceId, workspace.cwd);
+    void emitStatusUpdate(workspace.workspaceId, member.cwd);
     return script;
   }
 
   async function start(request: StartWorkspaceScriptRequest): Promise<void> {
     try {
-      const { workspace, terminalId } = await launchProcess(request);
-      void emitStatusUpdate(workspace.workspaceId, workspace.cwd);
+      const { workspace, member, terminalId } = await launchProcess(request);
+      void emitStatusUpdate(workspace.workspaceId, member.cwd);
       emit({
         type: "start_workspace_script_response",
         payload: {

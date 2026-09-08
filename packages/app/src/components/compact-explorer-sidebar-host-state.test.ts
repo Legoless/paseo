@@ -50,6 +50,19 @@ function createModel(
 }
 
 describe("resolveCompactExplorerSidebarHostModel", () => {
+  it("does not expose a stale root after all projects have been removed", () => {
+    const workspace = createWorkspace({ id: "workspace-a" });
+    workspace.members = [];
+    expect(
+      resolveCompactExplorerSidebarHostModel({
+        previous: createModel(),
+        selection: { serverId: "server-1", workspaceId: "workspace-a" },
+        workspace,
+        isGit: false,
+      })?.workspaceRoot,
+    ).toBe("");
+  });
+
   it("retains the last workspace root for the same active selection while the workspace reloads", () => {
     const previous = createModel();
 

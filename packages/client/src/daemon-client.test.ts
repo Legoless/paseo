@@ -1439,6 +1439,49 @@ test("honors explicit getDaemonPairingOffer timeout below the session RPC defaul
   await expect(responsePromise).rejects.toThrow("Timeout waiting for message (1500ms)");
 });
 
+test("scoped scripts require a host that honors their project directory", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger: createMockLogger(),
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+  const connected = client.connect();
+  mock.triggerOpen();
+  await connected;
+  await expect(
+    client.startWorkspaceScript("workspace", "dev", "old-host", { cwd: "/repo/second" }),
+  ).rejects.toThrow("Update the host to run scripts for a selected workspace project.");
+  expect(mock.sent).toEqual([]);
+  mock.triggerOpen({ features: { workspaceMemberScripts: true } });
+  const started = client.startWorkspaceScript("workspace", "dev", "new-host", {
+    cwd: "/repo/second",
+  });
+  expect(parseSentFrame(mock.sent[0])).toEqual({
+    type: "start_workspace_script_request",
+    workspaceId: "workspace",
+    scriptName: "dev",
+    requestId: "new-host",
+    cwd: "/repo/second",
+  });
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "start_workspace_script_response",
+      payload: {
+        requestId: "new-host",
+        workspaceId: "workspace",
+        scriptName: "dev",
+        terminalId: "terminal",
+        error: null,
+      },
+    }),
+  );
+  await expect(started).resolves.toMatchObject({ terminalId: "terminal", error: null });
+});
+
 test("gates config reload on the daemon capability", async () => {
   const mock = createMockTransport();
   const client = new DaemonClient({

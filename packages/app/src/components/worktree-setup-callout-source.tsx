@@ -5,7 +5,7 @@ import { useSidebarCallouts } from "@/contexts/sidebar-callout-context";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import { useWorkspaceFields } from "@/stores/session-store-hooks";
+import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selection-store";
 import {
   buildWorktreeSetupCalloutPolicy,
   selectActiveGitWorkspaceProject,
@@ -14,12 +14,16 @@ import {
 
 export function WorktreeSetupCalloutSource() {
   const selection = useActiveWorkspaceSelection();
-  const selectedWorkspaceProject = useWorkspaceFields(
+  const { member } = useSelectedWorkspaceProject(
     selection?.serverId ?? null,
     selection?.workspaceId ?? null,
-    (workspace) => selectActiveGitWorkspaceProject(selection?.serverId ?? "", workspace),
   );
-  const activeProject = selectedWorkspaceProject;
+  const activeProject = member
+    ? selectActiveGitWorkspaceProject(selection?.serverId ?? "", {
+        ...member,
+        projectKind: member.projectKind ?? "unknown",
+      })
+    : null;
   const client = useHostRuntimeClient(activeProject?.serverId ?? "");
   const callouts = useSidebarCallouts();
   const router = useRouter();

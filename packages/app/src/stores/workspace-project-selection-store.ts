@@ -7,7 +7,7 @@ import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 /**
  * Per-workspace pick of which project member feeds project-scoped surfaces
  * (explorer trees, terminal spawns). In-memory only — phase 1 does not persist
- * the pick across launches. The default is always the primary member.
+ * the pick across launches. Several members require an explicit selection.
  */
 interface WorkspaceProjectSelectionState {
   selectedCwdByWorkspaceKey: Record<string, string>;
@@ -32,22 +32,15 @@ export const useWorkspaceProjectSelectionStore = create<WorkspaceProjectSelectio
 const EMPTY_MEMBERS: WorkspaceMemberDescriptor[] = [];
 
 /**
- * Resolves the member a workspace surface should use. Falls back to the primary
- * member when nothing is stored or the stored cwd no longer matches a member
- * (e.g. the member was removed from the workspace).
+ * A single member is unambiguous. Never redirect a removed selection to an
+ * unrelated member in a workspace that still holds several projects.
  */
 export function resolveSelectedWorkspaceMember(input: {
   members: WorkspaceMemberDescriptor[];
   selectedCwd: string | null;
 }): WorkspaceMemberDescriptor | null {
-  const primary = input.members[0] ?? null;
-  if (!primary) {
-    return null;
-  }
-  if (!input.selectedCwd) {
-    return primary;
-  }
-  return input.members.find((member) => member.workspaceDirectory === input.selectedCwd) ?? primary;
+  const selected = input.members.find((member) => member.workspaceDirectory === input.selectedCwd);
+  return selected ?? (input.members.length === 1 ? input.members[0]! : null);
 }
 
 export interface SelectedWorkspaceProject {

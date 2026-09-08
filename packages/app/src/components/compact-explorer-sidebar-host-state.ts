@@ -15,7 +15,7 @@ interface ResolveCompactExplorerSidebarHostModelInput {
   selection: ActiveWorkspaceSelection | null;
   workspace: WorkspaceDescriptor | null;
   isGit: boolean;
-  /** Selected project member's cwd in multi-project workspaces; falls back to the primary. */
+  /** Selected project member's cwd in multi-project workspaces. */
   selectedWorkspaceRoot?: string | null;
 }
 
@@ -47,6 +47,7 @@ export function resolveCompactExplorerSidebarHostModel(
     input.previous.workspaceId === workspaceId
       ? input.previous
       : null;
+  const singleMember = input.workspace?.members.length === 1 ? input.workspace.members[0] : null;
 
   return {
     serverId,
@@ -54,8 +55,8 @@ export function resolveCompactExplorerSidebarHostModel(
     persistenceKey,
     workspaceRoot:
       trimNonEmpty(input.selectedWorkspaceRoot) ??
-      trimNonEmpty(input.workspace?.workspaceDirectory) ??
-      previousForSelection?.workspaceRoot ??
+      trimNonEmpty(singleMember?.workspaceDirectory) ??
+      (!input.workspace ? previousForSelection?.workspaceRoot : null) ??
       "",
     isGit: input.workspace ? input.isGit : (previousForSelection?.isGit ?? input.isGit),
   };

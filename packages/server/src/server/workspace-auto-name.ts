@@ -11,7 +11,11 @@ import {
 } from "./paseo-worktree-service.js";
 import type { GitMutationService } from "./session/git-mutation/git-mutation-service.js";
 import type { WorkspaceGitService } from "./workspace-git-service.js";
-import type { PersistedWorkspaceRecord, WorkspaceRegistry } from "./workspace-registry.js";
+import type {
+  PersistedWorkspaceMember,
+  PersistedWorkspaceRecord,
+  WorkspaceRegistry,
+} from "./workspace-registry.js";
 import {
   generateBranchNameFromFirstAgentContext,
   type GeneratedWorkspaceName,
@@ -68,6 +72,7 @@ export class WorkspaceAutoName {
   scheduleForWorktree(
     input: {
       workspace: PersistedWorkspaceRecord;
+      member: PersistedWorkspaceMember;
       firstAgentContext: FirstAgentContext;
     },
     context: ScheduleContext = {},
@@ -79,7 +84,7 @@ export class WorkspaceAutoName {
           currentSelection: context.currentSelection ?? null,
         }),
       {
-        cwd: input.workspace.cwd,
+        cwd: input.member.cwd,
         message: "Failed to auto-name worktree branch",
       },
     );
@@ -105,17 +110,18 @@ export class WorkspaceAutoName {
 
   private async maybeAutoNameWorkspaceBranchForFirstAgent(input: {
     workspace: PersistedWorkspaceRecord;
+    member: PersistedWorkspaceMember;
     firstAgentContext: FirstAgentContext;
     currentSelection: CurrentSelection;
   }): Promise<void> {
-    const worktreeRoot = input.workspace.worktreeRoot ?? input.workspace.cwd;
+    const worktreeRoot = input.member.worktreeRoot ?? input.member.cwd;
     let generated: GeneratedWorkspaceName | null = null;
     const result: AttemptFirstAgentBranchAutoNameResult = await attemptFirstAgentBranchAutoName({
       cwd: worktreeRoot,
       firstAgentContext: input.firstAgentContext,
       generateBranchNameFromContext: ({ firstAgentContext }) => {
         return this.generateFromContext({
-          cwd: input.workspace.cwd,
+          cwd: input.member.cwd,
           firstAgentContext,
           currentSelection: input.currentSelection,
         }).then((nextGenerated) => {
@@ -127,7 +133,7 @@ export class WorkspaceAutoName {
 
     if (!generated) {
       generated = await this.generateFromContext({
-        cwd: input.workspace.cwd,
+        cwd: input.member.cwd,
         firstAgentContext: input.firstAgentContext,
         currentSelection: input.currentSelection,
       });
@@ -143,13 +149,13 @@ export class WorkspaceAutoName {
     // alongside the title — both are this path's own fields.
     await this.applyGeneratedWorkspaceTitle(input.workspace.workspaceId, {
       title: generatedTitle,
-      ...(result.renamed ? { branch: result.branchName } : {}),
+      ...(result.renamed ? { branch: result.branchName, cwd: input.member.cwd } : {}),
       promptTitle: resolveFirstAgentPromptTitle(input.firstAgentContext),
     });
     if (result.renamed) {
       await this.gitMutation.notifyGitMutation(worktreeRoot, "rename-branch");
     }
-    await this.emitWorkspaceUpdateForCwd(input.workspace.cwd);
+    await this.emitWorkspaceUpdateForCwd(input.member.cwd);
   }
 
   private async maybeAutoNameDirectoryWorkspaceTitle(input: {
@@ -178,7 +184,7 @@ export class WorkspaceAutoName {
 
   private async applyGeneratedWorkspaceTitle(
     workspaceId: string,
-    input: { title: string; branch?: string | null; promptTitle?: string | null },
+    input: { title: string; branch?: string | null; cwd?: string; promptTitle?: string | null },
   ): Promise<void> {
     await this.workspaceRegistry.update(workspaceId, (current) => {
       let title = current.title;
@@ -188,7 +194,9 @@ export class WorkspaceAutoName {
       return {
         ...current,
         title,
-        ...(input.branch ? { branch: input.branch } : {}),
+        members: current.members.map((member) =>
+          input.branch && member.cwd === input.cwd ? { ...member, branch: input.branch } : member,
+        ),
         updatedAt: new Date().toISOString(),
       };
     });

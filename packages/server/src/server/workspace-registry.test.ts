@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 
 import { beforeEach, afterEach, describe, expect, test } from "vitest";
 
@@ -31,13 +31,23 @@ describe("resolveWorkspaceName", () => {
   test("resolveWorkspaceDisplayName applies the same rule over the persisted record", () => {
     const record = createPersistedWorkspaceRecord({
       workspaceId: "ws-1",
-      projectId: "proj-1",
-      cwd: "/tmp/repo",
-      kind: "local_checkout",
       displayName: "main",
       title: "Renamed",
       createdAt: "2026-03-01T00:00:00.000Z",
       updatedAt: "2026-03-01T00:00:00.000Z",
+      members: [
+        {
+          projectId: "proj-1",
+          cwd: "/tmp/repo",
+          kind: "local_checkout",
+          displayName: "main",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
     expect(resolveWorkspaceDisplayName(record)).toBe("Renamed");
     expect(resolveWorkspaceDisplayName({ ...record, title: null })).toBe("main");
@@ -418,24 +428,44 @@ describe("workspace registries", () => {
     await workspaceRegistry.upsert(
       createPersistedWorkspaceRecord({
         workspaceId: "/tmp/repo",
-        projectId: "remote:github.com/acme/repo",
-        cwd: "/tmp/repo",
-        kind: "local_checkout",
         displayName: "main",
         createdAt: "2026-03-01T00:00:00.000Z",
         updatedAt: "2026-03-01T00:00:00.000Z",
+        members: [
+          {
+            projectId: "remote:github.com/acme/repo",
+            cwd: "/tmp/repo",
+            kind: "local_checkout",
+            displayName: "main",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
     await workspaceRegistry.upsert(
       createPersistedWorkspaceRecord({
         workspaceId: "/tmp/repo",
-        projectId: "remote:github.com/acme/repo",
-        cwd: "/tmp/repo",
-        kind: "local_checkout",
         displayName: "feature/workspace",
         createdAt: "2026-03-01T00:00:00.000Z",
         updatedAt: "2026-03-02T00:00:00.000Z",
+        members: [
+          {
+            projectId: "remote:github.com/acme/repo",
+            cwd: "/tmp/repo",
+            kind: "local_checkout",
+            displayName: "feature/workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
     await workspaceRegistry.archive("/tmp/repo", "2026-03-03T00:00:00.000Z");
@@ -454,12 +484,22 @@ describe("workspace registries", () => {
     await workspaceRegistry.upsert(
       createPersistedWorkspaceRecord({
         workspaceId: "workspace-one",
-        projectId: "project-one",
-        cwd: "/tmp/repo",
-        kind: "local_checkout",
         displayName: "main",
         createdAt: "2026-03-01T00:00:00.000Z",
         updatedAt: "2026-03-01T00:00:00.000Z",
+        members: [
+          {
+            projectId: "project-one",
+            cwd: "/tmp/repo",
+            kind: "local_checkout",
+            displayName: "main",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -477,12 +517,22 @@ describe("workspace registries", () => {
     await workspaceRegistry.upsert(
       createPersistedWorkspaceRecord({
         workspaceId: "workspace-auto-archive",
-        projectId: "project-one",
-        cwd: "/tmp/repo",
-        kind: "worktree",
         displayName: "feature",
         createdAt: "2026-03-01T00:00:00.000Z",
         updatedAt: "2026-03-01T00:00:00.000Z",
+        members: [
+          {
+            projectId: "project-one",
+            cwd: "/tmp/repo",
+            kind: "worktree",
+            displayName: "feature",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -506,12 +556,22 @@ describe("workspace registries", () => {
     await workspaceRegistry.upsert(
       createPersistedWorkspaceRecord({
         workspaceId: "ws-1",
-        projectId: "proj-1",
-        cwd: "/tmp/repo",
-        kind: "local_checkout",
         displayName: "main",
         createdAt: "2026-03-01T00:00:00.000Z",
         updatedAt: "2026-03-01T00:00:00.000Z",
+        members: [
+          {
+            projectId: "proj-1",
+            cwd: "/tmp/repo",
+            kind: "local_checkout",
+            displayName: "main",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -539,7 +599,7 @@ describe("workspace registries", () => {
     });
   });
 
-  test("keeps the primary member mirrored from the scalar fields across mutation paths", async () => {
+  test("updates one member without changing another member or the container", async () => {
     await workspaceRegistry.initialize();
     const secondaryMember = {
       projectId: "proj-2",
@@ -555,12 +615,7 @@ describe("workspace registries", () => {
     await workspaceRegistry.upsert(
       createPersistedWorkspaceRecord({
         workspaceId: "ws-members",
-        projectId: "proj-1",
-        cwd: "/tmp/repo",
-        kind: "local_checkout",
         displayName: "main",
-        branch: "main",
-        worktreeRoot: "/tmp/repo",
         createdAt: "2026-03-01T00:00:00.000Z",
         updatedAt: "2026-03-01T00:00:00.000Z",
         members: [
@@ -580,12 +635,11 @@ describe("workspace registries", () => {
       }),
     );
 
-    // A scalar-only write (what reconciliation does) re-syncs the primary member.
-    await workspaceRegistry.update("ws-members", (record) => ({
-      ...record,
-      branch: "renamed-branch",
-      updatedAt: "2026-03-02T00:00:00.000Z",
-    }));
+    await workspaceRegistry.update("ws-members", (record) => {
+      const members = record.members.slice();
+      members[0] = { ...members[0], branch: "renamed-branch" };
+      return { ...record, members, updatedAt: "2026-03-02T00:00:00.000Z" };
+    });
 
     const reloadedRegistry = new FileBackedWorkspaceRegistry(
       path.join(tmpDir, "projects", "workspaces.json"),
@@ -593,12 +647,69 @@ describe("workspace registries", () => {
     );
     await reloadedRegistry.initialize();
     const record = await reloadedRegistry.get("ws-members");
-    expect(record?.branch).toBe("renamed-branch");
+    expect(record).not.toHaveProperty("branch");
+    expect(record).not.toHaveProperty("projectId");
+    expect(record?.displayName).toBe("main");
     expect(record?.members?.[0]).toMatchObject({
       projectId: "proj-1",
       cwd: "/tmp/repo",
       branch: "renamed-branch",
     });
     expect(record?.members?.[1]).toEqual(secondaryMember);
+  });
+  test("normalizes legacy placement on read while explicit members stay authoritative", async () => {
+    const file = path.join(tmpDir, "projects", "workspaces.json");
+    const legacy = {
+      workspaceId: "legacy",
+      projectId: "project-old",
+      cwd: "/old",
+      kind: "directory",
+      displayName: "Container",
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+      archivedAt: null,
+    };
+    const realMember = {
+      projectId: "project-real",
+      cwd: "/real",
+      kind: "directory",
+      displayName: "Real",
+      branch: null,
+      worktreeRoot: null,
+      baseBranch: null,
+      isPaseoOwnedWorktree: false,
+      mainRepoRoot: null,
+    };
+    await writeJsonFileAtomic(file, [
+      legacy,
+      { ...legacy, workspaceId: "explicit", members: [realMember] },
+      { ...legacy, workspaceId: "empty", members: [] },
+      {
+        ...legacy,
+        workspaceId: "wks_0000000000000001",
+        projectId: "wks_0000000000000001",
+        members: [{ ...realMember, projectId: "wks_0000000000000001", cwd: "/home" }, realMember],
+      },
+      { ...legacy, workspaceId: "wks_0000000000000002", projectId: "wks_0000000000000002" },
+      { ...legacy, workspaceId: "/old", projectId: "/old" },
+    ]);
+    await workspaceRegistry.initialize();
+    expect((await workspaceRegistry.get("legacy"))?.members).toMatchObject([
+      { projectId: "project-old", cwd: "/old" },
+    ]);
+    expect((await workspaceRegistry.get("/old"))?.members).toMatchObject([
+      { projectId: "/old", cwd: "/old" },
+    ]);
+    expect((await workspaceRegistry.get("explicit"))?.members).toEqual([realMember]);
+    expect((await workspaceRegistry.get("empty"))?.members).toEqual([]);
+    expect((await workspaceRegistry.get("wks_0000000000000001"))?.members).toEqual([realMember]);
+    expect((await workspaceRegistry.get("wks_0000000000000002"))?.members).toEqual([]);
+    await workspaceRegistry.update("legacy", (record) => ({ ...record, title: "Renamed" }));
+    for (const record of JSON.parse(readFileSync(file, "utf8"))) {
+      expect(record).not.toHaveProperty("projectId");
+      expect(record).not.toHaveProperty("cwd");
+      expect(record).not.toHaveProperty("kind");
+      expect(Array.isArray(record.members)).toBe(true);
+    }
   });
 });

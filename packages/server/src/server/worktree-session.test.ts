@@ -273,10 +273,10 @@ function createWorkspaceDescriptor(input: {
 }): WorkspaceDescriptorPayload {
   return {
     id: input.workspace.workspaceId,
-    projectId: input.workspace.projectId,
+    projectId: input.workspace.members[0]!.projectId,
     projectDisplayName: path.basename(input.repoDir),
     projectRootPath: input.repoDir,
-    workspaceDirectory: input.workspace.cwd,
+    workspaceDirectory: input.workspace.members[0]!.cwd,
     workspaceKind: "worktree",
     projectKind: "git",
     name: input.workspace.displayName,
@@ -1438,13 +1438,34 @@ describe("handleCreatePaseoWorktreeRequest", () => {
       },
       workspace: {
         workspaceId: "ws-fix-attached-pr-context",
-        projectId: "/tmp/repo",
-        cwd: "/tmp/worktrees/fix-attached-pr-context/packages/app",
-        kind: "worktree" as const,
         displayName: "fix-attached-pr-context",
         createdAt: "2026-04-30T00:00:00.000Z",
         updatedAt: "2026-04-30T00:00:00.000Z",
         archivedAt: null,
+        members: [
+          {
+            projectId: "/tmp/repo",
+            cwd: "/tmp/worktrees/fix-attached-pr-context/packages/app",
+            kind: "worktree" as const,
+            displayName: "fix-attached-pr-context",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
+      member: {
+        projectId: "/tmp/repo",
+        cwd: "/tmp/worktrees/fix-attached-pr-context/packages/app",
+        kind: "worktree" as const,
+        displayName: "fix-attached-pr-context",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
       },
       repoRoot: "/tmp/repo",
       created: true,
@@ -1603,7 +1624,7 @@ describe("handleCreatePaseoWorktreeRequest", () => {
           }),
           describeWorkspaceRecord: vi.fn(async (result) => ({
             id: result.workspace.workspaceId,
-            projectId: result.workspace.projectId,
+            projectId: result.member.projectId,
             projectDisplayName: path.basename(repoDir),
             projectRootPath: repoDir,
             projectKind: "git",
@@ -1709,7 +1730,7 @@ describe("handleCreatePaseoWorktreeRequest", () => {
       expect(warmWorkspaceGitData).toHaveBeenCalledWith(
         expect.objectContaining({
           workspaceId: response?.payload.workspace?.id,
-          cwd: registeredWorktreePath,
+          members: [expect.objectContaining({ cwd: registeredWorktreePath })],
         }),
       );
       const backgroundInput = backgroundWork.mock.calls[0]?.[0];
@@ -1835,8 +1856,38 @@ describe("handlePaseoWorktreeArchiveRequest worktree scope", () => {
     const workspaceA = "ws-worktree-scope-A";
     const workspaceB = "ws-worktree-scope-B";
     const activeWorkspaces = [
-      { workspaceId: workspaceA, cwd: sharedCwd, kind: "worktree" as const },
-      { workspaceId: workspaceB, cwd: sharedCwd, kind: "worktree" as const },
+      {
+        workspaceId: workspaceA,
+        members: [
+          {
+            projectId: "test-project",
+            cwd: sharedCwd,
+            kind: "worktree" as const,
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
+      {
+        workspaceId: workspaceB,
+        members: [
+          {
+            projectId: "test-project",
+            cwd: sharedCwd,
+            kind: "worktree" as const,
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
     ];
     const archivedWorkspaceRecords: string[] = [];
     const listActiveWorkspaces = vi.fn(async () => activeWorkspaces);
@@ -1908,7 +1959,22 @@ describe("handlePaseoWorktreeArchiveRequest worktree scope", () => {
     });
     const workspaceId = "ws-default-scope";
     const activeWorkspaces = [
-      { workspaceId, cwd: created.worktreePath, kind: "worktree" as const },
+      {
+        workspaceId,
+        members: [
+          {
+            projectId: "test-project",
+            cwd: created.worktreePath,
+            kind: "worktree" as const,
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
     ];
     const archivedWorkspaceRecords: string[] = [];
     const emitted: SessionOutboundMessage[] = [];
@@ -1983,8 +2049,38 @@ describe("handlePaseoWorktreeArchiveRequest worktree scope", () => {
     const workspaceA = "ws-default-scope-sibling-A";
     const workspaceB = "ws-default-scope-sibling-B";
     const activeWorkspaces = [
-      { workspaceId: workspaceA, cwd: sharedCwd, kind: "worktree" as const },
-      { workspaceId: workspaceB, cwd: sharedCwd, kind: "local_checkout" as const },
+      {
+        workspaceId: workspaceA,
+        members: [
+          {
+            projectId: "test-project",
+            cwd: sharedCwd,
+            kind: "worktree" as const,
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
+      {
+        workspaceId: workspaceB,
+        members: [
+          {
+            projectId: "test-project",
+            cwd: sharedCwd,
+            kind: "local_checkout" as const,
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
     ];
     const archivedWorkspaceRecords: string[] = [];
     const emitted: SessionOutboundMessage[] = [];
@@ -2059,8 +2155,38 @@ describe("handlePaseoWorktreeArchiveRequest worktree scope", () => {
     const workspaceA = "ws-delete-flag-a";
     const workspaceB = "ws-delete-flag-b";
     const activeWorkspaces = [
-      { workspaceId: workspaceA, cwd: sharedCwd, kind: "worktree" as const },
-      { workspaceId: workspaceB, cwd: sharedCwd, kind: "worktree" as const },
+      {
+        workspaceId: workspaceA,
+        members: [
+          {
+            projectId: "test-project",
+            cwd: sharedCwd,
+            kind: "worktree" as const,
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
+      {
+        workspaceId: workspaceB,
+        members: [
+          {
+            projectId: "test-project",
+            cwd: sharedCwd,
+            kind: "worktree" as const,
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
     ];
     const archivedWorkspaceRecords: string[] = [];
     const emitted: SessionOutboundMessage[] = [];

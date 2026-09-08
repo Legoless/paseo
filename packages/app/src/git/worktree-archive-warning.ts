@@ -1,10 +1,30 @@
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { i18n } from "@/i18n/i18next";
+import type { WorkspaceDescriptor } from "@/stores/session-store";
 
 export interface WorktreeArchiveRisk {
   isDirty?: boolean | null;
   aheadOfOrigin?: number | null;
   diffStat?: { additions: number; deletions: number } | null;
+}
+
+export function getWorkspaceArchiveRisk(
+  workspace: WorkspaceDescriptor | null | undefined,
+): WorktreeArchiveRisk & {
+  workspaceKind: WorkspaceDescriptor["workspaceKind"];
+} {
+  const worktrees =
+    workspace?.members.filter((member) => member.workspaceKind === "worktree") ?? [];
+  const singleMember = workspace?.members.length === 1;
+  const memberChanges = worktrees.some(
+    (member) => (member.diffStat?.additions ?? 0) > 0 || (member.diffStat?.deletions ?? 0) > 0,
+  );
+  return {
+    workspaceKind: worktrees.length > 0 ? "worktree" : "directory",
+    isDirty: memberChanges || (singleMember ? workspace?.gitRuntime?.isDirty : null),
+    aheadOfOrigin: singleMember ? workspace?.gitRuntime?.aheadOfOrigin : null,
+    diffStat: workspace?.diffStat,
+  };
 }
 
 export interface WorktreeArchiveRiskInput {

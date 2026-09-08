@@ -106,6 +106,9 @@ export interface Agent {
 
 export interface WorkspaceMemberDescriptor {
   projectId: string;
+  projectKey?: string | null;
+  projectKind?: WorkspaceDescriptorPayload["projectKind"];
+  projectCustomIconRevision?: string | null;
   projectDisplayName: string;
   projectCustomName: string | null;
   projectRootPath: string;
@@ -143,15 +146,8 @@ export interface WorkspaceDescriptor {
   forge?: WorkspaceDescriptorPayload["forge"];
   project?: ProjectPlacementPayload;
   /**
-   * Project placements inside this workspace, primary first. The implicit single
-   * member is synthesized when a pre-v0.7.0 daemon omits the field, so this is
-   * non-empty for every workspace that holds a project, and the scalar project
-   * and workspaceDirectory fields mirror the primary member.
-   *
-   * Empty means a projectless workspace: a pane arrangement whose panes each
-   * carry their own project. Its scalar project fields still point at the daemon
-   * home directory — required on the wire for older clients — so read this list,
-   * never the scalars, to decide whether a workspace has a project.
+   * Authoritative project placements. The scalar project fields above are wire
+   * compatibility metadata; they do not identify a workspace owner or default project.
    */
   members: WorkspaceMemberDescriptor[];
 }
@@ -171,9 +167,7 @@ export function normalizeWorkspaceDescriptor(
     projectCustomName: payload.projectCustomName ?? null,
     projectCustomIconRevision: payload.projectCustomIconRevision ?? null,
     projectRootPath: payload.projectRootPath,
-    // Canonicalize the workspace directory once, at the store boundary, so every
-    // consumer can read workspace.workspaceDirectory directly. Empty means "no
-    // usable directory" (older daemons may omit it; the wire field is optional).
+    // Compatibility projection only; project-scoped consumers select a member.
     workspaceDirectory: normalizeWorkspacePath(payload.workspaceDirectory) ?? "",
     worktreeSlug: payload.worktreeSlug,
     projectKind: payload.projectKind,
@@ -210,12 +204,25 @@ export function normalizeWorkspaceMembers(
     | "gitRuntime"
     | "diffStat"
     | "membersAuthoritative"
+    | "project"
+    | "projectKind"
+    | "projectCustomIconRevision"
   >,
 ): WorkspaceMemberDescriptor[] {
   const wire = payload.members;
   if (wire && wire.length > 0) {
     return wire.map((member) => ({
       projectId: member.projectId,
+      // COMPAT(workspaceMemberMetadata): added in v0.8.0, remove after 2027-03-08.
+      projectKey:
+        member.projectKey ??
+        (member.projectId === payload.projectId ? payload.project?.projectKey : null),
+      projectKind:
+        member.projectKind ??
+        (member.projectId === payload.projectId ? payload.projectKind : undefined),
+      projectCustomIconRevision:
+        member.projectCustomIconRevision ??
+        (member.projectId === payload.projectId ? payload.projectCustomIconRevision : null),
       projectDisplayName: member.projectDisplayName,
       projectCustomName: member.projectCustomName ?? null,
       projectRootPath: member.projectRootPath,
@@ -238,6 +245,9 @@ export function normalizeWorkspaceMembers(
   return [
     {
       projectId: payload.projectId,
+      projectKey: payload.project?.projectKey ?? null,
+      projectKind: payload.projectKind,
+      projectCustomIconRevision: payload.projectCustomIconRevision ?? null,
       projectDisplayName: payload.projectDisplayName,
       projectCustomName: payload.projectCustomName ?? null,
       projectRootPath: payload.projectRootPath,

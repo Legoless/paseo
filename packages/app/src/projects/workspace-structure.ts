@@ -81,52 +81,33 @@ export function buildWorkspaceStructureProjects(input: {
 
   for (const session of input.sessions) {
     for (const workspace of session.workspaces) {
-      const viewKey = viewKeyByServerProjectId.get(session.serverId)?.get(workspace.projectId);
-      if (!viewKey) {
-        // Orphan workspace: projectId names no project record. Create a synthetic
-        // project group so the workspace still renders in the sidebar.
-        const syntheticViewKey = allocatePlacementViewKey(
-          allocatedViewKeys,
-          session.serverId,
-          workspace.projectId,
-        );
-        getOrCreate(viewKeyByServerProjectId, session.serverId, () => new Map()).set(
-          workspace.projectId,
-          syntheticViewKey,
-        );
-        let draft = byProject.get(syntheticViewKey);
-        if (!draft) {
-          draft = {
-            viewKey: syntheticViewKey,
-            projectKey: null,
-            projectName:
-              workspace.projectDisplayName ?? projectDisplayNameFromProjectId(workspace.projectId),
-            hasCustomName: false,
-            projectKind: workspace.projectKind,
-            iconWorkingDir: workspace.projectRootPath,
-            hosts: new Map(),
-            workspaces: [],
-          };
-          byProject.set(syntheticViewKey, draft);
+      const attachedViewKeys = new Set<string>();
+      for (const member of workspace.members) {
+        let viewKey = viewKeyByServerProjectId.get(session.serverId)?.get(member.projectId);
+        if (!viewKey) {
+          viewKey = addProjectToView({
+            byProject,
+            keyCountsByServer,
+            allocatedViewKeys,
+            serverId: session.serverId,
+            project: {
+              ...member,
+              projectKind: member.projectKind ?? "directory",
+            },
+          });
+          getOrCreate(viewKeyByServerProjectId, session.serverId, () => new Map()).set(
+            member.projectId,
+            viewKey,
+          );
         }
-        draft.hosts.set(session.serverId, {
-          serverId: session.serverId,
-          projectId: workspace.projectId,
-          iconWorkingDir: workspace.projectRootPath,
-          worktreeSupport: workspace.projectKind === "git" ? "supported" : "unsupported",
-        });
-        draft.workspaces.push({
+        if (attachedViewKeys.has(viewKey)) continue;
+        attachedViewKeys.add(viewKey);
+        byProject.get(viewKey)?.workspaces.push({
           workspaceId: workspace.id,
           workspaceName: workspace.name,
           workspaceKey: `${session.serverId}:${workspace.id}`,
         });
-        continue;
       }
-      byProject.get(viewKey)?.workspaces.push({
-        workspaceId: workspace.id,
-        workspaceName: workspace.name,
-        workspaceKey: `${session.serverId}:${workspace.id}`,
-      });
     }
   }
 

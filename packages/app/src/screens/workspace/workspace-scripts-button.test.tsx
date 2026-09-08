@@ -218,6 +218,7 @@ function script(
 ): WorkspaceScriptPayload {
   return {
     scriptName: input.scriptName,
+    cwd: input.cwd,
     type: input.type ?? "script",
     hostname: input.hostname ?? input.scriptName,
     port: input.port ?? null,
@@ -590,6 +591,7 @@ describe("WorkspaceScriptsButton", () => {
     current = renderScripts([
       script({
         scriptName: "dev",
+        cwd: "/repo/selected-project",
         lifecycle: "running",
         terminalId: "terminal-script-1",
       }),
@@ -608,6 +610,7 @@ describe("WorkspaceScriptsButton", () => {
     await current.rerender([
       script({
         scriptName: "dev",
+        cwd: "/repo/selected-project",
         lifecycle: "stopped",
         exitCode: 0,
         terminalId: "terminal-script-1",
@@ -615,6 +618,8 @@ describe("WorkspaceScriptsButton", () => {
     ]);
     await act(async () => {});
 
-    expect(startWorkspaceScriptMock).toHaveBeenCalledWith("workspace-1", "dev");
+    expect(startWorkspaceScriptMock).toHaveBeenCalledWith("workspace-1", "dev", undefined, {
+      cwd: "/repo/selected-project",
+    });
   });
 });

@@ -74,13 +74,13 @@ afterEach(() => {
 });
 
 describe("resolveSelectedWorkspaceMember", () => {
-  it("defaults to the primary member when nothing is stored", () => {
+  it("requires selecting a project when several members are available", () => {
     expect(
       resolveSelectedWorkspaceMember({
         members: [PRIMARY_MEMBER, SECOND_MEMBER],
         selectedCwd: null,
       }),
-    ).toBe(PRIMARY_MEMBER);
+    ).toBeNull();
   });
 
   it("returns the member matching the stored cwd", () => {
@@ -107,14 +107,14 @@ describe("resolveSelectedWorkspaceMember", () => {
 });
 
 describe("useSelectedWorkspaceProject", () => {
-  it("returns the primary member by default and follows setSelected", () => {
+  it("requires a choice for several projects and follows setSelected", () => {
     useSessionStore.getState().initializeSession(SERVER_ID, null as unknown as DaemonClient);
     seedWorkspace([PRIMARY_MEMBER, SECOND_MEMBER]);
 
     const { result } = renderHook(() => useSelectedWorkspaceProject(SERVER_ID, WORKSPACE_ID));
 
-    expect(result.current.cwd).toBe(PRIMARY_MEMBER.workspaceDirectory);
-    expect(result.current.member).toEqual(PRIMARY_MEMBER);
+    expect(result.current.cwd).toBeNull();
+    expect(result.current.member).toBeNull();
     expect(result.current.members).toHaveLength(2);
 
     act(() => {

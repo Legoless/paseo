@@ -114,7 +114,8 @@ export function selectWorkspaceDirectory(
   serverId: string | null,
   workspaceId: string | null,
 ): string | null {
-  return selectWorkspace(state, serverId, workspaceId)?.workspaceDirectory || null;
+  const workspace = selectWorkspace(state, serverId, workspaceId);
+  return workspace?.members.length === 1 ? workspace.members[0]!.workspaceDirectory || null : null;
 }
 
 export function selectWorkspaceExists(
@@ -296,7 +297,7 @@ export function selectRecommendedProjectPaths(
     return EMPTY_WORKSPACE_KEYS;
   }
   return Array.from(workspaces.values())
-    .map((workspace) => workspace.projectRootPath)
+    .flatMap((workspace) => workspace.members.map((member) => member.projectRootPath))
     .filter((path) => path.length > 0);
 }
 

@@ -99,16 +99,24 @@ function createScheduleService(options: TestScheduleServiceOptions): ScheduleSer
     const workspaceId = `wks_schedule_test_${++workspaceCounter}`;
     const workspace: PersistedWorkspaceRecord = {
       workspaceId,
-      projectId: "test-project",
-      cwd: input.cwd,
-      kind: "directory",
       displayName: "test-project",
       title: input.firstAgentContext.prompt,
-      branch: null,
-      baseBranch: null,
       createdAt: timestamp,
       updatedAt: timestamp,
       archivedAt: null,
+      members: [
+        {
+          projectId: "test-project",
+          cwd: input.cwd,
+          kind: "directory",
+          displayName: "test-project",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     };
     workspaces.set(workspaceId, workspace);
     return workspace;
@@ -116,11 +124,7 @@ function createScheduleService(options: TestScheduleServiceOptions): ScheduleSer
   const listActiveWorkspaces = async (): Promise<ActiveWorkspaceRef[]> =>
     Array.from(workspaces.values())
       .filter((workspace) => !workspace.archivedAt)
-      .map((workspace) => ({
-        workspaceId: workspace.workspaceId,
-        cwd: workspace.cwd,
-        kind: workspace.kind,
-      }));
+      .map((workspace) => ({ workspaceId: workspace.workspaceId, members: workspace.members }));
   const archiveDefaultWorkspace: ScheduleServiceOptions["archiveWorkspace"] = async (
     workspaceId,
   ) => {
@@ -133,8 +137,9 @@ function createScheduleService(options: TestScheduleServiceOptions): ScheduleSer
           agentManager: options.agentManager,
           agentStorage: options.agentStorage,
           findWorkspaceIdForCwd: async (cwd) =>
-            Array.from(workspaces.values()).find((workspace) => workspace.cwd === cwd)
-              ?.workspaceId ?? null,
+            Array.from(workspaces.values()).find((workspace) =>
+              workspace.members.some((member) => member.cwd === cwd),
+            )?.workspaceId ?? null,
           listActiveWorkspaces,
           archiveWorkspaceRecord: async (id) => {
             const workspace = workspaces.get(id);
@@ -178,9 +183,10 @@ function createScheduleService(options: TestScheduleServiceOptions): ScheduleSer
         const workspace = await createDefaultWorkspace(input);
         return {
           workspace,
-          worktree: { branchName: "schedule-test", worktreePath: workspace.cwd },
+          member: workspace.members[0]!,
+          worktree: { branchName: "schedule-test", worktreePath: workspace.members[0]!.cwd },
           intent: { kind: "branch-off", baseBranch: "main", branchName: "schedule-test" },
-          repoRoot: workspace.cwd,
+          repoRoot: workspace.members[0]!.cwd,
           created: true,
         };
       }),
@@ -239,8 +245,7 @@ async function createRegistryBackedScheduleWorkspaceDeps(rootDir: string): Promi
                   .filter((workspace) => !workspace.archivedAt)
                   .map((workspace) => ({
                     workspaceId: workspace.workspaceId,
-                    cwd: workspace.cwd,
-                    kind: workspace.kind,
+                    members: workspace.members,
                   })),
               archiveWorkspaceRecord: async (id) => {
                 await workspaceRegistry.archive(id, new Date().toISOString());
@@ -629,12 +634,12 @@ describe("ScheduleService", () => {
     expect(await workspaceRegistry.list()).toEqual([
       expect.objectContaining({
         workspaceId: firstAgent?.workspaceId,
-        cwd: tempDir,
+        members: [expect.objectContaining({ cwd: tempDir })],
         archivedAt: null,
       }),
       expect.objectContaining({
         workspaceId: secondAgent?.workspaceId,
-        cwd: tempDir,
+        members: [expect.objectContaining({ cwd: tempDir })],
         archivedAt: null,
       }),
     ]);
@@ -755,7 +760,7 @@ describe("ScheduleService", () => {
 
     expect(await workspaceRegistry.list()).toEqual([
       expect.objectContaining({
-        cwd: tempDir,
+        members: [expect.objectContaining({ cwd: tempDir })],
         archivedAt: expect.any(String),
       }),
     ]);

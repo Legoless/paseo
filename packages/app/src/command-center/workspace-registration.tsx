@@ -1,3 +1,4 @@
+import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selection-store";
 import { useCallback, useMemo, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -35,7 +36,7 @@ import { type ShortcutOverrides } from "@/keyboard/keyboard-shortcuts";
 import { useKeyboardActionDispatcher } from "@/keyboard/keyboard-action-dispatcher-context";
 import { useHostFeature } from "@/runtime/host-features";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import { useWorkspaceDirectory, useWorkspaceFields } from "@/stores/session-store-hooks";
+import { useWorkspaceFields } from "@/stores/session-store-hooks";
 import {
   collectAllTabs,
   findPaneById,
@@ -185,13 +186,11 @@ export function useWorkspaceCommandCenterActions(): void {
   // re-render — a churny subscription here rebuilds the list while the user is looking at it.
   const fields = useWorkspaceFields(serverId, workspaceId, (workspace) => ({
     id: workspace.id,
-    workspaceDirectory: workspace.workspaceDirectory ?? null,
-    currentBranch: workspace.gitRuntime?.currentBranch ?? null,
     pinnedAt: workspace.pinnedAt ?? null,
     labels: workspace.labels ?? [],
   }));
-  const cwd = useWorkspaceDirectory(serverId, workspaceId);
-  const currentBranch = fields?.currentBranch ?? null;
+  const { cwd, member } = useSelectedWorkspaceProject(serverId, workspaceId);
+  const currentBranch = member?.branch ?? null;
   const isPinned = fields?.pinnedAt != null;
   const isCompact = useIsCompactFormFactor();
   const canPin = useHostFeature(serverId, "workspacePinning");
@@ -215,19 +214,19 @@ export function useWorkspaceCommandCenterActions(): void {
     if (!fields) return;
     clipboard.copyPath({
       workspaceId: fields.id,
-      workspaceDirectory: fields.workspaceDirectory,
-      currentBranch: fields.currentBranch,
+      workspaceDirectory: cwd,
+      currentBranch,
     });
-  }, [clipboard, fields]);
+  }, [clipboard, fields, cwd, currentBranch]);
 
   const copyBranchName = useCallback(() => {
     if (!fields) return;
     clipboard.copyBranchName({
       workspaceId: fields.id,
-      workspaceDirectory: fields.workspaceDirectory,
-      currentBranch: fields.currentBranch,
+      workspaceDirectory: cwd,
+      currentBranch,
     });
-  }, [clipboard, fields]);
+  }, [clipboard, fields, cwd, currentBranch]);
 
   const { labelCatalog, toggleLabel } = useWorkspaceLabelCatalog(serverId, fields);
 

@@ -349,7 +349,7 @@ export function WorkspaceDraftAgentTab({
   const client = useHostRuntimeClient(serverId);
   const isConnected = useHostRuntimeIsConnected(serverId);
   const workspaceFields = useWorkspaceFields(serverId, workspaceId, (w) => ({
-    workspaceDirectory: w.workspaceDirectory,
+    workspaceDirectory: w.members.length === 1 ? w.members[0]!.workspaceDirectory : null,
     id: w.id,
   }));
   const workspaceDirectory = workspaceFields?.workspaceDirectory || null;

@@ -2345,15 +2345,18 @@ export class DaemonClient {
     workspaceId: string,
     scriptName: string,
     requestId?: string,
+    options?: { cwd?: string },
   ): Promise<
     Extract<SessionOutboundMessage, { type: "start_workspace_script_response" }>["payload"]
   > {
+    this.requireWorkspaceMemberScriptsSupport(options?.cwd);
     return this.sendCorrelatedSessionRequest({
       requestId,
       message: {
         type: "start_workspace_script_request",
         workspaceId,
         scriptName,
+        ...options,
       },
       responseType: "start_workspace_script_response",
     });
@@ -2362,12 +2365,14 @@ export class DaemonClient {
   async listWorkspaceScripts(
     workspaceId: string,
     requestId?: string,
+    options?: { cwd?: string },
   ): Promise<
     Extract<SessionOutboundMessage, { type: "workspace.script.list.response" }>["payload"]
   > {
+    this.requireWorkspaceMemberScriptsSupport(options?.cwd);
     return this.sendCorrelatedSessionRequest({
       requestId,
-      message: { type: "workspace.script.list.request", workspaceId },
+      message: { type: "workspace.script.list.request", workspaceId, ...options },
       responseType: "workspace.script.list.response",
     });
   }
@@ -2376,12 +2381,14 @@ export class DaemonClient {
     workspaceId: string,
     scriptName: string,
     requestId?: string,
+    options?: { cwd?: string },
   ): Promise<
     Extract<SessionOutboundMessage, { type: "workspace.script.start.response" }>["payload"]
   > {
+    this.requireWorkspaceMemberScriptsSupport(options?.cwd);
     return this.sendCorrelatedSessionRequest({
       requestId,
-      message: { type: "workspace.script.start.request", workspaceId, scriptName },
+      message: { type: "workspace.script.start.request", workspaceId, scriptName, ...options },
       responseType: "workspace.script.start.response",
     });
   }
@@ -2390,12 +2397,14 @@ export class DaemonClient {
     workspaceId: string,
     scriptName: string,
     requestId?: string,
+    options?: { cwd?: string },
   ): Promise<
     Extract<SessionOutboundMessage, { type: "workspace.script.stop.response" }>["payload"]
   > {
+    this.requireWorkspaceMemberScriptsSupport(options?.cwd);
     return this.sendCorrelatedSessionRequest({
       requestId,
-      message: { type: "workspace.script.stop.request", workspaceId, scriptName },
+      message: { type: "workspace.script.stop.request", workspaceId, scriptName, ...options },
       responseType: "workspace.script.stop.response",
     });
   }
@@ -5685,6 +5694,17 @@ export class DaemonClient {
 
   getLastServerInfoMessage(): ServerInfoStatusPayload | null {
     return this.lastServerInfoMessage;
+  }
+
+  private requireWorkspaceMemberScriptsSupport(cwd: string | undefined): void {
+    // COMPAT(workspaceMemberScripts): added in v0.7.0, remove after 2027-03-08.
+    // Older hosts ignore cwd and could run a different project's script.
+    if (
+      cwd !== undefined &&
+      this.lastServerInfoMessage?.features?.workspaceMemberScripts !== true
+    ) {
+      throw new Error("Update the host to run scripts for a selected workspace project.");
+    }
   }
 
   private requireHubRelationshipSupport(): void {

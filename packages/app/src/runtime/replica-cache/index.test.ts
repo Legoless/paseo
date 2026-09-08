@@ -260,7 +260,16 @@ describe("ReplicaCache", () => {
     writer.commitDirectory(SERVER_ID, {
       agents: new Map(),
       workspaces: new Map([[multiProject.id, multiProject]]),
-      projects: new Map(),
+      projects: new Map(
+        multiProject.members.map((member) => [
+          member.projectId,
+          normalizeProjectDescriptor({
+            ...member,
+            projectKey: member.projectKey ?? undefined,
+            projectKind: "git",
+          }),
+        ]),
+      ),
       checkpoint: {},
     });
     await writer.flush();
@@ -271,6 +280,34 @@ describe("ReplicaCache", () => {
     expect(
       restored.workspaces.get("workspace-1")?.members.map((m) => m.workspaceDirectory),
     ).toEqual(["/repo/raceline", "/repo/celestine"]);
+    expect(
+      (await createCache(storage).readWorkspace(SERVER_ID, multiProject.id))?.projects.map(
+        (project) => project.projectId,
+      ),
+    ).toEqual(["project-1", "project-2"]);
+  });
+
+  it("keeps an empty workspace empty without reading a placeholder project", async () => {
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    const empty = normalizeWorkspaceDescriptor({
+      ...workspacePayload(),
+      members: [],
+      membersAuthoritative: true,
+    });
+    writer.commitDirectory(SERVER_ID, {
+      agents: new Map(),
+      workspaces: new Map([[empty.id, empty]]),
+      projects: new Map(),
+    });
+    await writer.flush();
+
+    const reader = createCache(storage);
+    const restored = await reader.readWorkspace(SERVER_ID, empty.id);
+    expect(restored?.workspace.members).toEqual([]);
+    expect(restored?.projects).toEqual([]);
+    expect(storage.reads).toEqual([{ serverId: SERVER_ID, kinds: ["workspace"], ids: [empty.id] }]);
+    expect((await reader.readDirectory(SERVER_ID)).workspaces.get(empty.id)?.members).toEqual([]);
   });
 
   it("never reads directory rows older than an accepted deferred deletion", async () => {
@@ -390,7 +427,7 @@ describe("ReplicaCache", () => {
     const restored = await reader.readWorkspace(SERVER_ID, "workspace-1");
 
     expect(restored?.workspace.id).toBe("workspace-1");
-    expect(restored?.project?.projectId).toBe("project-1");
+    expect(restored?.projects.map((project) => project.projectId)).toEqual(["project-1"]);
     expect(storage.reads).toEqual([
       { serverId: SERVER_ID, kinds: ["workspace"], ids: ["workspace-1"] },
       { serverId: SERVER_ID, kinds: ["project"], ids: ["project-1"] },

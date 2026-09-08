@@ -27,30 +27,13 @@ export type ActiveWorkspaceMemberRef = Pick<
   "cwd" | "kind" | "worktreeRoot" | "isPaseoOwnedWorktree" | "mainRepoRoot"
 >;
 
-export type ActiveWorkspaceRef = Pick<
-  PersistedWorkspaceRecord,
-  "workspaceId" | "cwd" | "kind" | "worktreeRoot" | "isPaseoOwnedWorktree" | "mainRepoRoot"
-> & {
-  // Project memberships of the workspace. Absent means a single implicit
-  // member derived from the scalar placement fields.
-  members?: ActiveWorkspaceMemberRef[];
-};
+export interface ActiveWorkspaceRef {
+  workspaceId: string;
+  members: ActiveWorkspaceMemberRef[];
+}
 
-// Every placement a workspace references: its members, or the single implicit
-// member derived from the scalar fields for refs that predate membership.
 export function workspaceRefPlacements(workspace: ActiveWorkspaceRef): ActiveWorkspaceMemberRef[] {
-  if (workspace.members && workspace.members.length > 0) {
-    return workspace.members;
-  }
-  return [
-    {
-      cwd: workspace.cwd,
-      kind: workspace.kind,
-      worktreeRoot: workspace.worktreeRoot,
-      isPaseoOwnedWorktree: workspace.isPaseoOwnedWorktree,
-      mainRepoRoot: workspace.mainRepoRoot,
-    },
-  ];
+  return workspace.members;
 }
 
 export interface ArchiveDependencies {

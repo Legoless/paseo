@@ -161,7 +161,9 @@ interface SessionTestAccess {
   listFetchAgentsEntries(params: unknown): Promise<ListFetchResult>;
   resolveAgentIdentifier(identifier: string): Promise<unknown>;
   getAgentPayloadById(agentId: string): Promise<unknown>;
-  buildProjectPlacementForWorkspaceId(workspaceId: string): Promise<unknown>;
+  buildProjectPlacementForAgent(
+    agent: Pick<AgentSnapshotPayload, "workspaceId" | "cwd">,
+  ): Promise<unknown>;
   buildProjectPlacement(cwd: string): Promise<unknown>;
   buildWorkspaceDescriptorMap(...args: unknown[]): Promise<Map<string, unknown>>;
   describeWorkspaceRecord(...args: unknown[]): Promise<unknown>;
@@ -591,41 +593,52 @@ function createSessionForWorkspaceTests(
     list: async () => [
       createPersistedWorkspaceRecord({
         workspaceId: "ws-repo-running",
-        projectId: "proj-repo-running",
-        cwd: REPO_CWD,
-        kind: "directory",
         displayName: "repo",
         createdAt: "2026-03-01T12:00:00.000Z",
         updatedAt: "2026-03-01T12:00:00.000Z",
+        members: [
+          {
+            projectId: "proj-repo-running",
+            cwd: REPO_CWD,
+            kind: "directory",
+            displayName: "repo",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     ],
     get: async (workspaceId: string) =>
       workspaceId === "ws-repo-running"
         ? createPersistedWorkspaceRecord({
             workspaceId: "ws-repo-running",
-            projectId: "proj-repo-running",
-            cwd: REPO_CWD,
-            kind: "directory",
             displayName: "repo",
             createdAt: "2026-03-01T12:00:00.000Z",
             updatedAt: "2026-03-01T12:00:00.000Z",
+            members: [
+              {
+                projectId: "proj-repo-running",
+                cwd: REPO_CWD,
+                kind: "directory",
+                displayName: "repo",
+                branch: null,
+                worktreeRoot: null,
+                baseBranch: null,
+                isPaseoOwnedWorktree: false,
+                mainRepoRoot: null,
+              },
+            ],
           })
         : null,
     update: async (workspaceId, updater) => {
-      if (workspaceId !== "ws-repo-running") {
-        return null;
-      }
-      return updater(
-        createPersistedWorkspaceRecord({
-          workspaceId: "ws-repo-running",
-          projectId: "proj-repo-running",
-          cwd: REPO_CWD,
-          kind: "directory",
-          displayName: "repo",
-          createdAt: "2026-03-01T12:00:00.000Z",
-          updatedAt: "2026-03-01T12:00:00.000Z",
-        }),
-      );
+      const current = await workspaceRegistry.get(workspaceId);
+      if (!current) return null;
+      const updated = updater(current);
+      await workspaceRegistry.upsert(updated);
+      return updated;
     },
     upsert: async () => {},
     archive: async () => {},
@@ -651,24 +664,44 @@ function createSessionForWorkspaceTests(
         list: async () => [
           createPersistedWorkspaceRecord({
             workspaceId: "ws-repo-running",
-            projectId: "proj-repo-running",
-            cwd: REPO_CWD,
-            kind: "directory",
             displayName: "repo",
             createdAt: "2026-03-01T12:00:00.000Z",
             updatedAt: "2026-03-01T12:00:00.000Z",
+            members: [
+              {
+                projectId: "proj-repo-running",
+                cwd: REPO_CWD,
+                kind: "directory",
+                displayName: "repo",
+                branch: null,
+                worktreeRoot: null,
+                baseBranch: null,
+                isPaseoOwnedWorktree: false,
+                mainRepoRoot: null,
+              },
+            ],
           }),
         ],
         get: async (workspaceId: string) =>
           workspaceId === "ws-repo-running"
             ? createPersistedWorkspaceRecord({
                 workspaceId: "ws-repo-running",
-                projectId: "proj-repo-running",
-                cwd: REPO_CWD,
-                kind: "directory",
                 displayName: "repo",
                 createdAt: "2026-03-01T12:00:00.000Z",
                 updatedAt: "2026-03-01T12:00:00.000Z",
+                members: [
+                  {
+                    projectId: "proj-repo-running",
+                    cwd: REPO_CWD,
+                    kind: "directory",
+                    displayName: "repo",
+                    branch: null,
+                    worktreeRoot: null,
+                    baseBranch: null,
+                    isPaseoOwnedWorktree: false,
+                    mainRepoRoot: null,
+                  },
+                ],
               })
             : null,
         upsert: async () => {},
@@ -980,12 +1013,22 @@ test("create_agent_request keeps requested child cwd when grouped under an exist
     await workspaceRegistry.upsert(
       createPersistedWorkspaceRecord({
         workspaceId: "ws-parent",
-        projectId: "proj-parent",
-        cwd: parent,
-        kind: "local_checkout",
         displayName: "parent",
         createdAt: "2026-05-07T00:00:00.000Z",
         updatedAt: "2026-05-07T00:00:00.000Z",
+        members: [
+          {
+            projectId: "proj-parent",
+            cwd: parent,
+            kind: "local_checkout",
+            displayName: "parent",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -1045,7 +1088,9 @@ test("create_agent_request keeps requested child cwd when grouped under an exist
     expect(createdAgent?.cwd).toBe(child);
     const createdWorkspace = await workspaceRegistry.get(createdAgent!.workspaceId!);
     expect(createdWorkspace).not.toBeNull();
-    await expect(projectRegistry.get(createdWorkspace!.projectId)).resolves.toMatchObject({
+    await expect(
+      projectRegistry.get(createdWorkspace!.members[0].projectId),
+    ).resolves.toMatchObject({
       projectKey: deriveProjectKey({
         rootPath: child,
         remoteUrl: null,
@@ -1054,10 +1099,8 @@ test("create_agent_request keeps requested child cwd when grouped under an exist
         serverId: "test-server",
       }),
     });
-    await expect(
-      session.buildProjectPlacementForWorkspaceId(createdAgent!.workspaceId!),
-    ).resolves.toMatchObject({
-      projectKey: createdWorkspace!.projectId,
+    await expect(session.buildProjectPlacementForAgent(createdAgent!)).resolves.toMatchObject({
+      projectKey: createdWorkspace!.members[0].projectId,
       checkout: { cwd: child },
     });
     expect(findByType(emitted, "status")?.payload).toMatchObject({
@@ -1111,7 +1154,7 @@ function createMultiMemberAgentIntentHarness(input: {
     new Session({
       clientId: "test-client",
       serverId: "test-server",
-      scopes: ["*"],
+      permissions: OWNER_PERMISSIONS,
       appVersion: null,
       onMessage: (message) => emitted.push(message),
       logger: asSessionLogger(logger),
@@ -1199,12 +1242,7 @@ async function seedMultiMemberWorkspace(input: {
   await workspaceRegistry.upsert(
     createPersistedWorkspaceRecord({
       workspaceId: "ws-multi",
-      projectId: "proj-primary",
-      cwd: input.primary,
-      kind: "local_checkout",
       displayName: "primary",
-      branch: "main",
-      worktreeRoot: input.primary,
       createdAt: "2026-05-07T00:00:00.000Z",
       updatedAt: "2026-05-07T00:00:00.000Z",
       members: [
@@ -1234,6 +1272,72 @@ async function seedMultiMemberWorkspace(input: {
     }),
   );
 }
+
+test("agents in an initially empty workspace survive their first prompt and directory refresh", async () => {
+  const workdir = mkdtempSync(path.join(tmpdir(), "paseo-rootless-agent-"));
+  try {
+    const cwd = path.join(workdir, "project");
+    mkdirSync(cwd);
+    const { session, agentManager, emitted } = createMultiMemberAgentIntentHarness({
+      primary: cwd,
+      member: cwd,
+      workdir,
+    });
+    await session.handleMessage({
+      type: "workspace.create.request",
+      requestId: "empty",
+      title: "Web",
+      source: { kind: "empty" },
+    });
+    const workspaceResponse = findByType(emitted, "workspace.create.response");
+    expect(workspaceResponse?.payload.error).toBeNull();
+    const workspaceId = workspaceResponse!.payload.workspace!.id;
+    expect(workspaceResponse!.payload.workspace!.members).toEqual([]);
+    await session.handleMessage({
+      type: "workspace.member.add.request",
+      requestId: "member",
+      workspaceId,
+      source: { kind: "directory", path: cwd },
+    });
+    expect(findByType(emitted, "workspace.member.add.response")?.payload.error).toBeNull();
+    session.agentUpdates.beginSubscription({ subscriptionId: "rootless" });
+    session.agentUpdates.flushBootstrapped("rootless");
+    await session.handleMessage({
+      type: "create_agent_request",
+      requestId: "create",
+      workspaceId,
+      config: { provider: "codex", cwd },
+      initialPrompt: "Hello",
+      attachments: [],
+    });
+    expect(findByType(emitted, "status")?.payload).toMatchObject({
+      status: "agent_created",
+      agent: { workspaceId, cwd },
+    });
+    const [agent] = agentManager.listAgents();
+    await session.agentUpdates.forwardLiveAgent(agent);
+    const updates = filterByType(emitted, "agent_update").map((message) => message.payload);
+    expect(updates).toContainEqual(
+      expect.objectContaining({
+        kind: "upsert",
+        agent: expect.objectContaining({ id: agent.id, workspaceId, cwd }),
+      }),
+    );
+    expect(updates.filter((update) => update.kind === "remove")).toEqual([]);
+    const listing = await session.listFetchAgentsEntries({
+      type: "fetch_agents_request",
+      requestId: "refresh",
+      scope: "active",
+    });
+    expect(agentIdsFromEntries(listing.entries)).toEqual([agent.id]);
+    const persisted = await session.workspaceRegistry.get(workspaceId);
+    expect(persisted).not.toHaveProperty("projectId");
+    expect(persisted).not.toHaveProperty("cwd");
+    expect(persisted).toMatchObject({ title: "Web", members: [{ cwd }] });
+  } finally {
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
 
 test("create_agent_request honors a config cwd that matches a workspace member", async () => {
   const workdir = mkdtempSync(path.join(tmpdir(), "paseo-create-agent-member-cwd-"));
@@ -1269,7 +1373,7 @@ test("create_agent_request honors a config cwd that matches a workspace member",
   }
 });
 
-test("create_agent_request forces the primary cwd when the config cwd matches no member", async () => {
+test("create_agent_request preserves the selected cwd without a workspace root", async () => {
   const workdir = mkdtempSync(path.join(tmpdir(), "paseo-create-agent-stranger-cwd-"));
   try {
     const primary = path.join(workdir, "primary");
@@ -1294,7 +1398,7 @@ test("create_agent_request forces the primary cwd when the config cwd matches no
 
     const [createdAgent] = agentManager.listAgents();
     expect(createdAgent?.workspaceId).toBe("ws-multi");
-    expect(createdAgent?.cwd).toBe(primary);
+    expect(createdAgent?.cwd).toBe(stranger);
   } finally {
     rmSync(workdir, { recursive: true, force: true });
   }
@@ -1365,12 +1469,22 @@ test("create_agent_request launches from an exact subdirectory in a created work
     await workspaceRegistry.upsert(
       createPersistedWorkspaceRecord({
         workspaceId: "ws-parent",
-        projectId: "proj-parent",
-        cwd: parent,
-        kind: "local_checkout",
         displayName: "parent",
         createdAt: "2026-05-07T00:00:00.000Z",
         updatedAt: "2026-05-07T00:00:00.000Z",
+        members: [
+          {
+            projectId: "proj-parent",
+            cwd: parent,
+            kind: "local_checkout",
+            displayName: "parent",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -1500,13 +1614,23 @@ test("create_agent_request does not title an existing workspace from the agent p
     await workspaceRegistry.upsert(
       createPersistedWorkspaceRecord({
         workspaceId: "ws-existing",
-        projectId: "proj-existing",
-        cwd,
-        kind: "local_checkout",
         displayName: "repo",
         title: null,
         createdAt: "2026-05-07T00:00:00.000Z",
         updatedAt: "2026-05-07T00:00:00.000Z",
+        members: [
+          {
+            projectId: "proj-existing",
+            cwd,
+            kind: "local_checkout",
+            displayName: "repo",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -1671,12 +1795,22 @@ test("agent_update placement does not refresh git snapshots", async () => {
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-1",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "repo",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "repo",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.projectRegistry.get = async (id: string) => (id === project.projectId ? project : null);
@@ -1837,12 +1971,22 @@ test("archive emits an authoritative agent_update upsert for subscribed clients"
       workspaceRegistry: (() => {
         const ws = createPersistedWorkspaceRecord({
           workspaceId: "ws-1",
-          projectId: "proj-1",
-          cwd: REPO_CWD,
-          kind: "directory",
           displayName: "repo",
           createdAt: "2026-03-01T12:00:00.000Z",
           updatedAt: "2026-03-01T12:00:00.000Z",
+          members: [
+            {
+              projectId: "proj-1",
+              cwd: REPO_CWD,
+              kind: "directory",
+              displayName: "repo",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
         });
         return {
           initialize: async () => {},
@@ -1907,12 +2051,22 @@ test("workspace clear attention clears stored-only agents and responds", async (
   const emitted: SessionOutboundMessage[] = [];
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: REPO_CWD,
-    projectId: REPO_CWD,
-    cwd: REPO_CWD,
-    kind: "directory",
     displayName: "repo",
     createdAt: "2026-03-30T15:00:00.000Z",
     updatedAt: "2026-03-30T15:00:00.000Z",
+    members: [
+      {
+        projectId: REPO_CWD,
+        cwd: REPO_CWD,
+        kind: "directory",
+        displayName: "repo",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const project = createPersistedProjectRecord({
     projectId: REPO_CWD,
@@ -2001,27 +2155,47 @@ test("workspace clear attention can clear multiple workspaces in one request", a
   const workspaces = [
     createPersistedWorkspaceRecord({
       workspaceId: "ws-repo-a",
-      projectId: "/tmp/repo-a",
-      cwd: "/tmp/repo-a",
-      kind: "directory",
       displayName: "repo-a",
       createdAt: "2026-03-30T15:00:00.000Z",
       updatedAt: "2026-03-30T15:00:00.000Z",
+      members: [
+        {
+          projectId: "/tmp/repo-a",
+          cwd: "/tmp/repo-a",
+          kind: "directory",
+          displayName: "repo-a",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
     createPersistedWorkspaceRecord({
       workspaceId: "ws-repo-b",
-      projectId: "/tmp/repo-b",
-      cwd: "/tmp/repo-b",
-      kind: "directory",
       displayName: "repo-b",
       createdAt: "2026-03-30T15:00:00.000Z",
       updatedAt: "2026-03-30T15:00:00.000Z",
+      members: [
+        {
+          projectId: "/tmp/repo-b",
+          cwd: "/tmp/repo-b",
+          kind: "directory",
+          displayName: "repo-b",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   ];
   const projects = workspaces.map((workspace) =>
     createPersistedProjectRecord({
-      projectId: workspace.projectId,
-      rootPath: workspace.cwd,
+      projectId: workspace.members[0].projectId,
+      rootPath: workspace.members[0].cwd,
       kind: "non_git",
       displayName: workspace.displayName,
       createdAt: "2026-03-30T15:00:00.000Z",
@@ -2033,7 +2207,7 @@ test("workspace clear attention can clear multiple workspaces in one request", a
       `stored-agent-${index + 1}`,
       makeStoredAgent({
         id: `stored-agent-${index + 1}`,
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         updatedAt: "2026-03-30T15:00:00.000Z",
         requiresAttention: true,
         attentionReason: "finished",
@@ -2055,7 +2229,7 @@ test("workspace clear attention can clear multiple workspaces in one request", a
   };
   session.listAgentPayloads = async () =>
     Array.from(storedRecords.values()).map((record) => {
-      const owner = workspaces.find((workspace) => workspace.cwd === record.cwd);
+      const owner = workspaces.find((workspace) => workspace.members[0].cwd === record.cwd);
       return makeAgent({
         id: record.id,
         cwd: record.cwd,
@@ -2197,12 +2371,22 @@ test("close_items_request archives agents and kills terminals in one batch", asy
       workspaceRegistry: (() => {
         const ws = createPersistedWorkspaceRecord({
           workspaceId: "ws-close",
-          projectId: "proj-close",
-          cwd: REPO_CWD,
-          kind: "directory",
           displayName: "repo",
           createdAt: "2026-03-01T12:00:00.000Z",
           updatedAt: "2026-03-01T12:00:00.000Z",
+          members: [
+            {
+              projectId: "proj-close",
+              cwd: REPO_CWD,
+              kind: "directory",
+              displayName: "repo",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
         });
         return {
           initialize: async () => {},
@@ -2382,12 +2566,22 @@ test("close_items_request archives stored agents that are not currently loaded",
       workspaceRegistry: (() => {
         const ws = createPersistedWorkspaceRecord({
           workspaceId: "ws-stored",
-          projectId: "proj-stored",
-          cwd: REPO_CWD,
-          kind: "directory",
           displayName: "repo",
           createdAt: "2026-03-01T12:00:00.000Z",
           updatedAt: "2026-03-01T12:00:00.000Z",
+          members: [
+            {
+              projectId: "proj-stored",
+              cwd: REPO_CWD,
+              kind: "directory",
+              displayName: "repo",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
         });
         return {
           initialize: async () => {},
@@ -2529,12 +2723,22 @@ test("close_items_request continues after an archive failure", async () => {
       workspaceRegistry: (() => {
         const ws = createPersistedWorkspaceRecord({
           workspaceId: "ws-err",
-          projectId: "proj-err",
-          cwd: REPO_CWD,
-          kind: "directory",
           displayName: "repo",
           createdAt: "2026-03-01T12:00:00.000Z",
           updatedAt: "2026-03-01T12:00:00.000Z",
+          members: [
+            {
+              projectId: "proj-err",
+              cwd: REPO_CWD,
+              kind: "directory",
+              displayName: "repo",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
         });
         return {
           initialize: async () => {},
@@ -2609,12 +2813,22 @@ test("non-git workspace uses deterministic directory name and no unknown branch 
   session.workspaceRegistry.list = async () => [
     createPersistedWorkspaceRecord({
       workspaceId: "ws-non-git",
-      projectId: "proj-non-git",
-      cwd: "/tmp/non-git",
-      kind: "directory",
       displayName: "non-git",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-01T12:00:00.000Z",
+      members: [
+        {
+          projectId: "proj-non-git",
+          cwd: "/tmp/non-git",
+          kind: "directory",
+          displayName: "non-git",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   ];
   session.listAgentPayloads = async () => [
@@ -2639,34 +2853,60 @@ test("workspace placements preserve checkout facts independently from the projec
   const session = createSessionForWorkspaceTests();
   const manualWorktree = createPersistedWorkspaceRecord({
     workspaceId: "ws-manual-worktree",
-    projectId: "proj-manual-worktree",
-    cwd: "/tmp/manual-worktree",
-    kind: "worktree",
     displayName: "manual",
-    isPaseoOwnedWorktree: false,
-    mainRepoRoot: "/tmp/main-repo",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-manual-worktree",
+        cwd: "/tmp/manual-worktree",
+        kind: "worktree",
+        displayName: "manual",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: "/tmp/main-repo",
+      },
+    ],
   });
   const explicitDirectory = createPersistedWorkspaceRecord({
     workspaceId: "ws-explicit-directory",
-    projectId: "proj-manual-worktree",
-    cwd: "/tmp/plain-directory",
-    kind: "directory",
     displayName: "plain",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-manual-worktree",
+        cwd: "/tmp/plain-directory",
+        kind: "directory",
+        displayName: "plain",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const paseoSubdirectory = createPersistedWorkspaceRecord({
     workspaceId: "ws-paseo-subdirectory",
-    projectId: "proj-manual-worktree",
-    cwd: "/tmp/paseo-worktree/packages/app",
-    kind: "worktree",
     displayName: "app",
-    isPaseoOwnedWorktree: true,
-    mainRepoRoot: "/tmp/main-repo",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-manual-worktree",
+        cwd: "/tmp/paseo-worktree/packages/app",
+        kind: "worktree",
+        displayName: "app",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: true,
+        mainRepoRoot: "/tmp/main-repo",
+      },
+    ],
   });
   const project = createPersistedProjectRecord({
     projectId: "proj-manual-worktree",
@@ -2682,14 +2922,17 @@ test("workspace placements preserve checkout facts independently from the projec
     ) ?? null;
   session.projectRegistry.get = async () => project;
   session.workspaceGitService.peekSnapshot = (cwd: string) =>
-    cwd === paseoSubdirectory.cwd
+    cwd === paseoSubdirectory.members[0].cwd
       ? createWorkspaceRuntimeSnapshot(cwd, {
           git: { repoRoot: "/tmp/paseo-worktree" },
         })
       : null;
 
   await expect(
-    session.buildProjectPlacementForWorkspaceId(manualWorktree.workspaceId),
+    session.buildProjectPlacementForAgent({
+      workspaceId: manualWorktree.workspaceId,
+      cwd: manualWorktree.members[0].cwd,
+    }),
   ).resolves.toEqual(
     expect.objectContaining({
       checkout: expect.objectContaining({
@@ -2700,7 +2943,10 @@ test("workspace placements preserve checkout facts independently from the projec
     }),
   );
   await expect(
-    session.buildProjectPlacementForWorkspaceId(explicitDirectory.workspaceId),
+    session.buildProjectPlacementForAgent({
+      workspaceId: explicitDirectory.workspaceId,
+      cwd: explicitDirectory.members[0].cwd,
+    }),
   ).resolves.toEqual(
     expect.objectContaining({
       checkout: expect.objectContaining({
@@ -2711,11 +2957,14 @@ test("workspace placements preserve checkout facts independently from the projec
     }),
   );
   await expect(
-    session.buildProjectPlacementForWorkspaceId(paseoSubdirectory.workspaceId),
+    session.buildProjectPlacementForAgent({
+      workspaceId: paseoSubdirectory.workspaceId,
+      cwd: paseoSubdirectory.members[0].cwd,
+    }),
   ).resolves.toEqual(
     expect.objectContaining({
       checkout: expect.objectContaining({
-        cwd: paseoSubdirectory.cwd,
+        cwd: paseoSubdirectory.members[0].cwd,
         worktreeRoot: "/tmp/paseo-worktree",
       }),
     }),
@@ -2744,31 +2993,61 @@ test("active-scoped fetch_agents includes only unarchived agents in active works
   });
   const activeWorkspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-active",
-    projectId: activeProject.projectId,
-    cwd: "/tmp/active",
-    kind: "directory",
     displayName: "active",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: activeProject.projectId,
+        cwd: "/tmp/active",
+        kind: "directory",
+        displayName: "active",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const archivedWorkspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-archived",
-    projectId: activeProject.projectId,
-    cwd: "/tmp/archived-workspace",
-    kind: "directory",
     displayName: "archived workspace",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
     archivedAt,
+    members: [
+      {
+        projectId: activeProject.projectId,
+        cwd: "/tmp/archived-workspace",
+        kind: "directory",
+        displayName: "archived workspace",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const workspaceInArchivedProject = createPersistedWorkspaceRecord({
     workspaceId: "ws-archived-project",
-    projectId: archivedProject.projectId,
-    cwd: "/tmp/archived-project",
-    kind: "directory",
     displayName: "archived project",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: archivedProject.projectId,
+        cwd: "/tmp/archived-project",
+        kind: "directory",
+        displayName: "archived project",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.projectRegistry.list = async () => [activeProject, archivedProject];
@@ -2827,7 +3106,11 @@ test("active-scoped fetch_agents includes only unarchived agents in active works
     filter: { includeArchived: true },
   });
 
-  expect(agentIdsFromEntries(result.entries)).toEqual(["agent-active", "agent-subdir"]);
+  expect(agentIdsFromEntries(result.entries)).toEqual([
+    "agent-active",
+    "agent-subdir",
+    "agent-archived-project",
+  ]);
   expect(result.pageInfo.hasMore).toBe(false);
 });
 
@@ -2843,31 +3126,61 @@ test("active-scoped fetch_agents pages within active scope instead of global his
   });
   const activeOne = createPersistedWorkspaceRecord({
     workspaceId: "ws-active-one",
-    projectId: project.projectId,
-    cwd: "/tmp/pages/one",
-    kind: "directory",
     displayName: "one",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: "/tmp/pages/one",
+        kind: "directory",
+        displayName: "one",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const activeTwo = createPersistedWorkspaceRecord({
     workspaceId: "ws-active-two",
-    projectId: project.projectId,
-    cwd: "/tmp/pages/two",
-    kind: "directory",
     displayName: "two",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: "/tmp/pages/two",
+        kind: "directory",
+        displayName: "two",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const archivedWorkspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-stale",
-    projectId: project.projectId,
-    cwd: "/tmp/pages/stale",
-    kind: "directory",
     displayName: "stale",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
     archivedAt: "2026-03-02T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: "/tmp/pages/stale",
+        kind: "directory",
+        displayName: "stale",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.projectRegistry.list = async () => [project];
@@ -2931,22 +3244,42 @@ test("legacy unscoped fetch_agents keeps global workspace behavior", async () =>
   });
   const activeWorkspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-legacy-active",
-    projectId: project.projectId,
-    cwd: activeCwd,
-    kind: "directory",
     displayName: "active",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: activeCwd,
+        kind: "directory",
+        displayName: "active",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const archivedWorkspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-legacy-archived",
-    projectId: project.projectId,
-    cwd: archivedCwd,
-    kind: "directory",
     displayName: "archived",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
     archivedAt: "2026-03-02T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: archivedCwd,
+        kind: "directory",
+        displayName: "archived",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.projectRegistry.get = async () => project;
@@ -2997,13 +3330,23 @@ test("fetch_agent_history_request pages archived historical rows separately", as
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-history",
-    projectId: project.projectId,
-    cwd: historyCwd,
-    kind: "directory",
     displayName: "history",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
     archivedAt: "2026-03-02T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: historyCwd,
+        kind: "directory",
+        displayName: "history",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.emit = (message) => {
@@ -3066,12 +3409,22 @@ test("fetch_agent_history_request ranks a search across the whole history, not o
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-search",
-    projectId: project.projectId,
-    cwd: historyCwd,
-    kind: "directory",
     displayName: "history-search",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: historyCwd,
+        kind: "directory",
+        displayName: "history-search",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.emit = (message) => {
@@ -3167,12 +3520,22 @@ test("fetch_agent_history_request rejects a cursor on a searched request", async
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-cursor",
-    projectId: project.projectId,
-    cwd: historyCwd,
-    kind: "directory",
     displayName: "history-cursor",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: historyCwd,
+        kind: "directory",
+        displayName: "history-cursor",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.emit = (message) => {
@@ -3215,7 +3578,7 @@ test("fetch_agent_history_request rejects a cursor on a searched request", async
   ]);
 });
 
-test("fetch_agent_history_request skips rows whose workspace project record is missing", async () => {
+test("fetch_agent_history_request retains rows without a registered project", async () => {
   const emitted: SessionOutboundMessage[] = [];
   const session = createSessionForWorkspaceTests();
   const stableCwd = path.resolve("/tmp/stable-history");
@@ -3230,21 +3593,41 @@ test("fetch_agent_history_request skips rows whose workspace project record is m
   });
   const stableWorkspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-stable-history",
-    projectId: stableProject.projectId,
-    cwd: stableCwd,
-    kind: "directory",
     displayName: "stable history",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: stableProject.projectId,
+        cwd: stableCwd,
+        kind: "directory",
+        displayName: "stable history",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const orphanWorkspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-orphan-history",
-    projectId: orphanCwd,
-    cwd: orphanCwd,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: orphanCwd,
+        cwd: orphanCwd,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.emit = (message) => {
@@ -3284,6 +3667,10 @@ test("fetch_agent_history_request skips rows whose workspace project record is m
       payload: expect.objectContaining({
         requestId: "req-history-orphan",
         entries: [
+          expect.objectContaining({
+            agent: expect.objectContaining({ id: "history-orphan" }),
+            project: expect.objectContaining({ projectKey: orphanCwd }),
+          }),
           expect.objectContaining({
             agent: expect.objectContaining({ id: "history-stable" }),
             project: expect.objectContaining({
@@ -3559,7 +3946,7 @@ test("fetch_agent_request still resolves archived historical agents", async () =
       ? { ok: true, agentId: agent.id }
       : { ok: false, error: `Agent not found: ${identifier}` };
   session.getAgentPayloadById = async (agentId: string) => (agentId === agent.id ? agent : null);
-  session.buildProjectPlacementForWorkspaceId = async () => ({
+  session.buildProjectPlacementForAgent = async () => ({
     projectKey: "proj-history-detail",
     projectName: "history detail",
     checkout: {
@@ -3599,12 +3986,22 @@ test("git branch workspace uses branch as canonical name", async () => {
   session.workspaceRegistry.list = async () => [
     createPersistedWorkspaceRecord({
       workspaceId: "ws-repo-branch",
-      projectId: "proj-repo-branch",
-      cwd: "/tmp/repo-branch",
-      kind: "local_checkout",
       displayName: "feature/name-from-server",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-01T12:00:00.000Z",
+      members: [
+        {
+          projectId: "proj-repo-branch",
+          cwd: "/tmp/repo-branch",
+          kind: "local_checkout",
+          displayName: "feature/name-from-server",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   ];
   session.listAgentPayloads = async () => [
@@ -3642,12 +4039,22 @@ test("branch/detached policies and dominant status bucket are deterministic", as
   session.workspaceRegistry.list = async () => [
     createPersistedWorkspaceRecord({
       workspaceId: "ws-repo-status",
-      projectId: "proj-repo-status",
-      cwd: REPO_CWD,
-      kind: "local_checkout",
       displayName: "repo",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-01T12:00:00.000Z",
+      members: [
+        {
+          projectId: "proj-repo-status",
+          cwd: REPO_CWD,
+          kind: "local_checkout",
+          displayName: "repo",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   ];
   session.listAgentPayloads = async () => [
@@ -3689,12 +4096,22 @@ test("subdirectory agents contribute to their owning workspace descriptor", asyn
   session.workspaceRegistry.list = async () => [
     createPersistedWorkspaceRecord({
       workspaceId: "ws-repo-subdir",
-      projectId: "proj-repo-subdir",
-      cwd: REPO_CWD,
-      kind: "local_checkout",
       displayName: "main",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-01T12:00:00.000Z",
+      members: [
+        {
+          projectId: "proj-repo-subdir",
+          cwd: REPO_CWD,
+          kind: "local_checkout",
+          displayName: "main",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   ];
   // The agent runs in a subdirectory but carries its owning workspaceId; the
@@ -3766,24 +4183,44 @@ test("workspace update stream keeps persisted workspace visible after agents sto
         list: async () => [
           createPersistedWorkspaceRecord({
             workspaceId: "ws-repo-running",
-            projectId: "proj-repo-running",
-            cwd: REPO_CWD,
-            kind: "directory",
             displayName: "repo",
             createdAt: "2026-03-01T12:00:00.000Z",
             updatedAt: "2026-03-01T12:00:00.000Z",
+            members: [
+              {
+                projectId: "proj-repo-running",
+                cwd: REPO_CWD,
+                kind: "directory",
+                displayName: "repo",
+                branch: null,
+                worktreeRoot: null,
+                baseBranch: null,
+                isPaseoOwnedWorktree: false,
+                mainRepoRoot: null,
+              },
+            ],
           }),
         ],
         get: async (workspaceId: string) =>
           workspaceId === "ws-repo-running"
             ? createPersistedWorkspaceRecord({
                 workspaceId: "ws-repo-running",
-                projectId: "proj-repo-running",
-                cwd: REPO_CWD,
-                kind: "directory",
                 displayName: "repo",
                 createdAt: "2026-03-01T12:00:00.000Z",
                 updatedAt: "2026-03-01T12:00:00.000Z",
+                members: [
+                  {
+                    projectId: "proj-repo-running",
+                    cwd: REPO_CWD,
+                    kind: "directory",
+                    displayName: "repo",
+                    branch: null,
+                    worktreeRoot: null,
+                    baseBranch: null,
+                    isPaseoOwnedWorktree: false,
+                    mainRepoRoot: null,
+                  },
+                ],
               })
             : null,
         upsert: async () => {},
@@ -3900,13 +4337,23 @@ test("archiving the last workspace emits a remove carrying the now-empty project
   });
   const archivedWorkspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-last",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "repo",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
     archivedAt: "2026-03-02T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "repo",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.projectRegistry.list = async () => [project];
@@ -3929,9 +4376,9 @@ test("archiving the last workspace emits a remove carrying the now-empty project
             projectId: project.projectId,
             projectDisplayName: project.displayName,
             projectRootPath: project.rootPath,
-            workspaceDirectory: archivedWorkspace.cwd,
+            workspaceDirectory: archivedWorkspace.members[0].cwd,
             projectKind: project.kind,
-            workspaceKind: archivedWorkspace.kind,
+            workspaceKind: archivedWorkspace.members[0].kind,
             name: archivedWorkspace.displayName,
             status: "done",
             activityAt: null,
@@ -3963,7 +4410,7 @@ test("archiving the last workspace emits a remove carrying the now-empty project
   });
 });
 
-test("project.remove.request archives active workspaces and removes the project record", async () => {
+test("project.remove.request detaches projects while preserving independent active workspaces", async () => {
   const emitted: SessionOutboundMessage[] = [];
   const session = createSessionForWorkspaceTests({
     onMessage: (message) => emitted.push(message),
@@ -3979,12 +4426,22 @@ test("project.remove.request archives active workspaces and removes the project 
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-project-remove",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const projects = new Map<string, PersistedProjectRecord>([[project.projectId, project]]);
   const workspaces = new Map<string, PersistedWorkspaceRecord>([
@@ -3999,6 +4456,13 @@ test("project.remove.request archives active workspaces and removes the project 
   session.workspaceRegistry.get = async (workspaceId: string) =>
     workspaces.get(workspaceId) ?? null;
   session.workspaceRegistry.list = async () => Array.from(workspaces.values());
+  session.workspaceRegistry.update = async (workspaceId, updater) => {
+    const existing = workspaces.get(workspaceId);
+    if (!existing) return null;
+    const updated = updater(existing);
+    workspaces.set(workspaceId, updated);
+    return updated;
+  };
   session.workspaceRegistry.archive = async (workspaceId: string, archivedAt: string) => {
     const existing = workspaces.get(workspaceId);
     if (!existing) return;
@@ -4012,26 +4476,6 @@ test("project.remove.request archives active workspaces and removes the project 
     lastEmittedByWorkspaceId: new Map(),
   };
   session.listAgentPayloads = async () => [];
-  session.buildWorkspaceDescriptorMap = async (options: { workspaceIds?: Iterable<string> }) => {
-    const workspaceIds = Array.from(options.workspaceIds ?? workspaces.keys());
-    const descriptors = new Map<string, unknown>();
-    for (const workspaceId of workspaceIds) {
-      const record = workspaces.get(workspaceId);
-      if (!record || record.archivedAt) continue;
-      descriptors.set(workspaceId, {
-        id: record.workspaceId,
-        projectId: record.projectId,
-        projectDisplayName: "repo",
-        projectRootPath: REPO_CWD,
-        projectKind: "git",
-        workspaceKind: record.kind,
-        name: record.displayName,
-        status: "idle",
-        activityAt: null,
-      });
-    }
-    return descriptors;
-  };
 
   await session.handleMessage({
     type: "project.remove.request",
@@ -4043,21 +4487,21 @@ test("project.remove.request archives active workspaces and removes the project 
   expect(workspaces.get(workspace.workspaceId)).toEqual({
     ...workspace,
     updatedAt: expect.any(String),
-    archivedAt: expect.any(String),
+    members: [],
   });
   expect(findByType(emitted, "project.remove.response")?.payload).toEqual({
     requestId: "req-remove-project",
     projectId: project.projectId,
     accepted: true,
-    removedWorkspaceIds: [workspace.workspaceId],
+    removedWorkspaceIds: [],
     error: null,
   });
   const workspaceUpdates = filterByType(emitted, "workspace_update");
-  expect(workspaceUpdates.at(-1)?.payload).toEqual({
-    kind: "remove",
-    id: workspace.workspaceId,
-    removedProjectId: project.projectId,
+  expect(workspaceUpdates.at(-1)?.payload).toMatchObject({
+    kind: "upsert",
+    workspace: { id: workspace.workspaceId, name: "main", members: [], membersAuthoritative: true },
   });
+  expect(workspaceUpdates.some((update) => update.payload.kind === "remove")).toBe(false);
 });
 
 test("project.remove.request removes an already-empty project", async () => {
@@ -4075,13 +4519,23 @@ test("project.remove.request removes an already-empty project", async () => {
   });
   const archivedWorkspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-project-remove-empty",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
     archivedAt: "2026-03-02T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const projects = new Map<string, PersistedProjectRecord>([[project.projectId, project]]);
   const workspaces = new Map<string, PersistedWorkspaceRecord>([
@@ -4096,6 +4550,13 @@ test("project.remove.request removes an already-empty project", async () => {
   session.workspaceRegistry.get = async (workspaceId: string) =>
     workspaces.get(workspaceId) ?? null;
   session.workspaceRegistry.list = async () => Array.from(workspaces.values());
+  session.workspaceRegistry.update = async (workspaceId, updater) => {
+    const existing = workspaces.get(workspaceId);
+    if (!existing) return null;
+    const updated = updater(existing);
+    workspaces.set(workspaceId, updated);
+    return updated;
+  };
   session.workspaceRegistry.archive = async (workspaceId: string, archivedAt: string) => {
     const existing = workspaces.get(workspaceId);
     if (!existing) return;
@@ -4120,7 +4581,11 @@ test("project.remove.request removes an already-empty project", async () => {
   });
 
   expect(projects.has(project.projectId)).toBe(false);
-  expect(workspaces.get(archivedWorkspace.workspaceId)).toEqual(archivedWorkspace);
+  expect(workspaces.get(archivedWorkspace.workspaceId)).toEqual({
+    ...archivedWorkspace,
+    members: [],
+    updatedAt: expect.any(String),
+  });
   expect(findByType(emitted, "project.remove.response")?.payload).toEqual({
     requestId: "req-remove-empty-project",
     projectId: project.projectId,
@@ -4298,21 +4763,41 @@ test("workspace updates stay scoped to the matching cwd", async () => {
   session.workspaceRegistry.list = async () => [
     createPersistedWorkspaceRecord({
       workspaceId: "ws-repo-main",
-      projectId: "proj-repo-main",
-      cwd: mainCwd,
-      kind: "local_checkout",
       displayName: "main",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-01T12:00:00.000Z",
+      members: [
+        {
+          projectId: "proj-repo-main",
+          cwd: mainCwd,
+          kind: "local_checkout",
+          displayName: "main",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
     createPersistedWorkspaceRecord({
       workspaceId: "ws-repo-feature",
-      projectId: "proj-repo-main",
-      cwd: featureCwd,
-      kind: "worktree",
       displayName: "feature",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-01T12:00:00.000Z",
+      members: [
+        {
+          projectId: "proj-repo-main",
+          cwd: featureCwd,
+          kind: "worktree",
+          displayName: "feature",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   ];
   session.workspaceRegistry.archive = async (workspaceId) => {
@@ -4419,7 +4904,7 @@ test("open_project_request registers a workspace before any agent exists", async
   });
 
   const registeredWorkspace = Array.from(workspaces.values()).find(
-    (workspace) => workspace.cwd === REPO_CWD,
+    (workspace) => workspace.members[0].cwd === REPO_CWD,
   );
   expect(registeredWorkspace).toBeTruthy();
   const response = findByType(emitted, "open_project_response");
@@ -4489,8 +4974,8 @@ test("import_agent_request registers a workspace for a never-seen cwd", async ()
     lastEmittedByWorkspaceId: new Map(),
   };
   session.buildWorkspaceDescriptorMap = async () => {
-    const workspace = Array.from(workspaces.values()).find(
-      (candidate) => candidate.cwd === importedCwd,
+    const workspace = Array.from(workspaces.values()).find((candidate) =>
+      candidate.members.some((member) => member.cwd === importedCwd),
     );
     if (!workspace) {
       return new Map();
@@ -4500,7 +4985,7 @@ test("import_agent_request registers a workspace for a never-seen cwd", async ()
         workspace.workspaceId,
         {
           id: workspace.workspaceId,
-          projectId: workspace.projectId,
+          projectId: workspace.members[0].projectId,
           projectDisplayName: "imported-project",
           projectRootPath: importedCwd,
           workspaceDirectory: importedCwd,
@@ -4523,7 +5008,7 @@ test("import_agent_request registers a workspace for a never-seen cwd", async ()
   });
 
   const importedWorkspace = Array.from(workspaces.values()).find(
-    (workspace) => workspace.cwd === importedCwd,
+    (workspace) => workspace.members[0].cwd === importedCwd,
   );
   expect(importedWorkspace).toBeTruthy();
   const workspaceUpdates = filterByType(emitted, "workspace_update");
@@ -4677,7 +5162,7 @@ test("open_project_response returns immediately even when the GitHub fetch is sl
   expect(response?.payload.workspace?.id).toMatch(/^wks_[0-9a-f]{16}$/);
   expect(response?.payload.workspace?.workspaceDirectory).toBe(cwd);
   expect(response?.payload.workspace?.gitRuntime).toBeUndefined();
-  expect(response?.payload.workspace?.githubRuntime).toBeUndefined();
+  expect(response?.payload.workspace?.githubRuntime).toBeNull();
 
   resolveSnapshot(createWorkspaceRuntimeSnapshot(cwd));
 });
@@ -4808,12 +5293,22 @@ test("open_project_request does not match a new child directory to an existing p
     home,
     createPersistedWorkspaceRecord({
       workspaceId: home,
-      projectId: home,
-      cwd: home,
-      kind: "directory",
       displayName: "developer",
       createdAt: "2026-04-24T09:00:00.000Z",
       updatedAt: "2026-04-24T09:00:00.000Z",
+      members: [
+        {
+          projectId: home,
+          cwd: home,
+          kind: "directory",
+          displayName: "developer",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 
@@ -4846,9 +5341,12 @@ test("open_project_request does not match a new child directory to an existing p
   expect(response?.payload.error).toBeNull();
   expect(response?.payload.workspace?.id).toMatch(/^wks_[0-9a-f]{16}$/);
   expect(response?.payload.workspace?.workspaceDirectory).toBe(worktree);
-  expect(Array.from(workspaces.values()).some((workspace) => workspace.cwd === worktree)).toBe(
-    true,
-  );
+  expect(workspaces.get(home)?.members.map((member) => member.cwd)).toEqual([home]);
+  expect(
+    Array.from(workspaces.values()).some((workspace) =>
+      workspace.members.some((member) => member.cwd === worktree),
+    ),
+  ).toBe(true);
 });
 
 test("open_project_request does not unarchive an archived parent workspace for a new child directory", async () => {
@@ -4876,13 +5374,23 @@ test("open_project_request does not unarchive an archived parent workspace for a
     home,
     createPersistedWorkspaceRecord({
       workspaceId: home,
-      projectId: home,
-      cwd: home,
-      kind: "directory",
       displayName: "moboudra",
       createdAt: "2026-04-24T07:00:00.000Z",
       updatedAt: archivedAt,
       archivedAt,
+      members: [
+        {
+          projectId: home,
+          cwd: home,
+          kind: "directory",
+          displayName: "moboudra",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 
@@ -4951,13 +5459,23 @@ test("open_project_request reclassifies an archived directory workspace when git
     workspaceId,
     createPersistedWorkspaceRecord({
       workspaceId,
-      projectId: cwd,
-      cwd,
-      kind: "directory",
       displayName: "desktop-daemon-settings",
       createdAt: "2026-04-24T09:46:43.146Z",
       updatedAt: archivedAt,
       archivedAt,
+      members: [
+        {
+          projectId: cwd,
+          cwd,
+          kind: "directory",
+          displayName: "desktop-daemon-settings",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 
@@ -5009,7 +5527,7 @@ test("open_project_request reclassifies an archived directory workspace when git
   const response = findByType(emitted, "open_project_response");
 
   expect(response?.payload.error).toBeNull();
-  expect(response?.payload.workspace?.projectId).toMatch(/^prj_[0-9a-f]{16}$/);
+  expect(response?.payload.workspace.members[0]?.projectId).toMatch(/^prj_[0-9a-f]{16}$/);
   expect(projects.get(cwd)?.archivedAt).toBe(archivedAt);
   expect(workspaces.get(workspaceId)?.archivedAt).toBe(archivedAt);
 });
@@ -5056,24 +5574,44 @@ test("open_project_request reclassifies an active directory workspace when git m
     workspaceId,
     createPersistedWorkspaceRecord({
       workspaceId,
-      projectId: cwd,
-      cwd,
-      kind: "directory",
       displayName: "desktop-daemon-settings",
       createdAt: "2026-04-24T09:46:43.146Z",
       updatedAt: "2026-04-24T09:46:43.146Z",
+      members: [
+        {
+          projectId: cwd,
+          cwd,
+          kind: "directory",
+          displayName: "desktop-daemon-settings",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
   workspaces.set(
     repoWorkspaceId,
     createPersistedWorkspaceRecord({
       workspaceId: repoWorkspaceId,
-      projectId: repoRoot,
-      cwd: repoRoot,
-      kind: "local_checkout",
       displayName: "main",
       createdAt: "2026-04-24T09:40:00.000Z",
       updatedAt: "2026-04-24T09:40:00.000Z",
+      members: [
+        {
+          projectId: repoRoot,
+          cwd: repoRoot,
+          kind: "local_checkout",
+          displayName: "main",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 
@@ -5125,8 +5663,8 @@ test("open_project_request reclassifies an active directory workspace when git m
   const response = findByType(emitted, "open_project_response");
 
   expect(response?.payload.error).toBeNull();
-  expect(response?.payload.workspace?.projectId).toBe(cwd);
-  expect(workspaces.get(workspaceId)?.projectId).toBe(cwd);
+  expect(response?.payload.workspace.members[0]?.projectId).toBe(cwd);
+  expect(workspaces.get(workspaceId)?.members[0]?.projectId).toBe(cwd);
 });
 
 test("open_project_request gives a plain git worktree its own exact-root project", async () => {
@@ -5158,12 +5696,22 @@ test("open_project_request gives a plain git worktree its own exact-root project
     repoRoot,
     createPersistedWorkspaceRecord({
       workspaceId: repoRoot,
-      projectId: repoRoot,
-      cwd: repoRoot,
-      kind: "local_checkout",
       displayName: "main",
       createdAt: "2026-04-24T09:46:43.146Z",
       updatedAt: "2026-04-24T09:46:43.146Z",
+      members: [
+        {
+          projectId: repoRoot,
+          cwd: repoRoot,
+          kind: "local_checkout",
+          displayName: "main",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 
@@ -5215,11 +5763,11 @@ test("open_project_request gives a plain git worktree its own exact-root project
   const response = findByType(emitted, "open_project_response");
 
   expect(response?.payload.error).toBeNull();
-  expect(response?.payload.workspace?.projectId).toMatch(/^prj_[0-9a-f]{16}$/);
+  expect(response?.payload.workspace.members[0]?.projectId).toMatch(/^prj_[0-9a-f]{16}$/);
   const worktreeWorkspace = Array.from(workspaces.values()).find(
-    (workspace) => workspace.cwd === cwd,
+    (workspace) => workspace.members[0].cwd === cwd,
   );
-  expect(worktreeWorkspace?.projectId).toMatch(/^prj_[0-9a-f]{16}$/);
+  expect(worktreeWorkspace?.members[0]?.projectId).toMatch(/^prj_[0-9a-f]{16}$/);
 });
 
 test("open_project_request keeps archived records and allocates a fresh workspace", async () => {
@@ -5246,13 +5794,23 @@ test("open_project_request keeps archived records and allocates a fresh workspac
     workspaceId,
     createPersistedWorkspaceRecord({
       workspaceId,
-      projectId: cwd,
-      cwd,
-      kind: "directory",
       displayName: "repo",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-10T00:00:00.000Z",
       archivedAt: "2026-03-10T00:00:00.000Z",
+      members: [
+        {
+          projectId: cwd,
+          cwd,
+          kind: "directory",
+          displayName: "repo",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 
@@ -5286,7 +5844,7 @@ test("open_project_request keeps archived records and allocates a fresh workspac
   const response = findByType(emitted, "open_project_response");
   expect(response?.payload.error).toBeNull();
   expect(response?.payload.workspace?.id).not.toBe(workspaceId);
-  expect(response?.payload.workspace?.projectId).toMatch(/^prj_[0-9a-f]{16}$/);
+  expect(response?.payload.workspace.members[0]?.projectId).toMatch(/^prj_[0-9a-f]{16}$/);
 });
 
 test("open_project_request does not repurpose an orphaned archived workspace", async () => {
@@ -5301,13 +5859,23 @@ test("open_project_request does not repurpose an orphaned archived workspace", a
     workspaceId,
     createPersistedWorkspaceRecord({
       workspaceId,
-      projectId: cwd,
-      cwd,
-      kind: "directory",
       displayName: "repo",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-10T00:00:00.000Z",
       archivedAt: "2026-03-10T00:00:00.000Z",
+      members: [
+        {
+          projectId: cwd,
+          cwd,
+          kind: "directory",
+          displayName: "repo",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 
@@ -5341,7 +5909,7 @@ test("open_project_request does not repurpose an orphaned archived workspace", a
   const response = findByType(emitted, "open_project_response");
   expect(response?.payload.error).toBeNull();
   expect(response?.payload.workspace?.id).not.toBe(workspaceId);
-  expect(response?.payload.workspace?.projectId).toMatch(/^prj_[0-9a-f]{16}$/);
+  expect(response?.payload.workspace.members[0]?.projectId).toMatch(/^prj_[0-9a-f]{16}$/);
 });
 
 test("workspace recovery stays accepted when git observer warming fails", async () => {
@@ -5370,13 +5938,23 @@ test("workspace recovery stays accepted when git observer warming fails", async 
   });
   let workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-recovery-warm-failure",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "directory",
     displayName: "repo",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: archivedAt,
     archivedAt,
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "directory",
+        displayName: "repo",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.filesystem.isDirectory = async () => true;
@@ -5450,13 +6028,23 @@ test("refresh_agent_request leaves workspace archival independent when its direc
     workspaceId,
     createPersistedWorkspaceRecord({
       workspaceId,
-      projectId: cwd,
-      cwd,
-      kind: "directory",
       displayName: "repo",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-10T00:00:00.000Z",
       archivedAt: "2026-03-10T00:00:00.000Z",
+      members: [
+        {
+          projectId: cwd,
+          cwd,
+          kind: "directory",
+          displayName: "repo",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 
@@ -5548,13 +6136,23 @@ test("refresh_agent_request leaves workspace archival independent when its direc
     workspaceId,
     createPersistedWorkspaceRecord({
       workspaceId,
-      projectId: cwd,
-      cwd,
-      kind: "directory",
       displayName: "missing",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-10T00:00:00.000Z",
       archivedAt: "2026-03-10T00:00:00.000Z",
+      members: [
+        {
+          projectId: cwd,
+          cwd,
+          kind: "directory",
+          displayName: "missing",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 
@@ -5638,14 +6236,23 @@ test("refresh_agent_request does not recreate or unarchive a deleted worktree", 
     workspaceId,
     createPersistedWorkspaceRecord({
       workspaceId,
-      projectId: cwd,
-      cwd,
-      kind: "worktree",
-      branch: "feature/keep",
       displayName: "feature/keep",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-10T00:00:00.000Z",
       archivedAt: "2026-03-10T00:00:00.000Z",
+      members: [
+        {
+          projectId: cwd,
+          cwd,
+          kind: "worktree",
+          displayName: "feature/keep",
+          branch: "feature/keep",
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 
@@ -5737,14 +6344,23 @@ test("refresh_agent_request does not inspect an archived worktree branch", async
     workspaceId,
     createPersistedWorkspaceRecord({
       workspaceId,
-      projectId: cwd,
-      cwd,
-      kind: "worktree",
-      branch: "feature/gone",
       displayName: "feature/gone",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-10T00:00:00.000Z",
       archivedAt: "2026-03-10T00:00:00.000Z",
+      members: [
+        {
+          projectId: cwd,
+          cwd,
+          kind: "worktree",
+          displayName: "feature/gone",
+          branch: "feature/gone",
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 
@@ -5868,14 +6484,23 @@ test("legacy refresh_agent_request restores a real deleted worktree", async () =
     workspaceId,
     createPersistedWorkspaceRecord({
       workspaceId,
-      projectId,
-      cwd: worktreePath,
-      kind: "worktree",
-      branch,
       displayName: branch,
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-10T00:00:00.000Z",
       archivedAt: "2026-03-10T00:00:00.000Z",
+      members: [
+        {
+          projectId,
+          cwd: worktreePath,
+          kind: "worktree",
+          displayName: branch,
+          branch,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 
@@ -5925,13 +6550,13 @@ test("legacy refresh_agent_request restores a real deleted worktree", async () =
   expect(findByType(emitted, "rpc_error")).toBeUndefined();
   expect(existsSync(worktreePath)).toBe(true);
   expect(workspaces.get(workspaceId)?.workspaceId).toBe(workspaceId);
-  expect(workspaces.get(workspaceId)?.cwd).toBe(worktreePath);
+  expect(workspaces.get(workspaceId)?.members[0]?.cwd).toBe(worktreePath);
   expect(workspaces.get(workspaceId)?.archivedAt).toBeNull();
 
   rmSync(tempDir, { recursive: true, force: true });
 });
 
-test.skip("open_project_request collapses a git subdirectory onto the repo root workspace", async () => {
+test("open_project_request preserves an exact project subdirectory", async () => {
   const emitted: SessionOutboundMessage[] = [];
   const session = createSessionForWorkspaceTests();
   const projects = new Map<string, ReturnType<typeof createPersistedProjectRecord>>();
@@ -5977,11 +6602,11 @@ test.skip("open_project_request collapses a git subdirectory onto the repo root 
     requestId: "req-open-subdir",
   });
 
-  expect(workspaces.get(repoRoot)).toBeTruthy();
-  expect(workspaces.has(subdir)).toBe(false);
+  expect(workspaces.size).toBe(1);
+  expect([...workspaces.values()][0].members[0].cwd).toBe(subdir);
   const response = findByType(emitted, "open_project_response");
   expect(response?.payload.error).toBeNull();
-  expect(response?.payload.workspace?.id).toBe(repoRoot);
+  expect(response?.payload.workspace?.id).toMatch(/^wks_/);
 });
 
 test("legacy editor RPC requests return daemon unsupported errors", async () => {
@@ -6017,12 +6642,22 @@ test("archive_workspace_request hides non-destructive workspace records", async 
   const session = createSessionForWorkspaceTests();
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-repo-archive",
-    projectId: "proj-repo-archive",
-    cwd: REPO_CWD,
-    kind: "directory",
     displayName: "repo",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-repo-archive",
+        cwd: REPO_CWD,
+        kind: "directory",
+        displayName: "repo",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.emit = (message) => {
@@ -6080,12 +6715,22 @@ test("archive_workspace_request archives a worktree-kind workspace and removes t
   const projectId = "proj-worktree-kind-archive";
   const workspace = createPersistedWorkspaceRecord({
     workspaceId,
-    projectId,
-    cwd: worktree.worktreePath,
-    kind: "worktree",
     displayName: "worktree-kind-archive",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId,
+        cwd: worktree.worktreePath,
+        kind: "worktree",
+        displayName: "worktree-kind-archive",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const project = createPersistedProjectRecord({
     projectId,
@@ -6153,7 +6798,7 @@ test("archive_workspace_request archives a worktree-kind workspace and removes t
   }
 });
 
-test.skip("opening a new worktree reconciles older local workspaces into the remote project", async () => {
+test("opening a worktree preserves existing workspace and project identities", async () => {
   const emitted: SessionOutboundMessage[] = [];
   const session = createSessionForWorkspaceTests();
   const projects = new Map<string, ReturnType<typeof createPersistedProjectRecord>>();
@@ -6182,12 +6827,22 @@ test.skip("opening a new worktree reconciles older local workspaces into the rem
     mainWorkspaceId,
     createPersistedWorkspaceRecord({
       workspaceId: mainWorkspaceId,
-      projectId: localProjectId,
-      cwd: mainWorkspaceId,
-      kind: "local_checkout",
       displayName: "main",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-01T12:00:00.000Z",
+      members: [
+        {
+          projectId: localProjectId,
+          cwd: mainWorkspaceId,
+          kind: "local_checkout",
+          displayName: "main",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 
@@ -6243,28 +6898,20 @@ test.skip("opening a new worktree reconciles older local workspaces into the rem
       requestId: "req-open-worktree",
     });
 
-    const mainWorkspaceProjectId = workspaces.get(mainWorkspaceId)?.projectId;
-    expect([localProjectId, remoteProjectId]).toContain(mainWorkspaceProjectId);
-    expect(workspaces.get(worktreeWorkspaceId)?.projectId).toBe(remoteProjectId);
-    expect(Boolean(projects.get(localProjectId)?.archivedAt)).toBe(
-      mainWorkspaceProjectId === remoteProjectId,
+    expect(workspaces.get(mainWorkspaceId)?.members[0].projectId).toBe(localProjectId);
+    expect(projects.get(localProjectId)?.archivedAt).toBeNull();
+    const added = [...workspaces.values()].find((workspace) =>
+      workspace.members.some((member) => member.cwd === worktreeWorkspaceId),
     );
-
-    const workspaceUpdates = filterByType(emitted, "workspace_update");
-    expect(workspaceUpdates).toHaveLength(1);
-    const firstUpdate = workspaceUpdates[0];
-    expect(firstUpdate?.payload.kind === "upsert" ? firstUpdate.payload.workspace.id : null).toBe(
-      worktreeWorkspaceId,
-    );
-    expect(
-      firstUpdate?.payload.kind === "upsert" ? firstUpdate.payload.workspace.projectId : null,
-    ).toBe(remoteProjectId);
+    expect(added?.workspaceId).toMatch(/^wks_/);
+    expect(added?.members[0].cwd).toBe(worktreeWorkspaceId);
+    expect(findByType(emitted, "open_project_response")?.payload.error).toBeNull();
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
 });
 
-test.skip("fetch_workspaces_request reconciles remote URL changes for existing workspaces", async () => {
+test("fetch_workspaces_request preserves identities when remote metadata changes", async () => {
   const session = createSessionForWorkspaceTests();
   const projects = new Map<string, ReturnType<typeof createPersistedProjectRecord>>();
   const workspaces = new Map<string, ReturnType<typeof createPersistedWorkspaceRecord>>();
@@ -6297,12 +6944,22 @@ test.skip("fetch_workspaces_request reconciles remote URL changes for existing w
       workspaceId,
       createPersistedWorkspaceRecord({
         workspaceId,
-        projectId: oldProjectId,
-        cwd: workspaceId,
-        kind: workspaceId === mainWorkspaceId ? "local_checkout" : "worktree",
         displayName,
         createdAt: "2026-03-01T12:00:00.000Z",
         updatedAt: "2026-03-01T12:00:00.000Z",
+        members: [
+          {
+            projectId: oldProjectId,
+            cwd: workspaceId,
+            kind: workspaceId === mainWorkspaceId ? "local_checkout" : "worktree",
+            displayName,
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
   }
@@ -6343,24 +7000,21 @@ test.skip("fetch_workspaces_request reconciles remote URL changes for existing w
   });
 
   try {
-    await session.reconcileWorkspaceRecord(mainWorkspaceId);
-    await session.reconcileWorkspaceRecord(worktreeWorkspaceId);
-
     const result = await session.listFetchWorkspacesEntries({
       type: "fetch_workspaces_request",
       requestId: "req-fetch-reconcile",
     });
 
-    expect(result.entries.map((entry) => entry["projectId"])).toEqual([newProjectId, newProjectId]);
-    expect(workspaces.get(mainWorkspaceId)?.projectId).toBe(newProjectId);
-    expect(workspaces.get(worktreeWorkspaceId)?.projectId).toBe(newProjectId);
-    expect(projects.get(oldProjectId)?.archivedAt).toBeTruthy();
+    expect(result.entries.map((entry) => entry["projectId"])).toEqual([oldProjectId, oldProjectId]);
+    expect(workspaces.get(mainWorkspaceId)?.members[0].projectId).toBe(oldProjectId);
+    expect(workspaces.get(worktreeWorkspaceId)?.members[0].projectId).toBe(oldProjectId);
+    expect(projects.get(oldProjectId)?.archivedAt).toBeNull();
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
 });
 
-test.skip("reconcile archives stale subdirectory workspace records when collapsing to the repo root", async () => {
+test("opening a registered subdirectory preserves both independent containers", async () => {
   const session = createSessionForWorkspaceTests();
   const projects = new Map<string, ReturnType<typeof createPersistedProjectRecord>>();
   const workspaces = new Map<string, ReturnType<typeof createPersistedWorkspaceRecord>>();
@@ -6387,24 +7041,44 @@ test.skip("reconcile archives stale subdirectory workspace records when collapsi
     repoRoot,
     createPersistedWorkspaceRecord({
       workspaceId: repoRoot,
-      projectId,
-      cwd: repoRoot,
-      kind: "local_checkout",
       displayName: "main",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-01T12:00:00.000Z",
+      members: [
+        {
+          projectId,
+          cwd: repoRoot,
+          kind: "local_checkout",
+          displayName: "main",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
   workspaces.set(
     subdirWorkspaceId,
     createPersistedWorkspaceRecord({
       workspaceId: subdirWorkspaceId,
-      projectId,
-      cwd: subdirWorkspaceId,
-      kind: "directory",
       displayName: "app",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-01T12:00:00.000Z",
+      members: [
+        {
+          projectId,
+          cwd: subdirWorkspaceId,
+          kind: "directory",
+          displayName: "app",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 
@@ -6444,13 +7118,14 @@ test.skip("reconcile archives stale subdirectory workspace records when collapsi
   });
 
   try {
-    const result = await session.reconcileWorkspaceRecord(subdirWorkspaceId);
-
-    expect(result.changed).toBe(true);
-    expect(result.workspace?.["workspaceId"]).toBe(repoRoot);
-    expect(result.removedWorkspaceId).toBe(subdirWorkspaceId);
+    await session.handleMessage({
+      type: "open_project_request",
+      requestId: "subdir",
+      cwd: subdirWorkspaceId,
+    });
+    expect(workspaces.get(subdirWorkspaceId)?.archivedAt).toBeNull();
+    expect(workspaces.get(subdirWorkspaceId)?.members[0].cwd).toBe(subdirWorkspaceId);
     expect(workspaces.get(repoRoot)?.archivedAt).toBeNull();
-    expect(workspaces.get(subdirWorkspaceId)?.archivedAt).toBeTruthy();
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
@@ -6468,12 +7143,22 @@ test("listWorkspaceDescriptorsSnapshot keeps git workspaces on the baseline desc
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-baseline",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.listAgentPayloads = async () => [];
@@ -6486,7 +7171,7 @@ test("listWorkspaceDescriptorsSnapshot keeps git workspaces on the baseline desc
     projectDisplayName: project.displayName,
     projectRootPath: project.rootPath,
     projectKind: project.kind,
-    workspaceKind: workspace.kind,
+    workspaceKind: workspace.members[0].kind,
     name: "main",
     archivingAt: null,
     status: "done",
@@ -6512,7 +7197,7 @@ test("listWorkspaceDescriptorsSnapshot keeps git workspaces on the baseline desc
     ).values(),
   );
 
-  expect(describeWorkspaceRecord).toHaveBeenCalledWith(workspace, project);
+  expect(describeWorkspaceRecord).toHaveBeenCalledWith(workspace);
   expect(describeWorkspaceRecordWithGitData).not.toHaveBeenCalled();
   expect(descriptors).toEqual([baselineDescriptor]);
 });
@@ -6529,12 +7214,22 @@ test("lists Git runtime for a checkout explicitly owned by a non-Git project", a
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-explicit-checkout",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   session.listAgentPayloads = async () => [];
   session.projectRegistry.list = async () => [project];
@@ -6564,12 +7259,22 @@ test("buildWorkspaceDescriptorMap computes statusEnteredAt from runtime agent fi
     });
     const workspace = createPersistedWorkspaceRecord({
       workspaceId: "ws-status-entered",
-      projectId: project.projectId,
-      cwd: "/tmp/repo",
-      kind: "worktree",
       displayName: "feature",
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-01T12:00:00.000Z",
+      members: [
+        {
+          projectId: project.projectId,
+          cwd: "/tmp/repo",
+          kind: "worktree",
+          displayName: "feature",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
     session.projectRegistry.list = async () => [project];
     session.workspaceRegistry.list = async () => [workspace];
@@ -6605,7 +7310,7 @@ test("buildWorkspaceDescriptorMap computes statusEnteredAt from runtime agent fi
     session.listAgentPayloads = async () => [
       owned({
         id: "agent-done",
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         status: "idle",
         updatedAt,
       }),
@@ -6623,7 +7328,7 @@ test("buildWorkspaceDescriptorMap computes statusEnteredAt from runtime agent fi
     session.listAgentPayloads = async () => [
       owned({
         id: "agent-initializing",
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         status: "initializing",
         updatedAt,
       }),
@@ -6644,19 +7349,19 @@ test("buildWorkspaceDescriptorMap computes statusEnteredAt from runtime agent fi
     session.listAgentPayloads = async () => [
       owned({
         id: "agent-done",
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         status: "idle",
         updatedAt: doneUpdatedAt,
       }),
       owned({
         id: "agent-running",
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         status: "running",
         updatedAt: runningUpdatedAt,
       }),
       owned({
         id: "agent-needs-input",
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         status: "idle",
         updatedAt: needsInputUpdatedAt,
         pendingPermissions: 1,
@@ -6676,7 +7381,7 @@ test("buildWorkspaceDescriptorMap computes statusEnteredAt from runtime agent fi
     session.listAgentPayloads = async () => [
       owned({
         id: "agent-done-early",
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         status: "idle",
         updatedAt: earlyUpdatedAt,
       }),
@@ -6690,13 +7395,13 @@ test("buildWorkspaceDescriptorMap computes statusEnteredAt from runtime agent fi
     session.listAgentPayloads = async () => [
       owned({
         id: "agent-done-early",
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         status: "idle",
         updatedAt: earlyUpdatedAt,
       }),
       owned({
         id: "agent-done-late",
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         status: "idle",
         updatedAt: lateUpdatedAt,
       }),
@@ -6717,13 +7422,13 @@ test("buildWorkspaceDescriptorMap computes statusEnteredAt from runtime agent fi
     session.listAgentPayloads = async () => [
       owned({
         id: "agent-done",
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         status: "idle",
         updatedAt: doneUpdatedAt,
       }),
       owned({
         id: "agent-needs-input",
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         status: "idle",
         updatedAt: needsInputUpdatedAt,
         pendingPermissions: 1,
@@ -6736,7 +7441,7 @@ test("buildWorkspaceDescriptorMap computes statusEnteredAt from runtime agent fi
     session.listAgentPayloads = async () => [
       owned({
         id: "agent-done",
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         status: "idle",
         updatedAt: doneUpdatedAt,
       }),
@@ -6755,7 +7460,7 @@ test("buildWorkspaceDescriptorMap computes statusEnteredAt from runtime agent fi
     session.listAgentPayloads = async () => [
       owned({
         id: "agent-attention",
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         status: "idle",
         updatedAt,
         requiresAttention: true,
@@ -6782,21 +7487,41 @@ test("same-cwd workspace descriptors compute agent status per workspaceId", asyn
   });
   const workspaceA = createPersistedWorkspaceRecord({
     workspaceId: "ws-same-cwd-a",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const workspaceB = createPersistedWorkspaceRecord({
     workspaceId: "ws-same-cwd-b",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "second view",
     createdAt: "2026-03-01T12:00:01.000Z",
     updatedAt: "2026-03-01T12:00:01.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "second view",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   session.projectRegistry.list = async () => [project];
   session.workspaceRegistry.list = async () => [workspaceA, workspaceB];
@@ -6845,12 +7570,22 @@ test("buildWorkspaceDescriptorMap keeps a done workspace recent after its agents
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-archive-status-entered",
-    projectId: project.projectId,
-    cwd: "/tmp/repo/archive-status-entered",
-    kind: "worktree",
     displayName: "feature",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: "/tmp/repo/archive-status-entered",
+        kind: "worktree",
+        displayName: "feature",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const doneEnteredAt = "2026-05-12T09:30:00.000Z";
   const archivedAt = "2026-05-12T09:45:00.000Z";
@@ -6860,7 +7595,7 @@ test("buildWorkspaceDescriptorMap keeps a done workspace recent after its agents
   session.listAgentPayloads = async () => [
     makeAgent({
       id: "agent-done",
-      cwd: workspace.cwd,
+      cwd: workspace.members[0].cwd,
       workspaceId: workspace.workspaceId,
       status: "idle",
       updatedAt: doneEnteredAt,
@@ -6875,7 +7610,7 @@ test("buildWorkspaceDescriptorMap keeps a done workspace recent after its agents
     {
       ...makeAgent({
         id: "agent-done",
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         workspaceId: workspace.workspaceId,
         status: "idle",
         updatedAt: doneEnteredAt,
@@ -6904,12 +7639,22 @@ test("buildWorkspaceDescriptorMap stamps workspace archiving state", async () =>
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-archiving-map",
-    projectId: project.projectId,
-    cwd: "/tmp/repo/worktree",
-    kind: "worktree",
     displayName: "feature",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: "/tmp/repo/worktree",
+        kind: "worktree",
+        displayName: "feature",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.listAgentPayloads = async () => [];
@@ -6946,12 +7691,22 @@ test("emitWorkspaceUpdatesForWorkspaceIds includes archiving state and dedupes u
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-archiving-emit",
-    projectId: project.projectId,
-    cwd: "/tmp/repo/worktree",
-    kind: "worktree",
     displayName: "feature",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: "/tmp/repo/worktree",
+        kind: "worktree",
+        displayName: "feature",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.emit = (message) => {
@@ -7000,21 +7755,41 @@ test("external workspace updates emit one deduplicated batch", async () => {
   });
   const main = createPersistedWorkspaceRecord({
     workspaceId: "ws-observer-main",
-    projectId: project.projectId,
-    cwd: "/tmp/observer-batch/main",
-    kind: "directory",
     displayName: "main",
     createdAt: "2026-07-15T00:00:00.000Z",
     updatedAt: "2026-07-15T00:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: "/tmp/observer-batch/main",
+        kind: "directory",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const feature = createPersistedWorkspaceRecord({
     workspaceId: "ws-observer-feature",
-    projectId: project.projectId,
-    cwd: "/tmp/observer-batch/feature",
-    kind: "directory",
     displayName: "feature",
     createdAt: "2026-07-15T00:00:00.000Z",
     updatedAt: "2026-07-15T00:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: "/tmp/observer-batch/feature",
+        kind: "directory",
+        displayName: "feature",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const snapshotReads = { projects: 0, workspaces: 0 };
   session.projectRegistry.list = async () => {
@@ -7051,7 +7826,7 @@ test("external workspace updates emit one deduplicated batch", async () => {
         workspace: expect.objectContaining({
           id: main.workspaceId,
           projectId: project.projectId,
-          workspaceDirectory: main.cwd,
+          workspaceDirectory: main.members[0].cwd,
           name: main.displayName,
         }),
       },
@@ -7063,13 +7838,13 @@ test("external workspace updates emit one deduplicated batch", async () => {
         workspace: expect.objectContaining({
           id: feature.workspaceId,
           projectId: project.projectId,
-          workspaceDirectory: feature.cwd,
+          workspaceDirectory: feature.members[0].cwd,
           name: feature.displayName,
         }),
       },
     },
   ]);
-  expect(snapshotReads).toEqual({ projects: 1, workspaces: 1 });
+  expect(snapshotReads).toEqual({ projects: 0, workspaces: 1 });
 });
 
 test("fetch_workspaces_response reads runtime fields from passive workspace git service snapshots", async () => {
@@ -7115,12 +7890,22 @@ test("fetch_workspaces_response reads runtime fields from passive workspace git 
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-runtime-fetch",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.emit = (message) => {
@@ -7213,12 +7998,22 @@ test("fetch_workspaces_response emits before cold registration-triggered git wor
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-fetch-boundary",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.emit = (message: unknown) => {
@@ -7279,12 +8074,22 @@ test("workspace_update includes updated runtime fields", async () => {
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-runtime-update",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   session.emit = (message) => {
@@ -7360,72 +8165,54 @@ test("subscribed fetch_workspaces includes git enrichment in the initial snapsho
   });
   const gitWorkspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-git-subscribe",
-    projectId: gitProject.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: gitProject.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const directoryWorkspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-docs-subscribe",
-    projectId: directoryProject.projectId,
-    cwd: "/tmp/docs",
-    kind: "directory",
     displayName: "docs",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: directoryProject.projectId,
+        cwd: "/tmp/docs",
+        kind: "directory",
+        displayName: "docs",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
-  const baselineGitDescriptor = {
-    id: gitWorkspace.workspaceId,
-    projectId: gitProject.projectId,
-    projectDisplayName: gitProject.displayName,
-    projectRootPath: gitProject.rootPath,
-    workspaceDirectory: gitWorkspace.cwd,
-    projectKind: gitProject.kind,
-    workspaceKind: gitWorkspace.kind,
-    name: "main",
-    status: "done",
-    activityAt: null,
-    diffStat: null,
-  } as const;
-  const enrichedGitDescriptor = {
-    ...baselineGitDescriptor,
-    diffStat: { additions: 3, deletions: 1 },
-  } as const;
-  const directoryDescriptor = {
-    id: directoryWorkspace.workspaceId,
-    projectId: directoryProject.projectId,
-    projectDisplayName: directoryProject.displayName,
-    projectRootPath: directoryProject.rootPath,
-    workspaceDirectory: directoryWorkspace.cwd,
-    projectKind: directoryProject.kind,
-    workspaceKind: directoryWorkspace.kind,
-    name: "docs",
-    status: "done",
-    activityAt: null,
-    diffStat: null,
-  } as const;
-
+  const runtime = createWorkspaceRuntimeSnapshot(REPO_CWD, {
+    git: { diffStat: { additions: 3, deletions: 1 } },
+  });
+  session.workspaceGitService.peekSnapshot = (cwd) => (cwd === REPO_CWD ? runtime : null);
   session.emit = (message) => {
     if (isSessionOutboundMessage(message)) emitted.push(message);
   };
   session.listAgentPayloads = async () => [];
   session.projectRegistry.list = async () => [gitProject, directoryProject];
+  session.projectRegistry.get = async (projectId) =>
+    [gitProject, directoryProject].find((project) => project.projectId === projectId) ?? null;
   session.workspaceRegistry.list = async () => [gitWorkspace, directoryWorkspace];
-  const describeWorkspaceRecordSubscribed = vi.fn(
-    async (workspace: typeof gitWorkspace, project: unknown) => {
-      if (workspace.workspaceId === gitWorkspace.workspaceId) {
-        expect(project).toEqual(gitProject);
-        return baselineGitDescriptor;
-      }
-      expect(project).toEqual(directoryProject);
-      return directoryDescriptor;
-    },
-  );
-  const describeWorkspaceRecordWithGitDataSubscribed = vi.fn(async () => enrichedGitDescriptor);
-  session.describeWorkspaceRecord = describeWorkspaceRecordSubscribed;
-  session.describeWorkspaceRecordWithGitData = describeWorkspaceRecordWithGitDataSubscribed;
 
   await session.handleMessage({
     type: "fetch_workspaces_request",
@@ -7436,16 +8223,20 @@ test("subscribed fetch_workspaces includes git enrichment in the initial snapsho
 
   const response = findByType(emitted, "fetch_workspaces_response");
   expect(response?.payload.entries.map((entry) => [entry.id, entry.diffStat])).toEqual([
-    [directoryDescriptor.id, directoryDescriptor.diffStat],
-    [enrichedGitDescriptor.id, enrichedGitDescriptor.diffStat],
+    [directoryWorkspace.workspaceId, null],
+    [gitWorkspace.workspaceId, { additions: 3, deletions: 1 }],
   ]);
 
   const workspaceUpdates = filterByType(emitted, "workspace_update");
   expect(workspaceUpdates).toEqual([]);
-  expect(describeWorkspaceRecordWithGitDataSubscribed).toHaveBeenCalledWith(
-    gitWorkspace,
-    gitProject,
-  );
+  expect(
+    response?.payload.entries.find((entry) => entry.id === gitWorkspace.workspaceId)?.members,
+  ).toEqual([
+    expect.objectContaining({
+      workspaceDirectory: REPO_CWD,
+      diffStat: { additions: 3, deletions: 1 },
+    }),
+  ]);
 });
 
 test("workspace mutation handling does not let a delayed upsert recreate an archived observer", async () => {
@@ -7462,26 +8253,23 @@ test("workspace mutation handling does not let a delayed upsert recreate an arch
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-race",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
-  const descriptor = {
-    id: workspace.workspaceId,
-    projectId: project.projectId,
-    projectDisplayName: project.displayName,
-    projectRootPath: project.rootPath,
-    workspaceDirectory: workspace.cwd,
-    projectKind: project.kind,
-    workspaceKind: workspace.kind,
-    name: workspace.displayName,
-    status: "done",
-    activityAt: null,
-    diffStat: null,
-  } as WorkspaceDescriptorPayload;
   let listedWorkspaces: PersistedWorkspaceRecord[] = [];
   const workspaceRegistry: SessionOptions["workspaceRegistry"] = {
     initialize: async () => {},
@@ -7531,6 +8319,7 @@ test("workspace mutation handling does not let a delayed upsert recreate an arch
   });
   listedWorkspaces = [workspace];
 
+  const descriptor = await session.describeWorkspaceRecord(workspace);
   let resumeDescribe!: () => void;
   const describeStarted = new Promise<void>((resolveStarted) => {
     session.describeWorkspaceRecordWithGitData = async () => {
@@ -7585,21 +8374,31 @@ test("workspace mutations outside a filtered subscription neither watch nor emit
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-filtered-mutation",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const descriptor = {
     id: workspace.workspaceId,
     projectId: project.projectId,
     projectDisplayName: project.displayName,
     projectRootPath: project.rootPath,
-    workspaceDirectory: workspace.cwd,
+    workspaceDirectory: workspace.members[0].cwd,
     projectKind: project.kind,
-    workspaceKind: workspace.kind,
+    workspaceKind: workspace.members[0].kind,
     name: workspace.displayName,
     status: "done",
     activityAt: null,
@@ -7684,13 +8483,23 @@ test("project removal mutation broadcasts the final delta to another subscribed 
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-global-remove",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-02T12:00:00.000Z",
     archivedAt: "2026-03-02T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   let projectMutationListener:
     | Parameters<NonNullable<SessionOptions["projectRegistry"]["subscribeToMutations"]>>[0]
@@ -7778,21 +8587,41 @@ test("workspace mutation handling drops queued observer sync after session clean
   });
   const firstWorkspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-cleanup-first",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const queuedWorkspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-cleanup-queued",
-    projectId: project.projectId,
-    cwd: "/tmp/repo/queued",
-    kind: "local_checkout",
     displayName: "queued",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: "/tmp/repo/queued",
+        kind: "local_checkout",
+        displayName: "queued",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const workspaces = new Map([
     [firstWorkspace.workspaceId, firstWorkspace],
@@ -7845,21 +8674,6 @@ test("workspace mutation handling drops queued observer sync after session clean
     subscribe: {},
   });
   listedWorkspaces = Array.from(workspaces.values());
-
-  session.describeWorkspaceRecordWithGitData = async (workspace) =>
-    ({
-      id: workspace.workspaceId,
-      projectId: workspace.projectId,
-      projectDisplayName: project.displayName,
-      projectRootPath: project.rootPath,
-      workspaceDirectory: workspace.cwd,
-      projectKind: project.kind,
-      workspaceKind: workspace.kind,
-      name: workspace.displayName,
-      status: "done",
-      activityAt: null,
-      diffStat: null,
-    }) as WorkspaceDescriptorPayload;
 
   let resumeFirstEmit!: () => void;
   const firstEmitStarted = new Promise<void>((resolveStarted) => {
@@ -8142,12 +8956,22 @@ test("project.rename.request stores customName and emits an updated workspace de
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-1",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   const projects = new Map([[project.projectId, project]]);
@@ -8316,12 +9140,22 @@ test("workspace.title.set.request stores the title and emits an updated descript
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-1",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   const projects = new Map([[project.projectId, project]]);
@@ -8390,12 +9224,22 @@ test("workspace.pin.set.request stores the pin timestamp and emits an updated de
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-1",
-    projectId: project.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: project.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const workspaces = new Map([[workspace.workspaceId, workspace]]);
   session.projectRegistry.get = async (id: string) => (id === project.projectId ? project : null);
@@ -8449,13 +9293,23 @@ test("workspace.title.set.request with whitespace-only title clears the title", 
 
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-1",
-    projectId: "proj-1",
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
     title: "Old title",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-1",
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   const workspaces = new Map([[workspace.workspaceId, workspace]]);
@@ -8544,43 +9398,36 @@ function createMemberTestRegistries(options?: { withMember?: boolean; memberCwd?
   );
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-1",
-    projectId: primaryProject.projectId,
-    cwd: REPO_CWD,
-    kind: "local_checkout",
     displayName: "main",
-    branch: "main",
-    worktreeRoot: REPO_CWD,
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
-    ...(options?.withMember
-      ? {
-          members: [
-            {
-              projectId: primaryProject.projectId,
-              cwd: REPO_CWD,
-              kind: "local_checkout" as const,
-              displayName: "main",
-              branch: "main",
-              worktreeRoot: REPO_CWD,
-              baseBranch: null,
-              isPaseoOwnedWorktree: false,
-              mainRepoRoot: null,
-            },
-            {
-              projectId: memberProject.projectId,
-              cwd: memberCwd,
-              kind: "local_checkout" as const,
-              displayName: "feature/member",
-              branch: "feature/member",
-              worktreeRoot: memberCwd,
-              baseBranch: null,
-              isPaseoOwnedWorktree: false,
-              mainRepoRoot: null,
-            },
-          ],
-        }
-      : {}),
+    members: [
+      {
+        projectId: primaryProject.projectId,
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: "main",
+        worktreeRoot: REPO_CWD,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
+  if (options?.withMember) {
+    workspace.members.push({
+      projectId: memberProject.projectId,
+      cwd: memberCwd,
+      kind: "local_checkout",
+      displayName: "feature/member",
+      branch: "feature/member",
+      worktreeRoot: memberCwd,
+      baseBranch: null,
+      isPaseoOwnedWorktree: false,
+      mainRepoRoot: null,
+    });
+  }
   const workspaces = new Map([[workspace.workspaceId, workspace]]);
   let projectSeq = 0;
 
@@ -8656,14 +9503,22 @@ function addTargetWorkspaceToMemberRegistries(
     "ws-2",
     createPersistedWorkspaceRecord({
       workspaceId: "ws-2",
-      projectId: "proj-3",
-      cwd: targetCwd,
-      kind: "local_checkout",
       displayName: "target",
-      branch: "main",
-      worktreeRoot: targetCwd,
       createdAt: "2026-03-01T12:00:00.000Z",
       updatedAt: "2026-03-01T12:00:00.000Z",
+      members: [
+        {
+          projectId: "proj-3",
+          cwd: targetCwd,
+          kind: "local_checkout",
+          displayName: "target",
+          branch: "main",
+          worktreeRoot: targetCwd,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     }),
   );
 }
@@ -8748,8 +9603,9 @@ test("workspace.member.add.request appends a member and emits the descriptor wit
 
   const persisted = registries.workspaces.get("ws-1");
   expect(persisted?.members).toHaveLength(2);
-  // Scalar fields keep mirroring the primary member.
-  expect(persisted).toMatchObject({ cwd: REPO_CWD, projectId: "proj-1" });
+  expect(persisted).not.toHaveProperty("cwd");
+  expect(persisted).not.toHaveProperty("projectId");
+  expect(persisted?.members[0]).toMatchObject({ cwd: REPO_CWD, projectId: "proj-1" });
 
   const update = findByType(emitted, "workspace_update");
   expect(update?.payload).toMatchObject({ kind: "upsert", workspace: { id: "ws-1" } });
@@ -8869,14 +9725,17 @@ test("workspace.member.remove.request strips a member and emits the updated desc
     workspaceDirectory: REPO_CWD,
   });
   expect(registries.workspaces.get("ws-1")?.members).toHaveLength(1);
-  expect(registries.workspaces.get("ws-1")).toMatchObject({ cwd: REPO_CWD, projectId: "proj-1" });
+  expect(registries.workspaces.get("ws-1")?.members[0]).toMatchObject({
+    cwd: REPO_CWD,
+    projectId: "proj-1",
+  });
   expect(findByType(emitted, "workspace_update")?.payload).toMatchObject({
     kind: "upsert",
     workspace: { id: "ws-1" },
   });
 });
 
-test("workspace.member.remove.request re-mirrors scalars when the primary member leaves", async () => {
+test("workspace.member.remove.request updates only the wire projection when the first member leaves", async () => {
   const emitted: SessionOutboundMessage[] = [];
   const session = asTestSession(
     createSessionForWorkspaceTests({ onMessage: (message) => emitted.push(message) }),
@@ -8899,15 +9758,20 @@ test("workspace.member.remove.request re-mirrors scalars when the primary member
     workspaceDirectory: MEMBER_CWD,
   });
   expect(response?.payload.workspace?.members).toHaveLength(1);
-  expect(registries.workspaces.get("ws-1")).toMatchObject({ cwd: MEMBER_CWD, projectId: "proj-2" });
+  expect(registries.workspaces.get("ws-1")?.members).toEqual([
+    expect.objectContaining({ cwd: MEMBER_CWD, projectId: "proj-2" }),
+  ]);
+  expect(registries.workspaces.get("ws-1")).not.toHaveProperty("projectId");
+  expect(registries.workspaces.get("ws-1")).not.toHaveProperty("cwd");
 });
 
-test("workspace.member.remove.request refuses to remove the last member", async () => {
+test("workspace.member.remove.request preserves an empty workspace after removing its last member", async () => {
   const emitted: SessionOutboundMessage[] = [];
   const session = asTestSession(
     createSessionForWorkspaceTests({ onMessage: (message) => emitted.push(message) }),
   );
-  createMemberTestRegistries().apply(session);
+  const registries = createMemberTestRegistries();
+  registries.apply(session);
 
   await session.handleMessage({
     type: "workspace.member.remove.request",
@@ -8919,10 +9783,11 @@ test("workspace.member.remove.request refuses to remove the last member", async 
   const response = findByType(emitted, "workspace.member.remove.response");
   expect(response?.payload).toMatchObject({
     requestId: "req-member-remove-last",
-    workspace: null,
-    errorCode: "last_member",
+    workspace: { id: "ws-1", members: [], membersAuthoritative: true },
+    error: null,
   });
-  expect(response?.payload.error).toBeTruthy();
+  expect(registries.workspaces.get("ws-1")?.members).toEqual([]);
+  expect(registries.workspaces.get("ws-1")?.archivedAt).toBeNull();
 });
 
 test("workspace.member.remove.request archives the agents left on the removed member directory", async () => {
@@ -9108,9 +9973,10 @@ test("workspace.member.move.request leaves the source projectless when its last 
   expect(response?.payload.source?.members).toEqual([]);
   expect(response?.payload.target?.members).toHaveLength(2);
   expect(registries.workspaces.get("ws-1")).toMatchObject({
-    projectId: "ws-1",
     members: [],
   });
+  expect(registries.workspaces.get("ws-1")).not.toHaveProperty("projectId");
+  expect(registries.workspaces.get("ws-1")).not.toHaveProperty("cwd");
   expect(registries.workspaces.get("ws-2")?.members).toHaveLength(2);
 });
 
@@ -9209,10 +10075,11 @@ test("agent.workspace.move.request re-parents an agent whose project the target 
   });
   expect(setAgentWorkspaceIdCalls).toEqual([{ agentId: "agent-1", workspaceId: "ws-2" }]);
 
-  // The membership is untouched on both sides; only the agent moved. ws-2 derives its member
-  // from its own cwd, so an unset `members` is the proof nothing was written to it.
+  // Moving an agent does not append or remove project memberships.
   expect(registries.workspaces.get("ws-1")?.members).toHaveLength(2);
-  expect(registries.workspaces.get("ws-2")?.members).toBeUndefined();
+  expect(registries.workspaces.get("ws-2")?.members).toEqual([
+    expect.objectContaining({ projectId: "proj-3", cwd: MEMBER_CWD }),
+  ]);
 
   const updatedWorkspaceIds = filterByType(emitted, "workspace_update").map((update) =>
     update.payload.kind === "upsert" ? update.payload.workspace.id : null,
@@ -9376,7 +10243,7 @@ test("project.remove.request strips a non-primary membership instead of archivin
   expect(registries.projects.has("proj-2")).toBe(false);
 });
 
-test("project.remove.request archives the workspace when its primary project is removed", async () => {
+test("project.remove.request preserves the workspace and remaining members when its first project is removed", async () => {
   const emitted: SessionOutboundMessage[] = [];
   const session = asTestSession(
     createSessionForWorkspaceTests({ onMessage: (message) => emitted.push(message) }),
@@ -9396,10 +10263,13 @@ test("project.remove.request archives the workspace when its primary project is 
     requestId: "req-project-remove-primary",
     projectId: "proj-1",
     accepted: true,
-    removedWorkspaceIds: ["ws-1"],
+    removedWorkspaceIds: [],
     error: null,
   });
-  expect(registries.workspaces.get("ws-1")?.archivedAt).not.toBeNull();
+  expect(registries.workspaces.get("ws-1")?.archivedAt).toBeNull();
+  expect(registries.workspaces.get("ws-1")?.members).toEqual([
+    expect.objectContaining({ projectId: "proj-2", cwd: MEMBER_CWD }),
+  ]);
   expect(registries.projects.has("proj-1")).toBe(false);
 });
 
@@ -9604,12 +10474,22 @@ test("title-only terminal change does not build workspace descriptors or emit wo
   const cwd = mkdtempSync(path.join(tmpdir(), "paseo-session-title-"));
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-title",
-    projectId: "proj-title",
-    cwd,
-    kind: "directory",
     displayName: "title-workspace",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-title",
+        cwd,
+        kind: "directory",
+        displayName: "title-workspace",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const project = createPersistedProjectRecord({
     projectId: "proj-title",
@@ -9648,12 +10528,22 @@ test("terminal activity contribution change updates the correct workspace", asyn
   const cwd = mkdtempSync(path.join(tmpdir(), "paseo-session-activity-"));
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-activity",
-    projectId: "proj-activity",
-    cwd,
-    kind: "directory",
     displayName: "activity-workspace",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-activity",
+        cwd,
+        kind: "directory",
+        displayName: "activity-workspace",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const project = createPersistedProjectRecord({
     projectId: "proj-activity",
@@ -9697,21 +10587,41 @@ test("same-cwd terminal activity updates only the workspace that owns the termin
   const cwd = mkdtempSync(path.join(tmpdir(), "paseo-session-same-cwd-"));
   const workspaceA = createPersistedWorkspaceRecord({
     workspaceId: "ws-same-a",
-    projectId: "proj-same",
-    cwd,
-    kind: "directory",
     displayName: "workspace-a",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-same",
+        cwd,
+        kind: "directory",
+        displayName: "workspace-a",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const workspaceB = createPersistedWorkspaceRecord({
     workspaceId: "ws-same-b",
-    projectId: "proj-same",
-    cwd,
-    kind: "directory",
     displayName: "workspace-b",
     createdAt: "2026-03-01T12:00:01.000Z",
     updatedAt: "2026-03-01T12:00:01.000Z",
+    members: [
+      {
+        projectId: "proj-same",
+        cwd,
+        kind: "directory",
+        displayName: "workspace-b",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const project = createPersistedProjectRecord({
     projectId: "proj-same",
@@ -9761,21 +10671,41 @@ test("a worktree terminal updates only the workspace that owns it", async () => 
   mkdirSync(terminalCwd, { recursive: true });
   const workspaceRoot = createPersistedWorkspaceRecord({
     workspaceId: "ws-root",
-    projectId: "proj-nested",
-    cwd: rootCwd,
-    kind: "local_checkout",
     displayName: "root",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-nested",
+        cwd: rootCwd,
+        kind: "local_checkout",
+        displayName: "root",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const workspaceWorktree = createPersistedWorkspaceRecord({
     workspaceId: "ws-worktree",
-    projectId: "proj-nested",
-    cwd: worktreeCwd,
-    kind: "worktree",
     displayName: "worktree",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-nested",
+        cwd: worktreeCwd,
+        kind: "worktree",
+        displayName: "worktree",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const project = createPersistedProjectRecord({
     projectId: "proj-nested",
@@ -9823,12 +10753,22 @@ test("removing an idle terminal does not update workspace status", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "paseo-session-remove-idle-"));
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-remove-idle",
-    projectId: "proj-remove-idle",
-    cwd,
-    kind: "directory",
     displayName: "remove-idle-workspace",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-remove-idle",
+        cwd,
+        kind: "directory",
+        displayName: "remove-idle-workspace",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const project = createPersistedProjectRecord({
     projectId: "proj-remove-idle",
@@ -9862,12 +10802,22 @@ test("removing a contributing terminal clears workspace status", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "paseo-session-remove-contrib-"));
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-remove-contrib",
-    projectId: "proj-remove-contrib",
-    cwd,
-    kind: "directory",
     displayName: "remove-contrib-workspace",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-remove-contrib",
+        cwd,
+        kind: "directory",
+        displayName: "remove-contrib-workspace",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const project = createPersistedProjectRecord({
     projectId: "proj-remove-contrib",
@@ -10113,7 +11063,7 @@ test("workspace.create worktree source checks out a GitHub PR from githubPrNumbe
     expect(response?.payload.error).toBeNull();
     expect(response?.payload.workspace).toMatchObject({
       workspaceDirectory: expect.any(String),
-      gitRuntime: { currentBranch: fixture.headRef },
+      members: [expect.objectContaining({ branch: fixture.headRef })],
     });
     const workspaceDirectory = response?.payload.workspace?.workspaceDirectory as string;
     expect(readCurrentBranch(workspaceDirectory)).toBe(fixture.headRef);
@@ -10164,13 +11114,23 @@ test("workspace auto-name keeps a manual title written before the scheduled titl
   vi.useFakeTimers();
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-manual-title",
-    projectId: "proj-manual-title",
-    cwd: REPO_CWD,
-    kind: "directory",
     displayName: "repo",
     title: "Fix login bug",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-manual-title",
+        cwd: REPO_CWD,
+        kind: "directory",
+        displayName: "repo",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const stored = new Map([[workspace.workspaceId, workspace]]);
   const emittedWorkspaceIds: string[] = [];
@@ -10200,7 +11160,7 @@ test("workspace auto-name keeps a manual title written before the scheduled titl
   try {
     workspaceAutoName.scheduleForDirectory({
       workspaceId: workspace.workspaceId,
-      cwd: workspace.cwd,
+      cwd: workspace.members[0].cwd,
       firstAgentContext: { prompt: "Fix login bug" },
     });
     stored.set(workspace.workspaceId, {
@@ -10221,13 +11181,23 @@ test("workspace auto-name replaces the unchanged prompt title", async () => {
   vi.useFakeTimers();
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-prompt-title",
-    projectId: "proj-prompt-title",
-    cwd: REPO_CWD,
-    kind: "directory",
     displayName: "repo",
     title: "Fix login bug",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-prompt-title",
+        cwd: REPO_CWD,
+        kind: "directory",
+        displayName: "repo",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const stored = new Map([[workspace.workspaceId, workspace]]);
   const workspaceAutoName = new WorkspaceAutoName({
@@ -10254,7 +11224,7 @@ test("workspace auto-name replaces the unchanged prompt title", async () => {
   try {
     workspaceAutoName.scheduleForDirectory({
       workspaceId: workspace.workspaceId,
-      cwd: workspace.cwd,
+      cwd: workspace.members[0].cwd,
       firstAgentContext: { prompt: "Fix login bug" },
     });
     await vi.runAllTimersAsync();
@@ -10290,16 +11260,23 @@ test("workspace auto-name uses the backing root for a nested worktree", async ()
 
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-rejected-branch-title",
-    projectId: "proj-rejected-branch-title",
-    cwd: workspaceCwd,
-    kind: "worktree",
     displayName: "Fix checkout title",
     title: "Fix checkout title",
-    branch: "placeholder-branch",
-    worktreeRoot: repoDir,
-    isPaseoOwnedWorktree: true,
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-rejected-branch-title",
+        cwd: workspaceCwd,
+        kind: "worktree",
+        displayName: "Fix checkout title",
+        branch: "placeholder-branch",
+        worktreeRoot: repoDir,
+        baseBranch: null,
+        isPaseoOwnedWorktree: true,
+        mainRepoRoot: null,
+      },
+    ],
   });
   const stored = new Map([[workspace.workspaceId, workspace]]);
   let generateCalls = 0;
@@ -10338,6 +11315,7 @@ test("workspace auto-name uses the backing root for a nested worktree", async ()
   try {
     workspaceAutoName.scheduleForWorktree({
       workspace,
+      member: workspace.members[0],
       firstAgentContext: { prompt: "Fix checkout title" },
     });
     await vi.runAllTimersAsync();
@@ -10345,7 +11323,7 @@ test("workspace auto-name uses the backing root for a nested worktree", async ()
     expect(generateCalls).toBe(1);
     expect(stored.get(workspace.workspaceId)).toMatchObject({
       title: "Generated Invalid Branch Title",
-      branch: "placeholder-branch",
+      members: [expect.objectContaining({ branch: "placeholder-branch" })],
     });
     expect(
       execFileSync("git", ["branch", "--show-current"], { cwd: repoDir, stdio: "pipe" })
@@ -10385,14 +11363,23 @@ test("checkout.rename_branch.request renames the branch without a denormalized b
 
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-worktree-rename",
-    projectId: "proj-rename",
-    cwd: REPO_CWD,
-    kind: "worktree",
     displayName: "Refactor auth flow",
-    branch: "feature/old-name",
     title: "Refactor auth flow",
     createdAt: "2026-03-01T12:00:00.000Z",
     updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-rename",
+        cwd: REPO_CWD,
+        kind: "worktree",
+        displayName: "Refactor auth flow",
+        branch: "feature/old-name",
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 
   const workspaces = new Map([[workspace.workspaceId, workspace]]);
@@ -10596,10 +11583,9 @@ test("workspace.create.request attaches a directory workspace to its explicit ac
   });
   const workspaceId = response?.payload.workspace?.id;
   expect(workspaceId).toEqual(expect.any(String));
-  expect(workspaces.get(workspaceId as string)).toMatchObject({
-    cwd: REPO_CWD,
-    projectId: "prj_explicit",
-  });
+  expect(workspaces.get(workspaceId as string)?.members).toEqual([
+    expect.objectContaining({ cwd: REPO_CWD, projectId: "prj_explicit" }),
+  ]);
 });
 
 test("workspace.create.request reports an unknown explicit project", async () => {

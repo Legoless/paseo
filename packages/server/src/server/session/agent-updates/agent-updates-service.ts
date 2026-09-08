@@ -61,7 +61,9 @@ export interface AgentUpdatesServiceDeps {
   enrichAgentPayload(payload: AgentSnapshotPayload): Promise<AgentSnapshotPayload>;
   buildStoredAgentPayload(record: StoredAgentRecord): AgentSnapshotPayload;
   isProviderVisibleToClient(provider: string): boolean;
-  buildProjectPlacementForWorkspaceId(workspaceId: string): Promise<ProjectPlacementPayload | null>;
+  buildProjectPlacementForAgent(
+    agent: Pick<AgentSnapshotPayload, "workspaceId" | "cwd">,
+  ): Promise<ProjectPlacementPayload | null>;
   emitWorkspaceUpdateForWorkspaceId(workspaceId: string): Promise<void>;
   sequenceAgentUpdate<T extends AgentUpdatePayload>(
     payload: T,
@@ -252,9 +254,7 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
     if (subscription !== activeSubscription || !deps.isProviderVisibleToClient(payload.provider)) {
       return false;
     }
-    const project = payload.workspaceId
-      ? await deps.buildProjectPlacementForWorkspaceId(payload.workspaceId)
-      : null;
+    const project = payload.workspaceId ? await deps.buildProjectPlacementForAgent(payload) : null;
     return (
       subscription === activeSubscription &&
       project !== null &&
@@ -273,7 +273,7 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
         const sub = subscription;
         if (!sub) return;
         const project = payload.workspaceId
-          ? await deps.buildProjectPlacementForWorkspaceId(payload.workspaceId)
+          ? await deps.buildProjectPlacementForAgent(payload)
           : null;
         if (!project) {
           bufferOrEmit(
@@ -315,7 +315,7 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
       payload = await deps.enrichAgentPayload(payload);
       if (sub) {
         const project = payload.workspaceId
-          ? await deps.buildProjectPlacementForWorkspaceId(payload.workspaceId)
+          ? await deps.buildProjectPlacementForAgent(payload)
           : null;
         if (!project) {
           bufferOrEmit(

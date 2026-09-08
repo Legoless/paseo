@@ -104,6 +104,7 @@ import {
   useWorkspaceSetupStore,
 } from "@/stores/workspace-setup-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
+import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selection-store";
 import { useWorkspaceTerminalSessionRetention } from "@/terminal/hooks/use-workspace-terminal-session-retention";
 import type { CheckoutStatusPayload } from "@/git/use-status-query";
 import { confirmDialog } from "@/utils/confirm-dialog";
@@ -1644,7 +1645,10 @@ function WorkspaceScreenContent({
   const supportsProvidersSnapshot = useSessionStore(
     (state) => state.sessions[normalizedServerId]?.serverInfo?.features?.providersSnapshot === true,
   );
-  const workspaceDirectory = workspaceDescriptor?.workspaceDirectory || null;
+  const { cwd: workspaceDirectory } = useSelectedWorkspaceProject(
+    normalizedServerId,
+    normalizedWorkspaceId,
+  );
   const workspaceMemberCount = getWorkspaceMemberCount(workspaceDescriptor);
   const isMissingWorkspaceDirectory = shouldRenderMissingWorkspaceDirectory({
     workspace: workspaceDescriptor,

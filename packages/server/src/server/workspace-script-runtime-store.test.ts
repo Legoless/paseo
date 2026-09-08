@@ -7,6 +7,7 @@ import {
 function createEntry(overrides: Partial<ScriptRuntimeEntry> = {}): ScriptRuntimeEntry {
   return {
     workspaceId: "workspace-101",
+    cwd: "/projects/web",
     scriptName: "web",
     type: "service",
     lifecycle: "running",
