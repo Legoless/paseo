@@ -974,13 +974,29 @@ export class ProviderSnapshotManager {
         },
       });
       if (!catalog) {
-        setEntry({ ...base, status: "unavailable", enabled: true });
+        // A transient availability answer — a `which` that lost a race, a PATH blip during a
+        // refresh storm — must not discard a catalog we already discovered.
+        setEntry(
+          retainedCatalogEntry({
+            base,
+            previous,
+            coldStatus: "unavailable",
+            fallbackDefaultModeId: definition.defaultModeId,
+          }),
+        );
         return;
       }
 
       if (!this.isCurrentProviderLoad(snapshotCwd, provider, load)) return;
+      // An empty model list is a success on the wire but a regression on screen. A custom ACP
+      // provider has no static models to fall back on — the probe's session/new response IS its
+      // whole catalog — so a probe that connects but reports nothing (expired CLI login, a
+      // session that came up before the agent knew its models) would replace a good list with
+      // an empty one and leave the provider showing only "Default".
+      const models =
+        catalog.models.length === 0 && previous?.models?.length ? previous.models : catalog.models;
       const publishedScope = createFetchCatalogOptions(catalogScope, force);
-      client.setModelCatalog?.(catalog.models, publishedScope);
+      client.setModelCatalog?.(models, publishedScope);
       this.events.emit("catalog", provider, publishedScope);
       setEntry({
         ...base,
@@ -988,19 +1004,20 @@ export class ProviderSnapshotManager {
           catalog.defaultModeId === undefined ? definition.defaultModeId : catalog.defaultModeId,
         status: "ready",
         enabled: true,
-        models: catalog.models,
+        models,
         modes: catalog.modes,
         fetchedAt: new Date().toISOString(),
       });
     } catch (error) {
-      const emitted = setEntry({
-        ...(previous?.models ? previous : {}),
-        ...base,
-        status: previous?.models ? "ready" : "error",
-        defaultModeId: previous?.models ? previous.defaultModeId : definition.defaultModeId,
-        enabled: true,
-        error: toErrorMessage(error),
-      });
+      const emitted = setEntry(
+        retainedCatalogEntry({
+          base,
+          previous,
+          coldStatus: "error",
+          fallbackDefaultModeId: definition.defaultModeId,
+          error: toErrorMessage(error),
+        }),
+      );
       if (emitted) {
         this.logger.warn(
           { err: error, provider, cwd: snapshotCwd },
@@ -1066,6 +1083,12 @@ export class ProviderSnapshotManager {
       const existing = snapshot.get(provider);
       snapshot.set(provider, {
         ...loadingEntry,
+        // A surviving catalog stays selectable. Demoting a warm entry to "loading" made every
+        // refresh redraw the model picker as "Loading…" instead of the model count it already
+        // had — deterministically, across every cwd — and the client refuses to select a
+        // non-ready provider (SELECTABLE_PROVIDER_STATUSES), so a good catalog went unpickable
+        // until its re-probe landed.
+        status: existing?.models?.length ? "ready" : loadingEntry.status,
         models: existing?.models,
         modes: existing?.modes,
         fetchedAt: existing?.fetchedAt,
@@ -1153,6 +1176,36 @@ function cloneEntry(entry: ProviderSnapshotEntry): ProviderSnapshotEntry {
     ...entry,
     models: entry.models?.map((model) => ({ ...model })),
     modes: entry.modes?.map((mode) => ({ ...mode })),
+  };
+}
+
+/**
+ * A refresh that produced no catalog keeps the one this cwd already had. Only a cwd that never
+ * discovered a catalog reports the cold status, so one bad probe leaves a provider `ready` and
+ * selectable on its known models instead of collapsing it to an unpickable error row.
+ *
+ * ponytail: a provider uninstalled after discovery keeps serving its stale catalog until the
+ * daemon restarts, and launching it then fails later at ensureAgentLoaded. Revisit if that
+ * error turns out to be confusing in practice.
+ */
+function retainedCatalogEntry(input: {
+  base: Pick<
+    ProviderSnapshotEntry,
+    "provider" | "source" | "label" | "description" | "defaultModeId"
+  >;
+  previous: ProviderSnapshotEntry | undefined;
+  coldStatus: ProviderSnapshotEntry["status"];
+  fallbackDefaultModeId: string | null;
+  error?: string;
+}): ProviderSnapshotEntry {
+  const retained = input.previous?.models ? input.previous : undefined;
+  return {
+    ...retained,
+    ...input.base,
+    status: retained ? "ready" : input.coldStatus,
+    defaultModeId: retained ? retained.defaultModeId : input.fallbackDefaultModeId,
+    enabled: true,
+    ...(input.error === undefined ? {} : { error: input.error }),
   };
 }
 
