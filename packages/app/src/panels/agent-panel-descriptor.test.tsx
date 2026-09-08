@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { i18n } from "@/i18n/i18next";
 import { buildDraftPanelDescriptor } from "@/panels/draft-panel-descriptor";
+import { resolveWorkspaceAgentTabLabel } from "@/panels/agent-panel-descriptor";
 
 function TestIcon() {
   return null;
@@ -64,5 +65,19 @@ describe("buildDraftPanelDescriptor", () => {
       subtitle: "正在创建 Agent",
     });
     await i18n.changeLanguage("en");
+  });
+});
+
+describe("resolveWorkspaceAgentTabLabel", () => {
+  it("shimmers only while the agent has no title", () => {
+    expect(resolveWorkspaceAgentTabLabel(null)).toBe(null);
+    expect(resolveWorkspaceAgentTabLabel(undefined)).toBe(null);
+    expect(resolveWorkspaceAgentTabLabel("   ")).toBe(null);
+  });
+
+  it("keeps a renamed tab's name, including the draft placeholder wording", () => {
+    expect(resolveWorkspaceAgentTabLabel("  Ship the release  ")).toBe("Ship the release");
+    expect(resolveWorkspaceAgentTabLabel("New Agent")).toBe("New Agent");
+    expect(resolveWorkspaceAgentTabLabel("new agent")).toBe("new agent");
   });
 });
