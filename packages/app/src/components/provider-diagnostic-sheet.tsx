@@ -531,6 +531,11 @@ function ProviderModalBody(props: ProviderModalBodyProps) {
   }
   return (
     <>
+      {providerErrorMessage ? (
+        <Text style={sheetStyles.errorText} accessibilityRole="alert">
+          {providerErrorMessage}
+        </Text>
+      ) : null}
       {filteredDiscovered.length > 0 ? (
         <View style={sheetStyles.section}>
           <SectionHeader
@@ -593,9 +598,8 @@ export function ProviderDiagnosticSheet({
   );
   const providerSnapshotRefreshing = providerEntry?.status === "loading";
   const providerErrorMessage =
-    providerEntry?.status === "error"
-      ? (providerEntry.error ?? t("settings.providers.diagnostic.unknownError"))
-      : null;
+    providerEntry?.error ??
+    (providerEntry?.status === "error" ? t("settings.providers.diagnostic.unknownError") : null);
   const modelsRefreshing = isRefreshing || providerSnapshotRefreshing;
 
   const stableDiscoveredRef = useRef<ProviderDiscoveredModelsCache | null>(null);

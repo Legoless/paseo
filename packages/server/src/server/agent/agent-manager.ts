@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { stat } from "node:fs/promises";
+import { isDeepStrictEqual } from "node:util";
 import {
   AGENT_LIFECYCLE_STATUSES,
   type AgentLifecycleStatus,
@@ -969,6 +970,17 @@ export class AgentManager {
     return Array.from(this.agents.values())
       .filter((agent) => !agent.internal)
       .map((agent) => Object.assign({}, agent));
+  }
+
+  refreshProviderFeatures(provider: AgentProvider, cwd?: string): void {
+    for (const agent of this.agents.values()) {
+      if (agent.provider !== provider) continue;
+      if (cwd && resolve(agent.cwd) !== resolve(cwd)) continue;
+      const features = agent.session?.features;
+      if (!features || isDeepStrictEqual(agent.features, features)) continue;
+      agent.features = features;
+      this.emitState(agent, { persist: false });
+    }
   }
 
   async listImportableSessions(

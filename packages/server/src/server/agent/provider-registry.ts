@@ -537,6 +537,7 @@ function wrapClientProvider(
       : undefined,
     resolveCreateConfig: inner.resolveCreateConfig?.bind(inner),
     resolveConfiguredModel: inner.resolveConfiguredModel?.bind(inner),
+    setModelCatalog: inner.setModelCatalog?.bind(inner),
     isCreateConfigUnattended: inner.isCreateConfigUnattended?.bind(inner),
     listFeatures: listFeatures
       ? async (config) => await listFeatures({ ...config, provider: inner.provider })
@@ -574,6 +575,7 @@ function wrapClientProvider(
       : undefined,
     isAvailable: (signal) => inner.isAvailable(signal),
     getDiagnostic: inner.getDiagnostic?.bind(inner),
+    shutdown: inner.shutdown?.bind(inner),
   };
 }
 
@@ -643,6 +645,7 @@ function createRegistryEntry(
         // must still be merged on top. If modes are dynamic, probe for modes via
         // the single catalog API; otherwise use static/empty modes with no runtime.
         const models = mergeModelAdditions(provider, replacementModels, additionalModels);
+        catalogClient.setModelCatalog?.(models, options);
         if (hasStaticModes) {
           const defaultModeId = await runProviderRefreshActivity(
             context,

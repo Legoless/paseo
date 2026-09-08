@@ -305,6 +305,48 @@ describe("ProviderCatalogSession", () => {
     expect(err?.payload.requestId).toBe("u1");
   });
 
+  it("resolves the scoped model catalog before exposing draft capabilities", async () => {
+    const order: string[] = [];
+    const features = [
+      { type: "toggle" as const, id: "future-feature", label: "Future", value: false },
+    ];
+    const warmUpSnapshotForCwd = vi.fn(async () => {
+      order.push("catalog");
+    });
+    const listDraftFeatures = vi.fn(async () => {
+      order.push("features");
+      return features;
+    });
+    const { subsystem, emitted } = makeSubsystem({
+      snapshot: { warmUpSnapshotForCwd },
+      host: { listDraftFeatures },
+    });
+    await subsystem.handleListProviderFeaturesRequest({
+      type: "list_provider_features_request",
+      requestId: "future",
+      draftConfig: {
+        provider: "codex",
+        cwd: "/tmp/project",
+        model: "future-model",
+        featureValues: { service_tier: "future-tier" },
+      },
+    });
+    expect(order).toEqual(["catalog", "features"]);
+    expect(warmUpSnapshotForCwd).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
+      providers: ["codex"],
+    });
+    expect(listDraftFeatures).toHaveBeenCalledWith({
+      provider: "codex",
+      cwd: "/tmp/project",
+      model: "future-model",
+      featureValues: { service_tier: "future-tier" },
+    });
+    expect(findByType(emitted, "list_provider_features_response")?.payload.features).toEqual(
+      features,
+    );
+  });
+
   it("surfaces a feature-list failure inline, not as an rpc_error", async () => {
     const { subsystem, emitted } = makeSubsystem({
       host: {

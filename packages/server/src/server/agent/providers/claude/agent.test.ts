@@ -2,20 +2,26 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { PermissionResult, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  ModelInfo,
+  PermissionResult,
+  SDKMessage,
+  SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
 import * as executableUtils from "../../../../executable-resolution/executable-resolution.js";
 import { buildAgentAttentionNotificationPayload } from "@getpaseo/protocol/agent-attention-notification";
 import {
-  ClaudeAgentClient,
   convertClaudeHistoryEntry,
   normalizeClaudeAskUserQuestionRequestInput,
   normalizeClaudeAskUserQuestionUpdatedInput,
   resolveClaudeCodeVersion,
   toClaudeSdkMcpConfig,
 } from "./agent.js";
+import { TestClaudeAgentClient as ClaudeAgentClient } from "./test-utils/catalog.js";
 import { claudeProjectDirSync } from "./project-dir.js";
+import { mapClaudeModels } from "./models.js";
 import { streamSession } from "../test-utils/session-stream-adapter.js";
 import type { AgentSession, AgentTimelineItem, AgentStreamEvent } from "../../agent-sdk-types.js";
 
@@ -405,110 +411,6 @@ describe("convertClaudeHistoryEntry", () => {
 // "interrupting message should produce coherent text without garbling from race condition"
 // in daemon.e2e.test.ts which exercises the full flow through the WebSocket API.
 
-describe("ClaudeAgentClient.fetchCatalog", () => {
-  const logger = createTestLogger();
-
-  test("returns hardcoded claude models", async () => {
-    const emptyConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "paseo-claude-models-empty-"));
-    try {
-      const client = new ClaudeAgentClient({
-        logger,
-        resolveBinary: async () => "/test/claude/bin",
-        resolveVersion: async () => "2.1.219",
-        configDir: emptyConfigDir,
-      });
-      const { models } = await client.fetchCatalog({
-        scope: "workspace",
-        cwd: "/tmp/claude-models",
-        force: false,
-      });
-
-      expect(models.map((m) => m.id)).toEqual([
-        "claude-opus-5",
-        "claude-fable-5",
-        "claude-fable-5[1m]",
-        "claude-opus-4-8[1m]",
-        "claude-opus-4-8",
-        "claude-sonnet-5",
-        "claude-sonnet-5[1m]",
-        "claude-opus-4-7[1m]",
-        "claude-opus-4-7",
-        "claude-opus-4-6[1m]",
-        "claude-opus-4-6",
-        "claude-sonnet-4-6[1m]",
-        "claude-sonnet-4-6",
-        "claude-haiku-4-5",
-      ]);
-      expect(models.find((model) => model.id === "claude-fable-5[1m]")?.isSelectable).toBe(false);
-
-      for (const model of models) {
-        expect(model.provider).toBe("claude");
-        expect(model.label.length).toBeGreaterThan(0);
-      }
-
-      const defaultModel = models.find((m) => m.isDefault);
-      expect(defaultModel?.id).toBe("claude-opus-5");
-    } finally {
-      await fs.rm(emptyConfigDir, { recursive: true, force: true });
-    }
-  });
-
-  test("preserves the catalog when Claude Code version detection fails", async () => {
-    const emptyConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "paseo-claude-models-empty-"));
-    try {
-      const client = new ClaudeAgentClient({
-        logger,
-        resolveVersion: async () => {
-          throw new Error("unrecognized version output");
-        },
-        configDir: emptyConfigDir,
-      });
-      const { models } = await client.fetchCatalog({
-        scope: "workspace",
-        cwd: "/tmp/claude-models",
-        force: false,
-      });
-
-      expect(models.find((model) => model.isDefault)?.id).toBe("claude-opus-5");
-      expect(models.map((model) => model.id)).toContain("claude-fable-5");
-    } finally {
-      await fs.rm(emptyConfigDir, { recursive: true, force: true });
-    }
-  });
-
-  test("exposes Ultra Code on xhigh-capable Claude models", async () => {
-    const emptyConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "paseo-claude-models-empty-"));
-    try {
-      const client = new ClaudeAgentClient({
-        logger,
-        resolveBinary: async () => "/test/claude/bin",
-        resolveVersion: async () => "2.1.219",
-        configDir: emptyConfigDir,
-      });
-      const { models } = await client.fetchCatalog({
-        scope: "workspace",
-        cwd: "/tmp/claude-models",
-        force: false,
-      });
-      const getThinkingIds = (modelId: string) => {
-        return models.find((model) => model.id === modelId)?.thinkingOptions?.map(({ id }) => id);
-      };
-
-      expect(getThinkingIds("claude-opus-5")).toContain("ultracode");
-      expect(getThinkingIds("claude-fable-5")).toContain("ultracode");
-      expect(getThinkingIds("claude-opus-4-8[1m]")).toContain("ultracode");
-      expect(getThinkingIds("claude-opus-4-8")).toContain("ultracode");
-      expect(getThinkingIds("claude-sonnet-5")).toContain("xhigh");
-      expect(getThinkingIds("claude-sonnet-5")).toContain("ultracode");
-      expect(getThinkingIds("claude-opus-4-7[1m]")).toContain("ultracode");
-      expect(getThinkingIds("claude-opus-4-7")).toContain("ultracode");
-      expect(getThinkingIds("claude-sonnet-4-6")).not.toContain("ultracode");
-    } finally {
-      await fs.rm(emptyConfigDir, { recursive: true, force: true });
-    }
-  });
-});
-
 describe("ClaudeAgentClient binary resolution", () => {
   const logger = createTestLogger();
 
@@ -634,6 +536,79 @@ describe("ClaudeAgentSession features", () => {
     });
     return { queryFactory, queryMock, launches };
   }
+
+  test.each(["native", "configured"])(
+    "forwards a future effort value advertised by a %s catalog",
+    async (source) => {
+      const { queryFactory, launches } = createQueryMock();
+      const client = new ClaudeAgentClient({
+        logger,
+        queryFactory,
+        resolveBinary: async () => "/test/claude",
+      });
+      const model = mapClaudeModels([
+        {
+          value: "opaque-future-model",
+          displayName: "Future",
+          description: "Native catalog",
+          supportsEffort: true,
+          supportsAdaptiveThinking: true,
+          supportedEffortLevels: ["future-effort"] as unknown as ModelInfo["supportedEffortLevels"],
+        },
+      ])[0]!;
+      client.setModelCatalog(
+        source === "native"
+          ? [model]
+          : [
+              {
+                provider: "claude",
+                id: model.id,
+                label: "Configured",
+                thinkingOptions: [{ id: "future-effort", label: "Future effort" }],
+              },
+            ],
+      );
+      const session = await client.createSession({
+        provider: "claude",
+        cwd: process.cwd(),
+        model: model.id,
+      });
+      await session.setThinkingOption!("future-effort");
+      await expect(session.setThinkingOption!("not-advertised")).rejects.toThrow("not available");
+      await session.startTurn("exercise the configured query factory");
+      expect(launches[0]?.options.effort).toBe("future-effort");
+      await session.close();
+    },
+  );
+
+  test("catalog refresh does not restart a running query during control-plane reads", async () => {
+    const { queryFactory, queryMock } = createQueryMock();
+    const client = new ClaudeAgentClient({
+      logger,
+      queryFactory,
+      resolveBinary: async () => "/test/claude",
+    });
+    const model = {
+      provider: "claude",
+      id: "future-provider-model",
+      label: "Future",
+      thinkingOptions: [{ id: "high", label: "High" }],
+      metadata: { claude: { supportsAdaptiveThinking: true } },
+    };
+    client.setModelCatalog([model]);
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: model.id,
+      thinkingOptionId: "high",
+    });
+    await session.startTurn("first turn");
+    client.setModelCatalog([{ ...model, thinkingOptions: [{ id: "low", label: "Low" }] }]);
+    await (session as unknown as { ensureQuery(): Promise<unknown> }).ensureQuery();
+    expect(queryFactory).toHaveBeenCalledOnce();
+    expect(queryMock.close).not.toHaveBeenCalled();
+    await session.close();
+  });
 
   test("publishes a resolution when the SDK aborts a permission callback", async () => {
     const { queryFactory } = createQueryMock();
@@ -770,7 +745,7 @@ describe("ClaudeAgentSession features", () => {
     await session.close();
   });
 
-  test("lists fast mode only for supported Opus models", async () => {
+  test("lists fast mode only when the catalog advertises it", async () => {
     const client = new ClaudeAgentClient({ logger, resolveBinary: async () => "/test/claude/bin" });
 
     await expect(
@@ -795,7 +770,7 @@ describe("ClaudeAgentSession features", () => {
         cwd: process.cwd(),
         model: "claude-opus-4-8-20260101",
       }),
-    ).resolves.toEqual([expect.objectContaining({ id: "fast_mode", value: false })]);
+    ).resolves.toEqual([]);
 
     await expect(
       client.listFeatures({
@@ -1063,7 +1038,7 @@ describe("ClaudeAgentSession features", () => {
 
   test.each([
     ["supported model", "claude-opus-4-8", { type: "disabled" }, undefined],
-    ["unsupported model", "claude-fable-5", { type: "adaptive" }, "high"],
+    ["unsupported model", "claude-fable-5", undefined, undefined],
     ["custom model", "openrouter/anthropic/claude-opus-4-8", undefined, undefined],
     ["provider default", null, undefined, undefined],
   ])("reconciles Off when switching to a %s", async (_label, modelId, thinking, effort) => {

@@ -329,6 +329,12 @@ export class ProviderCatalogSession {
     const fetchedAt = new Date().toISOString();
     try {
       const sessionConfig = this.buildDraftAgentSessionConfig(msg.draftConfig);
+      if (sessionConfig.model) {
+        await this.providerSnapshotManager.warmUpSnapshotForCwd({
+          cwd: sessionConfig.cwd,
+          providers: [sessionConfig.provider],
+        });
+      }
       const features = await this.host.listDraftFeatures(sessionConfig);
       this.host.emit({
         type: "list_provider_features_response",

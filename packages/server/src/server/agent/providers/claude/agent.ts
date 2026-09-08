@@ -32,16 +32,15 @@ import {
 } from "./task-notification-tool-call.js";
 import {
   findClaudeModel,
+  discoverClaudeModels,
+  claudeModelCapability,
   getClaudeModelsWithSettings,
   normalizeClaudeRuntimeModelId,
   resolveConfiguredClaudeModel,
-} from "./models.js";
-import {
   CLAUDE_DISABLED_THINKING_OPTION_ID,
   CLAUDE_ULTRACODE_THINKING_OPTION_ID,
   parseClaudeCodeVersion,
-  resolveClaudeDisabledThinkingForModel,
-} from "./model-manifest.js";
+} from "./models.js";
 import { parsePartialJsonObject } from "./partial-json.js";
 import { ClaudeSidechainTracker } from "./sidechain-tracker.js";
 import { ClaudeTaskState } from "./task-state.js";
@@ -107,6 +106,7 @@ import {
   type AgentPromptInput,
   type AgentRunOptions,
   type AgentRunResult,
+  type AgentResumeSessionOptions,
   type AgentSession,
   type AgentSessionConfig,
   type AgentSlashCommand,
@@ -398,7 +398,6 @@ interface ClaudeAgentClientOptions {
   runtimeSettings?: ProviderRuntimeSettings;
   queryFactory?: ClaudeQueryFactory;
   resolveBinary?: () => Promise<string>;
-  resolveVersion?: (signal?: AbortSignal) => Promise<string>;
   configDir?: string;
 }
 
@@ -412,13 +411,10 @@ interface ClaudeAgentSessionOptions {
   logger: Logger;
   queryFactory?: ClaudeQueryFactory;
   resolveBinary: () => Promise<string>;
+  getModelCatalog: () => readonly AgentModelDefinition[];
 }
 
 type ClaudeThinkingEffort = "low" | "medium" | "high" | "xhigh" | "max";
-type ClaudeThinkingOption =
-  | ClaudeThinkingEffort
-  | typeof CLAUDE_DISABLED_THINKING_OPTION_ID
-  | typeof CLAUDE_ULTRACODE_THINKING_OPTION_ID;
 
 function resolvePathEnvKey(): "Path" | "PATH" | null {
   if (process.env["Path"] !== undefined) return "Path";
@@ -465,26 +461,16 @@ function isClaudeThinkingEffort(value: string | null | undefined): value is Clau
   );
 }
 
-function isClaudeThinkingOption(value: string | null | undefined): value is ClaudeThinkingOption {
-  return (
-    value === CLAUDE_DISABLED_THINKING_OPTION_ID ||
-    value === CLAUDE_ULTRACODE_THINKING_OPTION_ID ||
-    isClaudeThinkingEffort(value)
-  );
-}
-
 function assertClaudeThinkingOptionSupported(
-  modelId: string | null | undefined,
+  model: AgentModelDefinition | undefined,
   thinkingOptionId: string | null | undefined,
 ): void {
-  if (
-    thinkingOptionId !== CLAUDE_DISABLED_THINKING_OPTION_ID ||
-    resolveClaudeDisabledThinkingForModel(modelId).supported
-  ) {
-    return;
-  }
+  if (!thinkingOptionId || thinkingOptionId === "default") return;
+  const options = model?.thinkingOptions;
+  if (options?.some((option) => option.id === thinkingOptionId)) return;
+  if (options === undefined && isClaudeThinkingEffort(thinkingOptionId)) return;
   throw new Error(
-    `Thinking option '${thinkingOptionId}' is not available for model '${modelId ?? "default"}'`,
+    `Thinking option '${thinkingOptionId}' is not available for model '${model?.id ?? "default"}'`,
   );
 }
 
@@ -926,10 +912,16 @@ function claudeAutoModeUnavailableOn(env: NodeJS.ProcessEnv): "Bedrock" | "Verte
   return null;
 }
 
-function assertClaudeModeCanRun(mode: PermissionMode, env: NodeJS.ProcessEnv): void {
+function assertClaudeModeCanRun(
+  mode: PermissionMode,
+  env: NodeJS.ProcessEnv,
+  model: AgentModelDefinition | undefined,
+): void {
   if (mode !== "auto") {
     return;
   }
+  if (!claudeModelCapability(model, "supportsAutoMode"))
+    throw new Error(`Claude Auto mode is not available for model '${model?.id ?? "default"}'`);
   const transport = claudeAutoModeUnavailableOn(env);
   if (transport === null) {
     return;
@@ -939,14 +931,23 @@ function assertClaudeModeCanRun(mode: PermissionMode, env: NodeJS.ProcessEnv): v
   );
 }
 
-function claudeModeCatalog(env: NodeJS.ProcessEnv): {
-  modes: AgentMode[];
-  defaultModeId: PermissionMode;
-} {
-  if (claudeAutoModeUnavailableOn(env)) {
-    return { modes: DEFAULT_MODES.filter((mode) => mode.id !== "auto"), defaultModeId: "default" };
-  }
-  return { modes: DEFAULT_MODES, defaultModeId: "auto" };
+function claudeModeCatalog(
+  env: NodeJS.ProcessEnv,
+  models: readonly AgentModelDefinition[],
+  modelId?: string | null,
+  includeAllModels = false,
+): { modes: AgentMode[]; defaultModeId: PermissionMode } {
+  const defaultSupportsAuto =
+    !claudeAutoModeUnavailableOn(env) &&
+    claudeModelCapability(findClaudeModel(models, modelId), "supportsAutoMode");
+  const supportsAuto = includeAllModels
+    ? !claudeAutoModeUnavailableOn(env) &&
+      models.some((model) => claudeModelCapability(model, "supportsAutoMode"))
+    : defaultSupportsAuto;
+  return {
+    modes: supportsAuto ? DEFAULT_MODES : DEFAULT_MODES.filter((mode) => mode.id !== "auto"),
+    defaultModeId: defaultSupportsAuto ? "auto" : "default",
+  };
 }
 
 function coerceSessionMetadata(metadata: AgentMetadata | undefined): Partial<AgentSessionConfig> {
@@ -1493,7 +1494,8 @@ export class ClaudeAgentClient implements AgentClient {
   private readonly runtimeSettings?: ProviderRuntimeSettings;
   private readonly queryFactory?: ClaudeQueryFactory;
   private readonly resolveBinary: () => Promise<string>;
-  private readonly resolveVersion: (signal?: AbortSignal) => Promise<string>;
+  private readonly modelCatalogs = new Map<string, AgentModelDefinition[]>();
+  private suppliedModelCatalog: AgentModelDefinition[] | null = null;
   private readonly configDir?: string;
 
   constructor(options: ClaudeAgentClientOptions) {
@@ -1502,10 +1504,29 @@ export class ClaudeAgentClient implements AgentClient {
     this.runtimeSettings = options.runtimeSettings;
     this.queryFactory = options.queryFactory;
     this.resolveBinary = options.resolveBinary ?? (() => resolveClaudeBinary(this.runtimeSettings));
-    this.resolveVersion =
-      options.resolveVersion ??
-      ((signal) => resolveClaudeCodeVersion(this.runtimeSettings, signal));
-    this.configDir = options.configDir;
+    this.configDir = options.configDir ?? this.runtimeSettings?.env?.CLAUDE_CONFIG_DIR;
+  }
+
+  setModelCatalog(models: AgentModelDefinition[], options?: FetchCatalogOptions): void {
+    if (!options) {
+      this.suppliedModelCatalog = models;
+      return;
+    }
+    const key = options.scope === "workspace" ? path.resolve(options.cwd) : "global";
+    this.modelCatalogs.set(key, models);
+  }
+
+  private getModelCatalog(cwd: string): readonly AgentModelDefinition[] {
+    return this.modelCatalogs.get(path.resolve(cwd)) ?? this.suppliedModelCatalog ?? [];
+  }
+
+  private async ensureModelCatalog(cwd: string): Promise<void> {
+    const key = path.resolve(cwd);
+    if (this.modelCatalogs.has(key) || this.suppliedModelCatalog !== null) return;
+    const options = { scope: "workspace" as const, cwd, force: false };
+    const catalog = await this.fetchCatalog(options);
+    if (!this.modelCatalogs.has(key) && this.suppliedModelCatalog === null)
+      this.setModelCatalog(catalog.models, options);
   }
 
   resolveConfiguredModel(model: AgentModelDefinition): AgentModelDefinition {
@@ -1517,7 +1538,12 @@ export class ClaudeAgentClient implements AgentClient {
     launchContext?: AgentLaunchContext,
     options?: AgentCreateSessionOptions,
   ): Promise<AgentSession> {
+    await this.ensureModelCatalog(config.cwd);
     const claudeConfig = this.assertConfig(config);
+    assertClaudeThinkingOptionSupported(
+      findClaudeModel(this.getModelCatalog(config.cwd), config.model),
+      config.thinkingOptionId,
+    );
     return new ClaudeAgentSession(claudeConfig, {
       defaults: this.defaults,
       runtimeSettings: this.runtimeSettings,
@@ -1527,6 +1553,7 @@ export class ClaudeAgentClient implements AgentClient {
       logger: this.logger,
       queryFactory: this.queryFactory,
       resolveBinary: this.resolveBinary,
+      getModelCatalog: () => this.getModelCatalog(claudeConfig.cwd),
     });
   }
 
@@ -1534,6 +1561,7 @@ export class ClaudeAgentClient implements AgentClient {
     handle: AgentPersistenceHandle,
     overrides?: Partial<AgentSessionConfig>,
     launchContext?: AgentLaunchContext,
+    options?: AgentResumeSessionOptions,
   ): Promise<AgentSession> {
     const metadata = coerceSessionMetadata(handle.metadata);
     const merged: Partial<AgentSessionConfig> = { ...metadata, ...overrides };
@@ -1545,6 +1573,7 @@ export class ClaudeAgentClient implements AgentClient {
       provider: "claude",
       cwd: merged.cwd,
     };
+    if (options?.purpose !== "history") await this.ensureModelCatalog(mergedConfig.cwd);
     const claudeConfig = this.assertConfig(mergedConfig);
     return new ClaudeAgentSession(claudeConfig, {
       defaults: this.defaults,
@@ -1555,48 +1584,56 @@ export class ClaudeAgentClient implements AgentClient {
       logger: this.logger,
       queryFactory: this.queryFactory,
       resolveBinary: this.resolveBinary,
+      getModelCatalog: () => this.getModelCatalog(claudeConfig.cwd),
     });
   }
 
   async fetchCatalog(
-    _options: FetchCatalogOptions,
+    options: FetchCatalogOptions,
     context?: ProviderRefreshContext,
   ): Promise<ProviderCatalog> {
-    // Claude exposes a global catalog here; cwd/force are intentionally irrelevant.
-    let claudeCodeVersion: string | undefined;
-    try {
-      claudeCodeVersion = await runProviderRefreshActivity(context, "version", () =>
-        this.resolveVersion(context?.signal),
-      );
-    } catch (error) {
-      this.logger.warn({ err: error }, "Failed to resolve Claude Code version for model catalog");
-    }
-    const models = await runProviderRefreshActivity(context, "settings", () =>
-      getClaudeModelsWithSettings(this.logger, this.configDir, claudeCodeVersion),
+    const nativeModels = await runProviderRefreshActivity(context, "models", () =>
+      discoverClaudeModels({
+        cwd: options.scope === "workspace" ? options.cwd : os.homedir(),
+        resolveBinary: this.resolveBinary,
+        runtimeSettings: this.runtimeSettings,
+        configDir: this.configDir,
+        queryFactory: this.queryFactory,
+        signal: context?.signal,
+      }),
     );
-    const modeCatalog = claudeModeCatalog(
-      createProviderEnv({ baseEnv: process.env, runtimeSettings: this.runtimeSettings }),
+    const models = await runProviderRefreshActivity(context, "settings", () =>
+      getClaudeModelsWithSettings(this.logger, this.configDir, nativeModels),
     );
     return {
       models,
-      ...modeCatalog,
+      ...claudeModeCatalog(
+        createProviderEnv({ baseEnv: process.env, runtimeSettings: this.runtimeSettings }),
+        models,
+        undefined,
+        true,
+      ),
     };
   }
 
-  async resolveDefaultModeId({ env: launchEnv }: ResolveAgentDefaultModeInput): Promise<string> {
+  async resolveDefaultModeId({
+    config,
+    env: launchEnv,
+  }: ResolveAgentDefaultModeInput): Promise<string> {
+    await this.ensureModelCatalog(config.cwd);
     const env = createProviderEnv({
       baseEnv: process.env,
       runtimeSettings: this.runtimeSettings,
       overlays: [launchEnv],
     });
-    return claudeModeCatalog(env).defaultModeId;
+    return claudeModeCatalog(env, this.getModelCatalog(config.cwd), config.model).defaultModeId;
   }
 
   async listFeatures(config: AgentSessionConfig): Promise<AgentFeature[]> {
-    const claudeConfig = this.assertConfig(config);
+    await this.ensureModelCatalog(config.cwd);
     return buildClaudeFeatures({
-      modelId: claudeConfig.model,
-      fastModeEnabled: claudeConfig.featureValues?.fast_mode === true,
+      model: findClaudeModel(this.getModelCatalog(config.cwd), config.model),
+      fastModeEnabled: config.featureValues?.fast_mode === true,
     });
   }
 
@@ -2048,7 +2085,7 @@ class ClaudeAgentSession implements AgentSession {
   private persistence: AgentPersistenceHandle | null;
   private currentMode: PermissionMode;
   private planResumeMode: PermissionMode | null = null;
-  private availableModes: AgentMode[] = DEFAULT_MODES;
+  private readonly getModelCatalog: () => readonly AgentModelDefinition[];
   private toolUseCache = new Map<string, ToolUseCacheEntry>();
   private toolUseIndexToId = new Map<number, string>();
   private toolUseInputBuffers = new Map<string, string>();
@@ -2099,7 +2136,7 @@ class ClaudeAgentSession implements AgentSession {
 
   constructor(config: ClaudeAgentConfig, options: ClaudeAgentSessionOptions) {
     this.config = config;
-    assertClaudeThinkingOptionSupported(config.model, config.thinkingOptionId);
+    this.getModelCatalog = options.getModelCatalog;
     this.launchEnv = options.launchEnv;
     this.agentId = options.agentId;
     this.defaults = options.defaults;
@@ -2108,9 +2145,7 @@ class ClaudeAgentSession implements AgentSession {
     this.logger = options.logger.child({ agentId: this.agentId });
     this.queryFactory = options.queryFactory;
     this.resolveBinary = options.resolveBinary;
-    this.contextUsage = new ClaudeContextUsageState(
-      findClaudeModel(this.config.model)?.contextWindowMaxTokens,
-    );
+    this.contextUsage = new ClaudeContextUsageState(this.modelDefinition?.contextWindowMaxTokens);
     const handle = options.handle;
 
     if (handle) {
@@ -2139,13 +2174,17 @@ class ClaudeAgentSession implements AgentSession {
     }
   }
 
+  private get modelDefinition(): AgentModelDefinition | undefined {
+    return findClaudeModel(this.getModelCatalog(), this.config.model);
+  }
+
   get id(): string | null {
     return this.claudeSessionId;
   }
 
   get features(): AgentFeature[] {
     return buildClaudeFeatures({
-      modelId: this.config.model,
+      model: this.modelDefinition,
       fastModeEnabled: this.config.featureValues?.fast_mode === true,
     });
   }
@@ -2255,6 +2294,7 @@ class ClaudeAgentSession implements AgentSession {
     this.notifySubscribers({ type: "turn_started", provider: "claude" });
 
     try {
+      await this.reconcileCatalogCapabilities();
       await this.ensureQuery();
       if (!this.input) {
         throw new Error("Claude session input stream not initialized");
@@ -2380,7 +2420,7 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   async getAvailableModes(): Promise<AgentMode[]> {
-    return this.availableModes;
+    return claudeModeCatalog(this.buildSdkEnv(), this.getModelCatalog(), this.config.model).modes;
   }
 
   async getCurrentMode(): Promise<string | null> {
@@ -2397,7 +2437,7 @@ class ClaudeAgentSession implements AgentSession {
     }
 
     const normalized = isPermissionMode(modeId) ? modeId : "default";
-    assertClaudeModeCanRun(normalized, this.buildSdkEnv());
+    assertClaudeModeCanRun(normalized, this.buildSdkEnv(), this.modelDefinition);
     const previousMode = this.currentMode;
     const activeQuery = await this.ensureQuery();
     await activeQuery.setPermissionMode(normalized);
@@ -2415,14 +2455,23 @@ class ClaudeAgentSession implements AgentSession {
     const normalizedModelId =
       typeof modelId === "string" && modelId.trim().length > 0 ? modelId.trim() : null;
     const activeQuery = await this.ensureQuery();
+    const nextModel = findClaudeModel(this.getModelCatalog(), normalizedModelId);
+    if (this.currentMode === "auto" && !claudeModelCapability(nextModel, "supportsAutoMode")) {
+      await activeQuery.setPermissionMode("default");
+      this.currentMode = "default";
+      this.planResumeMode = "default";
+    }
     await activeQuery.setModel(normalizedModelId ?? undefined);
     this.config.model = normalizedModelId ?? undefined;
-    this.reconcileThinkingOptionForModel(normalizedModelId);
-    if (!claudeModelSupportsFastMode(this.config.model) && this.config.featureValues?.fast_mode) {
+    this.reconcileThinkingOptionForModel();
+    if (
+      !claudeModelSupportsFastMode(this.modelDefinition) &&
+      this.config.featureValues?.fast_mode
+    ) {
       await this.applyFastModeFeature(false, activeQuery);
     }
     this.contextUsage.setInitialContextWindowMaxTokens(
-      findClaudeModel(this.config.model)?.contextWindowMaxTokens,
+      this.modelDefinition?.contextWindowMaxTokens,
     );
     this.lastOptionsModel = normalizedModelId ?? this.lastOptionsModel;
     this.lastRuntimeModel = null;
@@ -2431,24 +2480,14 @@ class ClaudeAgentSession implements AgentSession {
     this.persistence = null;
   }
 
-  private reconcileThinkingOptionForModel(modelId: string | null): void {
-    const thinkingOptionId = this.config.thinkingOptionId;
-    if (thinkingOptionId !== CLAUDE_DISABLED_THINKING_OPTION_ID) {
-      return;
-    }
-
-    const resolution = resolveClaudeDisabledThinkingForModel(modelId);
-    if (resolution.supported) {
-      return;
-    }
-
-    this.config.thinkingOptionId = resolution.fallbackThinkingOptionId;
+  private reconcileThinkingOptionForModel(): void {
+    const id = this.config.thinkingOptionId;
+    const options = this.modelDefinition?.thinkingOptions;
+    if (!id || options?.some((option) => option.id === id)) return;
+    if (options === undefined && isClaudeThinkingEffort(id)) return;
+    this.config.thinkingOptionId = undefined;
     this.queryRestartNeeded = true;
-    this.pushEvent({
-      type: "thinking_option_changed",
-      provider: "claude",
-      thinkingOptionId: this.config.thinkingOptionId ?? null,
-    });
+    this.pushEvent({ type: "thinking_option_changed", provider: "claude", thinkingOptionId: null });
   }
 
   async setThinkingOption(thinkingOptionId: string | null): Promise<void | AgentProviderNotice> {
@@ -2459,11 +2498,9 @@ class ClaudeAgentSession implements AgentSession {
 
     if (!normalizedThinkingOptionId || normalizedThinkingOptionId === "default") {
       this.config.thinkingOptionId = undefined;
-    } else if (isClaudeThinkingOption(normalizedThinkingOptionId)) {
-      assertClaudeThinkingOptionSupported(this.config.model, normalizedThinkingOptionId);
-      this.config.thinkingOptionId = normalizedThinkingOptionId;
     } else {
-      throw new Error(`Unknown thinking option: ${normalizedThinkingOptionId}`);
+      assertClaudeThinkingOptionSupported(this.modelDefinition, normalizedThinkingOptionId);
+      this.config.thinkingOptionId = normalizedThinkingOptionId;
     }
     this.queryRestartNeeded = true;
     if (this.activeForegroundTurnId || this.autonomousTurn) {
@@ -2477,7 +2514,7 @@ class ClaudeAgentSession implements AgentSession {
     }
 
     const enabled = Boolean(value);
-    if (enabled && !claudeModelSupportsFastMode(this.config.model)) {
+    if (enabled && !claudeModelSupportsFastMode(this.modelDefinition)) {
       throw new Error(
         `Claude fast mode is not available for model '${this.config.model ?? "default"}'`,
       );
@@ -3082,7 +3119,32 @@ class ClaudeAgentSession implements AgentSession {
     return { kind: "fork", messageId: previousTurn.assistantMessageId };
   }
 
+  private async reconcileCatalogCapabilities(): Promise<void> {
+    this.reconcileThinkingOptionForModel();
+    if (
+      this.config.featureValues?.fast_mode === true &&
+      !claudeModelSupportsFastMode(this.modelDefinition)
+    ) {
+      await this.applyFastModeFeature(false);
+    }
+    if (
+      this.currentMode === "auto" &&
+      !claudeModelCapability(this.modelDefinition, "supportsAutoMode")
+    ) {
+      await this.query?.setPermissionMode("default");
+      this.currentMode = "default";
+      this.planResumeMode = "default";
+      this.pushEvent({
+        type: "mode_changed",
+        provider: "claude",
+        currentModeId: this.currentMode,
+        availableModes: await this.getAvailableModes(),
+      });
+    }
+  }
+
   private async ensureQuery(): Promise<Query> {
+    if (!this.query) await this.reconcileCatalogCapabilities();
     if (this.query && !this.queryRestartNeeded) {
       return this.query;
     }
@@ -3207,15 +3269,28 @@ class ClaudeAgentSession implements AgentSession {
       this.config.thinkingOptionId && this.config.thinkingOptionId !== "default"
         ? this.config.thinkingOptionId
         : undefined;
-    assertClaudeThinkingOptionSupported(this.config.model, thinkingOptionId);
+    assertClaudeThinkingOptionSupported(this.modelDefinition, thinkingOptionId);
     if (thinkingOptionId === CLAUDE_DISABLED_THINKING_OPTION_ID) {
       return { thinking: { type: "disabled" }, effort: undefined, ultracode: false };
     }
     if (thinkingOptionId === CLAUDE_ULTRACODE_THINKING_OPTION_ID) {
-      return { thinking: { type: "adaptive" }, effort: "xhigh", ultracode: true };
+      return {
+        thinking: claudeModelCapability(this.modelDefinition, "supportsAdaptiveThinking")
+          ? { type: "adaptive" }
+          : undefined,
+        effort: "xhigh",
+        ultracode: true,
+      };
     }
-    if (thinkingOptionId && isClaudeThinkingEffort(thinkingOptionId)) {
-      return { thinking: { type: "adaptive" }, effort: thinkingOptionId, ultracode: false };
+    if (thinkingOptionId) {
+      return {
+        thinking: claudeModelCapability(this.modelDefinition, "supportsAdaptiveThinking")
+          ? { type: "adaptive" }
+          : undefined,
+        // The native catalog may advertise values ahead of the bundled SDK types.
+        effort: thinkingOptionId as ClaudeOptions["effort"],
+        ultracode: false,
+      };
     }
     return { thinking: undefined, effort: undefined, ultracode: false };
   }
@@ -3243,7 +3318,7 @@ class ClaudeAgentSession implements AgentSession {
     );
     const settingsOptions = this.buildSettingsOptions(providerOptions, { ultracode });
     const sdkEnv = this.buildSdkEnv();
-    assertClaudeModeCanRun(this.currentMode, sdkEnv);
+    assertClaudeModeCanRun(this.currentMode, sdkEnv, this.modelDefinition);
 
     const claudeBinary = await this.resolveBinary();
     this.logger.debug(
@@ -3339,7 +3414,7 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   private resolveFastModeSetting(): boolean | null {
-    if (!claudeModelSupportsFastMode(this.config.model)) {
+    if (!claudeModelSupportsFastMode(this.modelDefinition)) {
       return null;
     }
     return this.config.featureValues?.fast_mode === true;
@@ -4524,7 +4599,6 @@ class ClaudeAgentSession implements AgentSession {
       threadStartedSessionId = newSessionId;
       notice = this.createClaudeSessionChangedNotice(existingSessionId, newSessionId);
     }
-    this.availableModes = DEFAULT_MODES;
     this.currentMode = message.permissionMode;
     if (this.currentMode !== "plan") {
       this.planResumeMode = this.currentMode;

@@ -151,7 +151,7 @@ describe("ClaudeTaskProtocolSource", () => {
       {
         kind: "subtitle",
         id: "toolu_original",
-        subtitle: "general-purpose · Opus 5 · 12.3k tokens",
+        subtitle: "general-purpose · claude-opus-5 · 12.3k tokens",
       },
     ]);
   });
@@ -524,21 +524,29 @@ describe("ClaudeTaskProtocolSource usage and runtime", () => {
     source.observe(taskStarted());
     expect(
       source.observeSidechainFrame(assistantFrame("claude-opus-5"), "toolu_01DgLoPMW9"),
-    ).toEqual([{ kind: "subtitle", id: "toolu_01DgLoPMW9", subtitle: "general-purpose · Opus 5" }]);
+    ).toEqual([
+      { kind: "subtitle", id: "toolu_01DgLoPMW9", subtitle: "general-purpose · claude-opus-5" },
+    ]);
   });
 
   it("re-reports only when the model actually changes", () => {
     const source = new ClaudeTaskProtocolSource();
     source.observe(taskStarted());
     source.observeSidechainFrame(assistantFrame("claude-opus-5"), "toolu_01DgLoPMW9");
-    // A dated alias is the same model; a mid-flight fallback is not.
+    // Preserve versioned IDs exactly when no native alias mapping is supplied.
     expect(
       source.observeSidechainFrame(assistantFrame("claude-opus-5-20260724"), "toolu_01DgLoPMW9"),
-    ).toEqual([]);
+    ).toEqual([
+      {
+        kind: "subtitle",
+        id: "toolu_01DgLoPMW9",
+        subtitle: "general-purpose · claude-opus-5-20260724",
+      },
+    ]);
     expect(
       source.observeSidechainFrame(assistantFrame("claude-sonnet-5"), "toolu_01DgLoPMW9"),
     ).toEqual([
-      { kind: "subtitle", id: "toolu_01DgLoPMW9", subtitle: "general-purpose · Sonnet 5" },
+      { kind: "subtitle", id: "toolu_01DgLoPMW9", subtitle: "general-purpose · claude-sonnet-5" },
     ]);
   });
 

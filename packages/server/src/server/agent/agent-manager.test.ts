@@ -8517,6 +8517,53 @@ test("respondToPermission updates currentModeId after plan approval", async () =
   expect(persisted?.lastModeId).toBe("acceptEdits");
 });
 
+test("catalog refresh republishes changed features without replacing the live session", async () => {
+  let features: AgentFeature[] = [];
+  class CatalogSession extends TestAgentSession {
+    get features() {
+      return features;
+    }
+  }
+  const createSession = vi.fn(async (config: AgentSessionConfig) => new CatalogSession(config));
+  const client = new TestAgentClient();
+  client.createSession = createSession;
+  const manager = new AgentManager({ clients: { codex: client }, logger });
+  const agent = await manager.createAgent({ provider: "codex", cwd: tmpdir() }, undefined, {
+    workspaceId: undefined,
+  });
+  const other = await manager.createAgent({ provider: "codex", cwd: process.cwd() }, undefined, {
+    workspaceId: undefined,
+  });
+  const events: AgentManagerEvent[] = [];
+  const unsubscribe = manager.subscribe((event) => events.push(event), { replayState: false });
+  try {
+    features = [
+      {
+        type: "select",
+        id: "service_tier",
+        label: "Speed",
+        value: "",
+        options: [
+          { id: "", label: "Default" },
+          { id: "future-tier", label: "Future tier" },
+        ],
+      },
+    ];
+    manager.refreshProviderFeatures("codex", tmpdir());
+    expect(manager.getAgent(agent.id)?.features).toEqual(features);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "agent_state", agent: { id: agent.id, features } });
+    manager.refreshProviderFeatures("codex", tmpdir());
+    expect(events).toHaveLength(1);
+    expect(manager.getAgent(other.id)?.features).toEqual([]);
+    expect(createSession).toHaveBeenCalledTimes(2);
+  } finally {
+    unsubscribe();
+    await manager.closeAgent(agent.id);
+    await manager.closeAgent(other.id);
+  }
+});
+
 test("respondToPermission refreshes features and runtime info after provider-managed plan approval", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-test-"));
   const storagePath = join(workdir, "agents");

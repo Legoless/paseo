@@ -8,6 +8,7 @@ import type { ProviderSelectorProvider } from "@/provider-selection/provider-sel
 import { formatAgentModeLabel, formatThinkingOptionLabel } from "@/agent-controls/labels";
 import {
   FAST_MODE_FEATURE_ID,
+  getAgentFeatureSelectOptions,
   isPlanningAgentMode,
   PLAN_MODE_FEATURE_ID,
   resolveNonPlanningModeId,
@@ -20,6 +21,7 @@ const GROUP_RANK = {
   modes: 1.2,
   planMode: 1.3,
   fastMode: 1.4,
+  features: 1.5,
 } as const;
 
 export interface AgentControlContributionLabels {
@@ -303,6 +305,36 @@ function buildFastModeGroup(source: AgentControlContributionSource): CommandCent
   };
 }
 
+function buildSelectFeatureGroups(
+  source: AgentControlContributionSource,
+): CommandCenterChoiceGroup[] {
+  return source.features.list.flatMap((feature) => {
+    if (feature.type !== "select") return [];
+    const icon = source.icons.feature(feature);
+    return [
+      {
+        id: `feature-${feature.id}`,
+        rank: GROUP_RANK.features,
+        label: feature.label,
+        keywords: [
+          feature.id,
+          feature.label,
+          ...(feature.description ? [feature.description] : []),
+        ],
+        choices: getAgentFeatureSelectOptions(feature).map((option) => ({
+          id: option.id,
+          path: [option.label],
+          keywords: [option.id, ...(option.description ? [option.description] : [])],
+          icon,
+          selected: option.id === (feature.value ?? ""),
+          testId: `command-center-feature-${source.serverId}:${source.ownerKey}:${feature.id}:${option.id}`,
+          select: () => source.features.set(feature.id, option.id),
+        })),
+      },
+    ];
+  });
+}
+
 export function buildAgentControlContributions(
   source: AgentControlContributionSource,
 ): CommandCenterContribution[] {
@@ -313,6 +345,7 @@ export function buildAgentControlContributions(
       buildModeGroup(source),
       buildPlanModeGroup(source),
       buildFastModeGroup(source),
+      ...buildSelectFeatureGroups(source),
     );
   }
   return buildContributions(groups);

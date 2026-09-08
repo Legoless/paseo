@@ -3,6 +3,7 @@ import {
   resolveAgentForm,
   resolveFormState,
   resolveThinkingOptionId,
+  resolveEffectiveModel,
   mergeSelectedComposerPreferences,
   combineInitialValues,
   buildProviderDefinitionMap,
@@ -16,6 +17,7 @@ import {
   type UserModifiedFields,
 } from "./resolve-agent-form";
 import { buildProviderDefinitions } from "@/utils/provider-definitions";
+import { buildDraftCommandConfig, resolveEffectiveComposerModelId } from "./provider-selection";
 import type { AgentProviderDefinition } from "@getpaseo/protocol/provider-manifest";
 import type {
   AgentModelDefinition,
@@ -133,7 +135,73 @@ describe("resolveDefaultModel", () => {
 });
 
 describe("model aliases", () => {
-  it("canonicalizes a retired preferred model and restores thinking from its alias key", () => {
+  it("keeps a pinned request ID when native discovery exposes a moving alias", () => {
+    const models: AgentModelDefinition[] = [
+      {
+        provider: "codex",
+        id: "native-latest",
+        aliases: ["native-pinned-v9"],
+        label: "Future Model",
+        thinkingOptions: [{ id: "high", label: "High" }],
+        defaultThinkingOptionId: "high",
+      },
+    ];
+    const resolved = resolveFormState(
+      undefined,
+      { provider: "codex", providerPreferences: { codex: { model: "native-pinned-v9" } } },
+      models,
+      INITIAL_USER_MODIFIED,
+      makeState().form,
+      codexProviderMap,
+    );
+    expect(resolved.model).toBe("native-pinned-v9");
+    expect(resolveEffectiveModel(models, resolved.model)).toBe(models[0]);
+    const selection = {
+      provider: resolved.provider,
+      modelId: resolved.model,
+      modeId: resolved.modeId,
+      thinkingOptionId: resolved.thinkingOptionId,
+      availableModels: models,
+      modeOptions: TEST_CODEX_DEFINITION.modes,
+    };
+    expect(
+      buildDraftCommandConfig({
+        selection,
+        cwd: "/repo",
+        effectiveModelId: resolveEffectiveComposerModelId(selection),
+        effectiveThinkingOptionId: resolved.thinkingOptionId,
+      })?.model,
+    ).toBe("native-pinned-v9");
+    const explicitPick = resolveAgentForm(makeState(resolved), {
+      type: "SET_MODEL_FROM_USER",
+      modelId: "native-latest",
+      availableModels: models,
+      providerPrefs: undefined,
+    });
+    expect(explicitPick.form.model).toBe("native-latest");
+  });
+
+  it("retains a saved native model missing from the current catalog instead of choosing its default", () => {
+    const resolved = resolveFormState(
+      { model: "future-model/native-alias" },
+      { provider: "codex" },
+      CODEX_MODELS,
+      INITIAL_USER_MODIFIED,
+      makeState().form,
+      codexProviderMap,
+    );
+    expect(resolved.model).toBe("future-model/native-alias");
+    expect(resolveEffectiveModel(CODEX_MODELS, resolved.model)).toBeNull();
+    const selected = resolveAgentForm(makeState({ provider: "codex" }), {
+      type: "SET_MODEL_FROM_USER",
+      modelId: "future-model/native-alias",
+      availableModels: CODEX_MODELS,
+      providerPrefs: undefined,
+    });
+    expect(selected.form.model).toBe("future-model/native-alias");
+  });
+
+  it("preserves a saved reference while resolving its catalog thinking metadata", () => {
     const resolved = resolveFormState(
       undefined,
       {
@@ -151,7 +219,8 @@ describe("model aliases", () => {
       codexProviderMap,
     );
 
-    expect(resolved.model).toBe("gpt-5.3-codex");
+    expect(resolved.model).toBe("gpt-5.3-codex-legacy");
+    expect(resolveEffectiveModel(ALIASED_CODEX_MODELS, resolved.model)?.id).toBe("gpt-5.3-codex");
     expect(resolved.thinkingOptionId).toBe("low");
   });
 
@@ -176,7 +245,8 @@ describe("model aliases", () => {
       codexProviderMap,
     );
 
-    expect(resolved.model).toBe("gpt-5.3-codex");
+    expect(resolved.model).toBe("gpt-5.3-codex-legacy");
+    expect(resolveEffectiveModel(ALIASED_CODEX_MODELS, resolved.model)?.id).toBe("gpt-5.3-codex");
     expect(resolved.thinkingOptionId).toBe("xhigh");
   });
 
@@ -239,7 +309,7 @@ describe("resolveThinkingOptionId", () => {
     ).toBe("xhigh");
   });
 
-  it("falls back to first option when no default and requested is invalid", () => {
+  it("inherits the provider default when none is advertised and the saved option is invalid", () => {
     const modelsNoDefault: AgentModelDefinition[] = [
       {
         provider: "codex",
@@ -258,7 +328,7 @@ describe("resolveThinkingOptionId", () => {
         modelId: "m",
         requestedThinkingOptionId: "",
       }),
-    ).toBe("low");
+    ).toBe("");
   });
 });
 
@@ -477,7 +547,7 @@ describe("resolveFormState", () => {
     expect(resolved.thinkingOptionId).toBe("xhigh");
   });
 
-  it("normalizes legacy model id 'default' from initial values to the provider default model", () => {
+  it("preserves the native default alias when it is absent from the current catalog", () => {
     const resolved = resolveFormState(
       { model: "default" },
       { provider: "codex" },
@@ -488,7 +558,7 @@ describe("resolveFormState", () => {
       codexProviderMap,
     );
 
-    expect(resolved.model).toBe("gpt-5.3-codex");
+    expect(resolved.model).toBe("default");
   });
 
   it("keeps an explicit initial thinking option when it is valid", () => {
@@ -506,7 +576,7 @@ describe("resolveFormState", () => {
     expect(resolved.thinkingOptionId).toBe("low");
   });
 
-  it("falls back to the first thinking option when model exposes options without a provider default", () => {
+  it("inherits thinking when the model exposes options without a native default", () => {
     const claudeWithThinking: AgentModelDefinition[] = [
       {
         provider: "claude",
@@ -531,7 +601,7 @@ describe("resolveFormState", () => {
     );
 
     expect(resolved.model).toBe("default");
-    expect(resolved.thinkingOptionId).toBe("low");
+    expect(resolved.thinkingOptionId).toBe("");
   });
 
   it("clears an invalid provider instead of falling back to the first allowed provider", () => {

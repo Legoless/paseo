@@ -45,6 +45,7 @@ export function resolveFeatureValues(args: {
   localFeatureValues: Record<string, unknown>;
 }): Record<string, unknown> {
   const next: Record<string, unknown> = {};
+  const legacyFastMode = args.localFeatureValues.fast_mode ?? args.persistedFeatureValues.fast_mode;
 
   for (const feature of args.features) {
     if (Object.prototype.hasOwnProperty.call(args.localFeatureValues, feature.id)) {
@@ -53,6 +54,16 @@ export function resolveFeatureValues(args: {
     }
     if (Object.prototype.hasOwnProperty.call(args.persistedFeatureValues, feature.id)) {
       next[feature.id] = args.persistedFeatureValues[feature.id];
+      continue;
+    }
+    // COMPAT(codexFastPreference): added in v0.7.0, remove after 2027-03-08.
+    // The provider translates the old boolean using its native catalog; submit that value.
+    if (
+      feature.id === "service_tier" &&
+      feature.type === "select" &&
+      typeof legacyFastMode === "boolean"
+    ) {
+      next[feature.id] = feature.value ?? "";
     }
   }
 

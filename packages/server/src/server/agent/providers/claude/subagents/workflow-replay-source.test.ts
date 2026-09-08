@@ -85,7 +85,7 @@ describe("Claude workflow replay", () => {
       id: TOOL_CALL_ID,
       title: "Workflow",
       description: "Runs one deterministic child and returns its structured result",
-      subtitle: "Workflow · Sonnet 5 · 20.4k tokens",
+      subtitle: "Workflow · claude-sonnet-5 · 20.4k tokens",
       status: "completed",
       toolCallId: TOOL_CALL_ID,
     });

@@ -55,7 +55,27 @@ Implement the `AgentClient` and `AgentSession` interfaces from `agent-sdk-types.
 
 Existing direct providers: `claude` (in `providers/claude/agent.ts`), `codex` (`codex-app-server-agent.ts`), `opencode` (`opencode-agent.ts`), `pi` (`providers/pi/agent.ts`), and `omp` (`providers/omp/agent.ts`). The dev-only `mock` provider (`mock-load-test-agent.ts`) is also direct.
 
-Claude first-party model metadata lives in `packages/server/src/server/agent/providers/claude/model-manifest.ts`. When adding or updating a Claude model, update that manifest only; the model picker thinking options and Claude-specific feature gates are derived from the manifest. Do not add model-specific Claude capability lists in feature code.
+### Model catalogs
+
+Discover models and their capabilities from the configured provider: Claude Code's
+`supportedModels()` and Codex's `model/list`. Keep model IDs opaque and use only reported alias
+relationships. A model-name prefix or version table cannot decide whether a model supports effort,
+Fast, or another option. Preserve custom model IDs even when discovery does not advertise them;
+missing capability metadata must not turn an unknown model into a different model.
+
+Use native option IDs when sending settings back. If the provider omits a default, omit the setting
+and let its configuration decide; option order carries no default guarantee. Catalogs do not always include context limits;
+leave those unknown until runtime usage supplies them. Do not guess from the model name.
+
+Picker reads refresh catalogs after five minutes, and Settings can force a refresh. A failed refresh
+retains the last usable catalog and reports the error; changing provider configuration discards that
+cache. Model catalogs also feed live controls, so a refresh must invalidate draft feature queries and
+republish changed features on open agents without restarting them.
+
+Provider discovery must not create a conversation. Claude's metadata probe needs both
+`persistSession: false` and an explicit print flag; the CLI ignores the no-persistence flag without
+print mode. Disable hooks, tools, and MCP for that probe, and close its process on success, failure,
+and cancellation.
 
 Paseo tools are not implemented as MCP tools internally. They live in a shared tool catalog under `packages/server/src/server/agent/tools/`; MCP is only the fallback adapter. A provider that can register runtime tools directly should set `supportsNativePaseoTools: true` and consume `launchContext.paseoTools` in `createSession`/`resumeSession`. When native tools are present, `AgentManager` strips the internal Paseo MCP server from the provider launch config so the provider does not receive the same tools twice. Providers that only know MCP should keep `supportsMcpServers: true` and let the daemon inject `/mcp/agents`.
 

@@ -105,6 +105,204 @@ async function runTestCatalogActivities(
 }
 
 describe("ProviderSnapshotManager public surface", () => {
+  test("discovers newly advertised models and capabilities after the catalog expires", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-08T00:00:00Z"));
+    let models: AgentModelDefinition[] = [
+      { provider: "codex", id: "future-one", label: "Future One" },
+    ];
+    const setModelCatalog = vi.fn();
+    const fetchCatalog = vi.fn(async () => ({ models, modes: [] }));
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      extraClients: {
+        codex: createExtraClient("codex", {
+          isAvailable: async () => true,
+          fetchCatalog,
+          setModelCatalog,
+        }),
+      },
+    });
+    try {
+      const read = () =>
+        manager.listProviders({ cwd: "/tmp/catalog", providers: ["codex"], wait: true });
+      await read();
+      models = [
+        {
+          provider: "codex",
+          id: "future-two",
+          label: "Future Two",
+          metadata: { serviceTiers: [{ id: "new-tier", name: "New tier" }] },
+        },
+      ];
+      expect((await read())[0].models?.[0].id).toBe("future-one");
+      expect(fetchCatalog).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(new Date("2026-09-08T00:05:01Z"));
+      expect((await read())[0].models).toEqual(models);
+      expect(fetchCatalog).toHaveBeenLastCalledWith(
+        { scope: "workspace", cwd: resolveSnapshotCwd("/tmp/catalog"), force: true },
+        expect.anything(),
+      );
+      expect(setModelCatalog).toHaveBeenLastCalledWith(models, {
+        scope: "workspace",
+        cwd: resolveSnapshotCwd("/tmp/catalog"),
+        force: true,
+      });
+    } finally {
+      manager.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  test("keeps the last usable catalog and reports a failed refresh without hammering discovery", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-08T00:00:00Z"));
+    const models: AgentModelDefinition[] = [
+      { provider: "codex", id: "future-model", label: "Future" },
+    ];
+    const fetchCatalog = vi.fn(async () => ({
+      models,
+      modes: [{ id: "native-default", label: "Native default" }],
+      defaultModeId: "native-default",
+    }));
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      extraClients: {
+        codex: createExtraClient("codex", { isAvailable: async () => true, fetchCatalog }),
+      },
+    });
+    try {
+      await manager.refreshSettingsSnapshot({ providers: ["codex"] });
+      fetchCatalog.mockRejectedValue(new Error("Provider is offline"));
+      await manager.refreshSettingsSnapshot({ providers: ["codex"] });
+      const snapshot = await manager.listProviders({ providers: ["codex"], wait: true });
+      expect(snapshot[0]).toMatchObject({
+        status: "ready",
+        models,
+        defaultModeId: "native-default",
+        error: "Provider is offline",
+        fetchedAt: "2026-09-08T00:00:00.000Z",
+      });
+      expect(fetchCatalog).toHaveBeenCalledTimes(2);
+      vi.setSystemTime(new Date("2026-09-08T00:05:01Z"));
+      await manager.listProviders({ providers: ["codex"], wait: true });
+      expect(fetchCatalog).toHaveBeenCalledTimes(3);
+    } finally {
+      manager.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  test("settings refresh updates every cached workspace catalog with its own scope", async () => {
+    let revision = 1;
+    const setModelCatalog = vi.fn();
+    const fetchCatalog = vi.fn(async (options: FetchCatalogOptions) => ({
+      models: [
+        {
+          provider: "codex",
+          id: `future-${revision}`,
+          label: "Future",
+          metadata: { scope: options.scope === "workspace" ? options.cwd : "global" },
+        },
+      ],
+      modes: [],
+    }));
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      extraClients: {
+        codex: createExtraClient("codex", {
+          isAvailable: async () => true,
+          fetchCatalog,
+          setModelCatalog,
+        }),
+      },
+    });
+    try {
+      await manager.getProvider({ provider: "codex", cwd: "/tmp/catalog-a", wait: true });
+      await manager.getProvider({ provider: "codex", cwd: "/tmp/catalog-b", wait: true });
+      revision = 2;
+      await manager.refreshSettingsSnapshot({ providers: ["codex"] });
+      expect(
+        (await manager.getProvider({ provider: "codex", cwd: "/tmp/catalog-a" })).models,
+      ).toMatchObject([
+        { id: "future-2", metadata: { scope: resolveSnapshotCwd("/tmp/catalog-a") } },
+      ]);
+      expect(
+        (await manager.getProvider({ provider: "codex", cwd: "/tmp/catalog-b" })).models,
+      ).toMatchObject([
+        { id: "future-2", metadata: { scope: resolveSnapshotCwd("/tmp/catalog-b") } },
+      ]);
+      expect(setModelCatalog).toHaveBeenCalledWith(expect.any(Array), {
+        scope: "workspace",
+        cwd: resolveSnapshotCwd("/tmp/catalog-a"),
+        force: true,
+      });
+      expect(setModelCatalog).toHaveBeenCalledWith(expect.any(Array), {
+        scope: "workspace",
+        cwd: resolveSnapshotCwd("/tmp/catalog-b"),
+        force: true,
+      });
+    } finally {
+      manager.destroy();
+    }
+  });
+
+  test("a superseded refresh cannot publish older models into live sessions", async () => {
+    let startFirst!: () => void;
+    let startSecond!: () => void;
+    let finishFirst!: (value: { models: AgentModelDefinition[]; modes: AgentMode[] }) => void;
+    let finishSecond!: (value: { models: AgentModelDefinition[]; modes: AgentMode[] }) => void;
+    const firstStarted = new Promise<void>((settle) => {
+      startFirst = settle;
+    });
+    const secondStarted = new Promise<void>((settle) => {
+      startSecond = settle;
+    });
+    const first = new Promise<{ models: AgentModelDefinition[]; modes: AgentMode[] }>((settle) => {
+      finishFirst = settle;
+    });
+    const second = new Promise<{ models: AgentModelDefinition[]; modes: AgentMode[] }>((settle) => {
+      finishSecond = settle;
+    });
+    const fetchCatalog = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        startFirst();
+        return first;
+      })
+      .mockImplementationOnce(() => {
+        startSecond();
+        return second;
+      });
+    const setModelCatalog = vi.fn();
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      extraClients: {
+        codex: createExtraClient("codex", {
+          isAvailable: async () => true,
+          fetchCatalog,
+          setModelCatalog,
+        }),
+      },
+    });
+    try {
+      const oldRefresh = manager.refreshSettingsSnapshot({ providers: ["codex"] });
+      await firstStarted;
+      const newRefresh = manager.refreshSettingsSnapshot({ providers: ["codex"] });
+      await secondStarted;
+      const latest = [{ provider: "codex", id: "new-model", label: "New" }];
+      finishSecond({ models: latest, modes: [] });
+      await newRefresh;
+      finishFirst({ models: [{ provider: "codex", id: "old-model", label: "Old" }], modes: [] });
+      await oldRefresh;
+      expect(setModelCatalog).toHaveBeenCalledTimes(1);
+      expect(setModelCatalog).toHaveBeenCalledWith(latest, { scope: "global", force: true });
+      expect((await manager.getProvider({ provider: "codex" })).models).toEqual(latest);
+    } finally {
+      manager.destroy();
+    }
+  });
+
   test("validates complete Hub agent configurations through the current provider contract", async () => {
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),

@@ -34,6 +34,44 @@ const ICONS: AgentControlContributionSource["icons"] = {
   feature: () => TestIcon,
 };
 
+it("exposes newly discovered speed tiers and sends their native IDs unchanged", () => {
+  const calls: [string, unknown][] = [];
+  const source = makeSource({
+    provider: "codex",
+    features: {
+      list: [
+        {
+          type: "select",
+          id: "service_tier",
+          label: "Speed",
+          value: "future/priority_v7",
+          options: [
+            { id: "", label: "Standard", description: "Native default" },
+            { id: "future/priority_v7", label: "Ultra PRO", description: "Native fast lane" },
+            { id: "batch_future", label: "Future Batch", description: "Run whenever ready" },
+          ],
+        },
+      ],
+      set: (id, value) => {
+        calls.push([id, value]);
+      },
+    },
+  });
+  const choices = buildAgentControlContributions(source);
+  expect(choices.map((choice) => choice.presentation)).toEqual([
+    expect.objectContaining({ path: ["Speed", "Standard"], selected: false }),
+    expect.objectContaining({ path: ["Speed", "Ultra PRO"], selected: true }),
+    expect.objectContaining({ path: ["Speed", "Future Batch"], selected: false }),
+  ]);
+  expect(choices[1].keywords).toContain("Native fast lane");
+  choices[0].run();
+  choices[2].run();
+  expect(calls).toEqual([
+    ["service_tier", ""],
+    ["service_tier", "batch_future"],
+  ]);
+});
+
 function provider(input: {
   id: string;
   label: string;

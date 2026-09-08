@@ -2,16 +2,18 @@ import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
-import type { ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
+import type { AgentFeature, ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
 import { compactProviderSnapshot } from "@getpaseo/protocol/provider-snapshot-codec";
 import type { CachedProviderSnapshot, ProviderSnapshotCache } from "@/data/provider-snapshot-cache";
 import { draftAgentCommandsQueryKey } from "@/hooks/agent-commands-query";
+import { providerFeaturesQueryRoot } from "@/data/providers-snapshot";
+import { applyFeatureValues, resolveFeatureValues } from "@/hooks/feature-preferences";
+import { getAgentFeatureSelectOptions } from "@/agent-controls/policy";
 import { applyProvidersSnapshotUpdate, type ProvidersSnapshotUpdate } from "@/data/push-router";
 import {
   fetchProvidersSnapshot,
   providersSnapshotQueryKey,
   refreshAndApplyProvidersSnapshot,
-  selectorOpenRefetchDecision,
   type ProvidersSnapshotClient,
 } from "./use-providers-snapshot";
 
@@ -201,6 +203,61 @@ describe("refreshAndApplyProvidersSnapshot", () => {
     queryClient = new QueryClient();
   });
 
+  it("refreshes future models and tiers immediately while preserving a user tier override", async () => {
+    const futureModel = {
+      provider: "codex",
+      id: "future-model/native-alias",
+      label: "Future Model PRO",
+    };
+    const client = createClient({
+      snapshots: [providersSnapshot([codexEntry("ready", [futureModel])])],
+    });
+    const featuresKey = [...providerFeaturesQueryRoot(serverId), "codex", "/repo-a"];
+    const otherHostKey = [...providerFeaturesQueryRoot("other-host"), "codex", "/repo-a"];
+    queryClient.setQueryData(featuresKey, []);
+    queryClient.setQueryData(otherHostKey, []);
+    await refreshAndApplyProvidersSnapshot({
+      client,
+      queryClient,
+      serverId,
+      cwd: "/repo-a",
+      cache: createCache(),
+    });
+    const features = await queryClient.fetchQuery<AgentFeature[]>({
+      queryKey: featuresKey,
+      staleTime: Infinity,
+      queryFn: async () => [
+        {
+          type: "select",
+          id: "service_tier",
+          label: "Speed",
+          value: "",
+          options: [
+            { id: "", label: "Standard" },
+            { id: "future/priority_v7", label: "Ultra PRO", description: "Native fast lane" },
+          ],
+        },
+      ],
+    });
+    const values = resolveFeatureValues({
+      features,
+      persistedFeatureValues: { service_tier: "" },
+      localFeatureValues: { service_tier: "future/priority_v7" },
+    });
+    const displayed = applyFeatureValues(features, values)[0];
+    expect(displayed).toMatchObject({ id: "service_tier", value: "future/priority_v7" });
+    expect(displayed.type).toBe("select");
+    if (displayed.type !== "select") throw new Error("Expected select feature");
+    expect(getAgentFeatureSelectOptions(displayed)).toEqual([
+      { id: "", label: "Standard" },
+      { id: "future/priority_v7", label: "Ultra PRO", description: "Native fast lane" },
+    ]);
+    expect(queryClient.getQueryData(providersSnapshotQueryKey(serverId, "/repo-a"))).toEqual(
+      providersSnapshot([codexEntry("ready", [futureModel])]),
+    );
+    expect(queryClient.getQueryState(otherHostKey)?.isInvalidated).toBe(false);
+  });
+
   it("refreshes then re-fetches the home snapshot and writes it into the home query cache", async () => {
     const client = createClient({
       snapshots: [providersSnapshot([codexEntry("ready", [readyCodexModel])])],
@@ -324,6 +381,8 @@ describe("applyProvidersSnapshotUpdate", () => {
   }
 
   it("routes updates to the home query cache when the message carries no cwd", () => {
+    const featuresKey = [...providerFeaturesQueryRoot(serverId), "codex", "/repo-a"];
+    queryClient.setQueryData(featuresKey, []);
     applyProvidersSnapshotUpdate({
       serverId,
       queryClient,
@@ -335,6 +394,7 @@ describe("applyProvidersSnapshotUpdate", () => {
       generatedAt: "2026-01-01T00:00:01.000Z",
       requestId: "providers_snapshot_update",
     });
+    expect(queryClient.getQueryState(featuresKey)?.isInvalidated).toBe(true);
   });
 
   it("routes workspace updates to the matching scope without touching siblings", () => {
@@ -412,49 +472,5 @@ describe("applyProvidersSnapshotUpdate", () => {
     });
 
     expect(queryClient.getQueryState(commandsKey)?.isInvalidated).toBe(true);
-  });
-});
-
-describe("selectorOpenRefetchDecision", () => {
-  it("refetches stale entries when no provider is selected", () => {
-    expect(
-      selectorOpenRefetchDecision({
-        entries: [codexEntry("ready", [readyCodexModel])],
-        selectedProvider: null,
-      }),
-    ).toBe("refetch-stale");
-  });
-
-  it("forces a refetch when the selected provider has no entry", () => {
-    expect(selectorOpenRefetchDecision({ entries: [], selectedProvider: "codex" })).toBe(
-      "refetch-always",
-    );
-  });
-
-  it("forces a refetch when the selected provider is still loading", () => {
-    expect(
-      selectorOpenRefetchDecision({
-        entries: [codexEntry("loading")],
-        selectedProvider: "codex",
-      }),
-    ).toBe("refetch-always");
-  });
-
-  it("keeps a stale-only refetch when the selected provider is ready with no models", () => {
-    expect(
-      selectorOpenRefetchDecision({
-        entries: [codexEntry("ready", [])],
-        selectedProvider: "codex",
-      }),
-    ).toBe("refetch-stale");
-  });
-
-  it("keeps a stale-only refetch when the selected provider is ready with models", () => {
-    expect(
-      selectorOpenRefetchDecision({
-        entries: [codexEntry("ready", [readyCodexModel])],
-        selectedProvider: "codex",
-      }),
-    ).toBe("refetch-stale");
   });
 });

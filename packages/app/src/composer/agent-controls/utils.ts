@@ -1,4 +1,5 @@
 import type { AgentFeature, AgentModelDefinition } from "@getpaseo/protocol/agent-types";
+import { normalizeAgentModelDefinition } from "@getpaseo/protocol/agent-types";
 import { i18n } from "@/i18n/i18next";
 import { formatThinkingOptionLabel } from "@/agent-controls/labels";
 import { FAST_MODE_FEATURE_ID, PLAN_MODE_FEATURE_ID } from "@/agent-controls/policy";
@@ -82,7 +83,7 @@ function pickSelectedModel(
   if (!models || !preferredModelId) {
     return fallbackModel;
   }
-  return findModelById(models, preferredModelId) ?? fallbackModel;
+  return findModelById(models, preferredModelId);
 }
 
 function resolveThinkingId(
@@ -92,7 +93,9 @@ function resolveThinkingId(
   if (explicitThinkingOptionId && explicitThinkingOptionId !== "default") {
     return explicitThinkingOptionId;
   }
-  return selectedModel?.defaultThinkingOptionId ?? null;
+  return selectedModel
+    ? (normalizeAgentModelDefinition(selectedModel).defaultThinkingOptionId ?? null)
+    : null;
 }
 
 type ThinkingOption = NonNullable<AgentModelDefinition["thinkingOptions"]>[number];
@@ -101,9 +104,7 @@ function resolveEffectiveThinking(
   thinkingOptions: ThinkingOption[] | null,
   resolvedThinkingId: string | null,
 ): ThinkingOption | null {
-  const selectedThinking =
-    thinkingOptions?.find((option) => option.id === resolvedThinkingId) ?? null;
-  return selectedThinking ?? thinkingOptions?.[0] ?? null;
+  return thinkingOptions?.find((option) => option.id === resolvedThinkingId) ?? null;
 }
 
 function resolveModelDisplay(
@@ -113,7 +114,7 @@ function resolveModelDisplay(
   unknownModelLabel: string,
 ): { activeModelId: string | null; displayModel: string } {
   return {
-    activeModelId: selectedModel?.id ?? preferredModelId ?? null,
+    activeModelId: preferredModelId ?? selectedModel?.id ?? null,
     displayModel:
       selectedModel?.label ?? preferredModelId ?? fallbackModel?.label ?? unknownModelLabel,
   };
@@ -156,7 +157,7 @@ export function resolveAgentModelSelection(input: {
 
   const { activeModelId, displayModel } = resolveModelDisplay(
     selectedModel,
-    preferredModelId,
+    normalizedConfiguredModelId ?? normalizedRuntimeModelId ?? preferredModelId,
     fallbackModel,
     i18n.t("agentControls.model.unknown"),
   );
@@ -164,11 +165,11 @@ export function resolveAgentModelSelection(input: {
   const thinkingOptions = selectedModel?.thinkingOptions ?? null;
   const resolvedThinkingId = resolveThinkingId(explicitThinkingOptionId, selectedModel);
   const effectiveThinking = resolveEffectiveThinking(thinkingOptions, resolvedThinkingId);
-  const selectedThinkingId = effectiveThinking?.id ?? null;
+  const selectedThinkingId = effectiveThinking?.id ?? resolvedThinkingId;
   const displayThinking = resolveThinkingDisplay(
     effectiveThinking,
     selectedThinkingId,
-    i18n.t("agentControls.thinking.unknown"),
+    i18n.t("providerSelection.defaultModel"),
   );
 
   return {

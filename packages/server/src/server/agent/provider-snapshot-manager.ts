@@ -47,6 +47,7 @@ import {
 } from "./agent-configuration-validator.js";
 
 const DEFAULT_REFRESH_TIMEOUT_MS = 120_000;
+const CATALOG_STALE_TIME_MS = 5 * 60 * 1000;
 const MAX_REFRESH_TIMEOUT_MS = 2_147_483_647;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_MS = 120_000;
 const PROVIDER_REFRESH_DEADLINE_ENV = "PASEO_PROVIDER_REFRESH_TIMEOUT_MS";
@@ -88,6 +89,10 @@ function omitProviderOverrides(
 }
 
 type ProviderSnapshotChangeListener = (entries: ProviderSnapshotEntry[], cwd: string) => void;
+type ProviderCatalogChangeListener = (
+  provider: AgentProvider,
+  options: FetchCatalogOptions,
+) => void;
 
 export interface ProviderSnapshotManagerOptions {
   logger: Logger;
@@ -203,6 +208,7 @@ interface ProviderSnapshotTarget {
 export class ProviderSnapshotManager {
   private readonly snapshots = new Map<string, Map<AgentProvider, ProviderSnapshotEntry>>();
   private readonly providerLoads = new Map<string, Map<AgentProvider, ProviderLoad>>();
+  private readonly lastRefreshAttempts = new Map<string, number>();
   private readonly events = new EventEmitter();
   private destroyed = false;
   private refreshTimeoutMs: number;
@@ -249,7 +255,7 @@ export class ProviderSnapshotManager {
     const snapshotCwd = resolveSnapshotCwd(options.cwd);
     const target = createWorkspaceSnapshotTarget(snapshotCwd);
     const providers = this.resolveRefreshProviders(options.providers);
-    this.resetSnapshotToLoading(snapshotCwd, providers, { preserveExisting: false });
+    this.resetSnapshotToLoading(snapshotCwd, providers);
     this.emitChange(snapshotCwd);
     await this.refreshProviders(target, providers ?? this.getProviderIds());
   }
@@ -263,9 +269,14 @@ export class ProviderSnapshotManager {
     const providersToRefresh = providers ?? this.getProviderIds();
 
     this.clearCachedProviders(providers);
-    this.resetSnapshotToLoading(homeCwd, providers, { preserveExisting: false });
+    this.resetSnapshotToLoading(homeCwd, providers);
     this.emitChange(homeCwd);
-    await this.refreshProviders(target, providersToRefresh);
+    const targets = Array.from(this.snapshots.keys(), (cwd) =>
+      cwd === GLOBAL_PROVIDER_SNAPSHOT_KEY
+        ? createGlobalSnapshotTarget()
+        : createWorkspaceSnapshotTarget(cwd),
+    );
+    await Promise.all(targets.map((scope) => this.refreshProviders(scope, providersToRefresh)));
   }
 
   async warmUpSnapshotForCwd(options: ProviderSnapshotWarmUpOptions): Promise<void> {
@@ -507,7 +518,7 @@ export class ProviderSnapshotManager {
 
       for (const cwd of this.snapshots.keys()) {
         this.providerLoads.delete(cwd);
-        this.snapshots.set(cwd, this.reconcileSnapshotForRegistry(cwd));
+        this.snapshots.set(cwd, this.reconcileSnapshotForRegistry());
       }
 
       return {
@@ -562,12 +573,22 @@ export class ProviderSnapshotManager {
     this.diagnosticTimeoutMs = resolveDiagnosticTimeoutMs(undefined, this.refreshTimeoutMs);
   }
 
-  on(event: "change", listener: ProviderSnapshotChangeListener): this {
+  on(event: "change", listener: ProviderSnapshotChangeListener): this;
+  on(event: "catalog", listener: ProviderCatalogChangeListener): this;
+  on(
+    event: "change" | "catalog",
+    listener: ProviderSnapshotChangeListener | ProviderCatalogChangeListener,
+  ): this {
     this.events.on(event, listener);
     return this;
   }
 
-  off(event: "change", listener: ProviderSnapshotChangeListener): this {
+  off(event: "change", listener: ProviderSnapshotChangeListener): this;
+  off(event: "catalog", listener: ProviderCatalogChangeListener): this;
+  off(
+    event: "change" | "catalog",
+    listener: ProviderSnapshotChangeListener | ProviderCatalogChangeListener,
+  ): this {
     this.events.off(event, listener);
     return this;
   }
@@ -585,6 +606,7 @@ export class ProviderSnapshotManager {
     this.events.removeAllListeners();
     this.snapshots.clear();
     this.providerLoads.clear();
+    this.lastRefreshAttempts.clear();
   }
 
   private buildRegistry(): Record<AgentProvider, ProviderDefinition> {
@@ -668,7 +690,7 @@ export class ProviderSnapshotManager {
   ): Promise<ProviderSnapshotEntry> {
     try {
       const target = createGlobalSnapshotTarget();
-      this.resetSnapshotToLoading(target.snapshotCwd, [provider], { preserveExisting: false });
+      this.resetSnapshotToLoading(target.snapshotCwd, [provider]);
       this.emitChange(target.snapshotCwd);
       await this.refreshProviders(target, [provider]);
       return await this.getProvider({ provider, wait: false });
@@ -733,13 +755,11 @@ export class ProviderSnapshotManager {
     return entries;
   }
 
-  private reconcileSnapshotForRegistry(cwd: string): Map<AgentProvider, ProviderSnapshotEntry> {
-    const existing = this.snapshots.get(cwd);
+  private reconcileSnapshotForRegistry(): Map<AgentProvider, ProviderSnapshotEntry> {
     const entries = new Map<AgentProvider, ProviderSnapshotEntry>();
 
     for (const provider of this.getProviderIds()) {
       const definition = this.providerRegistry[provider];
-      const current = existing?.get(provider);
       const metadata = {
         provider,
         enabled: definition?.enabled ?? true,
@@ -762,9 +782,6 @@ export class ProviderSnapshotManager {
         ...metadata,
         status: "loading",
         enabled: true,
-        models: current?.models,
-        modes: current?.modes,
-        fetchedAt: current?.fetchedAt,
       });
     }
 
@@ -807,13 +824,18 @@ export class ProviderSnapshotManager {
       this.resetSnapshotToLoading(cwd, missingProviders);
     }
 
-    return providersToInspect.filter((provider) => snapshot.get(provider)?.status === "loading");
+    return providersToInspect.filter((provider) => {
+      const entry = snapshot.get(provider);
+      return (
+        Boolean(this.getProviderLoad(cwd, provider)) ||
+        entry?.status === "loading" ||
+        this.isCatalogStale(cwd, provider, entry)
+      );
+    });
   }
 
   private clearCachedProviders(providers?: AgentProvider[]): void {
     const providerSet = providers ? new Set(providers) : null;
-    const loadingEntries = this.createLoadingEntries();
-
     for (const [cwd, providerLoads] of Array.from(this.providerLoads.entries())) {
       if (!providerSet) {
         this.providerLoads.delete(cwd);
@@ -828,27 +850,20 @@ export class ProviderSnapshotManager {
       }
     }
 
-    for (const [cwd, snapshot] of this.snapshots.entries()) {
-      if (!providerSet) {
-        snapshot.clear();
-        for (const [provider, entry] of loadingEntries) {
-          snapshot.set(provider, entry);
-        }
-        this.emitChange(cwd);
-        continue;
-      }
-
-      let changed = false;
-      for (const provider of providerSet) {
-        const loadingEntry = loadingEntries.get(provider);
-        if (!loadingEntry) continue;
-        snapshot.set(provider, loadingEntry);
-        changed = true;
-      }
-      if (changed) {
-        this.emitChange(cwd);
-      }
+    for (const cwd of this.snapshots.keys()) {
+      this.resetSnapshotToLoading(cwd, providers);
+      this.emitChange(cwd);
     }
+  }
+
+  private isCatalogStale(
+    cwd: string,
+    provider: AgentProvider,
+    entry: ProviderSnapshotEntry | undefined,
+  ): boolean {
+    if (!entry?.enabled) return false;
+    const attemptedAt = this.lastRefreshAttempts.get(JSON.stringify([cwd, provider]));
+    return attemptedAt !== undefined && Date.now() - attemptedAt >= CATALOG_STALE_TIME_MS;
   }
 
   private async loadProviders(options: ProviderLoadOptions): Promise<void> {
@@ -868,10 +883,20 @@ export class ProviderSnapshotManager {
       return existingLoad.promise;
     }
     const existingEntry = this.snapshots.get(options.snapshotCwd)?.get(options.provider);
-    if (existingEntry && existingEntry.status !== "loading" && !options.force) {
+    if (
+      existingEntry &&
+      existingEntry.status !== "loading" &&
+      !options.force &&
+      !this.isCatalogStale(options.snapshotCwd, options.provider, existingEntry)
+    ) {
       return Promise.resolve();
     }
 
+    this.lastRefreshAttempts.set(
+      JSON.stringify([options.snapshotCwd, options.provider]),
+      Date.now(),
+    );
+    const force = options.force || existingEntry?.status === "ready";
     const load: ProviderLoad = {
       promise: Promise.resolve(),
     };
@@ -884,7 +909,7 @@ export class ProviderSnapshotManager {
           provider: options.provider,
           definition,
           load,
-          force: options.force,
+          force,
         }),
       )
       .finally(() => {
@@ -909,6 +934,7 @@ export class ProviderSnapshotManager {
   }): Promise<void> {
     const { snapshotCwd, catalogScope, provider, definition, load, force } = options;
     const snapshot = this.getOrCreateSnapshot(snapshotCwd);
+    const previous = snapshot.get(provider);
     const base = {
       provider,
       source: this.getProviderSource(provider),
@@ -952,6 +978,10 @@ export class ProviderSnapshotManager {
         return;
       }
 
+      if (!this.isCurrentProviderLoad(snapshotCwd, provider, load)) return;
+      const publishedScope = createFetchCatalogOptions(catalogScope, force);
+      client.setModelCatalog?.(catalog.models, publishedScope);
+      this.events.emit("catalog", provider, publishedScope);
       setEntry({
         ...base,
         defaultModeId:
@@ -964,8 +994,10 @@ export class ProviderSnapshotManager {
       });
     } catch (error) {
       const emitted = setEntry({
+        ...(previous?.models ? previous : {}),
         ...base,
-        status: "error",
+        status: previous?.models ? "ready" : "error",
+        defaultModeId: previous?.models ? previous.defaultModeId : definition.defaultModeId,
         enabled: true,
         error: toErrorMessage(error),
       });
@@ -1024,33 +1056,20 @@ export class ProviderSnapshotManager {
   private resetSnapshotToLoading(
     cwdKey: string,
     providers?: AgentProvider[],
-    options: { preserveExisting?: boolean } = {},
   ): Map<AgentProvider, ProviderSnapshotEntry> {
     const snapshot = this.getOrCreateSnapshot(cwdKey);
     const loadingEntries = this.createLoadingEntries();
-    const preserveExisting = options.preserveExisting ?? true;
 
-    if (!providers) {
-      snapshot.clear();
-      for (const [provider, entry] of loadingEntries) {
-        snapshot.set(provider, entry);
-      }
-      return snapshot;
-    }
-
-    for (const provider of providers) {
+    for (const provider of providers ?? loadingEntries.keys()) {
       const loadingEntry = loadingEntries.get(provider);
       if (!loadingEntry) continue;
       const existing = snapshot.get(provider);
       snapshot.set(provider, {
         ...loadingEntry,
-        ...(preserveExisting
-          ? {
-              models: existing?.models,
-              modes: existing?.modes,
-              fetchedAt: existing?.fetchedAt,
-            }
-          : {}),
+        models: existing?.models,
+        modes: existing?.modes,
+        fetchedAt: existing?.fetchedAt,
+        defaultModeId: existing?.models ? existing.defaultModeId : loadingEntry.defaultModeId,
       });
     }
     return snapshot;

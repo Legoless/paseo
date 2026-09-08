@@ -25,6 +25,15 @@ import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useShallow } from "zustand/shallow";
 import { Settings2 } from "lucide-react-native";
 import { getAgentFeatureIcon, ThinkingIcon } from "@/agent-controls/icons";
+import {
+  filterAgentModesForModel,
+  getAgentFeatureSelectOptions,
+  resolveAgentModeForModel,
+} from "@/agent-controls/policy";
+import {
+  resolveDefaultModel,
+  resolveEffectiveModel,
+} from "@/provider-selection/resolve-agent-form";
 import { formatThinkingOptionLabel } from "@/agent-controls/labels";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
 import { CombinedModelSelector } from "@/components/combined-model-selector";
@@ -539,7 +548,7 @@ function ControlledAgentControls({
   const displayThinking = findOptionLabel(
     formattedThinkingOptions,
     selectedThinkingOptionId,
-    formattedThinkingOptions[0]?.label ?? t("agentControls.thinking.unknown"),
+    t("providerSelection.defaultModel"),
   );
 
   const hasAnyControl = resolveHasAnyControl({
@@ -553,7 +562,9 @@ function ControlledAgentControls({
     () =>
       (features ?? []).map((feature) => {
         if (feature.type === "toggle") return { type: "toggle" as const };
-        const selectedOption = feature.options.find((option) => option.id === feature.value);
+        const selectedOption = getAgentFeatureSelectOptions(feature).find(
+          (option) => option.id === (feature.value ?? ""),
+        );
         return {
           type: "select" as const,
           label: selectedOption?.label ?? feature.label,
@@ -1322,7 +1333,11 @@ function DesktopFeatureItem({
   const comboboxOptions = useMemo<ComboboxOption[]>(
     () =>
       feature.type === "select"
-        ? feature.options.map((option) => ({ id: option.id, label: option.label }))
+        ? getAgentFeatureSelectOptions(feature).map((option) => ({
+            id: option.id,
+            label: option.label,
+            description: option.description,
+          }))
         : [],
     [feature],
   );
@@ -1358,7 +1373,7 @@ function DesktopFeatureItem({
 
   if (feature.type === "select") {
     const FeatureIcon = getAgentFeatureIcon(feature.icon);
-    const selectedOption = feature.options.find((o) => o.id === feature.value);
+    const selectedOption = comboboxOptions.find((option) => option.id === (feature.value ?? ""));
     return (
       <>
         <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
@@ -1382,7 +1397,7 @@ function DesktopFeatureItem({
         </Tooltip>
         <Combobox
           options={comboboxOptions}
-          value={String(feature.value)}
+          value={feature.value ?? ""}
           onSelect={handleSelectOption}
           open={openSelector === featureSelector}
           onOpenChange={handleFeatureOpenChange}
@@ -1432,7 +1447,11 @@ function SheetFeatureItem({
   );
   const comboboxOptions = useMemo<ComboboxOption[]>(() => {
     if (feature.type === "select") {
-      return feature.options.map((option) => ({ id: option.id, label: option.label }));
+      return getAgentFeatureSelectOptions(feature).map((option) => ({
+        id: option.id,
+        label: option.label,
+        description: option.description,
+      }));
     }
     return [
       { id: "true", label: t("agentControls.features.on") },
@@ -1479,7 +1498,7 @@ function SheetFeatureItem({
 
   if (feature.type === "select") {
     const FeatureIcon = getAgentFeatureIcon(feature.icon);
-    const selectedOption = feature.options.find((o) => o.id === feature.value);
+    const selectedOption = comboboxOptions.find((option) => option.id === (feature.value ?? ""));
     return (
       <>
         <AgentControlTrigger
@@ -1496,7 +1515,7 @@ function SheetFeatureItem({
         />
         <Combobox
           options={comboboxOptions}
-          value={String(feature.value)}
+          value={feature.value ?? ""}
           onSelect={handleSelectOption}
           open={openSelector === featureSelector}
           onOpenChange={handleFeatureOpenChange}
@@ -1894,12 +1913,27 @@ export function DraftAgentControls({
   modelSelectorServerId = null,
   isCompactLayout,
 }: DraftAgentControlsProps) {
+  const selectedModelDefinition = useMemo(
+    () =>
+      selectedModel ? resolveEffectiveModel(models, selectedModel) : resolveDefaultModel(models),
+    [models, selectedModel],
+  );
+  const availableModes = useMemo(
+    () => filterAgentModesForModel(modeOptions, selectedModelDefinition),
+    [modeOptions, selectedModelDefinition],
+  );
+  const effectiveSelectedMode = resolveAgentModeForModel({
+    modeId: selectedMode,
+    modes: availableModes,
+    defaultModeId: providerDefinitions.find((provider) => provider.id === selectedProvider)
+      ?.defaultModeId,
+    model: selectedModelDefinition,
+  });
   const mappedThinkingOptions = useMemo<AgentControlOption[]>(() => {
     return toThinkingControlOptions(thinkingOptions);
   }, [thinkingOptions]);
 
-  const effectiveSelectedThinkingOption =
-    selectedThinkingOptionId || mappedThinkingOptions[0]?.id || undefined;
+  const effectiveSelectedThinkingOption = selectedThinkingOptionId || undefined;
 
   const modelOptions = useMemo<AgentControlOption[]>(
     () =>
@@ -1939,17 +1973,24 @@ export function DraftAgentControls({
 
   const modeControl = useMemo<AgentModeControlValue | null>(
     () =>
-      selectedProvider && modeOptions.length > 0
+      selectedProvider && availableModes.length > 0
         ? {
             provider: selectedProvider,
             providerDefinitions,
-            modeOptions,
-            selectedModeId: selectedMode,
+            modeOptions: availableModes,
+            selectedModeId: effectiveSelectedMode,
             onSelectMode,
             disabled,
           }
         : null,
-    [selectedProvider, providerDefinitions, modeOptions, selectedMode, onSelectMode, disabled],
+    [
+      selectedProvider,
+      providerDefinitions,
+      availableModes,
+      effectiveSelectedMode,
+      onSelectMode,
+      disabled,
+    ],
   );
 
   return (

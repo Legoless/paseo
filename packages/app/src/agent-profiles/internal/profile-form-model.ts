@@ -262,12 +262,7 @@ function defaultModeId(entry: ProviderSnapshotEntry | null, modes: readonly Agen
 
 function defaultThinkingOptionId(model: AgentModelDefinition | null): string {
   const options = model?.thinkingOptions ?? [];
-  return (
-    model?.defaultThinkingOptionId ??
-    options.find((option) => option.isDefault)?.id ??
-    options[0]?.id ??
-    ""
-  );
+  return model?.defaultThinkingOptionId ?? options.find((option) => option.isDefault)?.id ?? "";
 }
 
 function seedSelections(

@@ -67,6 +67,42 @@ describe("combined model selector data", () => {
     ]);
   });
 
+  it("keeps cached native model IDs selectable after a failed catalog refresh", () => {
+    const models: AgentModelDefinition[] = [
+      {
+        provider: "claude",
+        id: "native-future[extended]",
+        label: "Future PRO",
+        aliases: ["native-alias"],
+        description: "Native context variant",
+      },
+      { provider: "claude", id: "native-alias", label: "Native Alias" },
+    ];
+    const providers = buildSelectableProviderSelectorProviders([
+      snapshotEntry({ provider: "claude", status: "ready", error: "Refresh failed", models }),
+    ]);
+    expect(providers[0].modelSelection).toMatchObject({
+      kind: "models",
+      error: "Refresh failed",
+      rows: [
+        {
+          modelId: "native-future[extended]",
+          modelLabel: "Future PRO",
+          description: "Native context variant",
+        },
+        { modelId: "native-alias", modelLabel: "Native Alias" },
+      ],
+    });
+    expect(
+      resolveSelectedModelLabel({
+        providers,
+        selectedProvider: "claude",
+        selectedModel: "native-alias",
+        isLoading: false,
+      }),
+    ).toBe("Native Alias");
+  });
+
   it("hides compatibility-only model entries from new clients", () => {
     const compatibilityModel: AgentModelDefinition = {
       ...codexModel,
