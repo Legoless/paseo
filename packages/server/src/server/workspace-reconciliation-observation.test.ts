@@ -300,7 +300,7 @@ class ObservedPlacements {
   async deleteWorkspaceDirectory(workspaceId: string): Promise<void> {
     const workspace = await this.workspaces.get(workspaceId);
     if (!workspace) throw new Error(`Unknown workspace: ${workspaceId}`);
-    rmSync(workspace.cwd, { recursive: true, force: true });
+    rmSync(workspace.members[0]!.cwd, { recursive: true, force: true });
   }
 
   get projectUpdates(): ProjectUpdate[] {
@@ -348,12 +348,22 @@ class ObservedPlacements {
       await this.workspaces.upsert(
         createPersistedWorkspaceRecord({
           workspaceId: workspace.id,
-          projectId: spec.id,
-          cwd,
-          kind: "directory",
           displayName: `Durable ${workspace.id}`,
           createdAt: TIMESTAMP,
           updatedAt: TIMESTAMP,
+          members: [
+            {
+              projectId: spec.id,
+              cwd,
+              kind: "directory",
+              displayName: `Durable ${workspace.id}`,
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
         }),
       );
     }
@@ -471,7 +481,7 @@ describe("observed workspace placement", () => {
     observed.dispose();
   });
 
-  test("archives missing workspace directories on the periodic pass", async () => {
+  test("preserves independent workspaces when their directories disappear on the periodic pass", async () => {
     const observed = new ObservedPlacements([
       { id: "project-one", root: "repo", workspaces: [{ id: "workspace-one", cwd: "repo" }] },
     ]);
@@ -480,8 +490,9 @@ describe("observed workspace placement", () => {
 
     await observed.advanceBy(RESCAN_INTERVAL_MS);
 
-    expect((await observed.placement("workspace-one"))?.archivedAt).toEqual(expect.any(String));
-    expect(observed.workspaceBatches).toEqual([["workspace-one"]]);
+    expect((await observed.placement("workspace-one"))?.archivedAt).toBeNull();
+    expect((await observed.placement("workspace-one"))?.members).toHaveLength(1);
+    expect(observed.workspaceBatches).toEqual([]);
     observed.dispose();
   });
 
@@ -490,20 +501,30 @@ describe("observed workspace placement", () => {
       { id: "project-one", root: "repo", workspaces: [{ id: "workspace-one", cwd: "repo" }] },
     ]);
     await observed.start();
+    observed.change("repo", ".git");
+    await observed.advanceBy(DEBOUNCE_MS);
+    const initialBatchCount = observed.workspaceBatches.length;
+
     const metadataRead = observed.holdNextReconciliation();
     observed.change("repo", ".git");
     const metadataPass = observed.advanceBy(DEBOUNCE_MS);
     await metadataRead.started;
-    await observed.deleteWorkspaceDirectory("workspace-one");
-    const workspaceBatch = observed.waitForWorkspaceBatch();
-
+    const queuedRead = observed.holdNextRegistryRead();
     await observed.advanceBy(RESCAN_INTERVAL_MS);
     metadataRead.release();
     await metadataPass;
+    await queuedRead.started;
+
+    observed.makeProjectGit("project-one", "main");
+    const workspaceBatch = observed.waitForWorkspaceBatch();
+    queuedRead.release();
     await workspaceBatch;
 
-    expect((await observed.placement("workspace-one"))?.archivedAt).toEqual(expect.any(String));
-    expect(observed.workspaceBatches).toEqual([["workspace-one"]]);
+    expect(await observed.placement("workspace-one")).toMatchObject({
+      archivedAt: null,
+      members: [expect.objectContaining({ kind: "local_checkout", branch: "main" })],
+    });
+    expect(observed.workspaceBatches.slice(initialBatchCount)).toEqual([["workspace-one"]]);
     observed.dispose();
   });
 
@@ -517,13 +538,12 @@ describe("observed workspace placement", () => {
 
     observed.change("repo", ".git");
     await observed.advanceBy(DEBOUNCE_MS);
-    expect((await observed.placement("workspace-one"))?.kind).toBe("directory");
+    expect((await observed.placement("workspace-one"))?.members[0]?.kind).toBe("directory");
 
     observed.change("repo", ".git");
     await observed.advanceBy(DEBOUNCE_MS);
     expect(await observed.placement("workspace-one")).toMatchObject({
-      kind: "local_checkout",
-      branch: "main",
+      members: [expect.objectContaining({ kind: "local_checkout", branch: "main" })],
       displayName: "Durable workspace-one",
     });
     observed.dispose();

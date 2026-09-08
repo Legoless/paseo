@@ -1,17 +1,10 @@
-import { homedir } from "node:os";
 import { expect, test } from "vitest";
 
 import { DaemonClient } from "./test-utils/index.js";
 import { createTestPaseoDaemon } from "./test-utils/paseo-daemon.js";
 
-// COMPAT(workspaceProjectless): added in v0.8.0, remove after 2028-03-01.
-// A projectless workspace is the one shape where `members: []` is the truth
-// instead of "old daemon, derive the implicit member from the scalars", so the
-// descriptor has to carry membersAuthoritative to say so. The scalar mirror is
-// still filled — clients older than v0.8.0 render only those fields — using the
-// workspace's own id as a stand-in projectId. That stand-in must never reach the
-// project registry, and the workspace must survive a fetch round trip without
-// being archived or filtered out for owning no checkout.
+// Empty membership is authoritative over the legacy wire fields, so creating
+// or fetching a blank container must never invent a project or a directory.
 test("workspace.create with an empty source creates a workspace holding no projects", async () => {
   const daemon = await createTestPaseoDaemon();
   const client = new DaemonClient({
@@ -38,19 +31,15 @@ test("workspace.create with an empty source creates a workspace holding no proje
     expect(descriptor.members).toEqual([]);
     expect(descriptor.membersAuthoritative).toBe(true);
 
-    // The scalar mirror pre-v0.8.0 clients read. The stand-in projectId is the
-    // workspace's own id, which keeps each projectless workspace a separate row
-    // for such a client instead of collapsing them into one bogus project group.
-    expect(descriptor.projectId).toBe(descriptor.id);
-    expect(descriptor.projectDisplayName).toBe("Scratch pad");
-    expect(descriptor.projectRootPath).toBe(homedir());
-    expect(descriptor.workspaceDirectory).toBe(homedir());
+    expect(descriptor.projectId).toBe("");
+    expect(descriptor.projectDisplayName).toBe("");
+    expect(descriptor.projectRootPath).toBe("");
+    expect(descriptor.workspaceDirectory).toBe("");
     expect(descriptor.projectKind).toBe("non_git");
     expect(descriptor.workspaceKind).toBe("directory");
     expect(descriptor.name).toBe("Scratch pad");
 
-    // The stand-in projectId resolves to nothing: this daemon started with no
-    // projects and creating a projectless workspace must not add one.
+    // Creating a container does not create a project.
     const projects = await client.listProjects();
     expect(projects.projects).toEqual([]);
 

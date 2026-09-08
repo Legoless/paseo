@@ -148,6 +148,13 @@ function createHarness(input: {
       existsOnDisk: async () => true,
       list: async () => Array.from(workspaces.values()),
       get: async (id: string) => workspaces.get(id) ?? null,
+      update: async (id, updater) => {
+        const existing = workspaces.get(id);
+        if (!existing) return null;
+        const updated = updater(existing);
+        workspaces.set(id, updated);
+        return updated;
+      },
       upsert: async (record: PersistedWorkspaceRecord) => {
         workspaces.set(record.workspaceId, record);
       },
@@ -225,26 +232,46 @@ const PARENT_CHILD = path.join(PARENT, "child");
 function gitWorkspace(rootPath: string, archivedAt: string | null = null) {
   return createPersistedWorkspaceRecord({
     workspaceId: `ws-${path.basename(rootPath) || "root"}`,
-    projectId: rootPath,
-    cwd: rootPath,
-    kind: "local_checkout",
     displayName: "main",
     createdAt: T0,
     updatedAt: T0,
     archivedAt,
+    members: [
+      {
+        projectId: rootPath,
+        cwd: rootPath,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 }
 
 function dirWorkspace(cwd: string, archivedAt: string | null = null) {
   return createPersistedWorkspaceRecord({
     workspaceId: `ws-${path.basename(cwd) || "root"}`,
-    projectId: cwd,
-    cwd,
-    kind: "directory",
     displayName: path.basename(cwd),
     createdAt: T0,
     updatedAt: T0,
     archivedAt,
+    members: [
+      {
+        projectId: cwd,
+        cwd,
+        kind: "directory",
+        displayName: path.basename(cwd),
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 }
 
@@ -276,7 +303,11 @@ function workspaceByCwd(
   workspaces: Map<string, PersistedWorkspaceRecord>,
   cwd: string,
 ): PersistedWorkspaceRecord | null {
-  return Array.from(workspaces.values()).find((workspace) => workspace.cwd === cwd) ?? null;
+  return (
+    Array.from(workspaces.values()).find((workspace) =>
+      workspace.members.some((member) => member.cwd === cwd),
+    ) ?? null
+  );
 }
 
 function hasWorkspaceCwd(workspaces: Map<string, PersistedWorkspaceRecord>, cwd: string): boolean {
@@ -339,7 +370,9 @@ test("S4: open subdir of active git workspace creates an independent exact-root 
   await openProject(h.session, FOO_SUB);
   const resp = getOpenResponse(h.emitted, "req-1");
   expect(resp?.workspace?.workspaceDirectory).toBe(FOO_SUB);
-  expect(resp?.workspace?.projectId).not.toBe(workspaceByCwd(h.workspaces, FOO)?.projectId);
+  expect(resp?.workspace?.projectId).not.toBe(
+    workspaceByCwd(h.workspaces, FOO)?.members[0]?.projectId,
+  );
   expect(h.workspaces.size).toBe(2);
 });
 
@@ -373,10 +406,11 @@ test("S6: re-opening an archived git workspace by exact path creates a fresh pro
   });
   await openProject(h.session, TOOLBOX);
   const fresh = Array.from(h.workspaces.values()).find(
-    (workspace) => workspace.cwd === TOOLBOX && !workspace.archivedAt,
+    (workspace) =>
+      workspace.members.some((member) => member.cwd === TOOLBOX) && !workspace.archivedAt,
   );
   expect(fresh?.workspaceId).not.toBe("ws-toolbox");
-  expect(fresh?.projectId).toMatch(/^prj_[0-9a-f]{16}$/);
+  expect(fresh?.members[0]?.projectId).toMatch(/^prj_[0-9a-f]{16}$/);
   expect(h.projects.get(TOOLBOX)?.archivedAt).toBe(archivedAt);
 });
 

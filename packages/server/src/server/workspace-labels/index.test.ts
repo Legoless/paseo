@@ -66,12 +66,22 @@ describe("workspace labels", () => {
     await registry.upsert(
       createPersistedWorkspaceRecord({
         workspaceId: "wks_one",
-        projectId: "prj_one",
-        cwd: "/repo",
-        kind: "local_checkout",
         displayName: "main",
         createdAt: "2026-08-14T00:00:00.000Z",
         updatedAt: "2026-08-14T00:00:00.000Z",
+        members: [
+          {
+            projectId: "prj_one",
+            cwd: "/repo",
+            kind: "local_checkout",
+            displayName: "main",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
     labels = createWorkspaceLabelService({ paseoHome, workspaceRegistry: registry });
@@ -460,12 +470,22 @@ describe("workspace labels", () => {
     await failingRegistry.upsert(
       createPersistedWorkspaceRecord({
         workspaceId: "wks_failing",
-        projectId: "prj_one",
-        cwd: "/repo",
-        kind: "local_checkout",
         displayName: "main",
         createdAt: "2026-08-14T00:00:00.000Z",
         updatedAt: "2026-08-14T00:00:00.000Z",
+        members: [
+          {
+            projectId: "prj_one",
+            cwd: "/repo",
+            kind: "local_checkout",
+            displayName: "main",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
     const failingLabels = createWorkspaceLabelService({
@@ -578,12 +598,22 @@ describe("workspace labels", () => {
     await interruptedRegistry.upsert(
       createPersistedWorkspaceRecord({
         workspaceId: "wks_interrupted",
-        projectId: "prj_one",
-        cwd: "/repo",
-        kind: "local_checkout",
         displayName: "main",
         createdAt: "2026-08-14T00:00:00.000Z",
         updatedAt: "2026-08-14T00:00:00.000Z",
+        members: [
+          {
+            projectId: "prj_one",
+            cwd: "/repo",
+            kind: "local_checkout",
+            displayName: "main",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
     const interrupted = createWorkspaceLabelService({
@@ -642,12 +672,22 @@ describe("workspace labels", () => {
     await recoveringRegistry.upsert(
       createPersistedWorkspaceRecord({
         workspaceId: "wks_recovering",
-        projectId: "prj_one",
-        cwd: "/repo",
-        kind: "local_checkout",
         displayName: "main",
         createdAt: "2026-08-14T00:00:00.000Z",
         updatedAt: "2026-08-14T00:00:00.000Z",
+        members: [
+          {
+            projectId: "prj_one",
+            cwd: "/repo",
+            kind: "local_checkout",
+            displayName: "main",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
     const recovering = createWorkspaceLabelService({
@@ -897,12 +937,22 @@ describe("workspace labels", () => {
     await lostAckRegistry.upsert(
       createPersistedWorkspaceRecord({
         workspaceId: "wks_lost_ack",
-        projectId: "prj_one",
-        cwd: "/repo",
-        kind: "local_checkout",
         displayName: "main",
         createdAt: "2026-08-14T00:00:00.000Z",
         updatedAt: "2026-08-14T00:00:00.000Z",
+        members: [
+          {
+            projectId: "prj_one",
+            cwd: "/repo",
+            kind: "local_checkout",
+            displayName: "main",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
     const workspaceLabels = createWorkspaceLabelService({

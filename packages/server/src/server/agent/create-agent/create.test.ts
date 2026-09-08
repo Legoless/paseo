@@ -49,7 +49,8 @@ function fakeWorktreeCreator(args: { repoRoot: string; createdWorkspaceId: strin
     ({
       worktree: { worktreePath },
       intent: {},
-      workspace: { workspaceId: args.createdWorkspaceId, cwd: workspaceCwd },
+      workspace: { workspaceId: args.createdWorkspaceId },
+      member: { cwd: workspaceCwd },
       repoRoot: args.repoRoot,
       created: true,
       setupContinuation: { kind: "agent" as const, startAfterAgentCreate: () => {} },
