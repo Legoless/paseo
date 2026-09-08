@@ -1,12 +1,4 @@
-import {
-  memo,
-  useCallback,
-  useMemo,
-  useState,
-  type MutableRefObject,
-  type ReactNode,
-  type Ref,
-} from "react";
+import { memo, useCallback, useMemo, useState, type MutableRefObject, type Ref } from "react";
 import { useTranslation } from "react-i18next";
 import {
   View,
@@ -121,7 +113,6 @@ interface StatusWorkspaceListProps {
   supportsPinningByServerId: ReadonlyMap<string, boolean>;
   onToggleWorkspacePin: ToggleSidebarWorkspacePin;
   onPinnedWorkspaceReorder: (workspaces: SidebarWorkspaceEntry[]) => void;
-  listHeaderComponent?: ReactNode;
   /** Swaps the group list for the label filter's empty state. Never the header above it. */
   sidebarFilterEmpty?: boolean;
   parentGestureRef?: MutableRefObject<GestureType | undefined>;
@@ -139,7 +130,6 @@ export function SidebarStatusWorkspaceList({
   supportsPinningByServerId,
   onToggleWorkspacePin,
   onPinnedWorkspaceReorder,
-  listHeaderComponent,
   sidebarFilterEmpty = false,
   parentGestureRef,
   dragGestureHostPresented,
@@ -226,7 +216,6 @@ export function SidebarStatusWorkspaceList({
           )}
         </View>
       ) : null}
-      {listHeaderComponent}
       {sidebarFilterEmpty ? (
         <SidebarFilterEmptyState />
       ) : (
