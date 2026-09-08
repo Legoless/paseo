@@ -69,6 +69,7 @@ import { definePanel, type PanelDescriptor } from "@/panels/panel-registry";
 import { RenderProfile } from "@/utils/render-profiler";
 import { useHasPluginComposerPills } from "@/plugins";
 import { buildDraftPanelDescriptor } from "@/panels/draft-panel-descriptor";
+import { resolveWorkspaceAgentTabLabel } from "@/panels/agent-panel-descriptor";
 import {
   type HostRuntimeConnectionStatus,
   getHostRuntimeConnectionStatusSince,
@@ -279,20 +280,6 @@ function formatProviderLabel(provider: Agent["provider"]): string {
     .filter((part) => part.length > 0)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-function resolveWorkspaceAgentTabLabel(title: string | null | undefined): string | null {
-  if (typeof title !== "string") {
-    return null;
-  }
-  const normalized = title.trim();
-  if (!normalized) {
-    return null;
-  }
-  if (normalized.toLowerCase() === "new agent") {
-    return null;
-  }
-  return normalized;
 }
 
 function shouldStoreFetchedAgentInActiveDirectory(agent: Agent): boolean {
