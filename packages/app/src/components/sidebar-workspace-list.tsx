@@ -175,7 +175,6 @@ interface SidebarWorkspaceListProps {
   sectionsByWorkspaceKey: ReadonlyMap<string, SidebarWorkspaceSection>;
   hasProjectsBeforeFilter: boolean;
   /** Whether a project filter is actually being applied — the resolved list, not the stored one. */
-  hasActiveProjectFilter: boolean;
   workspaceEntriesByKey: ReadonlyMap<string, SidebarWorkspaceEntry>;
   collapsedWorkspaceKeys: ReadonlySet<string>;
   onToggleWorkspaceCollapsed: (workspaceKey: string) => void;
@@ -186,9 +185,6 @@ interface SidebarWorkspaceListProps {
   onWorkspacePress?: () => void;
   onAddProject?: () => void;
   listFooterComponent?: ReactElement | null;
-  // Rendered inside the scroll area, below the Pinned section and above the workspace
-  // list. Holds the "Workspaces" section header so pinned items sit above it.
-  listHeaderComponent?: ReactElement | null;
   /** Gesture ref for coordinating with parent gestures (e.g., sidebar close) */
   parentGestureRef?: MutableRefObject<GestureType | undefined>;
   dragGestureHostPresented?: boolean;
@@ -1512,7 +1508,6 @@ export function SidebarWorkspaceList({
   topLevelWorkspaces,
   sectionsByWorkspaceKey,
   hasProjectsBeforeFilter,
-  hasActiveProjectFilter,
   workspaceEntriesByKey,
   collapsedWorkspaceKeys,
   onToggleWorkspaceCollapsed,
@@ -1523,7 +1518,6 @@ export function SidebarWorkspaceList({
   onWorkspacePress,
   onAddProject,
   listFooterComponent,
-  listHeaderComponent,
   parentGestureRef,
   dragGestureHostPresented,
 }: SidebarWorkspaceListProps) {
@@ -1608,7 +1602,6 @@ export function SidebarWorkspaceList({
         supportsPinningByServerId={supportsPinningByServerId}
         onToggleWorkspacePin={onToggleWorkspacePin}
         onPinnedWorkspaceReorder={handlePinnedWorkspaceReorder}
-        listHeaderComponent={listHeaderComponent}
         sidebarFilterEmpty={sidebarFilterEmpty}
         parentGestureRef={parentGestureRef}
         dragGestureHostPresented={dragGestureHostPresented}
@@ -1627,11 +1620,9 @@ export function SidebarWorkspaceList({
         onWorkspacePress={onWorkspacePress}
         onAddProject={onAddProject}
         listFooterComponent={listFooterComponent}
-        listHeaderComponent={listHeaderComponent}
         sidebarFilterEmpty={sidebarFilterEmpty}
         hasVisibleRows={hasVisibleRows}
         hasProjectsBeforeFilter={hasProjectsBeforeFilter}
-        hasActiveProjectFilter={hasActiveProjectFilter}
         parentGestureRef={parentGestureRef}
         dragGestureHostPresented={dragGestureHostPresented}
         pathname={pathname}
@@ -1662,7 +1653,6 @@ function SidebarGroupedModeList({
   supportsPinningByServerId,
   onToggleWorkspacePin,
   onPinnedWorkspaceReorder,
-  listHeaderComponent,
   sidebarFilterEmpty,
   parentGestureRef,
   dragGestureHostPresented,
@@ -1677,7 +1667,6 @@ function SidebarGroupedModeList({
   supportsPinningByServerId: ReadonlyMap<string, boolean>;
   onToggleWorkspacePin: ToggleSidebarWorkspacePin;
   onPinnedWorkspaceReorder: (workspaces: SidebarWorkspacePlacement[]) => void;
-  listHeaderComponent?: ReactElement | null;
   sidebarFilterEmpty: boolean;
   parentGestureRef?: MutableRefObject<GestureType | undefined>;
   dragGestureHostPresented?: boolean;
@@ -1704,7 +1693,6 @@ function SidebarGroupedModeList({
       supportsPinningByServerId={supportsPinningByServerId}
       onToggleWorkspacePin={onToggleWorkspacePin}
       onPinnedWorkspaceReorder={onPinnedWorkspaceReorder}
-      listHeaderComponent={listHeaderComponent}
       sidebarFilterEmpty={sidebarFilterEmpty}
       parentGestureRef={parentGestureRef}
       dragGestureHostPresented={dragGestureHostPresented}
@@ -1725,11 +1713,9 @@ function WorkspaceSectionList({
   onWorkspacePress,
   onAddProject,
   listFooterComponent,
-  listHeaderComponent,
   sidebarFilterEmpty,
   hasVisibleRows,
   hasProjectsBeforeFilter,
-  hasActiveProjectFilter,
   parentGestureRef,
   dragGestureHostPresented,
   pathname,
@@ -1751,11 +1737,9 @@ function WorkspaceSectionList({
   onWorkspacePress?: () => void;
   onAddProject?: () => void;
   listFooterComponent?: ReactElement | null;
-  listHeaderComponent?: ReactElement | null;
   sidebarFilterEmpty: boolean;
   hasVisibleRows: boolean;
   hasProjectsBeforeFilter: boolean;
-  hasActiveProjectFilter: boolean;
   parentGestureRef?: MutableRefObject<GestureType | undefined>;
   dragGestureHostPresented?: boolean;
   pathname: string;
@@ -1765,7 +1749,6 @@ function WorkspaceSectionList({
   onToggleWorkspacePin: ToggleSidebarWorkspacePin;
   onPinnedWorkspaceReorder: (workspaces: SidebarWorkspacePlacement[]) => void;
 }) {
-  const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const showShortcutBadges = useShowShortcutBadges();
   const pinnedCollapsed = useSidebarCollapsedSectionsStore((state) => state.collapsedPinned);
   const togglePinnedCollapsed = useSidebarCollapsedSectionsStore(
@@ -2113,12 +2096,6 @@ function WorkspaceSectionList({
           )}
         </View>
       ) : null}
-      {/* The header carries the display menu, which is the only way back out of a filter, so it
-        stays for as long as a filter is what emptied the list. It is absent only when the
-        sidebar is genuinely empty, where a section heading would sit over nothing. */}
-      {hasVisibleRows || hasActiveHostFilter || hasActiveProjectFilter || sidebarFilterEmpty
-        ? listHeaderComponent
-        : null}
       {sidebarFilterEmpty ? <SidebarFilterEmptyState /> : workspaceBody}
       {listFooterComponent}
     </>

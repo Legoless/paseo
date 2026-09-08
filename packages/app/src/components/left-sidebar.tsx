@@ -4,6 +4,7 @@ import {
   FolderPlus,
   History,
   Home,
+  Layers,
   Plus,
   Search,
   Server,
@@ -87,7 +88,6 @@ interface SidebarSharedProps {
   topLevelWorkspaces: SidebarWorkspacePlacement[];
   sectionsByWorkspaceKey: ReadonlyMap<string, SidebarWorkspaceSection>;
   hasProjectsBeforeFilter: boolean;
-  hasActiveProjectFilter: boolean;
   workspaceEntriesByKey: ReadonlyMap<string, SidebarWorkspaceEntry>;
   isInitialLoad: boolean;
   isRevalidating: boolean;
@@ -106,7 +106,6 @@ interface SidebarSharedProps {
 }
 
 interface SidebarLabels {
-  newWorkspace: string;
   addProject: string;
   hosts: string;
   home: string;
@@ -141,7 +140,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
 
   const {
     hasProjectsBeforeFilter,
-    resolvedProjectFilters,
     workspaceEntriesByKey,
     isInitialLoad,
     isRevalidating,
@@ -248,7 +246,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
 
   const labels = useMemo(
     (): SidebarLabels => ({
-      newWorkspace: t("sidebar.actions.newWorkspace"),
       addProject: t("sidebar.actions.addProject"),
       hosts: t("sidebar.actions.hosts"),
       home: t("sidebar.actions.home"),
@@ -270,7 +267,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     topLevelWorkspaces,
     sectionsByWorkspaceKey: workspaceGroupSections.sectionsByWorkspaceKey,
     hasProjectsBeforeFilter,
-    hasActiveProjectFilter: resolvedProjectFilters.length > 0,
     workspaceEntriesByKey,
     isInitialLoad,
     isRevalidating,
@@ -572,7 +568,6 @@ function MobileSidebar({
   topLevelWorkspaces,
   sectionsByWorkspaceKey,
   hasProjectsBeforeFilter,
-  hasActiveProjectFilter,
   workspaceEntriesByKey,
   isInitialLoad,
   isRevalidating,
@@ -633,7 +628,6 @@ function MobileSidebar({
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
         <View style={styles.sidebarHeaderGroup}>
-          <SidebarNewWorkspaceHeaderRow label={labels.newWorkspace} onBeforeCreate={closeSidebar} />
           <SidebarHeaderRow
             icon={History}
             label={labels.sessions}
@@ -651,6 +645,7 @@ function MobileSidebar({
             variant="compact"
           />
           <PluginSidebarItems onBeforeNavigate={closeSidebar} />
+          {workspacesSectionHeaderElement}
         </View>
         <WindowChromeSafeArea placement="inline" style={styles.mobileCloseButtonRow}>
           <Pressable
@@ -687,7 +682,6 @@ function MobileSidebar({
             topLevelWorkspaces={topLevelWorkspaces}
             sectionsByWorkspaceKey={sectionsByWorkspaceKey}
             hasProjectsBeforeFilter={hasProjectsBeforeFilter}
-            hasActiveProjectFilter={hasActiveProjectFilter}
             workspaceEntriesByKey={workspaceEntriesByKey}
             isRefreshing={isManualRefresh && isRevalidating}
             onRefresh={handleRefresh}
@@ -695,7 +689,6 @@ function MobileSidebar({
             onAddProject={handleOpenProject}
             parentGestureRef={closeGestureRef}
             dragGestureHostPresented={dragGestureHostPresented}
-            listHeaderComponent={workspacesSectionHeaderElement}
           />
         )}
 
@@ -722,7 +715,6 @@ function DesktopSidebar({
   topLevelWorkspaces,
   sectionsByWorkspaceKey,
   hasProjectsBeforeFilter,
-  hasActiveProjectFilter,
   workspaceEntriesByKey,
   isInitialLoad,
   isRevalidating,
@@ -843,7 +835,6 @@ function DesktopSidebar({
             <TitlebarDragRegion />
           )}
           <View style={sidebarHeaderGroupStyle}>
-            <SidebarNewWorkspaceHeaderRow label={labels.newWorkspace} />
             <SidebarHeaderRow
               icon={History}
               label={labels.sessions}
@@ -861,6 +852,7 @@ function DesktopSidebar({
               variant="compact"
             />
             <PluginSidebarItems />
+            {workspacesSectionHeaderElement}
           </View>
         </View>
 
@@ -879,12 +871,10 @@ function DesktopSidebar({
             topLevelWorkspaces={topLevelWorkspaces}
             sectionsByWorkspaceKey={sectionsByWorkspaceKey}
             hasProjectsBeforeFilter={hasProjectsBeforeFilter}
-            hasActiveProjectFilter={hasActiveProjectFilter}
             workspaceEntriesByKey={workspaceEntriesByKey}
             isRefreshing={isManualRefresh && isRevalidating}
             onRefresh={handleRefresh}
             onAddProject={handleOpenProject}
-            listHeaderComponent={workspacesSectionHeaderElement}
           />
         )}
 
@@ -910,34 +900,6 @@ function DesktopSidebar({
     </Animated.View>
   );
 }
-
-const SidebarNewWorkspaceHeaderRow = memo(function SidebarNewWorkspaceHeaderRow({
-  label,
-  onBeforeCreate,
-}: {
-  label: string;
-  onBeforeCreate?: () => void;
-}) {
-  const createProjectlessWorkspace = useCreateProjectlessWorkspace();
-  const handlePress = useCallback(() => {
-    onBeforeCreate?.();
-    void (async () => {
-      // Several hosts and no active workspace is a real choice; the New
-      // Workspace screen is the surface that can ask which one.
-      if (!(await createProjectlessWorkspace())) router.push(buildNewWorkspaceRoute());
-    })();
-  }, [createProjectlessWorkspace, onBeforeCreate]);
-
-  return (
-    <SidebarHeaderRow
-      icon={Plus}
-      label={label}
-      onPress={handlePress}
-      testID="sidebar-global-new-workspace"
-      variant="compact"
-    />
-  );
-});
 
 function WorkspacesSectionHeader() {
   const { theme } = useUnistyles();
@@ -967,73 +929,76 @@ function WorkspacesSectionHeader() {
 
   return (
     <View style={styles.workspacesSectionHeader}>
-      <Text style={styles.workspacesSectionTitle}>Workspaces</Text>
-      <View style={styles.workspacesSectionActions}>
-        <Tooltip delayDuration={300}>
-          <TooltipTrigger asChild>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t("sidebar.actions.newWorkspace")}
-              testID="sidebar-new-workspace"
-              style={headerIconButtonStyle}
-              onPress={handleNewWorkspacePress}
-            >
-              {({ hovered, pressed }) => (
-                <Plus
-                  size={14}
-                  color={
-                    hovered || pressed ? theme.colors.foreground : theme.colors.foregroundMuted
-                  }
-                />
-              )}
-            </Pressable>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" align="center" offset={8}>
-            {/* No shortcut chord here: Cmd+N opens the New Workspace screen, this
+      <View style={styles.workspacesSectionHeaderRow}>
+        <Layers size={14} color={theme.colors.foregroundMuted} />
+        <Text style={styles.workspacesSectionTitle}>Workspaces</Text>
+        <View style={styles.workspacesSectionActions}>
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("sidebar.actions.newWorkspace")}
+                testID="sidebar-new-workspace"
+                style={headerIconButtonStyle}
+                onPress={handleNewWorkspacePress}
+              >
+                {({ hovered, pressed }) => (
+                  <Plus
+                    size={14}
+                    color={
+                      hovered || pressed ? theme.colors.foreground : theme.colors.foregroundMuted
+                    }
+                  />
+                )}
+              </Pressable>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" align="center" offset={8}>
+              {/* No shortcut chord here: Cmd+N opens the New Workspace screen, this
                 creates one outright. Same label, different actions. */}
-            <IconTooltipContent label={t("sidebar.actions.newWorkspace")} />
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip delayDuration={300}>
-          <TooltipTrigger asChild>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Open command center"
-              testID="sidebar-command-center-search"
-              style={headerIconButtonStyle}
-              onPress={handleSearchPress}
-            >
-              {({ hovered, pressed }) => (
-                <Search
-                  size={14}
-                  color={
-                    hovered || pressed ? theme.colors.foreground : theme.colors.foregroundMuted
-                  }
-                />
-              )}
-            </Pressable>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" align="center" offset={8}>
-            <IconTooltipContent label="Search" shortcutKeys={commandCenterKeys} />
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip delayDuration={300}>
-          <TooltipTrigger asChild>
-            <View>
-              <SidebarDisplayPreferencesMenu />
-            </View>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" align="center" offset={8}>
-            <IconTooltipContent label="Display preferences" />
-          </TooltipContent>
-        </Tooltip>
+              <IconTooltipContent label={t("sidebar.actions.newWorkspace")} />
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open command center"
+                testID="sidebar-command-center-search"
+                style={headerIconButtonStyle}
+                onPress={handleSearchPress}
+              >
+                {({ hovered, pressed }) => (
+                  <Search
+                    size={14}
+                    color={
+                      hovered || pressed ? theme.colors.foreground : theme.colors.foregroundMuted
+                    }
+                  />
+                )}
+              </Pressable>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" align="center" offset={8}>
+              <IconTooltipContent label="Search" shortcutKeys={commandCenterKeys} />
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <View>
+                <SidebarDisplayPreferencesMenu />
+              </View>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" align="center" offset={8}>
+              <IconTooltipContent label="Display preferences" />
+            </TooltipContent>
+          </Tooltip>
+        </View>
       </View>
     </View>
   );
 }
 
-// Stable element so the sidebar list's listHeaderComponent prop keeps identity across
-// renders (WorkspacesSectionHeader takes no props).
+// Stable element so both sidebar surfaces share one WorkspacesSectionHeader instance
+// identity (it takes no props).
 const workspacesSectionHeaderElement = <WorkspacesSectionHeader />;
 
 // Static styles for Animated.Views — must NOT use Unistyles dynamic theme to
@@ -1060,24 +1025,29 @@ const styles = StyleSheet.create((theme) => ({
     paddingTop: 0,
   },
   workspacesSectionHeader: {
+    paddingHorizontal: theme.spacing[2],
+    justifyContent: "center",
+    userSelect: "none",
+  },
+  // Mirrors the compact SidebarHeaderRow box (minHeight 32) so the row reads as one of
+  // the header rows above it while carrying its own trailing actions instead of a press.
+  // Vertical padding is 2, not the SidebarHeaderRow's spacing[1.5], because the 28pt
+  // action buttons are the tallest content and must still fit the 32pt box.
+  workspacesSectionHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     gap: theme.spacing[2],
-    // Rendered inside the scroll's listContent (paddingHorizontal spacing[2]). The title
-    // lands at spacing[2] left to align with project icons. Settings2's painted path stops
-    // inside its 14px SVG, so 4px aligns the ink rather than the SVG box to the row rail.
-    paddingLeft: theme.spacing[2],
-    paddingRight: 4,
-    paddingTop: theme.spacing[1],
-    paddingBottom: theme.spacing[1],
+    minHeight: 32,
+    paddingVertical: 2,
+    paddingHorizontal: theme.spacing[2],
   },
   workspacesSectionTitle: {
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
   },
   workspacesSectionActions: {
+    marginLeft: "auto",
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[1],
