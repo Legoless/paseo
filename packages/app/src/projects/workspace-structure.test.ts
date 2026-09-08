@@ -37,6 +37,7 @@ function workspace(id: string, projectId: string, root: string): WorkspaceDescri
     members: [
       {
         projectId,
+        projectKind: "git",
         projectDisplayName: "acme/app",
         projectCustomName: null,
         projectRootPath: root,
@@ -50,6 +51,28 @@ function workspace(id: string, projectId: string, root: string): WorkspaceDescri
 }
 
 describe("buildWorkspaceStructureProjects", () => {
+  test("uses all members and never creates a project from workspace compatibility fields", () => {
+    const blank = workspace("blank", "placeholder", "/daemon-home");
+    blank.members = [];
+    const shared = workspace("shared", "placeholder", "/daemon-home");
+    shared.members = [
+      ...workspace("a", "project-a", "/repo/a").members,
+      ...workspace("b", "project-b", "/repo/b").members,
+    ];
+    const projects = buildWorkspaceStructureProjects({
+      sessions: [{ serverId: "host", projects: [], workspaces: [blank, shared] }],
+    });
+    expect(
+      projects.map((entry) => ({
+        projectId: entry.hosts[0]!.projectId,
+        workspaceKeys: entry.workspaceKeys,
+      })),
+    ).toEqual([
+      { projectId: "project-a", workspaceKeys: ["host:shared"] },
+      { projectId: "project-b", workspaceKeys: ["host:shared"] },
+    ]);
+  });
+
   test("groups the same project key across hosts and keeps host-local ids", () => {
     const key = "remote:github.com/acme/app";
     const result = buildWorkspaceStructureProjects({
@@ -188,7 +211,7 @@ describe("buildWorkspaceStructureProjects", () => {
 
   test("creates a synthetic project group for an orphan workspace whose projectId matches no project", () => {
     const orphanWs = workspace("ws-orphan", "wks_orphan", "/Users/legoless");
-    orphanWs.projectDisplayName = "Web";
+    orphanWs.members[0]!.projectDisplayName = "Web";
     const result = buildWorkspaceStructureProjects({
       sessions: [
         {

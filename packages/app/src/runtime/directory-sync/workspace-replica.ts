@@ -40,11 +40,15 @@ function patchWorkspaceScripts(
   });
   if (!workspaceKey) return workspaces;
   const existing = workspaces.get(workspaceKey);
-  if (!existing || equal(existing.scripts, update.scripts)) return workspaces;
+  if (!existing) return workspaces;
+  const scripts = update.cwd
+    ? [...existing.scripts.filter((script) => script.cwd !== update.cwd), ...update.scripts]
+    : update.scripts;
+  if (equal(existing.scripts, scripts)) return workspaces;
   const next = new Map(workspaces);
   next.set(workspaceKey, {
     ...existing,
-    scripts: update.scripts.map((script) => ({ ...script })),
+    scripts: scripts.map((script) => Object.assign({}, script)),
   });
   return next;
 }
@@ -56,7 +60,10 @@ function applyProjectDelta(
   if (delta.kind === "remove") {
     snapshot.projects.delete(delta.projectId);
     for (const [workspaceId, workspace] of snapshot.workspaces) {
-      if (workspace.projectId === delta.projectId) snapshot.workspaces.delete(workspaceId);
+      const members = workspace.members.filter((member) => member.projectId !== delta.projectId);
+      if (members.length !== workspace.members.length) {
+        snapshot.workspaces.set(workspaceId, { ...workspace, members });
+      }
     }
     return;
   }
@@ -64,14 +71,12 @@ function applyProjectDelta(
   const project = normalizeProjectDescriptor(delta.project);
   snapshot.projects.set(project.projectId, project);
   for (const [workspaceId, workspace] of snapshot.workspaces) {
-    if (workspace.projectId !== project.projectId) continue;
+    if (!workspace.members.some((member) => member.projectId === project.projectId)) continue;
     snapshot.workspaces.set(workspaceId, {
       ...workspace,
-      projectDisplayName: project.projectDisplayName,
-      projectCustomName: project.projectCustomName,
-      projectCustomIconRevision: project.projectCustomIconRevision,
-      projectRootPath: project.projectRootPath,
-      projectKind: project.projectKind,
+      members: workspace.members.map((member) =>
+        member.projectId === project.projectId ? Object.assign({}, member, project) : member,
+      ),
     });
   }
 }
@@ -94,12 +99,12 @@ export class WorkspaceDirectoryReplica {
 
   commitCachedWorkspace(
     workspace: WorkspaceDescriptor,
-    project: ProjectDescriptor | undefined,
+    projects: readonly ProjectDescriptor[],
   ): void {
     if (shouldSuppressWorkspaceForLocalArchive({ serverId: this.serverId, workspace })) return;
     const snapshot = this.read();
     snapshot.workspaces.set(workspace.id, workspace);
-    if (project) snapshot.projects.set(project.projectId, project);
+    for (const project of projects) snapshot.projects.set(project.projectId, project);
     this.commit(snapshot, []);
   }
 

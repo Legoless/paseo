@@ -129,16 +129,24 @@ it("commits the authoritative snapshot before buffered project updates", () => {
 
   const session = useSessionStore.getState().sessions[serverId];
   expect(session?.workspaces.get(attachedMain.id)).toMatchObject({
-    projectDisplayName: "Renamed attached project",
-    projectCustomName: "Personal name",
-    projectRootPath: "/moved/attached",
-    projectKind: "directory",
+    members: [
+      expect.objectContaining({
+        projectDisplayName: "Renamed attached project",
+        projectCustomName: "Personal name",
+        projectRootPath: "/moved/attached",
+        projectKind: "directory",
+      }),
+    ],
   });
   expect(session?.workspaces.get(attachedFeature.id)).toMatchObject({
-    projectDisplayName: "Renamed attached project",
-    projectRootPath: "/moved/attached",
+    members: [
+      expect.objectContaining({
+        projectDisplayName: "Renamed attached project",
+        projectRootPath: "/moved/attached",
+      }),
+    ],
   });
-  expect(session?.workspaces.has(removed.id)).toBe(false);
+  expect(session?.workspaces.get(removed.id)?.members).toEqual([]);
   expect(session?.workspaces.get(unrelated.id)).toBe(unrelated);
   expect(Array.from(session?.projects.keys() ?? [])).toEqual([
     "attached",
@@ -222,11 +230,50 @@ it("does not restore a targeted cached workspace while its archive is pending", 
   markWorkspaceArchivePending({ serverId, workspaceId });
 
   try {
-    replica.commitCachedWorkspace(normalizeWorkspaceDescriptor(workspace(workspaceId)), undefined);
+    replica.commitCachedWorkspace(normalizeWorkspaceDescriptor(workspace(workspaceId)), []);
 
     expect(useSessionStore.getState().sessions[serverId]?.workspaces.has(workspaceId)).toBe(false);
   } finally {
     clearWorkspaceArchivePending({ serverId, workspaceId });
     store.clearSession(serverId);
   }
+});
+
+it("updates one member's script without replacing another member's same-name script", () => {
+  const serverId = "member-script-status";
+  const store = useSessionStore.getState();
+  store.initializeSession(serverId, null as unknown as DaemonClient);
+  const replica = new WorkspaceDirectoryReplica(serverId);
+  const script = {
+    scriptName: "dev",
+    type: "service" as const,
+    hostname: "dev",
+    port: null,
+    proxyUrl: null,
+    lifecycle: "stopped" as const,
+    health: null,
+    exitCode: null,
+    terminalId: null,
+  };
+  const entry = normalizeWorkspaceDescriptor({
+    ...workspace("shared"),
+    scripts: [
+      { ...script, cwd: "/repo/a" },
+      { ...script, cwd: "/repo/b" },
+    ],
+  });
+  replica.commitCachedWorkspace(entry, []);
+  replica.applyDelta({
+    kind: "script_status",
+    update: {
+      workspaceId: entry.id,
+      cwd: "/repo/b",
+      scripts: [{ ...script, cwd: "/repo/b", lifecycle: "running", terminalId: "terminal-b" }],
+    },
+  });
+  expect(useSessionStore.getState().sessions[serverId]?.workspaces.get(entry.id)?.scripts).toEqual([
+    { ...script, cwd: "/repo/a" },
+    { ...script, cwd: "/repo/b", lifecycle: "running", terminalId: "terminal-b" },
+  ]);
+  store.clearSession(serverId);
 });

@@ -10,7 +10,6 @@ import {
   reconcileWorkspacePlacement,
   isProjectlessWorkspace,
   workspaceMembers,
-  workspaceScalarsFromPrimaryMember,
 } from "./workspace-registry-model.js";
 import { createPersistedWorkspaceRecord } from "./workspace-registry.js";
 
@@ -93,23 +92,28 @@ describe("workspace placement", () => {
   test("updates live placement while preserving its durable name and base branch", () => {
     const workspace = createPersistedWorkspaceRecord({
       workspaceId: "workspace-one",
-      projectId: "project-one",
-      cwd: "/repo-feature",
-      kind: "worktree",
       displayName: "Keep this name",
-      branch: "old-branch",
-      worktreeRoot: "/old-root",
-      baseBranch: "release",
-      isPaseoOwnedWorktree: true,
-      mainRepoRoot: "/repo",
       createdAt: "2026-03-01T00:00:00.000Z",
       updatedAt: "2026-03-01T00:00:00.000Z",
+      members: [
+        {
+          projectId: "project-one",
+          cwd: "/repo-feature",
+          kind: "worktree",
+          displayName: "Keep this name",
+          branch: "old-branch",
+          worktreeRoot: "/old-root",
+          baseBranch: "release",
+          isPaseoOwnedWorktree: true,
+          mainRepoRoot: "/repo",
+        },
+      ],
     });
 
     const update = reconcileWorkspacePlacement({
-      workspace,
+      member: workspace.members[0],
       checkout: {
-        cwd: workspace.cwd,
+        cwd: workspace.members[0].cwd,
         isGit: true,
         currentBranch: "renamed-branch",
         remoteUrl: null,
@@ -117,7 +121,6 @@ describe("workspace placement", () => {
         isPaseoOwnedWorktree: false,
         mainRepoRoot: "/repo",
       },
-      updatedAt: "2026-03-02T00:00:00.000Z",
     });
 
     expect(update?.fields).toEqual({
@@ -125,7 +128,7 @@ describe("workspace placement", () => {
       worktreeRoot: "/repo-feature",
       isPaseoOwnedWorktree: false,
     });
-    expect(update?.workspace).toMatchObject({
+    expect(update?.member).toMatchObject({
       displayName: "Keep this name",
       baseBranch: "release",
       branch: "renamed-branch",
@@ -135,19 +138,25 @@ describe("workspace placement", () => {
   test("projects persisted placement to the wire checkout", () => {
     const workspace = createPersistedWorkspaceRecord({
       workspaceId: "workspace-one",
-      projectId: "project-one",
-      cwd: "/repo-feature/app",
-      kind: "worktree",
       displayName: "feature",
-      branch: "feature",
-      worktreeRoot: "/repo-feature",
-      isPaseoOwnedWorktree: true,
-      mainRepoRoot: "/repo",
       createdAt: "2026-03-01T00:00:00.000Z",
       updatedAt: "2026-03-01T00:00:00.000Z",
+      members: [
+        {
+          projectId: "project-one",
+          cwd: "/repo-feature/app",
+          kind: "worktree",
+          displayName: "feature",
+          branch: "feature",
+          worktreeRoot: "/repo-feature",
+          isPaseoOwnedWorktree: true,
+          mainRepoRoot: "/repo",
+          baseBranch: null,
+        },
+      ],
     });
 
-    expect(checkoutFromPersistedWorkspacePlacement({ workspace })).toEqual({
+    expect(checkoutFromPersistedWorkspacePlacement({ member: workspace.members[0] })).toEqual({
       cwd: "/repo-feature/app",
       isGit: true,
       currentBranch: "feature",
@@ -183,119 +192,31 @@ describe("workspace members", () => {
     mainRepoRoot: null,
   };
 
-  test("derives a single implicit member from the scalar fields of a legacy record", () => {
+  test("preserves each member independently of the container name", () => {
     const record = createPersistedWorkspaceRecord({
       workspaceId: "workspace-one",
-      projectId: primaryMember.projectId,
-      cwd: primaryMember.cwd,
-      kind: primaryMember.kind,
-      displayName: primaryMember.displayName,
-      branch: primaryMember.branch,
-      worktreeRoot: primaryMember.worktreeRoot,
-      createdAt: "2026-03-01T00:00:00.000Z",
-      updatedAt: "2026-03-01T00:00:00.000Z",
-    });
-
-    expect(record.members).toBeUndefined();
-    expect(workspaceMembers(record)).toEqual([primaryMember]);
-  });
-
-  test("returns the explicit members when the record carries them", () => {
-    const record = createPersistedWorkspaceRecord({
-      workspaceId: "workspace-one",
-      projectId: primaryMember.projectId,
-      cwd: primaryMember.cwd,
-      kind: primaryMember.kind,
-      displayName: primaryMember.displayName,
-      branch: primaryMember.branch,
-      worktreeRoot: primaryMember.worktreeRoot,
+      displayName: "Independent container",
       createdAt: "2026-03-01T00:00:00.000Z",
       updatedAt: "2026-03-01T00:00:00.000Z",
       members: [primaryMember, secondaryMember],
     });
-
     expect(workspaceMembers(record)).toEqual([primaryMember, secondaryMember]);
+    expect(isProjectlessWorkspace(record)).toBe(false);
+    expect(record).not.toHaveProperty("projectId");
+    expect(record).not.toHaveProperty("cwd");
   });
 
-  test("re-derives the primary member from the scalar fields on every write", () => {
-    // A write that only updates scalars (reconciliation, recovery) must keep
-    // the persisted primary member in sync with them.
+  test("an empty container needs no placement", () => {
     const record = createPersistedWorkspaceRecord({
-      workspaceId: "workspace-one",
-      projectId: primaryMember.projectId,
-      cwd: primaryMember.cwd,
-      kind: primaryMember.kind,
-      displayName: primaryMember.displayName,
-      branch: "renamed-branch",
-      worktreeRoot: primaryMember.worktreeRoot,
-      createdAt: "2026-03-01T00:00:00.000Z",
-      updatedAt: "2026-03-01T00:00:00.000Z",
-      members: [primaryMember, secondaryMember],
-    });
-
-    expect(record.members).toEqual([
-      { ...primaryMember, branch: "renamed-branch" },
-      secondaryMember,
-    ]);
-    expect(workspaceMembers(record)).toEqual([
-      { ...primaryMember, branch: "renamed-branch" },
-      secondaryMember,
-    ]);
-  });
-
-  test("builds the scalar-mirror fields from a primary member", () => {
-    expect(workspaceScalarsFromPrimaryMember(secondaryMember)).toEqual({
-      projectId: "project-two",
-      cwd: "/other",
-      kind: "directory",
-      displayName: "other",
-      branch: null,
-      worktreeRoot: null,
-      baseBranch: null,
-      isPaseoOwnedWorktree: false,
-      mainRepoRoot: null,
-    });
-  });
-});
-
-// COMPAT(workspaceProjectless): added in v0.8.0, remove after 2028-03-01.
-describe("projectless workspaces", () => {
-  function projectlessRecord() {
-    return createPersistedWorkspaceRecord({
       workspaceId: "workspace-empty",
-      // The scalar mirror points at the home directory with the workspace's own
-      // id standing in for a project, so pre-v0.8.0 clients can still parse the
-      // descriptor. `members` is the truth.
-      projectId: "workspace-empty",
-      cwd: "/Users/me",
-      kind: "directory",
-      displayName: "New workspace",
-      members: [],
+      displayName: "Empty",
       createdAt: "2026-03-01T00:00:00.000Z",
       updatedAt: "2026-03-01T00:00:00.000Z",
+      members: [],
     });
-  }
-
-  test("keeps an explicitly empty member list instead of deriving one from the scalars", () => {
-    const record = projectlessRecord();
-
-    expect(record.members).toEqual([]);
     expect(workspaceMembers(record)).toEqual([]);
     expect(isProjectlessWorkspace(record)).toBe(true);
-  });
-
-  test("a record that omits members is not projectless", () => {
-    const record = createPersistedWorkspaceRecord({
-      workspaceId: "workspace-legacy",
-      projectId: "project-one",
-      cwd: "/repo",
-      kind: "local_checkout",
-      displayName: "main",
-      createdAt: "2026-03-01T00:00:00.000Z",
-      updatedAt: "2026-03-01T00:00:00.000Z",
-    });
-
-    expect(isProjectlessWorkspace(record)).toBe(false);
-    expect(workspaceMembers(record)).toHaveLength(1);
+    expect(record).not.toHaveProperty("projectId");
+    expect(record).not.toHaveProperty("cwd");
   });
 });

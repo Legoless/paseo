@@ -122,6 +122,7 @@ interface CreatePaseoWorktreeWorkflowDependencies extends CreatePaseoWorktreeInB
   warmWorkspaceGitData: (workspace: PersistedWorkspaceRecord) => Promise<void>;
   autoNameWorkspaceBranchForFirstAgent: (input: {
     workspace: PersistedWorkspaceRecord;
+    member: CreatePaseoWorktreeResult["member"];
     firstAgentContext: FirstAgentContext;
   }) => void;
   startWorkspaceSetup?: (workspaceId: string, operation: WorkspaceSetupOperation) => void;
@@ -246,7 +247,7 @@ export async function buildAgentSessionConfig(
               ),
       },
     );
-    cwd = createdWorktree.workspace.cwd;
+    cwd = createdWorktree.member.cwd;
     setupContinuation = createdWorktree.setupContinuation;
     createdWorkspaceId = createdWorktree.workspace.workspaceId;
   } else if (normalized.createNewBranch) {
@@ -612,6 +613,7 @@ export async function createPaseoWorktreeWorkflow(
     if (input.firstAgentContext) {
       dependencies.autoNameWorkspaceBranchForFirstAgent({
         workspace,
+        member: createdWorktree.member,
         firstAgentContext: input.firstAgentContext,
       });
     }
@@ -633,7 +635,7 @@ export async function createPaseoWorktreeWorkflow(
             shouldBootstrap: createdWorktree.created,
             slug,
             worktreePath: createdWorktree.worktree.worktreePath,
-            workspaceCwd: workspace.cwd,
+            workspaceCwd: createdWorktree.member.cwd,
           },
           signal,
         );
@@ -655,7 +657,7 @@ export async function createPaseoWorktreeWorkflow(
             agentId,
             workspaceId: workspace.workspaceId,
             worktree: createdWorktree.worktree,
-            workspaceCwd: workspace.cwd,
+            workspaceCwd: createdWorktree.member.cwd,
             shouldBootstrap: createdWorktree.created,
             terminalManager: setupContinuation.terminalManager,
             appendTimelineItem: (item) => setupContinuation.appendTimelineItem({ agentId, item }),

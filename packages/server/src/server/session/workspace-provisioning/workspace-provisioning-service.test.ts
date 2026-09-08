@@ -121,7 +121,7 @@ test("fresh git repo creates a workspace at the canonical worktree root", async 
 
   const workspace = await provisioning.findOrCreateWorkspaceForDirectory(repo);
 
-  expect(workspace.cwd).toBe(repo);
+  expect(workspace.members[0].cwd).toBe(repo);
   expect(await workspaceRegistry.list()).toHaveLength(1);
   expect(await projectRegistry.list()).toHaveLength(1);
 });
@@ -131,7 +131,7 @@ test("fresh non-git directory creates a directory workspace at the exact path", 
 
   const workspace = await provisioning.findOrCreateWorkspaceForDirectory(dir);
 
-  expect(workspace.cwd).toBe(dir);
+  expect(workspace.members[0].cwd).toBe(dir);
 });
 
 test("re-opening an active workspace by exact path returns the same record without duplicating", async () => {
@@ -148,7 +148,10 @@ test("re-opening an active workspace by exact path returns the same record witho
 test("re-opening Windows-equivalent workspace cwd spellings reuses the active and archived record", async () => {
   const cwd = path.join(tmpDir, "workspace");
   const created = await provisioning.findOrCreateWorkspaceForDirectory(cwd);
-  await workspaceRegistry.upsert({ ...created, cwd: `${cwd}${path.sep}` });
+  await workspaceRegistry.upsert({
+    ...created,
+    members: created.members.map((member) => ({ ...member, cwd: `${cwd}${path.sep}` })),
+  });
 
   const active = await provisioning.findOrCreateWorkspaceForDirectory(cwd);
   expect(active.workspaceId).toBe(created.workspaceId);
@@ -171,15 +174,19 @@ test("re-opening refreshes mutable checkout metadata without renaming the worksp
 
   expect(refreshed).toMatchObject({
     workspaceId: first.workspaceId,
-    kind: "local_checkout",
-    branch: "feature/refresh",
     displayName: first.displayName,
     title: "Pinned work",
-    isPaseoOwnedWorktree: false,
-    mainRepoRoot: null,
+    members: [
+      {
+        kind: "local_checkout",
+        branch: "feature/refresh",
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   expect(await workspaceRegistry.get(first.workspaceId)).toEqual(refreshed);
-  expect((await projectRegistry.get(first.projectId))?.kind).toBe("git");
+  expect((await projectRegistry.get(first.members[0].projectId))?.kind).toBe("git");
 });
 
 test("persists manual worktree ownership separately from its workspace kind", async () => {
@@ -205,9 +212,7 @@ test("persists manual worktree ownership separately from its workspace kind", as
   const workspace = await manualWorktreeProvisioning.findOrCreateWorkspaceForDirectory(cwd);
 
   expect(workspace).toMatchObject({
-    kind: "worktree",
-    isPaseoOwnedWorktree: false,
-    mainRepoRoot,
+    members: [{ kind: "worktree", isPaseoOwnedWorktree: false, mainRepoRoot }],
   });
 });
 
@@ -237,13 +242,23 @@ test("reopening archived exact-root records restores the fresh Git project", asy
   });
   const workspace = createPersistedWorkspaceRecord({
     workspaceId: "ws-archived-root",
-    projectId: project.projectId,
-    cwd,
-    kind: "directory",
     displayName: "repo",
     createdAt: ARCHIVED_AT,
     updatedAt: ARCHIVED_AT,
     archivedAt: ARCHIVED_AT,
+    members: [
+      {
+        projectId: project.projectId,
+        cwd,
+        kind: "directory",
+        displayName: "repo",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
   await workspaceRegistry.upsert(workspace);
   await projectRegistry.archive(project.projectId, ARCHIVED_AT);
@@ -268,8 +283,8 @@ test("reopening archived exact-root records restores the fresh Git project", asy
 
   expect(reopened).toMatchObject({
     workspaceId: workspace.workspaceId,
-    kind: "local_checkout",
     archivedAt: null,
+    members: [{ kind: "local_checkout" }],
   });
   expect(await projectRegistry.get(project.projectId)).toMatchObject({
     kind: "git",
@@ -293,6 +308,7 @@ test("uses one workspace snapshot when reopening an archived workspace", async (
     existsOnDisk: () => workspaceRegistry.existsOnDisk(),
     list: async () => (reads++ === 0 ? archived : []),
     get: (workspaceId) => workspaceRegistry.get(workspaceId),
+    update: (workspaceId, updater) => workspaceRegistry.update(workspaceId, updater),
     upsert: (workspace) => workspaceRegistry.upsert(workspace),
     archive: (workspaceId, archivedAt) => workspaceRegistry.archive(workspaceId, archivedAt),
     remove: (workspaceId) => workspaceRegistry.remove(workspaceId),
@@ -321,12 +337,10 @@ test("reopening an archived workspace refreshes placement without renaming it", 
 
   expect(reopened).toMatchObject({
     workspaceId: created.workspaceId,
-    projectId: created.projectId,
     title: "Pinned archived work",
-    kind: "directory",
-    branch: null,
     displayName: created.displayName,
     archivedAt: null,
+    members: [{ projectId: created.members[0].projectId, kind: "directory", branch: null }],
   });
   expect(reopened.updatedAt).toEqual(expect.any(String));
   expect(await workspaceRegistry.get(created.workspaceId)).toEqual(reopened);
@@ -341,7 +355,7 @@ test("opening a subpath of an archived git workspace mints a fresh workspace at 
 
   const fresh = await provisioning.findOrCreateWorkspaceForDirectory(sub);
 
-  expect(fresh.cwd).toBe(sub);
+  expect(fresh.members[0].cwd).toBe(sub);
   expect(fresh.workspaceId).not.toBe(canonical.workspaceId);
   expect((await workspaceRegistry.get(canonical.workspaceId))?.archivedAt).toBe(ARCHIVED_AT);
 });
@@ -350,7 +364,7 @@ test("ensureWorkspaceRecordUnarchived restores the owning archived project with 
   const repo = path.join(tmpDir, "repo");
   gitRoots.add(repo);
   const created = await provisioning.findOrCreateWorkspaceForDirectory(repo);
-  await projectRegistry.archive(created.projectId, ARCHIVED_AT);
+  await projectRegistry.archive(created.members[0].projectId, ARCHIVED_AT);
 
   const unarchived = await provisioning.ensureWorkspaceRecordUnarchived({
     ...created,
@@ -359,7 +373,7 @@ test("ensureWorkspaceRecordUnarchived restores the owning archived project with 
 
   expect(unarchived.archivedAt).toBeNull();
   expect((await workspaceRegistry.get(created.workspaceId))?.archivedAt).toBeNull();
-  expect((await projectRegistry.get(created.projectId))?.archivedAt).toBeNull();
+  expect((await projectRegistry.get(created.members[0].projectId))?.archivedAt).toBeNull();
 });
 
 test("ensureWorkspaceRecordUnarchived preserves the consumed auto-archive change request", async () => {
@@ -433,9 +447,9 @@ test("does not unarchive either record when checkout refresh fails", async () =>
   const repo = path.join(tmpDir, "repo");
   gitRoots.add(repo);
   const created = await provisioning.findOrCreateWorkspaceForDirectory(repo);
-  await projectRegistry.archive(created.projectId, ARCHIVED_AT);
+  await projectRegistry.archive(created.members[0].projectId, ARCHIVED_AT);
   await workspaceRegistry.archive(created.workspaceId, ARCHIVED_AT);
-  const archivedProject = await projectRegistry.get(created.projectId);
+  const archivedProject = await projectRegistry.get(created.members[0].projectId);
   const archivedWorkspace = await workspaceRegistry.get(created.workspaceId);
   checkoutFailure = new Error("Git read failed");
 
@@ -443,7 +457,7 @@ test("does not unarchive either record when checkout refresh fails", async () =>
     "Git read failed",
   );
 
-  expect(await projectRegistry.get(created.projectId)).toEqual(archivedProject);
+  expect(await projectRegistry.get(created.members[0].projectId)).toEqual(archivedProject);
   expect(await workspaceRegistry.get(created.workspaceId)).toEqual(archivedWorkspace);
 });
 
@@ -485,7 +499,7 @@ test("resolveOrCreateWorkspaceIdForCreateAgent creates a titled workspace when n
   });
 
   const created = await workspaceRegistry.get(id);
-  expect(created?.cwd).toBe(dir);
+  expect(created?.members[0]?.cwd).toBe(dir);
   expect(created?.title).toBe("My Title");
 });
 
@@ -504,7 +518,7 @@ test("directory creation persists the live branch and a trimmed title", async ()
   const repo = path.join(tmpDir, "repo");
   gitRoots.add(repo);
   const workspace = await provisioning.createWorkspaceForDirectory(repo, "  Focused work  ");
-  expect(workspace).toMatchObject({ branch: "main", title: "Focused work" });
+  expect(workspace).toMatchObject({ title: "Focused work", members: [{ branch: "main" }] });
 });
 
 test("createWorkspaceForDirectory honors an explicit active project without cwd containment", async () => {
@@ -519,7 +533,7 @@ test("createWorkspaceForDirectory honors an explicit active project without cwd 
     null,
     project.projectId,
   );
-  expect(workspace.projectId).toBe(project.projectId);
+  expect(workspace.members[0].projectId).toBe(project.projectId);
 });
 
 test("createWorkspaceForDirectory refreshes an explicit project's stale Git kind", async () => {
@@ -539,7 +553,7 @@ test("createWorkspaceForDirectory refreshes an explicit project's stale Git kind
     project.projectId,
   );
 
-  expect(workspace.projectId).toBe(project.projectId);
+  expect(workspace.members[0].projectId).toBe(project.projectId);
   expect(await projectRegistry.get(project.projectId)).toMatchObject({
     projectId: project.projectId,
     rootPath,
@@ -632,9 +646,9 @@ test.each(["missing", "archived"] as const)(
     mkdirSync(cwd);
     const workspace = await provisioning.createWorkspaceForDirectory(cwd);
     if (state === "archived") {
-      await projectRegistry.archive(workspace.projectId, ARCHIVED_AT);
+      await projectRegistry.archive(workspace.members[0].projectId, ARCHIVED_AT);
     } else {
-      await projectRegistry.remove(workspace.projectId);
+      await projectRegistry.remove(workspace.members[0].projectId);
     }
     let imported = false;
 
@@ -645,7 +659,7 @@ test.each(["missing", "archived"] as const)(
           imported = true;
         },
       ),
-    ).rejects.toThrow(`Project not found: ${workspace.projectId}`);
+    ).rejects.toThrow(`Project not found: ${workspace.members[0].projectId}`);
     expect(imported).toBe(false);
   },
 );
@@ -732,17 +746,20 @@ test("addWorkspaceMember appends a directory member with its own project", async
   });
 
   expect(updated.workspaceId).toBe(workspace.workspaceId);
-  // Scalar fields keep mirroring the primary member.
-  expect(updated).toMatchObject({ cwd: primaryDir, projectId: workspace.projectId });
+  expect(updated.displayName).toBe(workspace.displayName);
+  expect(updated).not.toHaveProperty("projectId");
   expect(updated.members).toHaveLength(2);
-  expect(updated.members?.[0]).toMatchObject({ cwd: primaryDir, projectId: workspace.projectId });
+  expect(updated.members?.[0]).toMatchObject({
+    cwd: primaryDir,
+    projectId: workspace.members[0].projectId,
+  });
   expect(updated.members?.[1]).toMatchObject({
     cwd: memberDir,
     kind: "local_checkout",
     branch: "main",
     worktreeRoot: memberDir,
   });
-  expect(updated.members?.[1].projectId).not.toBe(workspace.projectId);
+  expect(updated.members?.[1].projectId).not.toBe(workspace.members[0].projectId);
   expect(await projectRegistry.list()).toHaveLength(2);
 
   const reloaded = new FileBackedWorkspaceRegistry(
@@ -834,7 +851,7 @@ test("addWorkspaceMember classifies unknown and archived workspaces", async () =
   } satisfies Partial<WorkspaceProvisioningError>);
 });
 
-test("removeWorkspaceMember drops a non-primary member and keeps the scalars", async () => {
+test("removeWorkspaceMember drops a member and preserves the container name", async () => {
   const primaryDir = path.join(tmpDir, "primary");
   const memberDir = path.join(tmpDir, "member");
   const workspace = await provisioning.createWorkspaceForDirectory(primaryDir);
@@ -849,11 +866,14 @@ test("removeWorkspaceMember drops a non-primary member and keeps the scalars", a
   });
 
   expect(updated.members).toHaveLength(1);
-  expect(updated.members?.[0]).toMatchObject({ cwd: primaryDir, projectId: workspace.projectId });
-  expect(updated).toMatchObject({ cwd: primaryDir, projectId: workspace.projectId });
+  expect(updated.members?.[0]).toMatchObject({
+    cwd: primaryDir,
+    projectId: workspace.members[0].projectId,
+  });
+  expect(updated.displayName).toBe(workspace.displayName);
 });
 
-test("removeWorkspaceMember re-mirrors the scalars when the primary member leaves", async () => {
+test("removeWorkspaceMember preserves the other member when the first leaves", async () => {
   const primaryDir = path.join(tmpDir, "primary");
   const memberDir = path.join(tmpDir, "member");
   const workspace = await provisioning.createWorkspaceForDirectory(primaryDir);
@@ -870,32 +890,37 @@ test("removeWorkspaceMember re-mirrors the scalars when the primary member leave
 
   expect(updated.members).toHaveLength(1);
   expect(updated.members?.[0]).toMatchObject({ cwd: memberDir, projectId: secondProjectId });
-  expect(updated).toMatchObject({ cwd: memberDir, projectId: secondProjectId });
+  expect(updated.displayName).toBe(workspace.displayName);
 
   const reloaded = new FileBackedWorkspaceRegistry(
     path.join(tmpDir, "projects", "workspaces.json"),
     logger,
   );
   await reloaded.initialize();
-  expect(await reloaded.get(workspace.workspaceId)).toMatchObject({
-    cwd: memberDir,
-    projectId: secondProjectId,
-  });
+  expect((await reloaded.get(workspace.workspaceId))?.members).toMatchObject([
+    {
+      cwd: memberDir,
+      projectId: secondProjectId,
+    },
+  ]);
 });
 
-test("removeWorkspaceMember refuses to strip the last member", async () => {
-  const workspace = await provisioning.createWorkspaceForDirectory(path.join(tmpDir, "primary"));
-
-  await expect(
-    provisioning.removeWorkspaceMember({
-      workspaceId: workspace.workspaceId,
-      cwd: path.join(tmpDir, "primary"),
-    }),
-  ).rejects.toMatchObject({ code: "last_member" } satisfies Partial<WorkspaceProvisioningError>);
-
-  expect((await workspaceRegistry.get(workspace.workspaceId))?.cwd).toBe(
-    path.join(tmpDir, "primary"),
-  );
+test("removeWorkspaceMember leaves an empty container when its last member leaves", async () => {
+  const cwd = path.join(tmpDir, "primary");
+  const workspace = await provisioning.createWorkspaceForDirectory(cwd, "Keep me");
+  const empty = await provisioning.removeWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    cwd,
+  });
+  expect(empty).toMatchObject({
+    workspaceId: workspace.workspaceId,
+    displayName: workspace.displayName,
+    title: "Keep me",
+    members: [],
+  });
+  expect(empty).not.toHaveProperty("cwd");
+  expect(empty).not.toHaveProperty("projectId");
+  expect(await workspaceRegistry.get(workspace.workspaceId)).toEqual(empty);
 });
 
 test("removeWorkspaceMember rejects a cwd the workspace does not hold", async () => {
@@ -942,9 +967,8 @@ test("moveWorkspaceMember lands the member in the target and strips it from the 
     branch: "main",
     worktreeRoot: memberDir,
   });
-  // Scalar mirrors never move: each side keeps its own primary member.
-  expect(moved.source).toMatchObject({ cwd: primaryDir, projectId: source.projectId });
-  expect(moved.target).toMatchObject({ cwd: targetDir, projectId: target.projectId });
+  expect(moved.source.displayName).toBe(source.displayName);
+  expect(moved.target.displayName).toBe(target.displayName);
 
   const reloaded = new FileBackedWorkspaceRegistry(
     path.join(tmpDir, "projects", "workspaces.json"),
@@ -979,7 +1003,7 @@ test("moveWorkspaceMember refuses a member cwd the target already holds", async 
   expect(untouchedTarget && workspaceMembers(untouchedTarget)).toHaveLength(1);
 });
 
-test("moveWorkspaceMember re-mirrors the source scalars when the primary member leaves", async () => {
+test("moveWorkspaceMember preserves both container names when the first member moves", async () => {
   const primaryDir = path.join(tmpDir, "primary");
   const memberDir = path.join(tmpDir, "member");
   const source = await provisioning.createWorkspaceForDirectory(primaryDir);
@@ -998,12 +1022,10 @@ test("moveWorkspaceMember re-mirrors the source scalars when the primary member 
 
   expect(moved.source.members).toHaveLength(1);
   expect(moved.source.members?.[0]).toMatchObject({ cwd: memberDir, projectId: secondProjectId });
-  expect(moved.source).toMatchObject({ cwd: memberDir, projectId: secondProjectId });
-  // The moved member becomes the target's non-primary member; the target's own
-  // scalars keep mirroring its original primary.
+  expect(moved.source.displayName).toBe(source.displayName);
   expect(moved.target.members).toHaveLength(2);
   expect(moved.target.members?.[1]).toMatchObject({ cwd: primaryDir });
-  expect(moved.target).toMatchObject({ projectId: target.projectId });
+  expect(moved.target.displayName).toBe(target.displayName);
 });
 
 test("moveWorkspaceMember leaves the source projectless when its last member moves", async () => {
@@ -1018,21 +1040,12 @@ test("moveWorkspaceMember leaves the source projectless when its last member mov
   });
 
   expect(moved.source.members).toEqual([]);
-  // The scalar mirror takes the projectless stand-in shape: the workspace's own
-  // id as project, the daemon home as cwd, and no placement metadata left over
-  // from the departed member.
   expect(moved.source).toMatchObject({
-    projectId: source.workspaceId,
-    cwd: os.homedir(),
-    kind: "directory",
-    displayName: "Pinned source",
-    branch: null,
-    worktreeRoot: null,
-    baseBranch: null,
-    isPaseoOwnedWorktree: false,
-    mainRepoRoot: null,
+    displayName: source.displayName,
     title: "Pinned source",
   });
+  expect(moved.source).not.toHaveProperty("projectId");
+  expect(moved.source).not.toHaveProperty("cwd");
   expect(moved.target.members?.[1]).toMatchObject({ cwd: primaryDir });
 
   const reloaded = new FileBackedWorkspaceRegistry(
@@ -1107,4 +1120,110 @@ test("moveWorkspaceMember rejects a cwd the source does not hold", async () => {
   ).rejects.toMatchObject({
     code: "member_not_found",
   } satisfies Partial<WorkspaceProvisioningError>);
+});
+
+test("an empty workspace accepts its first project without manufacturing or losing a member", async () => {
+  const empty = await provisioning.createProjectlessWorkspace("Web");
+  expect(empty.members).toEqual([]);
+  expect(await projectRegistry.list()).toEqual([]);
+  expect(empty).not.toHaveProperty("projectId");
+  expect(empty).not.toHaveProperty("cwd");
+  const firstCwd = path.join(tmpDir, "first");
+  const secondCwd = path.join(tmpDir, "second");
+  const first = await provisioning.addWorkspaceMember({
+    workspaceId: empty.workspaceId,
+    source: { kind: "directory", path: firstCwd },
+  });
+  expect(first.members.map((member) => member.cwd)).toEqual([firstCwd]);
+  const second = await provisioning.addWorkspaceMember({
+    workspaceId: empty.workspaceId,
+    source: { kind: "directory", path: secondCwd },
+  });
+  expect(second.members.map((member) => member.cwd)).toEqual([firstCwd, secondCwd]);
+  expect(second.displayName).toBe("Web");
+  expect(second).not.toHaveProperty("projectId");
+  const reloaded = new FileBackedWorkspaceRegistry(
+    path.join(tmpDir, "projects", "workspaces.json"),
+    logger,
+  );
+  expect(await reloaded.get(empty.workspaceId)).toEqual(second);
+});
+
+test("moving a sole project into an empty workspace preserves both containers", async () => {
+  const cwd = path.join(tmpDir, "project");
+  const source = await provisioning.createWorkspaceForDirectory(cwd, "Source");
+  const target = await provisioning.createProjectlessWorkspace("Target");
+  const moved = await provisioning.moveWorkspaceMember({
+    sourceWorkspaceId: source.workspaceId,
+    targetWorkspaceId: target.workspaceId,
+    cwd,
+  });
+  expect(moved.source).toMatchObject({
+    workspaceId: source.workspaceId,
+    title: "Source",
+    members: [],
+  });
+  expect(moved.target).toMatchObject({
+    workspaceId: target.workspaceId,
+    title: "Target",
+    members: source.members,
+  });
+  expect(moved.target).not.toHaveProperty("projectId");
+  expect(moved.source).not.toHaveProperty("cwd");
+});
+
+test("directory reuse and provider import resolve a secondary member", async () => {
+  const workspace = await provisioning.createWorkspaceForDirectory(path.join(tmpDir, "first"));
+  const cwd = path.join(tmpDir, "second");
+  await provisioning.addWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    source: { kind: "directory", path: cwd },
+  });
+  const reopened = await provisioning.findOrCreateWorkspaceForDirectory(cwd);
+  expect(reopened.workspaceId).toBe(workspace.workspaceId);
+  expect(reopened.members).toHaveLength(2);
+  const imported = await provisioning.runInImportWorkspace(
+    { cwd, requestedWorkspaceId: workspace.workspaceId },
+    async (record) => record.workspaceId,
+  );
+  expect(imported).toEqual({ value: workspace.workspaceId, createdWorkspace: null });
+  expect(await workspaceRegistry.list()).toHaveLength(1);
+});
+
+test("restoring an empty container performs no checkout reads", async () => {
+  const workspace = await provisioning.createProjectlessWorkspace("Empty");
+  await workspaceRegistry.archive(workspace.workspaceId, ARCHIVED_AT);
+  checkoutFailure = new Error("No checkout is available");
+  const archived = (await workspaceRegistry.get(workspace.workspaceId))!;
+  expect(await provisioning.ensureWorkspaceRecordUnarchived(archived)).toMatchObject({
+    workspaceId: workspace.workspaceId,
+    members: [],
+    archivedAt: null,
+    title: "Empty",
+  });
+  expect(await projectRegistry.list()).toEqual([]);
+});
+
+test("restoring a container refreshes every member and restores each project", async () => {
+  const firstCwd = path.join(tmpDir, "first");
+  const secondCwd = path.join(tmpDir, "second");
+  const workspace = await provisioning.createWorkspaceForDirectory(firstCwd);
+  const populated = await provisioning.addWorkspaceMember({
+    workspaceId: workspace.workspaceId,
+    source: { kind: "directory", path: secondCwd },
+  });
+  for (const member of populated.members)
+    await projectRegistry.archive(member.projectId, ARCHIVED_AT);
+  await workspaceRegistry.archive(workspace.workspaceId, ARCHIVED_AT);
+  gitRoots.add(firstCwd);
+  gitRoots.add(secondCwd);
+  const restored = await provisioning.ensureWorkspaceRecordUnarchived(
+    (await workspaceRegistry.get(workspace.workspaceId))!,
+  );
+  expect(restored.members.map((member) => member.kind)).toEqual([
+    "local_checkout",
+    "local_checkout",
+  ]);
+  expect(restored.displayName).toBe(workspace.displayName);
+  expect((await projectRegistry.list()).map((project) => project.archivedAt)).toEqual([null, null]);
 });

@@ -2902,6 +2902,7 @@ export const RenameTerminalRequestSchema = z.object({
 export const StartWorkspaceScriptRequestSchema = z.object({
   type: z.literal("start_workspace_script_request"),
   workspaceId: z.string(),
+  cwd: z.string().optional(),
   scriptName: z.string(),
   requestId: z.string(),
 });
@@ -2909,12 +2910,14 @@ export const StartWorkspaceScriptRequestSchema = z.object({
 export const WorkspaceScriptListRequestSchema = z.object({
   type: z.literal("workspace.script.list.request"),
   workspaceId: z.string(),
+  cwd: z.string().optional(),
   requestId: z.string(),
 });
 
 export const WorkspaceScriptStartRequestSchema = z.object({
   type: z.literal("workspace.script.start.request"),
   workspaceId: z.string(),
+  cwd: z.string().optional(),
   scriptName: z.string(),
   requestId: z.string(),
 });
@@ -2922,6 +2925,7 @@ export const WorkspaceScriptStartRequestSchema = z.object({
 export const WorkspaceScriptStopRequestSchema = z.object({
   type: z.literal("workspace.script.stop.request"),
   workspaceId: z.string(),
+  cwd: z.string().optional(),
   scriptName: z.string(),
   requestId: z.string(),
 });
@@ -3572,6 +3576,7 @@ export const ServerInfoStatusPayloadSchema = z
         stableProjectIdentity: z.boolean().optional(),
         // COMPAT(workspaceScriptManagement): added in v0.1.105, remove gate after 2027-01-10.
         workspaceScriptManagement: z.boolean().optional(),
+        workspaceMemberScripts: z.boolean().optional(),
         // COMPAT(projectCustomIcon): added in v0.2.0, remove after 2027-01-20.
         projectCustomIcon: z.boolean().optional(),
         // COMPAT(fsEntryOps): added in v0.3.0, remove gate after 2027-02-08.
@@ -3774,6 +3779,7 @@ export const WorkspaceScriptHealthSchema = z.enum(["healthy", "unhealthy"]);
 
 export const WorkspaceScriptPayloadSchema = z.object({
   scriptName: z.string(),
+  cwd: z.string().optional(),
   type: z.enum(["script", "service"]).optional().default("service"),
   hostname: z.string(),
   port: z.number().int().positive().nullable(),
@@ -3851,11 +3857,12 @@ export const WorkspaceGitHubRuntimePayloadSchema = z
   .optional()
   .nullable();
 
-// One project membership of a workspace. A workspace holds 1..N members; the
-// descriptor's scalar project/placement fields mirror the primary (first)
-// member so old clients keep working unchanged.
+// Projects belong to members; an empty workspace has no project placement.
 export const WorkspaceMemberPayloadSchema = z.object({
   projectId: z.string(),
+  projectKey: z.string().nullable().optional(),
+  projectKind: z.enum(["git", "non_git", "directory"]).optional(),
+  projectCustomIconRevision: z.string().nullable().optional(),
   projectDisplayName: z.string(),
   projectCustomName: z.string().nullable(),
   projectRootPath: z.string(),
@@ -4249,6 +4256,7 @@ export const ScriptStatusUpdateMessageSchema = z.object({
   type: z.literal("script_status_update"),
   payload: z.object({
     workspaceId: z.string(),
+    cwd: z.string().optional(),
     scripts: z.array(WorkspaceScriptPayloadSchema),
   }),
 });

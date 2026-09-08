@@ -885,19 +885,20 @@ export class ScheduleService {
     let workspace: PersistedWorkspaceRecord | null = null;
     let agentId: string | null = null;
     try {
-      workspace = await this.createScheduleRunWorkspace(config, schedule.prompt);
+      const placement = await this.createScheduleRunWorkspace(config, schedule.prompt);
+      workspace = placement.workspace;
       await this.recordRunWorkspace({
         scheduleId: schedule.id,
         runId,
         workspaceId: workspace.workspaceId,
         agentId: null,
       });
-      const runConfig = { ...config, cwd: workspace.cwd };
+      const runConfig = { ...config, cwd: placement.cwd };
       const created = await this.createAgent({
         kind: "mcp",
         provider: formatScheduleProviderModel(runConfig),
         config: buildScheduleAgentConfig(runConfig),
-        cwd: workspace.cwd,
+        cwd: placement.cwd,
         workspaceId: workspace.workspaceId,
         title: resolveScheduleAgentTitle(config, schedule.prompt),
         labels: {
@@ -971,14 +972,21 @@ export class ScheduleService {
   private async createScheduleRunWorkspace(
     config: Extract<ScheduleTarget, { type: "new-agent" }>["config"],
     prompt: string,
-  ): Promise<PersistedWorkspaceRecord> {
+  ): Promise<{ workspace: PersistedWorkspaceRecord; cwd: string }> {
     const firstAgentContext = { prompt };
     switch (config.isolation ?? "local") {
       case "local":
-        return this.createDirectoryWorkspace({ cwd: config.cwd, firstAgentContext });
-      case "worktree":
-        return (await this.createPaseoWorktreeWorkspace({ cwd: config.cwd, firstAgentContext }))
-          .workspace;
+        return {
+          workspace: await this.createDirectoryWorkspace({ cwd: config.cwd, firstAgentContext }),
+          cwd: config.cwd,
+        };
+      case "worktree": {
+        const result = await this.createPaseoWorktreeWorkspace({
+          cwd: config.cwd,
+          firstAgentContext,
+        });
+        return { workspace: result.workspace, cwd: result.member.cwd };
+      }
     }
   }
 

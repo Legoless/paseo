@@ -1,4 +1,3 @@
-import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import type { Logger } from "pino";
 import {
@@ -6,7 +5,7 @@ import {
   initialWorkspacePlacement,
   reconcileWorkspacePlacement,
   workspaceMembers,
-  workspaceScalarsFromPrimaryMember,
+  type MutableWorkspacePlacement,
 } from "../../workspace-registry-model.js";
 import {
   createPersistedWorkspaceRecord,
@@ -112,7 +111,6 @@ export type WorkspaceProvisioningErrorCode =
   | "archived_workspace"
   | "duplicate_member"
   | "member_not_found"
-  | "last_member"
   | "member_has_active_agents"
   | "member_has_live_terminals";
 
@@ -144,12 +142,15 @@ export function createWorkspaceProvisioningService(deps: {
       if (!workspace || workspace.archivedAt) {
         throw new Error(`Workspace not found: ${input.requestedWorkspaceId}`);
       }
-      const project = await projectRegistry.get(workspace.projectId);
-      if (!project || project.archivedAt) {
-        throw new Error(`Project not found: ${workspace.projectId}`);
-      }
-      if (!createRealpathAwarePathMatcher(workspace.cwd)(input.cwd)) {
+      const member = workspace.members.find((candidate) =>
+        createRealpathAwarePathMatcher(candidate.cwd)(input.cwd),
+      );
+      if (!member) {
         throw new Error(`Import cwd does not match workspace: ${workspace.workspaceId}`);
+      }
+      const project = await projectRegistry.get(member.projectId);
+      if (!project || project.archivedAt) {
+        throw new Error(`Project not found: ${member.projectId}`);
       }
       return {
         value: await operation(workspace),
@@ -159,8 +160,12 @@ export function createWorkspaceProvisioningService(deps: {
 
     const projectsBeforeImport = await projectRegistry.list();
     const workspace = await createWorkspaceForDirectory(input.cwd);
+    const importedMember = workspace.members.find((member) =>
+      areEquivalentPaths(member.cwd, input.cwd),
+    )!;
     const previousProject =
-      projectsBeforeImport.find((project) => project.projectId === workspace.projectId) ?? null;
+      projectsBeforeImport.find((project) => project.projectId === importedMember.projectId) ??
+      null;
 
     try {
       return {
@@ -168,19 +173,22 @@ export function createWorkspaceProvisioningService(deps: {
         createdWorkspace: workspace,
       };
     } catch (error) {
-      await rollbackFailedImportWorkspace(workspace, previousProject);
+      await rollbackFailedImportWorkspace(workspace, importedMember.projectId, previousProject);
       throw error;
     }
   }
 
   async function rollbackFailedImportWorkspace(
     workspace: PersistedWorkspaceRecord,
+    projectId: string,
     previousProject: PersistedProjectRecord | null,
   ): Promise<void> {
     try {
       await workspaceRegistry.remove(workspace.workspaceId);
       const projectHasActiveWorkspace = (await workspaceRegistry.list()).some(
-        (candidate) => candidate.projectId === workspace.projectId && !candidate.archivedAt,
+        (candidate) =>
+          !candidate.archivedAt &&
+          candidate.members.some((member) => member.projectId === projectId),
       );
       if (projectHasActiveWorkspace) {
         return;
@@ -188,11 +196,11 @@ export function createWorkspaceProvisioningService(deps: {
       if (previousProject?.archivedAt) {
         await projectRegistry.upsert(previousProject);
       } else if (!previousProject) {
-        await projectRegistry.remove(workspace.projectId);
+        await projectRegistry.remove(projectId);
       }
     } catch (error) {
       logger.error(
-        { err: error, workspaceId: workspace.workspaceId, projectId: workspace.projectId },
+        { err: error, workspaceId: workspace.workspaceId, projectId },
         "Failed to restore workspace state after provider import failure",
       );
     }
@@ -239,10 +247,14 @@ export function createWorkspaceProvisioningService(deps: {
       : // COMPAT(workspaceCreateMissingProjectId): added in v0.1.107, remove after 2027-01-15.
         await findOrCreateProjectForDirectory(normalizedCwd);
     const timestamp = new Date().toISOString();
-    const workspace = createPersistedWorkspaceRecord({
-      workspaceId: generateWorkspaceId(),
+    const member = {
       projectId: project.projectId,
       ...initialWorkspacePlacement({ source: "checkout", cwd: normalizedCwd, checkout }),
+    };
+    const workspace = createPersistedWorkspaceRecord({
+      workspaceId: generateWorkspaceId(),
+      displayName: member.displayName,
+      members: [member],
       title: title?.trim() || null,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -251,18 +263,6 @@ export function createWorkspaceProvisioningService(deps: {
     return workspace;
   }
 
-  /**
-   * COMPAT(workspaceProjectless): added in v0.8.0. Creates a workspace holding no
-   * projects — a pane arrangement whose panes each carry their own project.
-   *
-   * `members: []` is the truth. The scalar mirror is still filled, pointed at the
-   * daemon home directory with the workspace's own id standing in for a project,
-   * because the descriptor's scalar fields are required on the wire and clients
-   * older than v0.8.0 read only those. A unique stand-in keeps such a client
-   * listing each empty workspace separately instead of collapsing them all into
-   * one bogus project group. No project record is created, so the user's project
-   * list stays clean; nothing resolves that id.
-   */
   async function createProjectlessWorkspace(
     title?: string | null,
     context?: { expectsInitialAgent?: boolean },
@@ -272,9 +272,6 @@ export function createWorkspaceProvisioningService(deps: {
     const displayName = title?.trim() || "New workspace";
     const workspace = createPersistedWorkspaceRecord({
       workspaceId,
-      projectId: workspaceId,
-      cwd: homedir(),
-      kind: "directory",
       displayName,
       title: title?.trim() || null,
       members: [],
@@ -298,8 +295,7 @@ export function createWorkspaceProvisioningService(deps: {
       repoRoot,
     });
     const timestamp = new Date().toISOString();
-    const workspace = createPersistedWorkspaceRecord({
-      workspaceId: generateWorkspaceId(),
+    const member = {
       projectId: project.projectId,
       ...initialWorkspacePlacement({
         source: "created_worktree",
@@ -309,6 +305,11 @@ export function createWorkspaceProvisioningService(deps: {
         baseBranch: input.baseBranch,
         mainRepoRoot: repoRoot,
       }),
+    };
+    const workspace = createPersistedWorkspaceRecord({
+      workspaceId: generateWorkspaceId(),
+      displayName: member.displayName,
+      members: [member],
       title: input.title,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -328,19 +329,17 @@ export function createWorkspaceProvisioningService(deps: {
       return refreshProjectKind(await requireActiveProject(input.projectId));
     }
 
-    const workspaces = await workspaceRegistry.list();
-    const sourceWorkspace =
-      workspaces.find(
-        (workspace) => !workspace.archivedAt && areEquivalentPaths(workspace.cwd, input.sourceCwd),
-      ) ??
-      workspaces.find(
-        (workspace) => !workspace.archivedAt && areEquivalentPaths(workspace.cwd, input.repoRoot),
-      );
-    if (sourceWorkspace) {
-      const project = await projectRegistry.get(sourceWorkspace.projectId);
+    const members = (await workspaceRegistry.list())
+      .filter((workspace) => !workspace.archivedAt)
+      .flatMap((workspace) => workspace.members);
+    const sourceMember =
+      members.find((member) => areEquivalentPaths(member.cwd, input.sourceCwd)) ??
+      members.find((member) => areEquivalentPaths(member.cwd, input.repoRoot));
+    if (sourceMember) {
+      const project = await projectRegistry.get(sourceMember.projectId);
       if (project) return refreshProjectKind(project);
       // COMPAT(worktreeMissingSourceProject): added in v0.1.107, remove after 2027-01-15.
-      // Orphaned legacy workspace FKs fall through to exact-root allocation.
+      // Orphaned legacy memberships fall through to exact-root allocation.
     }
 
     const checkout = await workspaceGitService.getCheckout(input.repoRoot);
@@ -365,7 +364,9 @@ export function createWorkspaceProvisioningService(deps: {
     const workspaces = await workspaceRegistry.list();
     const active = workspaces
       .filter(
-        (workspace) => !workspace.archivedAt && areEquivalentPaths(workspace.cwd, normalizedCwd),
+        (workspace) =>
+          !workspace.archivedAt &&
+          workspace.members.some((member) => areEquivalentPaths(member.cwd, normalizedCwd)),
       )
       .sort(
         (left, right) =>
@@ -375,7 +376,9 @@ export function createWorkspaceProvisioningService(deps: {
     if (active) return refreshWorkspaceRecord(active);
     const archived = workspaces
       .filter(
-        (workspace) => workspace.archivedAt && areEquivalentPaths(workspace.cwd, normalizedCwd),
+        (workspace) =>
+          workspace.archivedAt &&
+          workspace.members.some((member) => areEquivalentPaths(member.cwd, normalizedCwd)),
       )
       .sort(
         (left, right) =>
@@ -383,7 +386,10 @@ export function createWorkspaceProvisioningService(deps: {
           left.workspaceId.localeCompare(right.workspaceId),
       )[0];
     if (archived) {
-      const project = await projectRegistry.get(archived.projectId);
+      const member = archived.members.find((candidate) =>
+        areEquivalentPaths(candidate.cwd, normalizedCwd),
+      )!;
+      const project = await projectRegistry.get(member.projectId);
       if (project && !project.archivedAt) return ensureWorkspaceRecordUnarchived(archived);
     }
     return createWorkspaceForDirectory(normalizedCwd);
@@ -404,49 +410,48 @@ export function createWorkspaceProvisioningService(deps: {
   async function resolveRestoredAutoArchiveChangeRequestUrl(
     workspace: PersistedWorkspaceRecord,
   ): Promise<string | null> {
-    if (!workspace.archivedAt) {
-      return workspace.autoArchivedChangeRequestUrl;
-    }
-    const snapshot = await workspaceGitService.getSnapshot(workspace.cwd, {
-      force: true,
-      includeForge: true,
-      reason: "workspace-restore-auto-archive-latch",
-    });
-    return snapshot.forge.pullRequest?.isMerged
-      ? snapshot.forge.pullRequest.url
-      : workspace.autoArchivedChangeRequestUrl;
+    if (!workspace.archivedAt) return workspace.autoArchivedChangeRequestUrl;
+    const snapshots = await Promise.all(
+      workspace.members.map((member) =>
+        workspaceGitService.getSnapshot(member.cwd, {
+          force: true,
+          includeForge: true,
+          reason: "workspace-restore-auto-archive-latch",
+        }),
+      ),
+    );
+    const mergedUrls = new Set(
+      snapshots.flatMap((snapshot) =>
+        snapshot.forge.pullRequest?.isMerged ? [snapshot.forge.pullRequest.url] : [],
+      ),
+    );
+    return mergedUrls.size === 1 ? [...mergedUrls][0] : workspace.autoArchivedChangeRequestUrl;
   }
 
   async function ensureWorkspaceRecordUnarchived(
     workspace: PersistedWorkspaceRecord,
   ): Promise<PersistedWorkspaceRecord> {
-    const project = await projectRegistry.get(workspace.projectId);
-    if (!project) throw new Error(`Unknown project: ${workspace.projectId}`);
     const timestamp = new Date().toISOString();
-    const checkout =
-      workspace.archivedAt || project.archivedAt
-        ? await workspaceGitService.getCheckout(workspace.cwd)
-        : null;
+    // Finish all checkout reads before restoring any lifecycle record.
+    const placements = await Promise.all(
+      workspace.members.map(async (member) => {
+        const project = await projectRegistry.get(member.projectId);
+        if (!project) throw new Error(`Unknown project: ${member.projectId}`);
+        const checkout =
+          workspace.archivedAt || project.archivedAt
+            ? await workspaceGitService.getCheckout(member.cwd)
+            : null;
+        let projectCheckout = checkout;
+        if (checkout && !areEquivalentPaths(project.rootPath, member.cwd)) {
+          projectCheckout = await workspaceGitService.getCheckout(project.rootPath);
+        }
+        return { member, project, checkout, projectCheckout };
+      }),
+    );
     const autoArchivedChangeRequestUrl =
       await resolveRestoredAutoArchiveChangeRequestUrl(workspace);
-    let next: PersistedWorkspaceRecord | null = null;
-    if (workspace.archivedAt && checkout) {
-      const placementUpdate = reconcileWorkspacePlacement({
-        workspace,
-        checkout,
-        updatedAt: timestamp,
-      });
-      next = {
-        ...(placementUpdate?.workspace ?? workspace),
-        archivedAt: null,
-        autoArchivedChangeRequestUrl,
-        updatedAt: timestamp,
-      };
-    }
-    if (checkout && (project.archivedAt || workspace.archivedAt)) {
-      const projectCheckout = areEquivalentPaths(project.rootPath, workspace.cwd)
-        ? checkout
-        : await workspaceGitService.getCheckout(project.rootPath);
+    for (const { project, projectCheckout } of placements) {
+      if (!projectCheckout) continue;
       const kind = projectCheckout.isGit ? "git" : "non_git";
       const projectKey = deriveProjectKey({
         rootPath: project.rootPath,
@@ -465,27 +470,46 @@ export function createWorkspaceProvisioningService(deps: {
         });
       }
     }
-    if (!next) return workspace;
-    await workspaceRegistry.upsert(next);
-    return next;
+    if (!workspace.archivedAt) return workspace;
+    const updates = new Map(
+      placements.map(({ member, checkout }) => [
+        member.cwd,
+        checkout ? reconcileWorkspacePlacement({ member, checkout })?.fields : undefined,
+      ]),
+    );
+    return (
+      (await workspaceRegistry.update(workspace.workspaceId, (current) => ({
+        ...current,
+        members: current.members.map((member) => ({ ...member, ...updates.get(member.cwd) })),
+        archivedAt: null,
+        autoArchivedChangeRequestUrl,
+        updatedAt: timestamp,
+      }))) ?? workspace
+    );
   }
 
   async function refreshWorkspaceRecord(
     workspace: PersistedWorkspaceRecord,
   ): Promise<PersistedWorkspaceRecord> {
-    const checkout = await workspaceGitService.getCheckout(workspace.cwd);
-    const project = await projectRegistry.get(workspace.projectId);
-    if (project && !project.archivedAt) {
-      await refreshProjectKind(project, workspace.cwd, checkout);
+    const updates = new Map<string, Partial<MutableWorkspacePlacement>>();
+    for (const member of workspace.members) {
+      const checkout = await workspaceGitService.getCheckout(member.cwd);
+      const project = await projectRegistry.get(member.projectId);
+      if (project && !project.archivedAt) await refreshProjectKind(project, member.cwd, checkout);
+      const update = reconcileWorkspacePlacement({ member, checkout });
+      if (update) updates.set(member.cwd, update.fields);
     }
-    const update = reconcileWorkspacePlacement({
-      workspace,
-      checkout,
-      updatedAt: new Date().toISOString(),
-    });
-    if (!update) return workspace;
-    await workspaceRegistry.upsert(update.workspace);
-    return update.workspace;
+    if (updates.size === 0) return workspace;
+    return (
+      (await workspaceRegistry.update(workspace.workspaceId, (current) => ({
+        ...current,
+        members: current.members.map((member) => {
+          const fields = updates.get(member.cwd);
+          return fields ? { ...member, ...fields } : member;
+        }),
+        updatedAt: new Date().toISOString(),
+      }))) ?? workspace
+    );
   }
 
   async function refreshProjectKind(
@@ -605,18 +629,8 @@ export function createWorkspaceProvisioningService(deps: {
           `Workspace ${input.workspaceId} has no member at ${normalizedCwd}`,
         );
       }
-      if (remaining.length === 0) {
-        throw new WorkspaceProvisioningError(
-          "last_member",
-          `Cannot remove the last member of workspace ${input.workspaceId}`,
-        );
-      }
-      const removedWasPrimary = areEquivalentPaths(members[0].cwd, normalizedCwd);
       return {
         ...current,
-        // The schema syncs the primary member from the scalar fields on every
-        // write, so a primary change must re-mirror the scalars in the same update.
-        ...(removedWasPrimary ? workspaceScalarsFromPrimaryMember(remaining[0]) : {}),
         members: remaining,
         updatedAt: timestamp,
       };
@@ -728,31 +742,8 @@ export function createWorkspaceProvisioningService(deps: {
           `Workspace ${input.sourceWorkspaceId} has no member at ${normalizedCwd}`,
         );
       }
-      if (remaining.length === 0) {
-        // Moving the last member out is allowed (unlike remove): the source
-        // becomes a projectless workspace, so the scalar mirror takes the same
-        // stand-in shape createProjectlessWorkspace writes.
-        return {
-          ...current,
-          projectId: current.workspaceId,
-          cwd: homedir(),
-          kind: "directory",
-          displayName: current.title?.trim() || current.displayName,
-          branch: null,
-          worktreeRoot: null,
-          baseBranch: null,
-          isPaseoOwnedWorktree: false,
-          mainRepoRoot: null,
-          members: [],
-          updatedAt: timestamp,
-        };
-      }
-      const removedWasPrimary = areEquivalentPaths(members[0].cwd, normalizedCwd);
       return {
         ...current,
-        // The schema syncs the primary member from the scalar fields on every
-        // write, so a primary change must re-mirror the scalars in the same update.
-        ...(removedWasPrimary ? workspaceScalarsFromPrimaryMember(remaining[0]) : {}),
         members: remaining,
         updatedAt: timestamp,
       };

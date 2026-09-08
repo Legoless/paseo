@@ -438,9 +438,9 @@ describe("archiveIfSafe", () => {
     expect(harness.log.info).toHaveBeenCalledWith(
       {
         workspaceId: "ws-auto-archive",
+        pullRequestUrl: "https://github.com/acme/repo/pull/123",
         cwd: CWD,
         branch: "feature",
-        pullRequestUrl: "https://github.com/acme/repo/pull/123",
       },
       "Auto-archived worktree after PR merge",
     );
@@ -488,8 +488,38 @@ describe("archiveIfSafe", () => {
   test("archives only the supplied workspace id and does not iterate siblings", async () => {
     const harness = createHarness();
     harness.options.listActiveWorkspaces = vi.fn(async () => [
-      { workspaceId: "ws-merged-worktree", cwd: CWD, kind: "worktree" as const },
-      { workspaceId: "ws-sibling", cwd: CWD, kind: "local_checkout" as const },
+      {
+        workspaceId: "ws-merged-worktree",
+        members: [
+          {
+            projectId: "test-project",
+            cwd: CWD,
+            kind: "worktree" as const,
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
+      {
+        workspaceId: "ws-sibling",
+        members: [
+          {
+            projectId: "test-project",
+            cwd: CWD,
+            kind: "local_checkout" as const,
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
     ]);
 
     await runArchiveIfSafe(harness, { workspaceId: "ws-merged-worktree" });
@@ -516,8 +546,38 @@ describe("archiveIfSafe", () => {
       repoDir,
       worktreePath: worktree.worktreePath,
       activeWorkspaces: [
-        { workspaceId: workspaceA, cwd: worktree.worktreePath, kind: "worktree" },
-        { workspaceId: workspaceB, cwd: worktree.worktreePath, kind: "local_checkout" },
+        {
+          workspaceId: workspaceA,
+          members: [
+            {
+              projectId: "test-project",
+              cwd: worktree.worktreePath,
+              kind: "worktree",
+              displayName: "workspace",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
+        },
+        {
+          workspaceId: workspaceB,
+          members: [
+            {
+              projectId: "test-project",
+              cwd: worktree.worktreePath,
+              kind: "local_checkout",
+              displayName: "workspace",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
+        },
       ],
       archivedWorkspaceIds,
     });
@@ -545,7 +605,24 @@ describe("archiveIfSafe", () => {
       paseoHome,
       repoDir,
       worktreePath: worktree.worktreePath,
-      activeWorkspaces: [{ workspaceId: workspaceA, cwd: worktree.worktreePath, kind: "worktree" }],
+      activeWorkspaces: [
+        {
+          workspaceId: workspaceA,
+          members: [
+            {
+              projectId: "test-project",
+              cwd: worktree.worktreePath,
+              kind: "worktree",
+              displayName: "workspace",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
+        },
+      ],
       archivedWorkspaceIds,
     });
 
@@ -566,13 +643,35 @@ describe("archiveIfSafe", () => {
     const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "merged-then-unarchived");
     const workspace = {
       workspaceId: "ws-merged-then-unarchived",
-      cwd: worktree.worktreePath,
-      kind: "worktree" as const,
+      members: [
+        {
+          projectId: "test-project",
+          cwd: worktree.worktreePath,
+          kind: "worktree" as const,
+          displayName: "workspace",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     };
     const sibling = {
       workspaceId: "ws-directory-preserving-sibling",
-      cwd: worktree.worktreePath,
-      kind: "local_checkout" as const,
+      members: [
+        {
+          projectId: "test-project",
+          cwd: worktree.worktreePath,
+          kind: "local_checkout" as const,
+          displayName: "workspace",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     };
     const archivedWorkspaceIds = new Set<string>();
     const harness = createRealOutcomeHarness({

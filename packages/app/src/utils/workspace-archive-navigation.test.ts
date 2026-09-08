@@ -44,6 +44,18 @@ function workspace(
 }
 
 describe("buildWorkspaceArchiveRedirectRoute", () => {
+  it("does not navigate to the legacy project after archiving an empty workspace", () => {
+    const empty = workspace({ id: "empty" });
+    empty.members = [];
+    expect(
+      buildWorkspaceArchiveRedirectRoute({
+        serverId: "server-1",
+        archivedWorkspaceId: empty.id,
+        workspaces: [empty],
+      }),
+    ).toBe("/h/server-1");
+  });
+
   it("redirects an archived worktree to the new workspace screen for the same project", () => {
     const workspaces = [
       workspace({ id: "/repo", workspaceKind: "checkout", name: "main" }),

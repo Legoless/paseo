@@ -1,5 +1,6 @@
 import type { PrHint } from "@/git/pr-hint";
 import { selectPrHintFromStatus } from "@/git/pr-hint";
+import { getWorkspaceArchiveRisk } from "@/git/worktree-archive-warning";
 import { type HostProjectListItem } from "@/projects/host-project-model";
 import type { PendingCreateAttempt } from "@/stores/create-flow-store";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
@@ -136,16 +137,12 @@ interface EffectiveWorkspaceStatus {
 }
 
 function projectNameForWorkspace(workspace: WorkspaceDescriptor): string {
-  // A projectless workspace still carries a scalar `projectId`, but it is synthetic and names no
-  // project record, so deriving a display name from it would invent a project the workspace does
-  // not have. Empty is the placement's "no project" sentinel.
-  if (workspace.members.length === 0) {
-    return "";
-  }
+  if (workspace.members.length !== 1) return "";
+  const member = workspace.members[0]!;
   return (
-    workspace.projectCustomName ??
-    workspace.projectDisplayName ??
-    projectDisplayNameFromProjectId(workspace.projectId)
+    member.projectCustomName ??
+    member.projectDisplayName ??
+    projectDisplayNameFromProjectId(member.projectId)
   );
 }
 
@@ -164,26 +161,28 @@ export function createSidebarWorkspaceEntry(input: {
   pendingCreateAttempts?: Record<string, PendingCreateAttempt>;
   workspaceAgentActivity?: ReadonlyMap<string, WorkspaceAgentActivity>;
 }): SidebarWorkspaceEntry {
-  const projectViewKey = input.projectViewKey ?? input.workspace.projectId;
+  const member = input.workspace.members.length === 1 ? input.workspace.members[0] : null;
+  const projectViewKey = input.projectViewKey ?? member?.projectId ?? "";
+  const workspaceDirectory = member?.workspaceDirectory ?? "";
   const effectiveStatus = deriveEffectiveWorkspaceStatus(input);
+  const archiveRisk = getWorkspaceArchiveRisk(input.workspace);
   return {
     workspaceKey: `${input.serverId}:${input.workspace.id}`,
     serverId: input.serverId,
     workspaceId: input.workspace.id,
     projectViewKey,
     projectName: projectNameForWorkspace(input.workspace),
-    projectRootPath: input.workspace.projectRootPath,
-    workspaceDirectory: input.workspace.workspaceDirectory,
-    workspaceDirectoryLabel:
-      input.workspace.worktreeSlug ?? shortenPath(input.workspace.workspaceDirectory),
+    projectRootPath: member?.projectRootPath ?? "",
+    workspaceDirectory,
+    workspaceDirectoryLabel: member?.worktreeSlug ?? shortenPath(workspaceDirectory),
     projectCount: input.workspace.members.length,
-    projectKind: input.workspace.projectKind,
-    workspaceKind: input.workspace.workspaceKind,
+    projectKind: member?.projectKind ?? "unknown",
+    workspaceKind: archiveRisk.workspaceKind,
     name: input.workspace.name,
     title: input.workspace.title ?? null,
     pinnedAt: input.workspace.pinnedAt,
     labels: input.workspace.labels ?? EMPTY_WORKSPACE_LABELS,
-    currentBranch: normalizeCurrentBranch(input.workspace.gitRuntime?.currentBranch),
+    currentBranch: normalizeCurrentBranch(member?.branch),
     statusBucket: effectiveStatus.status,
     statusEnteredAt: effectiveStatus.enteredAt,
     archivingAt: input.workspace.archivingAt,
@@ -192,8 +191,8 @@ export function createSidebarWorkspaceEntry(input: {
       input.workspace.githubRuntime?.pullRequest,
       input.workspace.forge,
     ),
-    archiveHasUncommittedChanges: input.workspace.gitRuntime?.isDirty ?? null,
-    archiveUnpushedCommitCount: input.workspace.gitRuntime?.aheadOfOrigin ?? null,
+    archiveHasUncommittedChanges: archiveRisk.isDirty ?? null,
+    archiveUnpushedCommitCount: archiveRisk.aheadOfOrigin ?? null,
     scripts: input.workspace.scripts,
     hasRunningScripts: input.workspace.scripts.some((script) => script.lifecycle === "running"),
   };
@@ -308,10 +307,14 @@ export function buildSidebarWorkspacePlacementModel(input: {
   const projects = buildSidebarProjectsFromHostProjects({ projects: input.projects });
   return {
     projects,
-    workspaces: [
-      ...projects.flatMap((project) => project.workspaces),
-      ...(input.projectlessWorkspaces ?? EMPTY_PLACEMENTS),
-    ],
+    workspaces: Array.from(
+      new Map(
+        [
+          ...projects.flatMap((project) => project.workspaces),
+          ...(input.projectlessWorkspaces ?? EMPTY_PLACEMENTS),
+        ].map((workspace) => [workspace.workspaceKey, workspace]),
+      ).values(),
+    ),
     projectNamesByViewKey: new Map(
       projects.map((project) => [project.viewKey, project.projectName]),
     ),

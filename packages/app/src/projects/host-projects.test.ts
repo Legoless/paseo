@@ -160,5 +160,20 @@ describe("host project lookups", () => {
       projectKey: "remote:github.com/acme/app",
       hosts: [{ serverId: "host-a", projectId: "project-a" }],
     });
+    expect(
+      hostProjectFromWorkspace({ serverId: "host-a", workspace: { ...workspace, members: [] } }),
+    ).toBeNull();
+    expect(
+      hostProjectFromWorkspace({
+        serverId: "host-a",
+        workspace: {
+          ...workspace,
+          members: [
+            ...workspace.members,
+            { ...workspace.members[0]!, projectId: "project-b", workspaceDirectory: "/repo/b" },
+          ],
+        },
+      }),
+    ).toBeNull();
   });
 });

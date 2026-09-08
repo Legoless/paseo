@@ -1,3 +1,4 @@
+import { areEquivalentPaths } from "../utils/path.js";
 import type { Logger } from "pino";
 import type {
   ScriptStatusUpdateMessage,
@@ -219,9 +220,15 @@ export function buildWorkspaceScriptPayloads(
   const projectSlug = options.gitMetadata?.projectSlug ?? deriveProjectSlug(workspaceDirectory);
   const branchName = options.gitMetadata?.currentBranch ?? null;
   const scriptConfigs = getScriptConfigs(options.paseoConfig);
+  const workspaceRuntimeEntries = options.runtimeStore.listForWorkspace(workspaceId);
+  const otherMemberScripts = new Set(
+    workspaceRuntimeEntries
+      .filter((entry) => entry.cwd && !areEquivalentPaths(entry.cwd, workspaceDirectory))
+      .map((entry) => entry.scriptName),
+  );
   const runtimeEntries = new Map(
-    options.runtimeStore
-      .listForWorkspace(workspaceId)
+    workspaceRuntimeEntries
+      .filter((entry) => !otherMemberScripts.has(entry.scriptName))
       .map((entry) => [entry.scriptName, entry] as const),
   );
   const ctx: BuildPayloadContext = {
@@ -237,9 +244,10 @@ export function buildWorkspaceScriptPayloads(
 
   for (const [scriptName, config] of scriptConfigs.entries()) {
     const runtimeEntry = runtimeEntries.get(scriptName) ?? null;
-    const serviceState = isServiceScript(config)
-      ? projectWorkspaceServiceState({ workspaceId, scriptName, ctx })
-      : null;
+    const serviceState =
+      isServiceScript(config) && !otherMemberScripts.has(scriptName)
+        ? projectWorkspaceServiceState({ workspaceId, scriptName, ctx })
+        : null;
     payloads.push(
       buildConfiguredScriptPayload(scriptName, config, runtimeEntry, serviceState, ctx),
     );
@@ -262,11 +270,13 @@ export function buildWorkspaceScriptPayloads(
 function buildScriptStatusUpdateMessage(params: {
   workspaceId: string;
   scripts: WorkspaceScriptPayload[];
+  cwd: string;
 }): ScriptStatusUpdateMessage {
   return {
     type: "script_status_update",
     payload: {
       workspaceId: params.workspaceId,
+      cwd: params.cwd,
       scripts: params.scripts,
     },
   };
@@ -278,7 +288,7 @@ export function createScriptStatusEmitter({
   runtimeStore,
   daemonPort,
   serviceProxyPublicBaseUrl,
-  resolveWorkspaceDirectory,
+  resolveWorkspaceDirectories,
   logger,
 }: {
   sessions: () => SessionEmitter[];
@@ -286,40 +296,40 @@ export function createScriptStatusEmitter({
   runtimeStore: WorkspaceScriptRuntimeStore;
   daemonPort: number | null | (() => number | null);
   serviceProxyPublicBaseUrl?: string | null;
-  resolveWorkspaceDirectory: (workspaceId: string) => string | null | Promise<string | null>;
+  resolveWorkspaceDirectories: (workspaceId: string) => string[] | Promise<string[]>;
   logger: Logger;
 }): (workspaceId: string, scripts: ScriptHealthEntry[]) => void {
   return (workspaceId, scripts) => {
     void (async () => {
-      const workspaceDirectory = await resolveWorkspaceDirectory(workspaceId);
-      if (!workspaceDirectory) {
-        return;
-      }
+      const workspaceDirectories = await resolveWorkspaceDirectories(workspaceId);
 
       const resolvedDaemonPort = resolveDaemonPort(daemonPort);
       const scriptHealthByHostname = new Map(
         scripts.map((script) => [script.hostname, script.health] as const),
       );
 
-      const projected = buildWorkspaceScriptPayloads({
-        workspaceId,
-        workspaceDirectory,
-        paseoConfig: readPaseoConfigForProjection(workspaceDirectory, logger),
-        serviceProxy,
-        runtimeStore,
-        daemonPort: resolvedDaemonPort,
-        serviceProxyPublicBaseUrl,
-        resolveHealth: (hostname) => scriptHealthByHostname.get(hostname) ?? null,
-      });
+      for (const workspaceDirectory of workspaceDirectories) {
+        const projected = buildWorkspaceScriptPayloads({
+          workspaceId,
+          workspaceDirectory,
+          paseoConfig: readPaseoConfigForProjection(workspaceDirectory, logger),
+          serviceProxy,
+          runtimeStore,
+          daemonPort: resolvedDaemonPort,
+          serviceProxyPublicBaseUrl,
+          resolveHealth: (hostname) => scriptHealthByHostname.get(hostname) ?? null,
+        });
 
-      const message = buildScriptStatusUpdateMessage({
-        workspaceId,
-        scripts: projected,
-      });
+        const message = buildScriptStatusUpdateMessage({
+          workspaceId,
+          cwd: workspaceDirectory,
+          scripts: projected.map((script) => Object.assign(script, { cwd: workspaceDirectory })),
+        });
 
-      for (const session of sessions()) {
-        session.emit(message);
+        for (const session of sessions()) {
+          session.emit(message);
+        }
       }
-    })();
+    })().catch((err) => logger.warn({ err, workspaceId }, "Failed to emit script health update"));
   };
 }

@@ -6,6 +6,7 @@ import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspac
 import type { WorkspaceDescriptor } from "@/stores/session-store";
 import { redirectIfArchivingActiveWorkspace } from "@/utils/sidebar-workspace-archive-redirect";
 import { useWorkspaceArchive } from "@/workspace/use-workspace-archive";
+import { getWorkspaceArchiveRisk } from "@/git/worktree-archive-warning";
 
 const EMPTY_LABELS: readonly string[] = [];
 
@@ -48,11 +49,8 @@ export function useWorkspaceHeaderActions(input: {
   const archiveController = useWorkspaceArchive({
     serverId,
     workspaceId,
-    workspaceKind: workspace?.workspaceKind ?? "local_checkout",
+    ...getWorkspaceArchiveRisk(workspace),
     name: workspace?.name ?? "",
-    isDirty: workspace?.gitRuntime?.isDirty ?? null,
-    aheadOfOrigin: workspace?.gitRuntime?.aheadOfOrigin ?? null,
-    diffStat: workspace?.diffStat ?? null,
     onArchiveStarted,
     onSetHiding: setIsHiding,
   });

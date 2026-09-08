@@ -52,6 +52,36 @@ function workspace(id: string, projectId: string, root: string): WorkspaceDescri
 }
 
 describe("buildProjects", () => {
+  test("lists a shared workspace under every member project using each project's own root", () => {
+    const shared = workspace("shared", "placeholder", "/daemon-home");
+    shared.members = [
+      ...workspace("a", "project-a", "/a").members,
+      ...workspace("b", "project-b", "/b").members,
+    ];
+    const result = buildProjects({
+      hosts: [
+        {
+          serverId: "host",
+          serverName: "Host",
+          isOnline: true,
+          projects: [descriptor("project-a", "a", "/a"), descriptor("project-b", "b", "/b")],
+          workspaces: [shared],
+        },
+      ],
+    });
+    expect(
+      result.projects.map((entry) => ({
+        projectId: entry.hosts[0]!.projectId,
+        repoRoot: entry.hosts[0]!.repoRoot,
+        workspaceCount: entry.hosts[0]!.workspaces.length,
+        workspaceId: entry.hosts[0]!.workspaces[0]?.id,
+      })),
+    ).toEqual([
+      { projectId: "project-a", repoRoot: "/a", workspaceCount: 1, workspaceId: "shared" },
+      { projectId: "project-b", repoRoot: "/b", workspaceCount: 1, workspaceId: "shared" },
+    ]);
+  });
+
   test("uses the grouped project list while retaining each host project id", () => {
     const key = "remote:github.com/acme/app";
     const result = buildProjects({

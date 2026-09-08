@@ -8,7 +8,11 @@ import { createTestLogger } from "../test-utils/test-logger.js";
 import { AgentStorage } from "./agent/agent-storage.js";
 import { createNoopWorkspaceGitService } from "./test-utils/workspace-git-service-stub.js";
 import type { WorkspaceGitService } from "./workspace-git-service.js";
-import { FileBackedProjectRegistry, FileBackedWorkspaceRegistry } from "./workspace-registry.js";
+import {
+  createPersistedWorkspaceRecord,
+  FileBackedProjectRegistry,
+  FileBackedWorkspaceRegistry,
+} from "./workspace-registry.js";
 import { bootstrapWorkspaceRegistries } from "./workspace-registry-bootstrap.js";
 import { deriveProjectKey } from "./project-key.js";
 
@@ -236,7 +240,7 @@ describe("bootstrapWorkspaceRegistries", () => {
     const workspaces = await workspaceRegistry.list();
     expect(workspaces).toHaveLength(1);
     expect(workspaces[0]?.workspaceId).toMatch(/^wks_[0-9a-f]{16}$/);
-    expect(workspaces[0]?.cwd).toBe(NON_GIT_PROJECT);
+    expect(workspaces[0]?.members[0]?.cwd).toBe(NON_GIT_PROJECT);
     expect(workspaces[0]?.createdAt).toBe("2026-03-01T00:00:00.000Z");
     expect(workspaces[0]?.updatedAt).toBe("2026-03-03T00:00:00.000Z");
 
@@ -269,13 +273,23 @@ describe("bootstrapWorkspaceRegistries", () => {
     });
     await workspaceRegistry.upsert({
       workspaceId: "ws-existing",
-      projectId: "proj-existing",
-      cwd: "/tmp/existing",
-      kind: "directory",
       displayName: "existing",
       createdAt: "2026-03-01T00:00:00.000Z",
       updatedAt: "2026-03-01T00:00:00.000Z",
       archivedAt: null,
+      members: [
+        {
+          projectId: "proj-existing",
+          cwd: "/tmp/existing",
+          kind: "directory",
+          displayName: "existing",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
 
     await agentStorage.initialize();
@@ -369,6 +383,7 @@ describe("bootstrapWorkspaceRegistries", () => {
     const workspaces = await workspaceRegistry.list();
     expect(
       workspaces
+        .flatMap((workspace) => workspace.members)
         .map(({ projectId, cwd, kind, displayName }) => ({ projectId, cwd, kind, displayName }))
         .sort((left, right) => left.cwd.localeCompare(right.cwd)),
     ).toEqual([
@@ -401,23 +416,43 @@ describe("bootstrapWorkspaceRegistries", () => {
     });
     await workspaceRegistry.upsert({
       workspaceId: "ws-newer",
-      projectId: NON_GIT_PROJECT,
-      cwd: NON_GIT_PROJECT,
-      kind: "directory",
       displayName: "newer",
       createdAt: "2026-03-02T00:00:00.000Z",
       updatedAt: "2026-03-02T00:00:00.000Z",
       archivedAt: null,
+      members: [
+        {
+          projectId: NON_GIT_PROJECT,
+          cwd: NON_GIT_PROJECT,
+          kind: "directory",
+          displayName: "newer",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
     await workspaceRegistry.upsert({
       workspaceId: "ws-older",
-      projectId: NON_GIT_PROJECT,
-      cwd: NON_GIT_PROJECT,
-      kind: "directory",
       displayName: "older",
       createdAt: "2026-03-01T00:00:00.000Z",
       updatedAt: "2026-03-01T00:00:00.000Z",
       archivedAt: null,
+      members: [
+        {
+          projectId: NON_GIT_PROJECT,
+          cwd: NON_GIT_PROJECT,
+          kind: "directory",
+          displayName: "older",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
 
     await agentStorage.initialize();
@@ -466,13 +501,23 @@ describe("bootstrapWorkspaceRegistries", () => {
     });
     await workspaceRegistry.upsert({
       workspaceId: "ws-original-owner",
-      projectId: NON_GIT_PROJECT,
-      cwd: NON_GIT_PROJECT,
-      kind: "directory",
       displayName: "original",
       createdAt: "2026-03-01T00:00:00.000Z",
       updatedAt: "2026-03-01T00:00:00.000Z",
       archivedAt: null,
+      members: [
+        {
+          projectId: NON_GIT_PROJECT,
+          cwd: NON_GIT_PROJECT,
+          kind: "directory",
+          displayName: "original",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
 
     await agentStorage.initialize();
@@ -504,13 +549,23 @@ describe("bootstrapWorkspaceRegistries", () => {
     });
     await workspaceRegistry.upsert({
       workspaceId: "ws-created-later",
-      projectId: NON_GIT_PROJECT,
-      cwd: NON_GIT_PROJECT,
-      kind: "directory",
       displayName: "created later",
       createdAt: "2026-03-04T00:00:00.000Z",
       updatedAt: "2026-03-04T00:00:00.000Z",
       archivedAt: null,
+      members: [
+        {
+          projectId: NON_GIT_PROJECT,
+          cwd: NON_GIT_PROJECT,
+          kind: "directory",
+          displayName: "created later",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
     await bootstrapWorkspaceRegistries({
       paseoHome,
@@ -522,22 +577,34 @@ describe("bootstrapWorkspaceRegistries", () => {
     });
 
     expect((await agentStorage.get("legacy-agent"))?.workspaceId).toBe("ws-original-owner");
-    expect(await workspaceRegistry.get("ws-created-later")).toMatchObject({
-      cwd: NON_GIT_PROJECT,
-    });
+    expect((await workspaceRegistry.get("ws-created-later"))?.members).toMatchObject([
+      {
+        cwd: NON_GIT_PROJECT,
+      },
+    ]);
   });
 
   test("preserves existing workspace IDs when only the projects file is missing", async () => {
     await workspaceRegistry.initialize();
     await workspaceRegistry.upsert({
       workspaceId: "ws-existing",
-      projectId: NON_GIT_PROJECT,
-      cwd: NON_GIT_PROJECT,
-      kind: "directory",
       displayName: "non-git-project",
       createdAt: "2026-03-01T00:00:00.000Z",
       updatedAt: "2026-03-01T00:00:00.000Z",
       archivedAt: null,
+      members: [
+        {
+          projectId: NON_GIT_PROJECT,
+          cwd: NON_GIT_PROJECT,
+          kind: "directory",
+          displayName: "non-git-project",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
 
     await agentStorage.initialize();
@@ -571,10 +638,67 @@ describe("bootstrapWorkspaceRegistries", () => {
     const workspaces = await workspaceRegistry.list();
     expect(workspaces).toHaveLength(1);
     expect(workspaces[0]?.workspaceId).toBe("ws-existing");
-    expect(workspaces[0]?.cwd).toBe(NON_GIT_PROJECT);
+    expect(workspaces[0]?.members[0]?.cwd).toBe(NON_GIT_PROJECT);
 
     const projects = await projectRegistry.list();
     expect(projects).toHaveLength(1);
     expect(projects[0]?.projectId).toBe(NON_GIT_PROJECT);
+  });
+  test("rebuilding projects preserves a container and its secondary member ownership", async () => {
+    const timestamp = "2026-03-01T00:00:00.000Z";
+    const members = [NON_GIT_PROJECT, GIT_PROJECT].map((cwd, index) => ({
+      projectId: `prj-existing-${index}`,
+      cwd,
+      kind: "directory" as const,
+      displayName: `Member ${index}`,
+      branch: null,
+      worktreeRoot: null,
+      baseBranch: null,
+      isPaseoOwnedWorktree: false,
+      mainRepoRoot: null,
+    }));
+    const workspace = createPersistedWorkspaceRecord({
+      workspaceId: "container",
+      displayName: "Keep the container",
+      title: "Pinned",
+      members,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    await workspaceRegistry.upsert(workspace);
+    for (const [index, member] of members.entries()) {
+      await agentStorage.upsert({
+        id: `legacy-${index}`,
+        provider: "codex",
+        cwd: member.cwd,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        lastActivityAt: timestamp,
+        lastUserMessageAt: null,
+        title: null,
+        labels: {},
+        lastStatus: "idle",
+        lastModeId: null,
+        config: null,
+        runtimeInfo: { provider: "codex", sessionId: null },
+        persistence: null,
+        archivedAt: null,
+      });
+    }
+    await bootstrapWorkspaceRegistries({
+      paseoHome,
+      agentStorage,
+      projectRegistry,
+      workspaceRegistry,
+      workspaceGitService,
+      logger,
+    });
+    expect(await workspaceRegistry.list()).toEqual([workspace]);
+    expect((await projectRegistry.list()).map((project) => project.projectId).sort()).toEqual([
+      "prj-existing-0",
+      "prj-existing-1",
+    ]);
+    expect((await agentStorage.get("legacy-0"))?.workspaceId).toBe(workspace.workspaceId);
+    expect((await agentStorage.get("legacy-1"))?.workspaceId).toBe(workspace.workspaceId);
   });
 });

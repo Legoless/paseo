@@ -544,8 +544,8 @@ describe("script-status-projection", () => {
       serviceProxy: routeStore,
       runtimeStore,
       daemonPort: 6767,
-      resolveWorkspaceDirectory: async (requestedWorkspaceId) =>
-        requestedWorkspaceId === "workspace-emitter" ? workspace.repoDir : null,
+      resolveWorkspaceDirectories: async (requestedWorkspaceId) =>
+        requestedWorkspaceId === "workspace-emitter" ? [workspace.repoDir] : [],
       logger: createTestLogger(),
     });
 
@@ -564,8 +564,10 @@ describe("script-status-projection", () => {
         type: "script_status_update",
         payload: {
           workspaceId,
+          cwd: workspace.repoDir,
           scripts: [
             {
+              cwd: workspace.repoDir,
               scriptName: "api",
               type: "service",
               hostname: "api--repo.localhost",
@@ -579,6 +581,7 @@ describe("script-status-projection", () => {
               terminalId: "term-api",
             },
             {
+              cwd: workspace.repoDir,
               scriptName: "typecheck",
               type: "script",
               hostname: "typecheck",
@@ -596,4 +599,83 @@ describe("script-status-projection", () => {
       workspace.cleanup();
     }
   });
+});
+
+it("emits separate health projections for every container member directory", async () => {
+  const first = createWorkspaceRepo({
+    paseoConfig: { scripts: { first: { command: "echo first" } } },
+  });
+  const second = createWorkspaceRepo({
+    paseoConfig: { scripts: { second: { command: "echo second" } } },
+  });
+  const session = { emit: vi.fn() };
+  try {
+    const emitUpdate = createScriptStatusEmitter({
+      sessions: () => [session],
+      serviceProxy: new ScriptRouteStore(),
+      runtimeStore: new WorkspaceScriptRuntimeStore(),
+      daemonPort: 6767,
+      resolveWorkspaceDirectories: async () => [first.repoDir, second.repoDir],
+      logger: createTestLogger(),
+    });
+    emitUpdate("container", []);
+    await Promise.resolve();
+    expect(session.emit.mock.calls.map(([message]) => message.payload.cwd)).toEqual([
+      first.repoDir,
+      second.repoDir,
+    ]);
+    expect(
+      session.emit.mock.calls.map(([message]) =>
+        message.payload.scripts.map((script: { scriptName: string }) => script.scriptName),
+      ),
+    ).toEqual([["first"], ["second"]]);
+  } finally {
+    first.cleanup();
+    second.cleanup();
+  }
+});
+
+it("does not project another member's running scripts or service route", () => {
+  const workspace = createWorkspaceRepo({
+    paseoConfig: { scripts: { shared: { type: "service", command: "echo shared", port: 4000 } } },
+  });
+  try {
+    const runtimeStore = new WorkspaceScriptRuntimeStore();
+    for (const scriptName of ["shared", "orphan"])
+      runtimeStore.set({
+        workspaceId: "container",
+        cwd: "/other-member",
+        scriptName,
+        type: "service",
+        lifecycle: "running",
+        terminalId: `term-${scriptName}`,
+        exitCode: null,
+      });
+    const routeStore = new ScriptRouteStore();
+    routeStore.registerRoute({
+      hostname: "shared--other.localhost",
+      port: 3000,
+      workspaceId: "container",
+      projectSlug: "other",
+      scriptName: "shared",
+    });
+    const scripts = buildWorkspaceScriptPayloads({
+      workspaceId: "container",
+      workspaceDirectory: workspace.repoDir,
+      paseoConfig: { scripts: { shared: { type: "service", command: "echo shared", port: 4000 } } },
+      serviceProxy: routeStore,
+      runtimeStore,
+      daemonPort: 6767,
+    });
+    expect(scripts).toHaveLength(1);
+    expect(scripts[0]).toMatchObject({
+      scriptName: "shared",
+      lifecycle: "stopped",
+      terminalId: null,
+      port: 4000,
+    });
+    expect(scripts[0]?.hostname).not.toBe("shared--other.localhost");
+  } finally {
+    workspace.cleanup();
+  }
 });

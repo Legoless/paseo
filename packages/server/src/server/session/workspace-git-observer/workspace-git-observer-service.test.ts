@@ -33,14 +33,19 @@ function makeDescriptor(overrides: {
   return {
     id: overrides.id,
     workspaceDirectory: overrides.workspaceDirectory,
-    ...(overrides.members
-      ? {
-          members: overrides.members.map((member) => ({
-            workspaceDirectory: member.workspaceDirectory,
-            workspaceKind: member.workspaceKind ?? "local_checkout",
-          })),
-        }
-      : {}),
+    members: (
+      overrides.members ?? [
+        {
+          workspaceDirectory: overrides.workspaceDirectory,
+          workspaceKind: overrides.workspaceKind ?? "local_checkout",
+        },
+      ]
+    ).map((member) => ({
+      workspaceDirectory: member.workspaceDirectory,
+      workspaceKind: member.workspaceKind ?? "local_checkout",
+      branch: overrides.currentBranch,
+      diffStat: overrides.diffStat ?? null,
+    })),
     projectKind: overrides.projectKind ?? "git",
     workspaceKind: overrides.workspaceKind ?? "local_checkout",
     name: overrides.name ?? null,
@@ -292,8 +297,8 @@ describe("multi-project members", () => {
       cwd: "/repo/openvehicle",
       branch: "feature/thing",
     });
-    // The workspace's branch comes from its primary checkout only.
-    expect(harness.branchChanges).toEqual([]);
+    // Each member reports its own branch changes.
+    expect(harness.branchChanges).toEqual([["ws-1", "main", "feature/thing"]]);
   });
 
   test("drops member watches when the workspace goes away", () => {

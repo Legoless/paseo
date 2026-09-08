@@ -1,5 +1,6 @@
 export interface ScriptRuntimeEntry {
   workspaceId: string;
+  cwd?: string;
   scriptName: string;
   type: "script" | "service";
   lifecycle: "running" | "stopped";

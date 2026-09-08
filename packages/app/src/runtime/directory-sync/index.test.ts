@@ -274,7 +274,7 @@ describe("DirectorySync session readiness", () => {
       },
       {
         readAgent: async () => cachedAgent,
-        readWorkspace: async () => ({ workspace: cachedWorkspace }),
+        readWorkspace: async () => ({ workspace: cachedWorkspace, projects: [] }),
         readDirectory: async () => ({
           agents: new Map(),
           workspaces: new Map(),

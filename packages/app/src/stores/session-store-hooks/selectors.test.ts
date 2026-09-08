@@ -294,6 +294,19 @@ describe("selectWorkspace", () => {
 });
 
 describe("selectWorkspaceDirectory", () => {
+  it("does not select a compatibility directory for empty or multi-project workspaces", () => {
+    const empty = createWorkspace({ id: "empty", workspaceDirectory: "/daemon-home" });
+    empty.members = [];
+    const multiple = createWorkspace({ id: "multiple", workspaceDirectory: "/legacy-root" });
+    multiple.members = [
+      ...createWorkspace({ id: "a", workspaceDirectory: "/a" }).members,
+      ...createWorkspace({ id: "b", workspaceDirectory: "/b" }).members,
+    ];
+    initializeWorkspaces([empty, multiple]);
+    expect(selectWorkspaceDirectory(useSessionStore.getState(), SERVER_ID, empty.id)).toBeNull();
+    expect(selectWorkspaceDirectory(useSessionStore.getState(), SERVER_ID, multiple.id)).toBeNull();
+  });
+
   it("returns the workspace directory, never the opaque workspace id", () => {
     const workspace = createWorkspace({
       id: "wks_3f9a2b1c",
@@ -555,9 +568,14 @@ describe("selectRecommendedProjectPaths", () => {
     const workspace = createWorkspace({ id: "workspace-a", projectRootPath: "/repo/a" });
     initializeWorkspaces([workspace]);
 
-    useSessionStore
-      .getState()
-      .mergeWorkspaces(SERVER_ID, [{ ...workspace, projectRootPath: "/repo/b" }]);
+    useSessionStore.getState().mergeWorkspaces(SERVER_ID, [
+      {
+        ...workspace,
+        members: workspace.members.map((member) =>
+          Object.assign({}, member, { projectRootPath: "/repo/b" }),
+        ),
+      },
+    ]);
 
     expect(selectRecommendedProjectPaths(useSessionStore.getState(), SERVER_ID)).toEqual([
       "/repo/b",

@@ -1,3 +1,4 @@
+import { areEquivalentPaths } from "../../../utils/path.js";
 import { z } from "zod";
 import { ensureValidJson } from "../../json-utils.js";
 import type { Logger } from "pino";
@@ -176,20 +177,26 @@ interface ProviderSummary {
 
 const WorkspaceAutomationSummarySchema = z.object({
   workspaceId: z.string(),
-  projectId: z.string(),
-  cwd: z.string(),
-  isolation: z.enum(["local", "worktree"]),
-  kind: z.enum(["directory", "local_checkout", "worktree"]),
+  members: z.array(
+    z.object({
+      projectId: z.string(),
+      cwd: z.string(),
+      isolation: z.enum(["local", "worktree"]),
+      kind: z.enum(["directory", "local_checkout", "worktree"]),
+    }),
+  ),
   title: z.string().nullable(),
 });
 
 function toWorkspaceAutomationSummary(workspace: PersistedWorkspaceRecord) {
   return {
     workspaceId: workspace.workspaceId,
-    projectId: workspace.projectId,
-    cwd: workspace.cwd,
-    isolation: workspace.kind === "worktree" ? ("worktree" as const) : ("local" as const),
-    kind: workspace.kind,
+    members: workspace.members.map((member) => ({
+      projectId: member.projectId,
+      cwd: member.cwd,
+      isolation: member.kind === "worktree" ? ("worktree" as const) : ("local" as const),
+      kind: member.kind,
+    })),
     title: workspace.title,
   };
 }
@@ -667,6 +674,24 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
 
     return expandUserPath(trimmedCwd);
   };
+
+  function resolveWorkspaceScriptCwd(requestedCwd?: string): string | undefined {
+    const lockedCwd = callerContext?.lockedCwd?.trim();
+    const caller = resolveCallerAgent();
+    if (!requestedCwd && !caller && !lockedCwd) return undefined;
+    const cwd = resolveScopedCwd(requestedCwd ?? lockedCwd, { required: true });
+    if (requestedCwd) {
+      const requested = caller
+        ? resolvePathFromBase(caller.cwd, requestedCwd)
+        : expandUserPath(requestedCwd);
+      if (!areEquivalentPaths(cwd, requested))
+        throw new Error("Workspace script directory is outside the allowed cwd");
+    }
+    if (lockedCwd && !isSameOrDescendantPath(expandUserPath(lockedCwd), cwd)) {
+      throw new Error("Workspace script directory is outside the allowed cwd");
+    }
+    return cwd;
+  }
 
   async function resolveTerminalWorkspaceId(resolvedCwd: string): Promise<string> {
     // An agent-spawned terminal belongs to the caller agent's workspace. Only if
@@ -1220,7 +1245,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
           .string()
           .optional()
           .describe("Local directory or source checkout. Defaults to your current workspace."),
-        projectId: z.string().optional().describe("Existing project id to own the workspace."),
+        projectId: z.string().optional().describe("Existing project to add to the workspace."),
         title: z.string().trim().min(1).optional(),
         mode: z
           .enum(["branch-off", "checkout-branch", "checkout-pr"])
@@ -1799,9 +1824,10 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       if (!existingWorkspace) {
         throw new Error(`Workspace ${workspace.workspaceId} not found`);
       }
-      const cwd = workspace.cwd
-        ? resolveScopedCwd(workspace.cwd, { required: true })
-        : existingWorkspace.cwd;
+      let cwd: string;
+      if (workspace.cwd) cwd = resolveScopedCwd(workspace.cwd, { required: true });
+      else if (existingWorkspace.members.length === 1) cwd = existingWorkspace.members[0]!.cwd;
+      else cwd = resolveScopedCwd(undefined, { required: true });
       const lockedCwd = callerContext?.lockedCwd?.trim();
       if (lockedCwd && !isSameOrDescendantPath(expandUserPath(lockedCwd), cwd)) {
         throw new Error(`Workspace ${workspace.workspaceId} is outside the allowed cwd`);
@@ -2241,19 +2267,27 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       description:
         "List configured workspace scripts and their lifecycle, service port, proxy URL, health, and terminal ID.",
       inputSchema: {
+        cwd: z
+          .string()
+          .optional()
+          .describe(
+            "Project directory within the workspace. Defaults to your agent directory; required for multiple projects.",
+          ),
         workspaceId: z.string().describe("Workspace ID whose configured scripts to list."),
       },
       outputSchema: {
         scripts: z.array(WorkspaceScriptPayloadSchema),
       },
     },
-    async ({ workspaceId }) => {
+    async ({ workspaceId, cwd }) => {
       if (!workspaceScripts) {
         throw new Error("Workspace script management is not configured");
       }
       return {
         content: [],
-        structuredContent: ensureValidJson({ scripts: await workspaceScripts.list(workspaceId) }),
+        structuredContent: ensureValidJson({
+          scripts: await workspaceScripts.list(workspaceId, resolveWorkspaceScriptCwd(cwd)),
+        }),
       };
     },
   );
@@ -2265,6 +2299,12 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       description:
         "Start one configured workspace script through Paseo's managed workspace-script launcher.",
       inputSchema: {
+        cwd: z
+          .string()
+          .optional()
+          .describe(
+            "Project directory within the workspace. Defaults to your agent directory; required for multiple projects.",
+          ),
         workspaceId: z.string().describe("Workspace ID containing the configured script."),
         scriptName: z.string().min(1).describe("Configured paseo.json script name to start."),
       },
@@ -2272,14 +2312,18 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         script: WorkspaceScriptPayloadSchema,
       },
     },
-    async ({ workspaceId, scriptName }) => {
+    async ({ workspaceId, scriptName, cwd }) => {
       if (!workspaceScripts) {
         throw new Error("Workspace script management is not configured");
       }
       return {
         content: [],
         structuredContent: ensureValidJson({
-          script: await workspaceScripts.launch({ workspaceId, scriptName }),
+          script: await workspaceScripts.launch({
+            workspaceId,
+            scriptName,
+            cwd: resolveWorkspaceScriptCwd(cwd),
+          }),
         }),
       };
     },
@@ -2291,6 +2335,12 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       title: "Stop workspace script",
       description: "Stop a running workspace script through its supervised terminal lifecycle.",
       inputSchema: {
+        cwd: z
+          .string()
+          .optional()
+          .describe(
+            "Project directory within the workspace. Defaults to your agent directory; required for multiple projects.",
+          ),
         workspaceId: z.string().describe("Workspace ID containing the running script."),
         scriptName: z.string().min(1).describe("Configured paseo.json script name to stop."),
       },
@@ -2298,14 +2348,18 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         script: WorkspaceScriptPayloadSchema,
       },
     },
-    async ({ workspaceId, scriptName }) => {
+    async ({ workspaceId, scriptName, cwd }) => {
       if (!workspaceScripts) {
         throw new Error("Workspace script management is not configured");
       }
       return {
         content: [],
         structuredContent: ensureValidJson({
-          script: await workspaceScripts.stop({ workspaceId, scriptName }),
+          script: await workspaceScripts.stop({
+            workspaceId,
+            scriptName,
+            cwd: resolveWorkspaceScriptCwd(cwd),
+          }),
         }),
       };
     },

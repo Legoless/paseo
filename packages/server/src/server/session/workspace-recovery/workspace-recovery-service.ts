@@ -13,6 +13,7 @@ import {
   resolveWorkspaceDisplayName,
   type PersistedProjectRecord,
   type PersistedWorkspaceRecord,
+  type PersistedWorkspaceMember,
 } from "../../workspace-registry.js";
 
 export type WorkspaceRecoveryAction = "unarchive" | "restore";
@@ -43,18 +44,12 @@ export interface WorkspaceRecoveryService {
   restore(workspaceId: string): Promise<{ workspaceId: string; action: WorkspaceRecoveryAction }>;
 }
 
-type RecoveryPlan =
-  | {
-      kind: "unarchive";
-      state: Extract<WorkspaceRecoveryState, { kind: "recoverable" }>;
-      workspace: PersistedWorkspaceRecord;
-    }
-  | {
-      kind: "restore";
-      state: Extract<WorkspaceRecoveryState, { kind: "recoverable" }>;
-      workspace: PersistedWorkspaceRecord;
-      sourceRepoRoot: string;
-    };
+interface RecoveryPlan {
+  kind: WorkspaceRecoveryAction;
+  state: Extract<WorkspaceRecoveryState, { kind: "recoverable" }>;
+  workspace: PersistedWorkspaceRecord;
+  restores: Array<{ member: PersistedWorkspaceMember; sourceRepoRoot: string }>;
+}
 
 type UnavailableRecoveryState = Extract<WorkspaceRecoveryState, { kind: "unavailable" }>;
 
@@ -87,50 +82,58 @@ export function createWorkspaceRecoveryService(deps: {
       };
     }
 
-    const project = await deps.getProject(workspace.projectId);
-    if (!project) {
-      return {
-        kind: "unavailable",
+    const restores: RecoveryPlan["restores"] = [];
+    for (const member of workspace.members) {
+      if (await deps.isDirectory(member.cwd)) continue;
+      if (member.kind !== "worktree") {
+        return {
+          kind: "unavailable",
+          workspaceId,
+          reason: "workspace_directory_missing",
+          message: `The project directory ${member.cwd} no longer exists and cannot be recreated.`,
+        };
+      }
+      if (!member.branch) {
+        return {
+          kind: "unavailable",
+          workspaceId,
+          reason: "worktree_branch_missing",
+          message: "The archived worktree has no branch recorded, so it cannot be restored.",
+        };
+      }
+      const project = await deps.getProject(member.projectId);
+      if (!project) {
+        return {
+          kind: "unavailable",
+          workspaceId,
+          reason: "project_not_found",
+          message: "The project for this archived worktree no longer exists.",
+        };
+      }
+      const sourceRepoRoot = member.mainRepoRoot ?? project.rootPath;
+      if (!(await deps.isDirectory(sourceRepoRoot))) {
+        return {
+          kind: "unavailable",
+          workspaceId,
+          reason: "project_directory_missing",
+          message: "The source repository needed to restore this worktree no longer exists.",
+        };
+      }
+      restores.push({ member, sourceRepoRoot });
+    }
+    const action = restores.length > 0 ? "restore" : "unarchive";
+    return {
+      kind: action,
+      workspace,
+      restores,
+      state: {
+        kind: "recoverable",
         workspaceId,
-        reason: "project_not_found",
-        message: "The project for this archived workspace no longer exists.",
-      };
-    }
-
-    if (await deps.isDirectory(workspace.cwd)) {
-      return createRecoveryPlan({ action: "unarchive", workspace });
-    }
-
-    if (workspace.kind !== "worktree") {
-      return {
-        kind: "unavailable",
-        workspaceId,
-        reason: "workspace_directory_missing",
-        message: "The archived workspace directory no longer exists and cannot be recreated.",
-      };
-    }
-    if (!workspace.branch) {
-      return {
-        kind: "unavailable",
-        workspaceId,
-        reason: "worktree_branch_missing",
-        message: "The archived worktree has no branch recorded, so it cannot be restored.",
-      };
-    }
-
-    // COMPAT(worktreeRestoreMissingMainRepoRoot): records created before v0.1.110
-    // lack placement ownership; remove the project-root fallback after 2027-01-17.
-    const sourceRepoRoot = workspace.mainRepoRoot ?? project.rootPath;
-    if (!(await deps.isDirectory(sourceRepoRoot))) {
-      return {
-        kind: "unavailable",
-        workspaceId,
-        reason: "project_directory_missing",
-        message: "The source repository needed to restore this worktree no longer exists.",
-      };
-    }
-
-    return createRecoveryPlan({ action: "restore", workspace, sourceRepoRoot });
+        workspaceName: resolveWorkspaceDisplayName(workspace),
+        action,
+        branch: workspace.members.length === 1 ? workspace.members[0]!.branch : null,
+      },
+    };
   }
 
   async function inspect(workspaceId: string): Promise<WorkspaceRecoveryState> {
@@ -146,22 +149,24 @@ export function createWorkspaceRecoveryService(deps: {
       throw new Error(resolved.message);
     }
 
-    if (resolved.kind === "restore") {
-      await recreateArchivedWorktree(resolved.workspace, resolved.sourceRepoRoot);
+    for (const { member, sourceRepoRoot } of resolved.restores) {
+      // Another member may share the worktree restored by the previous entry.
+      if (!(await deps.isDirectory(member.cwd)))
+        await recreateArchivedWorktree(member, sourceRepoRoot);
     }
     await deps.unarchiveWorkspace(resolved.workspace);
     return { workspaceId, action: resolved.kind };
   }
 
   async function recreateArchivedWorktree(
-    workspace: PersistedWorkspaceRecord,
+    workspace: PersistedWorkspaceMember,
     sourceRepoRoot: string,
   ): Promise<void> {
     const branch = workspace.branch;
     if (!branch) {
       throw new WorktreeRequestError({
         code: "unknown",
-        message: `Workspace ${workspace.workspaceId} has no branch to restore`,
+        message: `Worktree ${workspace.cwd} has no branch to restore`,
       });
     }
 
@@ -232,33 +237,4 @@ export function createWorkspaceRecoveryService(deps: {
   }
 
   return { inspect, restore };
-}
-
-function createRecoveryPlan(
-  input:
-    | { action: "unarchive"; workspace: PersistedWorkspaceRecord }
-    | { action: "restore"; workspace: PersistedWorkspaceRecord; sourceRepoRoot: string },
-): RecoveryPlan {
-  const state = {
-    kind: "recoverable" as const,
-    workspaceId: input.workspace.workspaceId,
-    workspaceName: resolveWorkspaceDisplayName(input.workspace),
-    branch: input.workspace.branch,
-  };
-  if (input.action === "restore") {
-    return {
-      kind: input.action,
-      state: { ...state, action: input.action },
-      workspace: input.workspace,
-      sourceRepoRoot: input.sourceRepoRoot,
-    };
-  }
-  return {
-    kind: input.action,
-    state: {
-      ...state,
-      action: input.action,
-    },
-    workspace: input.workspace,
-  };
 }

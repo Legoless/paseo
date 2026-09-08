@@ -6,6 +6,7 @@ import type {
   WorkspaceRegistry,
   PersistedProjectRecord,
   PersistedWorkspaceRecord,
+  PersistedWorkspaceMember,
 } from "./workspace-registry.js";
 import type { WorkspaceGitService } from "./workspace-git-service.js";
 import { areEquivalentPaths } from "../utils/path.js";
@@ -99,7 +100,7 @@ export interface WorkspaceReconciliationServiceOptions {
 
 interface ProjectReconciliationInput {
   project: PersistedProjectRecord;
-  siblings: PersistedWorkspaceRecord[];
+  siblings: Array<{ workspace: PersistedWorkspaceRecord; member: PersistedWorkspaceMember }>;
   currentGit: ProjectCheckoutLitePayload;
   readCheckout: (cwd: string) => Promise<ProjectCheckoutLitePayload>;
   changes: ReconciliationChange[];
@@ -120,7 +121,6 @@ export class WorkspaceReconciliationService {
   private readonly onChanges: ((changes: ReconciliationChange[]) => void) | null;
   private readonly workspaceGitService: Pick<WorkspaceGitService, "getCheckout"> | null;
   private readonly onProjectUpdate: ((update: ProjectUpdate) => void) | null;
-  private readonly onWorkspaceArchived: ((workspaceId: string) => void | Promise<void>) | null;
   private readonly onWorkspacesChanged: ((workspaceIds: string[]) => Promise<void>) | null;
   private readonly watchProjectRoot: ProjectRootWatch;
   private readonly clock: ReconciliationClock;
@@ -143,7 +143,6 @@ export class WorkspaceReconciliationService {
     this.onChanges = options.onChanges ?? null;
     this.workspaceGitService = options.workspaceGitService ?? null;
     this.onProjectUpdate = options.onProjectUpdate ?? null;
-    this.onWorkspaceArchived = options.onWorkspaceArchived ?? null;
     this.onWorkspacesChanged = options.onWorkspacesChanged ?? null;
     this.watchProjectRoot = options.watchProjectRoot ?? watchProjectRoot;
     this.clock = options.clock ?? systemClock;
@@ -196,12 +195,18 @@ export class WorkspaceReconciliationService {
       this.projectRegistry.list(),
       this.workspaceRegistry.list(),
     ]);
-    const workspacesByProject = new Map<string, PersistedWorkspaceRecord[]>();
+    const workspacesByProject = new Map<
+      string,
+      Array<{ workspace: PersistedWorkspaceRecord; member: PersistedWorkspaceMember }>
+    >();
     for (const workspace of workspaces) {
-      if (workspace.archivedAt || this.inspectDirectory(workspace.cwd) !== "directory") continue;
-      const siblings = workspacesByProject.get(workspace.projectId) ?? [];
-      siblings.push(workspace);
-      workspacesByProject.set(workspace.projectId, siblings);
+      if (workspace.archivedAt) continue;
+      for (const member of workspace.members) {
+        if (this.inspectDirectory(member.cwd) !== "directory") continue;
+        const siblings = workspacesByProject.get(member.projectId) ?? [];
+        siblings.push({ workspace, member });
+        workspacesByProject.set(member.projectId, siblings);
+      }
     }
     await this.reconcileGitMetadataForProjects(
       projects.filter(
@@ -222,45 +227,21 @@ export class WorkspaceReconciliationService {
     const allWorkspaces = await this.workspaceRegistry.list();
 
     const activeProjects = allProjects.filter((p) => !p.archivedAt);
-    const activeWorkspaces = allWorkspaces.filter((w) => !w.archivedAt);
-    const workspaceDirectoryStates = activeWorkspaces.map((workspace) => ({
-      workspace,
-      state: this.inspectDirectory(workspace.cwd),
-    }));
-
-    const workspacesByProject = new Map<string, PersistedWorkspaceRecord[]>();
-    for (const { workspace, state } of workspaceDirectoryStates) {
-      if (state !== "directory") continue;
-      const list = workspacesByProject.get(workspace.projectId) ?? [];
-      list.push(workspace);
-      workspacesByProject.set(workspace.projectId, list);
+    const workspacesByProject = new Map<
+      string,
+      Array<{ workspace: PersistedWorkspaceRecord; member: PersistedWorkspaceMember }>
+    >();
+    for (const workspace of allWorkspaces) {
+      if (workspace.archivedAt) continue;
+      for (const member of workspace.members) {
+        if (this.inspectDirectory(member.cwd) !== "directory") continue;
+        const siblings = workspacesByProject.get(member.projectId) ?? [];
+        siblings.push({ workspace, member });
+        workspacesByProject.set(member.projectId, siblings);
+      }
     }
 
-    // 1. Archive workspaces whose directories no longer exist
-    const missingWorkspaces = workspaceDirectoryStates
-      .filter(({ state }) => state === "missing")
-      .map(({ workspace }) => workspace);
-    await Promise.all(
-      missingWorkspaces.map(async (workspace) => {
-        const timestamp = new Date().toISOString();
-        await this.workspaceRegistry.archive(workspace.workspaceId, timestamp);
-        await this.onWorkspaceArchived?.(workspace.workspaceId);
-        changes.push({
-          kind: "workspace_archived",
-          workspaceId: workspace.workspaceId,
-          directory: workspace.cwd,
-          reason: "directory_missing",
-        });
-
-        // Update the in-memory list for the project orphan check below
-        const siblings = workspacesByProject.get(workspace.projectId);
-        if (siblings) {
-          const updated = siblings.filter((w) => w.workspaceId !== workspace.workspaceId);
-          workspacesByProject.set(workspace.projectId, updated);
-        }
-      }),
-    );
-
+    // A missing checkout does not delete its independent workspace container.
     // 2. Reconcile mutable git metadata without changing identity or membership.
     //    Projects persist until explicitly removed, even when they currently have
     //    zero active workspaces, so they still reconcile their own metadata.
@@ -291,7 +272,10 @@ export class WorkspaceReconciliationService {
 
   private async reconcileGitMetadataForProjects(
     projectsToReconcile: PersistedProjectRecord[],
-    workspacesByProject: Map<string, PersistedWorkspaceRecord[]>,
+    workspacesByProject: Map<
+      string,
+      Array<{ workspace: PersistedWorkspaceRecord; member: PersistedWorkspaceMember }>
+    >,
     changes: ReconciliationChange[],
   ): Promise<void> {
     const checkoutReads: CachedCheckoutRead[] = [];
@@ -338,9 +322,10 @@ export class WorkspaceReconciliationService {
   private async reconcileProject(input: ProjectReconciliationInput): Promise<void> {
     const { project, siblings, currentGit, readCheckout, changes } = input;
     const workspaceCheckouts = await Promise.all(
-      siblings.map(async (workspace) => ({
+      siblings.map(async ({ workspace, member }) => ({
         workspace,
-        checkout: await readCheckout(workspace.cwd),
+        member,
+        checkout: await readCheckout(member.cwd),
       })),
     );
     const projectUpdates: Partial<Pick<PersistedProjectRecord, "kind" | "projectKey">> = {};
@@ -376,25 +361,29 @@ export class WorkspaceReconciliationService {
     }
 
     await Promise.all(
-      workspaceCheckouts.map(async ({ workspace, checkout: wsGit }) => {
+      workspaceCheckouts.map(async ({ workspace, member, checkout: wsGit }) => {
         const timestamp = new Date().toISOString();
         const update = reconcileWorkspacePlacement({
-          workspace,
+          member,
           checkout: wsGit,
-          updatedAt: timestamp,
         });
         if (!update) return;
 
         const updated = await this.workspaceRegistry.update(workspace.workspaceId, (current) => ({
           ...current,
-          ...update.fields,
+          members: current.members.map((candidate) =>
+            candidate.projectId === member.projectId &&
+            areEquivalentPaths(candidate.cwd, member.cwd)
+              ? { ...candidate, ...update.fields }
+              : candidate,
+          ),
           updatedAt: timestamp,
         }));
         if (!updated) return;
         changes.push({
           kind: "workspace_updated",
           workspaceId: workspace.workspaceId,
-          directory: workspace.cwd,
+          directory: member.cwd,
           fields: update.fields,
         });
       }),

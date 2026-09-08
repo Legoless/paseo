@@ -535,6 +535,7 @@ describe("runAsyncWorktreeBootstrap", () => {
     expect(createTerminalCalls[0]?.env).toBeUndefined();
     expect(terminalRecords[0]?.sentInputs).toEqual(["npm run dev\r"]);
     expect(runtimeStore.get({ workspaceId: repoDir, scriptName: "web" })).toMatchObject({
+      cwd: repoDir,
       type: "script",
       lifecycle: "running",
       exitCode: null,
@@ -645,6 +646,28 @@ describe("runAsyncWorktreeBootstrap", () => {
       terminalId: firstResult.terminalId,
       exitCode: 0,
     });
+    const otherDirectory = join(repoDir, "other-project");
+    mkdirSync(otherDirectory);
+    writeFileSync(
+      join(otherDirectory, "paseo.json"),
+      JSON.stringify({ scripts: { typecheck: { command: "echo other" } } }),
+    );
+    const thirdResult = await spawnWorkspaceScript({
+      repoRoot: otherDirectory,
+      workspaceId: repoDir,
+      projectSlug: "other",
+      branchName: null,
+      scriptName: "typecheck",
+      daemonPort: null,
+      serviceProxy: routeStore,
+      runtimeStore,
+      terminalManager,
+    });
+    expect(thirdResult.terminalId).not.toBe(firstResult.terminalId);
+    expect(createTerminalCalls[1]?.cwd).toBe(otherDirectory);
+    expect(runtimeStore.get({ workspaceId: repoDir, scriptName: "typecheck" })?.cwd).toBe(
+      otherDirectory,
+    );
   });
 
   it("tracks command completion when reusing a live terminal from a stopped plain script entry", async () => {

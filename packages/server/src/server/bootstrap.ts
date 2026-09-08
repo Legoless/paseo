@@ -707,8 +707,8 @@ export async function createPaseoDaemon(
       serviceProxy,
       runtimeStore: scriptRuntimeStore,
       daemonPort: () => (boundListenTarget?.type === "tcp" ? boundListenTarget.port : null),
-      resolveWorkspaceDirectory: async (workspaceId) =>
-        (await workspaceRegistry?.get(workspaceId))?.cwd ?? null,
+      resolveWorkspaceDirectories: async (workspaceId) =>
+        (await workspaceRegistry?.get(workspaceId))?.members.map((member) => member.cwd) ?? [],
       logger,
       serviceProxyPublicBaseUrl,
     }),
@@ -1027,7 +1027,7 @@ export async function createPaseoDaemon(
     if (firstAgentContext) {
       workspaceAutoName.scheduleForDirectory({
         workspaceId: workspace.workspaceId,
-        cwd: workspace.cwd,
+        cwd,
         firstAgentContext,
       });
     }
@@ -1039,11 +1039,6 @@ export async function createPaseoDaemon(
       .filter((workspace) => !workspace.archivedAt)
       .map((workspace) => ({
         workspaceId: workspace.workspaceId,
-        cwd: workspace.cwd,
-        kind: workspace.kind,
-        worktreeRoot: workspace.worktreeRoot,
-        isPaseoOwnedWorktree: workspace.isPaseoOwnedWorktree,
-        mainRepoRoot: workspace.mainRepoRoot,
         members: workspaceMembers(workspace).map((member) => ({
           cwd: member.cwd,
           kind: member.kind,
@@ -1291,7 +1286,7 @@ export async function createPaseoDaemon(
     );
     workspaceAutoName.scheduleForDirectory({
       workspaceId: workspace.workspaceId,
-      cwd: workspace.cwd,
+      cwd: input.cwd,
       firstAgentContext: input.firstAgentContext,
     });
     await emitWorkspaceUpdatesExternal([workspace.workspaceId]);

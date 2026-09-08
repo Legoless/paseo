@@ -222,6 +222,7 @@ const StoredAgentSchema = z.strictObject({
 
 const WorkspaceScriptSchema = z.strictObject({
   scriptName: z.string(),
+  cwd: z.string().optional(),
   type: z.enum(["script", "service"]),
   hostname: z.string(),
   port: z.number().int().positive().nullable(),
@@ -249,6 +250,9 @@ const WorkspaceGitRuntimeSchema = z
 
 const StoredWorkspaceMemberSchema = z.strictObject({
   projectId: z.string(),
+  projectKey: z.string().nullable().optional(),
+  projectKind: z.enum(["git", "non_git", "directory"]).optional(),
+  projectCustomIconRevision: z.string().nullable().optional(),
   projectDisplayName: z.string(),
   projectCustomName: z.string().nullable(),
   projectRootPath: z.string(),
@@ -281,6 +285,7 @@ const StoredWorkspaceSchema = z.strictObject({
   // Dropping it here made every cached workspace re-hydrate as single-project, because
   // normalizeWorkspaceDescriptor then synthesizes the implicit member from the scalar fields.
   members: z.array(StoredWorkspaceMemberSchema).optional(),
+  membersAuthoritative: z.boolean().optional(),
   status: z.enum(["needs_input", "failed", "running", "attention", "done"]),
   statusEnteredAt: IsoDateSchema.nullable(),
   activityAt: z.null(),
@@ -337,7 +342,7 @@ export interface CachedDirectory {
 
 export interface CachedWorkspace {
   workspace: WorkspaceDescriptor;
-  project?: ProjectDescriptor;
+  projects: ProjectDescriptor[];
 }
 
 export interface DirectoryCursor {
@@ -644,8 +649,12 @@ function serializeWorkspace(workspace: WorkspaceDescriptor): StoredWorkspace {
     title: workspace.title ?? null,
     pinnedAt: workspace.pinnedAt ?? null,
     labels: workspace.labels,
+    membersAuthoritative: true,
     members: workspace.members.map((member) => ({
       projectId: member.projectId,
+      projectKey: member.projectKey,
+      projectKind: member.projectKind,
+      projectCustomIconRevision: member.projectCustomIconRevision,
       projectDisplayName: member.projectDisplayName,
       projectCustomName: member.projectCustomName,
       projectRootPath: member.projectRootPath,
@@ -662,6 +671,7 @@ function serializeWorkspace(workspace: WorkspaceDescriptor): StoredWorkspace {
     diffStat: workspace.diffStat,
     scripts: workspace.scripts.map((script) => ({
       scriptName: script.scriptName,
+      cwd: script.cwd,
       type: script.type,
       hostname: script.hostname,
       port: script.port,
@@ -782,7 +792,13 @@ function applyDirectoryRow(
     case "workspace": {
       const stored = parseStoredPayload(StoredWorkspaceSchema, row.payload);
       if (stored.id !== row.id) throw new Error("Replica workspace row id mismatch");
-      result.workspaces.set(row.id, normalizeWorkspaceDescriptor(stored));
+      result.workspaces.set(
+        row.id,
+        normalizeWorkspaceDescriptor({
+          ...stored,
+          membersAuthoritative: stored.members !== undefined,
+        }),
+      );
       return;
     }
     case "project": {
@@ -856,25 +872,30 @@ export class ReplicaCache {
     try {
       const stored = parseStoredPayload(StoredWorkspaceSchema, workspaceRow.payload);
       if (stored.id !== workspaceRow.id) throw new Error("Replica workspace row id mismatch");
-      workspace = normalizeWorkspaceDescriptor(stored);
+      workspace = normalizeWorkspaceDescriptor({
+        ...stored,
+        membersAuthoritative: stored.members !== undefined,
+      });
     } catch {
       await this.deleteInvalidRow(workspaceRow);
       return undefined;
     }
 
-    let project: ProjectDescriptor | undefined;
-    const projectRow = (await this.readRows(serverId, ["project"], [workspace.projectId]))[0];
-    if (projectRow) {
+    const projects: ProjectDescriptor[] = [];
+    const projectIds = [...new Set(workspace.members.map((member) => member.projectId))];
+    const projectRows =
+      projectIds.length > 0 ? await this.readRows(serverId, ["project"], projectIds) : [];
+    for (const projectRow of projectRows) {
       try {
         const stored = parseStoredPayload(StoredProjectSchema, projectRow.payload);
         if (stored.projectId !== projectRow.id) throw new Error("Replica project row id mismatch");
-        project = normalizeProjectDescriptor(stored);
+        projects.push(normalizeProjectDescriptor(stored));
       } catch {
         await this.deleteInvalidRow(projectRow);
       }
     }
 
-    return { workspace, ...(project ? { project } : {}) };
+    return { workspace, projects };
   }
 
   async readDirectory(serverId: string): Promise<CachedDirectory> {

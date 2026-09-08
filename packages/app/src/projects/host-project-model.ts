@@ -53,35 +53,40 @@ export function hostProjectFromWorkspace(input: {
   serverId: string;
   workspace: WorkspaceDescriptor | null;
 }): HostProjectListItem | null {
-  if (!input.workspace) {
+  if (!input.workspace || input.workspace.members.length !== 1) {
     return null;
   }
-  const projectId = input.workspace.projectId.trim() || undefined;
+  const member = input.workspace.members[0]!;
+  const projectId = member.projectId.trim() || undefined;
   if (!projectId) {
     return null;
   }
-  const iconWorkingDir = input.workspace.projectRootPath.trim();
+  const iconWorkingDir = member.projectRootPath.trim();
   if (!iconWorkingDir) {
     return null;
   }
-  const canCreate = canCreateWorktreeForProjectKind(input.workspace.projectKind);
+  const projectKind = member.projectKind ?? "unknown";
+  let worktreeSupport: WorkspaceStructureHostPlacement["worktreeSupport"] = "unknown";
+  if (projectKind !== "unknown") {
+    worktreeSupport = canCreateWorktreeForProjectKind(projectKind) ? "supported" : "unsupported";
+  }
   return {
     viewKey: createProjectViewKey({
       kind: "placement",
       serverId: input.serverId,
       projectId,
     }),
-    projectKey: input.workspace.project?.projectKey ?? null,
-    projectName: input.workspace.projectDisplayName || projectId,
-    projectKind: input.workspace.projectKind,
+    projectKey: member.projectKey ?? null,
+    projectName: member.projectCustomName ?? member.projectDisplayName,
+    projectKind,
     iconWorkingDir,
     hosts: [
       {
         serverId: input.serverId,
-        projectId: input.workspace.projectId,
+        projectId,
         iconWorkingDir,
-        worktreeSupport: canCreate ? "supported" : "unsupported",
-        customIconRevision: input.workspace.projectCustomIconRevision,
+        worktreeSupport,
+        customIconRevision: member.projectCustomIconRevision,
       },
     ],
     workspaceKeys: [`${input.serverId}:${input.workspace.id}`],

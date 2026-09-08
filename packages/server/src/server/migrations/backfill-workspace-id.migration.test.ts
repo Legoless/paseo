@@ -19,13 +19,23 @@ function workspaceRecord(
 ) {
   return createPersistedWorkspaceRecord({
     workspaceId,
-    projectId: workspaceId,
-    cwd,
-    kind: "directory",
     displayName: path.basename(cwd) || cwd,
     createdAt: overrides?.createdAt ?? "2026-03-01T00:00:00.000Z",
     updatedAt: overrides?.createdAt ?? "2026-03-01T00:00:00.000Z",
     archivedAt: overrides?.archivedAt ?? null,
+    members: [
+      {
+        projectId: `project-${workspaceId}`,
+        cwd,
+        kind: "directory",
+        displayName: path.basename(cwd) || cwd,
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
   });
 }
 

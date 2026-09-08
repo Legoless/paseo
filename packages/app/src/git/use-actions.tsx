@@ -27,7 +27,10 @@ import {
   type ActiveWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
 import { redirectIfArchivingActiveWorkspace } from "@/utils/sidebar-workspace-archive-redirect";
-import { type WorktreeArchiveWarningLabels } from "@/git/worktree-archive-warning";
+import {
+  getWorkspaceArchiveRisk,
+  type WorktreeArchiveWarningLabels,
+} from "@/git/worktree-archive-warning";
 import { useWorkspaceArchive } from "@/workspace/use-workspace-archive";
 import { resolveWorkspaceMapKeyByIdentity } from "@/utils/workspace-identity";
 import { readValidatedString } from "@/storage/validated-storage";
@@ -234,7 +237,9 @@ function resolveArchiveWorkspaceDescriptor(input: {
     return null;
   }
   for (const candidate of input.workspaces?.values() ?? []) {
-    if (candidate.workspaceDirectory === input.workspaceDirectory) {
+    if (
+      candidate.members.some((member) => member.workspaceDirectory === input.workspaceDirectory)
+    ) {
       return candidate;
     }
   }
@@ -245,9 +250,13 @@ function resolveWorkspaceArchiveRisk(
   workspace: WorkspaceDescriptor | null,
   gitStatus: CheckoutStatusPayload | null,
 ): { isDirty: boolean | null | undefined; aheadOfOrigin: number | null | undefined } {
+  const risk = getWorkspaceArchiveRisk(workspace);
+  if (workspace?.members.length !== 1) {
+    return { isDirty: risk.isDirty, aheadOfOrigin: risk.aheadOfOrigin };
+  }
   return {
-    isDirty: gitStatus?.isDirty ?? workspace?.gitRuntime?.isDirty,
-    aheadOfOrigin: gitStatus?.aheadOfOrigin ?? workspace?.gitRuntime?.aheadOfOrigin,
+    isDirty: gitStatus?.isDirty ?? risk.isDirty,
+    aheadOfOrigin: gitStatus?.aheadOfOrigin ?? risk.aheadOfOrigin,
   };
 }
 
@@ -257,7 +266,7 @@ function canArchiveWorkspace(
 ): boolean {
   return (
     workspace !== null &&
-    (workspace.workspaceKind !== "worktree" ||
+    (!workspace.members.some((member) => member.workspaceKind === "worktree") ||
       (risk.isDirty !== undefined && risk.aheadOfOrigin !== undefined))
   );
 }
@@ -286,7 +295,7 @@ function useWorkspaceScreenArchiveController({
   const controller = useWorkspaceArchive({
     serverId,
     workspaceId: workspaceDescriptor?.id ?? "",
-    workspaceKind: workspaceDescriptor?.workspaceKind ?? "directory",
+    workspaceKind: getWorkspaceArchiveRisk(workspaceDescriptor).workspaceKind,
     name: workspaceDescriptor?.name ?? branchLabel,
     isDirty: archiveRisk.isDirty,
     aheadOfOrigin: archiveRisk.aheadOfOrigin,

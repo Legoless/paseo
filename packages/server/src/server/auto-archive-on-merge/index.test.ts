@@ -62,9 +62,74 @@ test("fans one fresh observation out to every workspace attached to its exact cw
       getSnapshot,
     },
     listActiveWorkspaces: async () => [
-      { workspaceId: "workspace-a", cwd: "/repo/worktree" },
-      { workspaceId: "workspace-b", cwd: "/repo/worktree/child/.." },
-      { workspaceId: "workspace-other", cwd: "/repo/other" },
+      {
+        workspaceId: "workspace-with-unrelated-project",
+        members: [
+          {
+            cwd: "/repo/worktree",
+            kind: "worktree",
+            worktreeRoot: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+          {
+            cwd: "/repo/other",
+            kind: "local_checkout",
+            worktreeRoot: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
+
+      {
+        workspaceId: "workspace-a",
+        members: [
+          {
+            projectId: "test-project",
+            cwd: "/repo/worktree",
+            kind: "directory",
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
+      {
+        workspaceId: "workspace-b",
+        members: [
+          {
+            projectId: "test-project",
+            cwd: "/repo/worktree/child/..",
+            kind: "directory",
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
+      {
+        workspaceId: "workspace-other",
+        members: [
+          {
+            projectId: "test-project",
+            cwd: "/repo/other",
+            kind: "directory",
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
     ],
   } as unknown as AutoArchiveOnMergeOptions;
   const calls: Array<{ workspaceId: string; pullRequest: unknown }> = [];
@@ -110,8 +175,38 @@ test("serializes the complete fan-out for duplicate merge events on one cwd", as
       getSnapshot: async () => snapshot,
     },
     listActiveWorkspaces: async () => [
-      { workspaceId: "workspace-a", cwd: "/repo/worktree" },
-      { workspaceId: "workspace-b", cwd: "/repo/worktree/child/.." },
+      {
+        workspaceId: "workspace-a",
+        members: [
+          {
+            projectId: "test-project",
+            cwd: "/repo/worktree",
+            kind: "directory",
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
+      {
+        workspaceId: "workspace-b",
+        members: [
+          {
+            projectId: "test-project",
+            cwd: "/repo/worktree/child/..",
+            kind: "directory",
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
     ],
   } as unknown as AutoArchiveOnMergeOptions;
   const archivedWorkspaceIds: string[] = [];
@@ -167,7 +262,22 @@ test("does not fan out a stale merged event when the fresh observation has no PR
       getSnapshot,
     },
     listActiveWorkspaces: vi.fn(async () => [
-      { workspaceId: "workspace-a", cwd: "/repo/worktree" },
+      {
+        workspaceId: "workspace-a",
+        members: [
+          {
+            projectId: "test-project",
+            cwd: "/repo/worktree",
+            kind: "directory",
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      },
     ]),
   } as unknown as AutoArchiveOnMergeOptions;
 

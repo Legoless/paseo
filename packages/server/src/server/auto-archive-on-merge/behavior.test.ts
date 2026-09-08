@@ -113,7 +113,26 @@ async function createWorkspaceJourney() {
       getSnapshot: async () => snapshot(),
     },
     listActiveWorkspaces: async () =>
-      active ? [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" as const }] : [],
+      active
+        ? [
+            {
+              workspaceId,
+              members: [
+                {
+                  projectId: "test-project",
+                  cwd: worktree.worktreePath,
+                  kind: "worktree" as const,
+                  displayName: "workspace",
+                  branch: null,
+                  worktreeRoot: null,
+                  baseBranch: null,
+                  isPaseoOwnedWorktree: false,
+                  mainRepoRoot: null,
+                },
+              ],
+            },
+          ]
+        : [],
   } as unknown as AutoArchiveOnMergeOptions;
   const dependencies: AutoArchiveOnMergeDependencies = {
     archiveIfSafe: async () => {

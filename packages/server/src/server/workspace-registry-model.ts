@@ -39,93 +39,16 @@ export function deriveWorkspaceDisplayName(input: {
   return segments[segments.length - 1] ?? input.cwd;
 }
 
-/** Scalar placement fields that always mirror the workspace's primary member. */
-export interface WorkspaceScalarMirror {
-  projectId: string;
-  cwd: string;
-  kind: PersistedWorkspaceKind;
-  displayName: string;
-  branch: string | null;
-  worktreeRoot: string | null;
-  baseBranch: string | null;
-  isPaseoOwnedWorktree: boolean;
-  mainRepoRoot: string | null;
-}
-
-/**
- * Builds the member view of the scalar placement fields. The scalar fields are
- * the primary member's source of truth, so this is both the implicit member of
- * a legacy record and the value the primary member is synced to on every write.
- */
-export function workspaceMemberFromScalars(
-  record: WorkspaceScalarMirror,
-): PersistedWorkspaceMember {
-  return {
-    projectId: record.projectId,
-    cwd: record.cwd,
-    kind: record.kind,
-    displayName: record.displayName,
-    branch: record.branch,
-    worktreeRoot: record.worktreeRoot,
-    baseBranch: record.baseBranch,
-    isPaseoOwnedWorktree: record.isPaseoOwnedWorktree,
-    mainRepoRoot: record.mainRepoRoot,
-  };
-}
-
-/**
- * Returns the workspace's project memberships. Records persisted before
- * cross-project workspaces carry no `members` list; they read as a single
- * implicit member derived from the scalar fields.
- *
- * COMPAT(workspaceProjectless): added in v0.8.0. An explicit `[]` means the
- * workspace genuinely has no projects and must stay empty; only an absent list
- * derives the legacy implicit member. Collapsing the two would resurrect a
- * phantom member at the scalar cwd.
- */
 export function workspaceMembers(record: PersistedWorkspaceRecord): PersistedWorkspaceMember[] {
-  if (record.members) return record.members;
-  return [workspaceMemberFromScalars(record)];
+  return record.members;
 }
 
-/**
- * COMPAT(workspaceProjectless): added in v0.8.0. True for a workspace that holds
- * no projects — panes carry their own project, so the workspace is a pane
- * arrangement only.
- *
- * Its scalar `cwd`/`projectId` still point at the daemon home directory so
- * readers that predate `members` keep working, which means several projectless
- * workspaces share one cwd. Any lookup answering "which workspace owns this
- * path" must therefore skip them, or it will attribute work in the home
- * directory to an arbitrary one.
- */
 export function isProjectlessWorkspace(record: PersistedWorkspaceRecord): boolean {
-  return record.members?.length === 0;
-}
-
-/**
- * Builds the scalar-mirror fields from a primary member. Writers that change
- * which member is primary (member removal, membership reorder) must apply
- * these to the record's scalar fields in the same write.
- */
-export function workspaceScalarsFromPrimaryMember(
-  member: PersistedWorkspaceMember,
-): WorkspaceScalarMirror {
-  return {
-    projectId: member.projectId,
-    cwd: member.cwd,
-    kind: member.kind,
-    displayName: member.displayName,
-    branch: member.branch,
-    worktreeRoot: member.worktreeRoot,
-    baseBranch: member.baseBranch,
-    isPaseoOwnedWorktree: member.isPaseoOwnedWorktree,
-    mainRepoRoot: member.mainRepoRoot,
-  };
+  return record.members.length === 0;
 }
 
 export type PersistedWorkspacePlacement = Pick<
-  PersistedWorkspaceRecord,
+  PersistedWorkspaceMember,
   | "cwd"
   | "kind"
   | "displayName"
@@ -137,7 +60,7 @@ export type PersistedWorkspacePlacement = Pick<
 >;
 
 export type MutableWorkspacePlacement = Pick<
-  PersistedWorkspaceRecord,
+  PersistedWorkspaceMember,
   "kind" | "branch" | "worktreeRoot" | "isPaseoOwnedWorktree" | "mainRepoRoot"
 >;
 
@@ -157,11 +80,11 @@ export type InitialWorkspacePlacementInput =
     };
 
 export interface WorkspacePlacementUpdate {
-  workspace: PersistedWorkspaceRecord;
+  member: PersistedWorkspaceMember;
   fields: Partial<MutableWorkspacePlacement>;
 }
 
-/** Defines the complete persisted placement for every new workspace. */
+/** Defines the complete persisted placement for a workspace member. */
 export function initialWorkspacePlacement(
   input: InitialWorkspacePlacementInput,
 ): PersistedWorkspacePlacement {
@@ -196,42 +119,41 @@ export function initialWorkspacePlacement(
  * or its creation-time base branch.
  */
 export function reconcileWorkspacePlacement(input: {
-  workspace: PersistedWorkspaceRecord;
+  member: PersistedWorkspaceMember;
   checkout: ProjectCheckoutLitePayload;
-  updatedAt: string;
 }): WorkspacePlacementUpdate | null {
   const observed = initialWorkspacePlacement({
     source: "checkout",
-    cwd: input.workspace.cwd,
+    cwd: input.member.cwd,
     checkout: input.checkout,
   });
   const fields: Partial<MutableWorkspacePlacement> = {};
-  if (input.workspace.kind !== observed.kind) fields.kind = observed.kind;
-  if (input.workspace.branch !== observed.branch) fields.branch = observed.branch;
-  if (input.workspace.worktreeRoot !== observed.worktreeRoot)
+  if (input.member.kind !== observed.kind) fields.kind = observed.kind;
+  if (input.member.branch !== observed.branch) fields.branch = observed.branch;
+  if (input.member.worktreeRoot !== observed.worktreeRoot)
     fields.worktreeRoot = observed.worktreeRoot;
-  if (input.workspace.isPaseoOwnedWorktree !== observed.isPaseoOwnedWorktree)
+  if (input.member.isPaseoOwnedWorktree !== observed.isPaseoOwnedWorktree)
     fields.isPaseoOwnedWorktree = observed.isPaseoOwnedWorktree;
-  if (input.workspace.mainRepoRoot !== observed.mainRepoRoot)
+  if (input.member.mainRepoRoot !== observed.mainRepoRoot)
     fields.mainRepoRoot = observed.mainRepoRoot;
 
   if (Object.keys(fields).length === 0) return null;
   return {
-    workspace: { ...input.workspace, ...fields, updatedAt: input.updatedAt },
+    member: { ...input.member, ...fields },
     fields,
   };
 }
 
 /** Projects persisted placement onto the checkout shape sent over the wire. */
 export function checkoutFromPersistedWorkspacePlacement(input: {
-  workspace: PersistedWorkspaceRecord;
+  member: PersistedWorkspaceMember;
   fallbackBranch?: string | null;
   fallbackWorktreeRoot?: string | null;
 }): ProjectPlacementPayload["checkout"] {
-  const { workspace } = input;
-  if (workspace.kind === "directory") {
+  const { member } = input;
+  if (member.kind === "directory") {
     return {
-      cwd: workspace.cwd,
+      cwd: member.cwd,
       isGit: false,
       currentBranch: null,
       remoteUrl: null,
@@ -242,24 +164,24 @@ export function checkoutFromPersistedWorkspacePlacement(input: {
   }
 
   const checkout = {
-    cwd: workspace.cwd,
-    currentBranch: workspace.branch ?? input.fallbackBranch ?? null,
+    cwd: member.cwd,
+    currentBranch: member.branch ?? input.fallbackBranch ?? null,
     remoteUrl: null,
-    worktreeRoot: workspace.worktreeRoot ?? input.fallbackWorktreeRoot ?? workspace.cwd,
+    worktreeRoot: member.worktreeRoot ?? input.fallbackWorktreeRoot ?? member.cwd,
   };
-  if (workspace.isPaseoOwnedWorktree && workspace.mainRepoRoot) {
+  if (member.isPaseoOwnedWorktree && member.mainRepoRoot) {
     return {
       ...checkout,
       isGit: true,
       isPaseoOwnedWorktree: true,
-      mainRepoRoot: workspace.mainRepoRoot,
+      mainRepoRoot: member.mainRepoRoot,
     };
   }
   return {
     ...checkout,
     isGit: true,
     isPaseoOwnedWorktree: false,
-    mainRepoRoot: workspace.mainRepoRoot ?? null,
+    mainRepoRoot: member.mainRepoRoot ?? null,
   };
 }
 

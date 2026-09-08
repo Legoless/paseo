@@ -67,7 +67,7 @@ function fakeGitService() {
 
 // The service only truthiness-checks terminalManager in its availability guard and then forwards it
 // opaquely to the injected spawnWorkspaceScript fake, which ignores it — an empty stand-in is enough.
-const availableTerminalManager = {} as unknown as TerminalManager;
+const availableTerminalManager = { getTerminal: () => null } as unknown as TerminalManager;
 
 interface BuildOptions {
   serviceProxy?: ServiceProxySubsystem | null;
@@ -84,7 +84,22 @@ function buildService(options: BuildOptions = {}) {
   const spawnCalls: SpawnWorkspaceScriptOptions[] = [];
   const workspace =
     options.workspace === undefined
-      ? ({ workspaceId: "ws-1", cwd: "/tmp/repo" } as PersistedWorkspaceRecord)
+      ? ({
+          workspaceId: "ws-1",
+          members: [
+            {
+              projectId: "test-project",
+              cwd: "/tmp/repo",
+              kind: "directory",
+              displayName: "workspace",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
+        } as PersistedWorkspaceRecord)
       : options.workspace;
 
   const service = createWorkspaceScriptsService({
@@ -146,14 +161,44 @@ describe("buildSnapshot", () => {
   test("returns no scripts when the service proxy is unavailable", async () => {
     const { service } = buildService({ serviceProxy: null });
     expect(
-      service.buildSnapshot({ workspaceId: "ws-1", cwd: "/tmp/repo" } as PersistedWorkspaceRecord),
+      service.buildSnapshot({
+        workspaceId: "ws-1",
+        members: [
+          {
+            projectId: "test-project",
+            cwd: "/tmp/repo",
+            kind: "directory",
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      } as PersistedWorkspaceRecord),
     ).toEqual([]);
   });
 
   test("returns no scripts when the runtime store is unavailable", async () => {
     const { service } = buildService({ scriptRuntimeStore: null });
     expect(
-      service.buildSnapshot({ workspaceId: "ws-1", cwd: "/tmp/repo" } as PersistedWorkspaceRecord),
+      service.buildSnapshot({
+        workspaceId: "ws-1",
+        members: [
+          {
+            projectId: "test-project",
+            cwd: "/tmp/repo",
+            kind: "directory",
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      } as PersistedWorkspaceRecord),
     ).toEqual([]);
   });
 
@@ -162,7 +207,22 @@ describe("buildSnapshot", () => {
     tempDirs.push(dir);
     const { service } = buildService();
     expect(
-      service.buildSnapshot({ workspaceId: "ws-1", cwd: dir } as PersistedWorkspaceRecord),
+      service.buildSnapshot({
+        workspaceId: "ws-1",
+        members: [
+          {
+            projectId: "test-project",
+            cwd: dir,
+            kind: "directory",
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      } as PersistedWorkspaceRecord),
     ).toEqual([]);
   });
 
@@ -185,9 +245,19 @@ describe("buildSnapshot", () => {
     } as PersistedProjectRecord;
     const workspace = {
       workspaceId: "ws-no-snapshot",
-      projectId: project.projectId,
-      cwd: directory,
-      branch: "feature/persisted",
+      members: [
+        {
+          projectId: project.projectId,
+          cwd: directory,
+          kind: "directory",
+          displayName: "workspace",
+          branch: "feature/persisted",
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     } as PersistedWorkspaceRecord;
     const serviceProxy = createServiceProxySubsystem({ logger });
     const { service, spawnCalls } = buildService({
@@ -200,13 +270,13 @@ describe("buildSnapshot", () => {
     expect(service.buildSnapshot(workspace, project)[0]?.hostname).toBe(
       serviceProxy.projectWorkspaceService({
         projectSlug: deriveProjectServiceSlug(project),
-        branchName: workspace.branch,
+        branchName: workspace.members[0]!.branch,
         scriptName: "app",
         daemonPort: 6767,
       }).hostname,
     );
     await service.start({ ...request, workspaceId: workspace.workspaceId });
-    expect(spawnCalls[0]?.branchName).toBe(workspace.branch);
+    expect(spawnCalls[0]?.branchName).toBe(workspace.members[0]!.branch);
   });
 });
 
@@ -215,7 +285,10 @@ describe("emitStatusUpdate", () => {
     const { service, emitted } = buildService();
     await service.emitStatusUpdate("ws-1", "/tmp/repo");
     expect(emitted).toEqual([
-      { type: "script_status_update", payload: { workspaceId: "ws-1", scripts: [] } },
+      {
+        type: "script_status_update",
+        payload: { workspaceId: "ws-1", cwd: "/tmp/repo", scripts: [] },
+      },
     ]);
   });
 });
@@ -238,7 +311,7 @@ describe("stop", () => {
       exitCode: null,
     });
     const terminalManager = {
-      getTerminal: (terminalId: string) => (terminalId === "terminal-1" ? {} : undefined),
+      getTerminal: (terminalId: string) => (terminalId === "terminal-1" ? { cwd: dir } : undefined),
       async killTerminalAndWait(terminalId: string) {
         expect(terminalId).toBe("terminal-1");
         runtimeStore.set({
@@ -252,7 +325,22 @@ describe("stop", () => {
       },
     } as unknown as TerminalManager;
     const { service } = buildService({
-      workspace: { workspaceId: "ws-1", cwd: dir } as PersistedWorkspaceRecord,
+      workspace: {
+        workspaceId: "ws-1",
+        members: [
+          {
+            projectId: "test-project",
+            cwd: dir,
+            kind: "directory",
+            displayName: "workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
+      } as PersistedWorkspaceRecord,
       scriptRuntimeStore: runtimeStore,
       terminalManager,
     });
@@ -321,7 +409,7 @@ describe("start", () => {
     });
     expect(emitted).toContainEqual({
       type: "script_status_update",
-      payload: { workspaceId: "ws-1", scripts: [] },
+      payload: { workspaceId: "ws-1", cwd: "/tmp/repo", scripts: [] },
     });
     expect(emitted).toContainEqual({
       type: "start_workspace_script_response",
@@ -338,8 +426,19 @@ describe("start", () => {
   test("uses the exact project root for a service hostname", async () => {
     const workspace = {
       workspaceId: "ws-app",
-      projectId: "prj-app",
-      cwd: "/repo/apps/app",
+      members: [
+        {
+          projectId: "prj-app",
+          cwd: "/repo/apps/app",
+          kind: "directory",
+          displayName: "workspace",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     } as PersistedWorkspaceRecord;
     const project = {
       projectId: "prj-app",
@@ -374,13 +473,35 @@ describe("start", () => {
     const projectB = { ...projectA, projectId: "prj-app-b", rootPath: "/repo-b/app" };
     const workspaceA = {
       workspaceId: "ws-app-a",
-      projectId: projectA.projectId,
-      cwd: projectA.rootPath,
+      members: [
+        {
+          projectId: projectA.projectId,
+          cwd: projectA.rootPath,
+          kind: "directory",
+          displayName: "workspace",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     } as PersistedWorkspaceRecord;
     const workspaceB = {
       workspaceId: "ws-app-b",
-      projectId: projectB.projectId,
-      cwd: projectB.rootPath,
+      members: [
+        {
+          projectId: projectB.projectId,
+          cwd: projectB.rootPath,
+          kind: "directory",
+          displayName: "workspace",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     } as PersistedWorkspaceRecord;
     const first = buildService({ workspace: workspaceA, project: projectA });
     const second = buildService({ workspace: workspaceB, project: projectB });
@@ -410,8 +531,19 @@ describe("start", () => {
     } as PersistedProjectRecord;
     const workspace = {
       workspaceId: "ws-hostname",
-      projectId: project.projectId,
-      cwd: directory,
+      members: [
+        {
+          projectId: project.projectId,
+          cwd: directory,
+          kind: "directory",
+          displayName: "workspace",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     } as PersistedWorkspaceRecord;
     const serviceProxy = createServiceProxySubsystem({ logger });
     const { service, spawnCalls } = buildService({ workspace, project, serviceProxy });
@@ -446,4 +578,90 @@ describe("start", () => {
       },
     ]);
   });
+});
+
+test("empty containers have no scripts and multiple projects require an explicit directory", async () => {
+  const member = (cwd: string) => ({
+    projectId: cwd,
+    cwd,
+    kind: "directory" as const,
+    displayName: cwd,
+    branch: null,
+    worktreeRoot: null,
+    baseBranch: null,
+    isPaseoOwnedWorktree: false,
+    mainRepoRoot: null,
+  });
+  const empty = { workspaceId: "ws-empty", members: [] } as unknown as PersistedWorkspaceRecord;
+  const emptyService = buildService({ workspace: empty }).service;
+  expect(await emptyService.list(empty.workspaceId)).toEqual([]);
+  await expect(
+    emptyService.launch({ workspaceId: empty.workspaceId, scriptName: "dev" }),
+  ).rejects.toThrow("Choose a project");
+  const dirs = [
+    mkdtempSync(join(tmpdir(), "workspace-script-one-")),
+    mkdtempSync(join(tmpdir(), "workspace-script-two-")),
+  ];
+  tempDirs.push(...dirs);
+  for (const dir of dirs)
+    writeFileSync(
+      join(dir, "paseo.json"),
+      JSON.stringify({ scripts: { dev: { command: "echo hello" } } }),
+    );
+  const workspace = {
+    workspaceId: "ws-multi",
+    members: dirs.map(member),
+  } as unknown as PersistedWorkspaceRecord;
+  const { service, spawnCalls } = buildService({ workspace });
+  expect((await service.list(workspace.workspaceId)).map((script) => script.cwd)).toEqual(dirs);
+  await expect(
+    service.launch({ workspaceId: workspace.workspaceId, scriptName: "dev" }),
+  ).rejects.toThrow("Choose a project");
+  await service.launch({ workspaceId: workspace.workspaceId, scriptName: "dev", cwd: dirs[1] });
+  expect(spawnCalls[0]?.repoRoot).toBe(dirs[1]);
+});
+
+test("script actions cannot reuse or stop the same name in another project", async () => {
+  const member = (cwd: string) => ({
+    projectId: cwd,
+    cwd,
+    kind: "directory" as const,
+    displayName: cwd,
+    branch: null,
+    worktreeRoot: null,
+    baseBranch: null,
+    isPaseoOwnedWorktree: false,
+    mainRepoRoot: null,
+  });
+  const workspace = {
+    workspaceId: "ws-multi",
+    members: [member("/one"), member("/two")],
+  } as unknown as PersistedWorkspaceRecord;
+  const runtimeStore = new WorkspaceScriptRuntimeStore();
+  runtimeStore.set({
+    workspaceId: workspace.workspaceId,
+    scriptName: "dev",
+    type: "script",
+    lifecycle: "running",
+    terminalId: "term-one",
+    exitCode: null,
+  });
+  const terminalManager = {
+    getTerminal: () => ({ cwd: "/one" }),
+    killTerminalAndWait: () => {
+      throw new Error("must not stop another project");
+    },
+  } as unknown as TerminalManager;
+  const { service, spawnCalls } = buildService({
+    workspace,
+    scriptRuntimeStore: runtimeStore,
+    terminalManager,
+  });
+  await expect(
+    service.launch({ workspaceId: workspace.workspaceId, scriptName: "dev", cwd: "/two" }),
+  ).rejects.toThrow("already running in /one");
+  await expect(
+    service.stop({ workspaceId: workspace.workspaceId, scriptName: "dev", cwd: "/two" }),
+  ).rejects.toThrow("running in /one");
+  expect(spawnCalls).toEqual([]);
 });

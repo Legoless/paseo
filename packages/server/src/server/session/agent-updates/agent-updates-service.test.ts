@@ -131,7 +131,7 @@ function buildHarness() {
       return payload;
     },
     isProviderVisibleToClient: (provider) => providerVisible(provider),
-    buildProjectPlacementForWorkspaceId: async (workspaceId) => {
+    buildProjectPlacementForAgent: async ({ workspaceId }) => {
       if (projectResolutionError) throw projectResolutionError;
       return projectByWorkspaceId.get(workspaceId) ?? null;
     },

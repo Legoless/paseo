@@ -117,12 +117,22 @@ function createImportWorkspace(
     async runInImportWorkspace(input, operation) {
       const workspace = createPersistedWorkspaceRecord({
         workspaceId,
-        projectId: `project-${workspaceId}`,
-        cwd: input.cwd,
-        kind: "directory",
         displayName: "imported",
         createdAt: "2026-04-30T00:00:00.000Z",
         updatedAt: "2026-04-30T00:00:00.000Z",
+        members: [
+          {
+            projectId: `project-${workspaceId}`,
+            cwd: input.cwd,
+            kind: "directory",
+            displayName: "imported",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       });
       return {
         value: await operation(workspace),

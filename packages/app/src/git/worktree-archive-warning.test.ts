@@ -1,12 +1,60 @@
 import { describe, expect, it } from "vitest";
+import { normalizeWorkspaceDescriptor } from "@/stores/session-store";
 
 import {
   buildWorktreeArchiveConfirmationMessage,
   buildWorktreeArchiveRiskReasons,
   toWorktreeArchiveRisk,
+  getWorkspaceArchiveRisk,
 } from "@/git/worktree-archive-warning";
 
 describe("workspace archive warning for worktree backing", () => {
+  it("warns about a dirty secondary worktree even when the legacy root is a clean checkout", () => {
+    const workspace = normalizeWorkspaceDescriptor({
+      id: "workspace",
+      name: "Workspace",
+      projectId: "root",
+      projectDisplayName: "Root",
+      projectRootPath: "/root",
+      workspaceDirectory: "/root",
+      projectKind: "git",
+      workspaceKind: "local_checkout",
+      status: "done",
+      statusEnteredAt: null,
+      activityAt: null,
+      archivingAt: null,
+      diffStat: null,
+      scripts: [],
+      gitRuntime: { isDirty: false, aheadOfOrigin: 0 },
+      members: [
+        {
+          projectId: "root",
+          projectCustomName: null,
+          worktreeSlug: null,
+          branch: null,
+          projectDisplayName: "Root",
+          projectRootPath: "/root",
+          workspaceDirectory: "/root",
+          workspaceKind: "local_checkout",
+        },
+        {
+          projectId: "other",
+          projectCustomName: null,
+          worktreeSlug: null,
+          branch: null,
+          projectDisplayName: "Other",
+          projectRootPath: "/other",
+          workspaceDirectory: "/other/worktree",
+          workspaceKind: "worktree",
+          diffStat: { additions: 2, deletions: 1 },
+        },
+      ],
+    });
+    const risk = getWorkspaceArchiveRisk(workspace);
+    expect(risk.workspaceKind).toBe("worktree");
+    expect(buildWorktreeArchiveRiskReasons(risk)).toEqual(["Uncommitted changes"]);
+  });
+
   it("does not require a confirmation for clean and pushed worktrees", () => {
     expect(
       buildWorktreeArchiveConfirmationMessage({

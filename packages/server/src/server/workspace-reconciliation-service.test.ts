@@ -260,13 +260,22 @@ describe("WorkspaceReconciliationService", () => {
       "w1",
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
-        projectId: "p1",
-        cwd: workspaceRoot,
-        kind: "local_checkout",
         displayName: "archive-race",
-        branch: "old-branch",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: workspaceRoot,
+            kind: "local_checkout",
+            displayName: "archive-race",
+            branch: "old-branch",
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
     const readStarted = deferred();
@@ -297,11 +306,11 @@ describe("WorkspaceReconciliationService", () => {
 
     expect(workspaces.get("w1")).toMatchObject({
       archivedAt,
-      branch: "new-branch",
+      members: [expect.objectContaining({ branch: "new-branch" })],
     });
   });
 
-  test("metadata reconciliation leaves missing workspaces active while a full pass archives them", async () => {
+  test("metadata and full reconciliation retain containers with missing checkouts", async () => {
     const projectRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-metadata-only-")));
     const missingWorkspace = path.join(projectRoot, "missing-workspace");
     tempDirs.push(projectRoot);
@@ -322,12 +331,22 @@ describe("WorkspaceReconciliationService", () => {
       "w1",
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
-        projectId: "p1",
-        cwd: missingWorkspace,
-        kind: "directory",
         displayName: "missing-workspace",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: missingWorkspace,
+            kind: "directory",
+            displayName: "missing-workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
     const service = new WorkspaceReconciliationService({
@@ -356,15 +375,8 @@ describe("WorkspaceReconciliationService", () => {
 
     const fullResult = await service.runOnce();
 
-    expect(fullResult.changesApplied).toEqual([
-      {
-        kind: "workspace_archived",
-        workspaceId: "w1",
-        directory: missingWorkspace,
-        reason: "directory_missing",
-      },
-    ]);
-    expect(workspaces.get("w1")?.archivedAt).toEqual(expect.any(String));
+    expect(fullResult.changesApplied).toEqual([]);
+    expect(workspaces.get("w1")?.archivedAt).toBeNull();
   });
 
   test("reads fresh checkout facts on every metadata pass", async () => {
@@ -477,14 +489,22 @@ describe("WorkspaceReconciliationService", () => {
         workspaceId,
         createPersistedWorkspaceRecord({
           workspaceId,
-          projectId,
-          cwd,
-          kind: "local_checkout",
           displayName: workspaceId,
-          branch: "topic",
-          worktreeRoot: workspaceRoot,
           createdAt: timestamp,
           updatedAt: timestamp,
+          members: [
+            {
+              projectId,
+              cwd,
+              kind: "local_checkout",
+              displayName: workspaceId,
+              branch: "topic",
+              worktreeRoot: workspaceRoot,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
         }),
       );
     }
@@ -532,15 +552,23 @@ describe("WorkspaceReconciliationService", () => {
     });
     const originalWorkspace = createPersistedWorkspaceRecord({
       workspaceId: "w1",
-      projectId: "p1",
-      cwd: workspaceRoot,
-      kind: "local_checkout",
       displayName: "Stable workspace name",
       title: "Pinned workspace name",
-      branch: "stale-branch",
-      baseBranch: "main",
       createdAt: timestamp,
       updatedAt: timestamp,
+      members: [
+        {
+          projectId: "p1",
+          cwd: workspaceRoot,
+          kind: "local_checkout",
+          displayName: "Stable workspace name",
+          branch: "stale-branch",
+          worktreeRoot: null,
+          baseBranch: "main",
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
     projects.set(originalProject.projectId, originalProject);
     workspaces.set(originalWorkspace.workspaceId, originalWorkspace);
@@ -591,13 +619,12 @@ describe("WorkspaceReconciliationService", () => {
     });
     expect(workspaces.get("w1")).toEqual({
       ...originalWorkspace,
-      kind: "directory",
-      branch: null,
+      members: [{ ...originalWorkspace.members[0]!, kind: "directory", branch: null }],
       updatedAt: expect.any(String),
     });
   });
 
-  test("archives workspaces whose directories no longer exist", async () => {
+  test("retains workspaces whose member directories no longer exist", async () => {
     const { projects, workspaces, projectRegistry, workspaceRegistry } = createTestRegistries();
     const archivedWorkspaceIds: string[] = [];
 
@@ -616,12 +643,22 @@ describe("WorkspaceReconciliationService", () => {
       "w1",
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
-        projectId: "p1",
-        cwd: "/tmp/does-not-exist-reconcile-test",
-        kind: "directory",
         displayName: "ghost",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: "/tmp/does-not-exist-reconcile-test",
+            kind: "directory",
+            displayName: "ghost",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -636,19 +673,12 @@ describe("WorkspaceReconciliationService", () => {
 
     const result = await service.runOnce();
 
-    expect(result.changesApplied).toEqual([
-      {
-        kind: "workspace_archived",
-        workspaceId: "w1",
-        directory: "/tmp/does-not-exist-reconcile-test",
-        reason: "directory_missing",
-      },
-    ]);
-    expect(archivedWorkspaceIds).toEqual(["w1"]);
-    expect(workspaces.get("w1")?.archivedAt).toEqual(expect.any(String));
+    expect(result.changesApplied).toEqual([]);
+    expect(archivedWorkspaceIds).toEqual([]);
+    expect(workspaces.get("w1")?.archivedAt).toBeNull();
   });
 
-  test("keeps a project active after all its workspaces are archived", async () => {
+  test("keeps projects and containers active when directories disappear", async () => {
     const { projects, workspaces, projectRegistry, workspaceRegistry } = createTestRegistries();
 
     const project = createPersistedProjectRecord({
@@ -664,12 +694,22 @@ describe("WorkspaceReconciliationService", () => {
       "w1",
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
-        projectId: "p1",
-        cwd: "/tmp/does-not-exist-reconcile-orphan",
-        kind: "directory",
         displayName: "orphan",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: "/tmp/does-not-exist-reconcile-orphan",
+            kind: "directory",
+            displayName: "orphan",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -681,31 +721,29 @@ describe("WorkspaceReconciliationService", () => {
 
     const result = await service.runOnce();
 
-    expect(result.changesApplied).toEqual([
-      {
-        kind: "workspace_archived",
-        workspaceId: "w1",
-        directory: "/tmp/does-not-exist-reconcile-orphan",
-        reason: "directory_missing",
-      },
-    ]);
+    expect(result.changesApplied).toEqual([]);
     expect(workspaces.get("w1")).toEqual({
       workspaceId: "w1",
-      projectId: "p1",
-      cwd: "/tmp/does-not-exist-reconcile-orphan",
-      kind: "directory",
       displayName: "orphan",
       title: null,
       pinnedAt: null,
-      branch: null,
-      worktreeRoot: null,
-      baseBranch: null,
-      isPaseoOwnedWorktree: false,
-      mainRepoRoot: null,
       createdAt: timestamp,
       updatedAt: expect.any(String),
-      archivedAt: expect.any(String),
+      archivedAt: null,
       autoArchivedChangeRequestUrl: null,
+      members: [
+        {
+          projectId: "p1",
+          cwd: "/tmp/does-not-exist-reconcile-orphan",
+          kind: "directory",
+          displayName: "orphan",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
     expect(projects.get("p1")).toEqual(project);
   });
@@ -733,12 +771,22 @@ describe("WorkspaceReconciliationService", () => {
       "w1",
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
-        projectId: "p1",
-        cwd: resolved,
-        kind: "local_checkout",
         displayName: path.basename(resolved),
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: resolved,
+            kind: "local_checkout",
+            displayName: path.basename(resolved),
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -787,12 +835,22 @@ describe("WorkspaceReconciliationService", () => {
       "w1",
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
-        projectId: "p1",
-        cwd: resolved,
-        kind: "directory",
         displayName: path.basename(resolved),
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: resolved,
+            kind: "directory",
+            displayName: path.basename(resolved),
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -814,7 +872,7 @@ describe("WorkspaceReconciliationService", () => {
     await service.runOnce();
 
     expect(projects.get("p1")!.kind).toBe("git");
-    expect(workspaces.get("w1")!.kind).toBe("local_checkout");
+    expect(workspaces.get("w1")!.members[0]!.kind).toBe("local_checkout");
   });
 
   test("keeps legacy duplicate projects and workspace membership intact", async () => {
@@ -853,24 +911,44 @@ describe("WorkspaceReconciliationService", () => {
       "focused-bat",
       createPersistedWorkspaceRecord({
         workspaceId: "focused-bat",
-        projectId: "remote:github.com/blank-dot-page/editor",
-        cwd: canonicalWorktreeDir,
-        kind: "worktree",
         displayName: "update-og-image",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "remote:github.com/blank-dot-page/editor",
+            cwd: canonicalWorktreeDir,
+            kind: "worktree",
+            displayName: "update-og-image",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
     workspaces.set(
       "gigantic-blowfish",
       createPersistedWorkspaceRecord({
         workspaceId: "gigantic-blowfish",
-        projectId: repoDir,
-        cwd: duplicateWorktreeDir,
-        kind: "worktree",
         displayName: "markdown-view",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: repoDir,
+            cwd: duplicateWorktreeDir,
+            kind: "worktree",
+            displayName: "markdown-view",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -925,11 +1003,11 @@ describe("WorkspaceReconciliationService", () => {
       archivedAt: null,
     });
     expect(workspaces.get("focused-bat")).toMatchObject({
-      projectId: "remote:github.com/blank-dot-page/editor",
+      members: [expect.objectContaining({ projectId: "remote:github.com/blank-dot-page/editor" })],
       archivedAt: null,
     });
     expect(workspaces.get("gigantic-blowfish")).toMatchObject({
-      projectId: repoDir,
+      members: [expect.objectContaining({ projectId: repoDir })],
       archivedAt: null,
     });
   });
@@ -955,12 +1033,22 @@ describe("WorkspaceReconciliationService", () => {
       "w1",
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
-        projectId: "p1",
-        cwd: dir,
-        kind: "local_checkout",
         displayName: "main",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: dir,
+            kind: "local_checkout",
+            displayName: "main",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -1057,12 +1145,22 @@ describe("WorkspaceReconciliationService", () => {
       "w1",
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
-        projectId: "p1",
-        cwd: dir,
-        kind: "local_checkout",
         displayName: "main",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: dir,
+            kind: "local_checkout",
+            displayName: "main",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -1107,12 +1205,22 @@ describe("WorkspaceReconciliationService", () => {
       "w1",
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
-        projectId: "p1",
-        cwd: dir,
-        kind: "local_checkout",
         displayName: "main",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: dir,
+            kind: "local_checkout",
+            displayName: "main",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -1157,13 +1265,22 @@ describe("WorkspaceReconciliationService", () => {
     });
     const workspace = createPersistedWorkspaceRecord({
       workspaceId: "w1",
-      projectId: project.projectId,
-      cwd: workspaceRoot,
-      kind: "local_checkout",
       displayName: "workspace",
-      branch: "feature",
       createdAt: timestamp,
       updatedAt: timestamp,
+      members: [
+        {
+          projectId: project.projectId,
+          cwd: workspaceRoot,
+          kind: "local_checkout",
+          displayName: "workspace",
+          branch: "feature",
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
     });
     projects.set(project.projectId, project);
     workspaces.set(workspace.workspaceId, workspace);
@@ -1186,7 +1303,7 @@ describe("WorkspaceReconciliationService", () => {
     expect(workspaces.get(workspace.workspaceId)).toEqual(workspace);
   });
 
-  test("archives non-directory workspaces without blocking sibling reconciliation", async () => {
+  test("retains unavailable members without blocking sibling reconciliation", async () => {
     const projectRoot = mkdtempSync(path.join(tmpdir(), "reconcile-file-workspace-"));
     const replacedWorkspace = path.join(projectRoot, "replaced-workspace");
     const siblingWorkspace = path.join(projectRoot, "sibling-workspace");
@@ -1210,24 +1327,44 @@ describe("WorkspaceReconciliationService", () => {
       "replaced",
       createPersistedWorkspaceRecord({
         workspaceId: "replaced",
-        projectId: "p1",
-        cwd: replacedWorkspace,
-        kind: "directory",
         displayName: "replaced-workspace",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: replacedWorkspace,
+            kind: "directory",
+            displayName: "replaced-workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
     workspaces.set(
       "sibling",
       createPersistedWorkspaceRecord({
         workspaceId: "sibling",
-        projectId: "p1",
-        cwd: siblingWorkspace,
-        kind: "directory",
         displayName: "sibling-workspace",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: siblingWorkspace,
+            kind: "directory",
+            displayName: "sibling-workspace",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -1253,12 +1390,6 @@ describe("WorkspaceReconciliationService", () => {
 
     expect(result.changesApplied).toEqual([
       {
-        kind: "workspace_archived",
-        workspaceId: "replaced",
-        directory: replacedWorkspace,
-        reason: "directory_missing",
-      },
-      {
         kind: "project_updated",
         projectId: "p1",
         directory: projectRoot,
@@ -1275,8 +1406,8 @@ describe("WorkspaceReconciliationService", () => {
         },
       },
     ]);
-    expect(workspaces.get("replaced")?.archivedAt).toEqual(expect.any(String));
-    expect(workspaces.get("sibling")).toMatchObject({
+    expect(workspaces.get("replaced")?.archivedAt).toBeNull();
+    expect(workspaces.get("sibling")!.members[0]).toMatchObject({
       kind: "local_checkout",
       branch: "feature/sibling",
     });
@@ -1305,13 +1436,22 @@ describe("WorkspaceReconciliationService", () => {
       "w1",
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
-        projectId: "p1",
-        cwd: dir,
-        kind: "local_checkout",
         displayName: "Human workspace title",
-        branch: "main",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: dir,
+            kind: "local_checkout",
+            displayName: "Human workspace title",
+            branch: "main",
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -1338,7 +1478,7 @@ describe("WorkspaceReconciliationService", () => {
       fields: { branch: "feature-branch" },
     });
     expect(workspaces.get("w1")!.displayName).toBe("Human workspace title");
-    expect(workspaces.get("w1")!.branch).toBe("feature-branch");
+    expect(workspaces.get("w1")!.members[0]!.branch).toBe("feature-branch");
   });
 
   test("does not modify already-archived records", async () => {
@@ -1360,13 +1500,23 @@ describe("WorkspaceReconciliationService", () => {
       "w1",
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
-        projectId: "p1",
-        cwd: "/tmp/does-not-exist-archived",
-        kind: "directory",
         displayName: "archived",
         createdAt: timestamp,
         updatedAt: timestamp,
         archivedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: "/tmp/does-not-exist-archived",
+            kind: "directory",
+            displayName: "archived",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -1381,7 +1531,7 @@ describe("WorkspaceReconciliationService", () => {
     expect(result.changesApplied).toHaveLength(0);
   });
 
-  test("calls onChanges callback when changes are applied", async () => {
+  test("does not report missing checkouts as workspace deletion", async () => {
     const { projects, workspaces, projectRegistry, workspaceRegistry } = createTestRegistries();
 
     projects.set(
@@ -1399,12 +1549,22 @@ describe("WorkspaceReconciliationService", () => {
       "w1",
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
-        projectId: "p1",
-        cwd: "/tmp/does-not-exist-callback-test",
-        kind: "directory",
         displayName: "ghost",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: "/tmp/does-not-exist-callback-test",
+            kind: "directory",
+            displayName: "ghost",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -1418,17 +1578,10 @@ describe("WorkspaceReconciliationService", () => {
 
     await service.runOnce();
 
-    expect(reportedChanges).toEqual([
-      {
-        kind: "workspace_archived",
-        workspaceId: "w1",
-        directory: "/tmp/does-not-exist-callback-test",
-        reason: "directory_missing",
-      },
-    ]);
+    expect(reportedChanges).toEqual([]);
   });
 
-  test("logs reconciliation changes with affected paths and reasons", async () => {
+  test("does not log missing checkouts as workspace deletion", async () => {
     const { projects, workspaces, projectRegistry, workspaceRegistry } = createTestRegistries();
     const { logger, infoRecords } = createCapturingLogger();
 
@@ -1447,12 +1600,22 @@ describe("WorkspaceReconciliationService", () => {
       "w1",
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
-        projectId: "p1",
-        cwd: "/tmp/does-not-exist-log-test",
-        kind: "directory",
         displayName: "ghost",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: "/tmp/does-not-exist-log-test",
+            kind: "directory",
+            displayName: "ghost",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
 
@@ -1464,23 +1627,7 @@ describe("WorkspaceReconciliationService", () => {
 
     await service.runOnce();
 
-    expect(infoRecords).toEqual([
-      {
-        message: "Workspace reconciliation applied changes",
-        payload: expect.objectContaining({
-          changeCount: 1,
-          changes: expect.arrayContaining([
-            {
-              kind: "workspace_archived",
-              workspaceId: "w1",
-              directory: "/tmp/does-not-exist-log-test",
-              reason: "directory_missing",
-            },
-          ]),
-          durationMs: expect.any(Number),
-        }),
-      },
-    ]);
+    expect(infoRecords).toEqual([]);
     expect(projects.get("p1")!.archivedAt).toBeFalsy();
   });
 
@@ -1528,12 +1675,22 @@ describe("WorkspaceReconciliationService", () => {
       "w1",
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
-        projectId: "p1",
-        cwd: rootPath,
-        kind: "worktree",
         displayName: "worktree",
         createdAt: timestamp,
         updatedAt: timestamp,
+        members: [
+          {
+            projectId: "p1",
+            cwd: rootPath,
+            kind: "worktree",
+            displayName: "worktree",
+            branch: null,
+            worktreeRoot: null,
+            baseBranch: null,
+            isPaseoOwnedWorktree: false,
+            mainRepoRoot: null,
+          },
+        ],
       }),
     );
     const service = new WorkspaceReconciliationService({
@@ -1563,10 +1720,75 @@ describe("WorkspaceReconciliationService", () => {
         },
       },
     ]);
-    expect(workspaces.get("w1")).toMatchObject({
+    expect(workspaces.get("w1")!.members[0]).toMatchObject({
       worktreeRoot: rootPath,
       isPaseoOwnedWorktree: true,
       mainRepoRoot: "/tmp/main-repo",
     });
   });
+});
+
+test("reconciles every project member without changing container identity", async () => {
+  const dirs = [
+    realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-member-a-"))),
+    realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-member-b-"))),
+  ];
+  const { projects, workspaces, projectRegistry, workspaceRegistry } = createTestRegistries();
+  const now = "2026-09-08T00:00:00.000Z";
+  try {
+    for (const cwd of dirs)
+      projects.set(
+        cwd,
+        createPersistedProjectRecord({
+          projectId: cwd,
+          rootPath: cwd,
+          kind: "non_git",
+          displayName: cwd,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      );
+    workspaces.set(
+      "container",
+      createPersistedWorkspaceRecord({
+        workspaceId: "container",
+        displayName: "Independent",
+        title: "My workspace",
+        createdAt: now,
+        updatedAt: now,
+        members: dirs.map((cwd) => ({
+          projectId: cwd,
+          cwd,
+          kind: "directory",
+          displayName: cwd,
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        })),
+      }),
+    );
+    const service = new WorkspaceReconciliationService({
+      projectRegistry,
+      workspaceRegistry,
+      logger: createTestLogger(),
+      workspaceGitService: {
+        getCheckout: async (cwd) =>
+          createCheckout(cwd, {
+            isGit: true,
+            currentBranch: path.basename(cwd),
+            worktreeRoot: cwd,
+          }),
+      },
+    });
+    await service.reconcileGitMetadata();
+    expect(workspaces.get("container")?.title).toBe("My workspace");
+    expect(workspaces.get("container")?.members.map((member) => member.branch)).toEqual(
+      dirs.map((cwd) => path.basename(cwd)),
+    );
+    expect(workspaces.get("container")).not.toHaveProperty("projectId");
+  } finally {
+    for (const cwd of dirs) rmSync(cwd, { recursive: true, force: true });
+  }
 });
