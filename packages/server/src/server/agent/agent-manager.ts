@@ -2203,7 +2203,13 @@ export class AgentManager {
       return;
     }
 
-    await this.writeStoredMetadata(agentId, updates);
+    // A stored agent has no live object to emit state from, so the write has to
+    // announce itself: without this a rename lands on disk and no client hears
+    // about it until the next full fetch.
+    const record = await this.writeStoredMetadata(agentId, updates);
+    if (!record.internal) {
+      this.dispatch({ type: "stored_agent_state", record });
+    }
   }
 
   private async runLifecycleMutation<T>(agentId: string, mutation: () => Promise<T>): Promise<T> {
