@@ -4102,6 +4102,44 @@ test("updateAgentMetadata bumps updatedAt for stored agents", async () => {
   expect(Date.parse(after!.updatedAt)).toBeGreaterThan(Date.parse(before!.updatedAt));
 });
 
+test("updateAgentMetadata dispatches stored_agent_state so a rename reaches clients", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-stored-metadata-dispatch-"));
+  const storagePath = join(workdir, "agents");
+  const storage = new AgentStorage(storagePath, logger);
+  const manager = new AgentManager({
+    clients: {
+      codex: new TestAgentClient(),
+    },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000129",
+  });
+
+  const snapshot = await manager.createAgent(
+    {
+      provider: "codex",
+      cwd: workdir,
+    },
+    undefined,
+    { workspaceId: undefined },
+  );
+  await manager.closeAgent(snapshot.id);
+  expect(manager.getAgent(snapshot.id)).toBeNull();
+
+  const events: AgentManagerEvent[] = [];
+  manager.subscribe((event) => events.push(event), { replayState: false });
+
+  await manager.updateAgentMetadata(snapshot.id, { title: "Renamed while stored" });
+
+  expect(events).toContainEqual(
+    expect.objectContaining({
+      type: "stored_agent_state",
+      record: expect.objectContaining({ id: snapshot.id, title: "Renamed while stored" }),
+    }),
+  );
+  rmSync(workdir, { recursive: true, force: true });
+});
+
 test("setAgentWorkspaceId re-parents a live agent and persists the new owner", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-workspace-move-live-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);
