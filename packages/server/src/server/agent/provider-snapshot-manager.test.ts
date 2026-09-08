@@ -10,6 +10,7 @@ import type {
   AgentProvider,
   FetchCatalogOptions,
   ProviderRefreshContext,
+  ProviderSnapshotEntry,
   ResolveAgentCreateConfigInput,
 } from "./agent-sdk-types.js";
 import type { ManagedAgent } from "./agent-manager.js";
@@ -490,6 +491,134 @@ describe("ProviderSnapshotManager public surface", () => {
       expect(entry.provider).toBe("codex");
       expect(entry.status).toBe("unavailable");
       expect(isAvailable).toHaveBeenCalledTimes(1);
+    } finally {
+      manager.destroy();
+    }
+  });
+
+  test("a later isAvailable=false keeps the catalog already discovered for that cwd", async () => {
+    const cwd = "/tmp/project";
+    const isAvailable = vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false);
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: {
+        claude: { enabled: false },
+        copilot: { enabled: false },
+        opencode: { enabled: false },
+        pi: { enabled: false },
+      },
+      extraClients: {
+        codex: createExtraClient("codex", {
+          isAvailable,
+          async fetchCatalog() {
+            return {
+              models: [{ provider: "codex", id: "gpt-5.4", label: "GPT-5.4" }],
+              modes: [] as AgentMode[],
+            };
+          },
+        }),
+      },
+    });
+    try {
+      const discovered = await manager.getProvider({ cwd, provider: "codex", wait: true });
+      expect(discovered.status).toBe("ready");
+      expect(discovered.models).toHaveLength(1);
+
+      await manager.refreshSnapshotForCwd({ cwd, providers: ["codex"] });
+
+      const afterProbeMiss = await manager.getProvider({ cwd, provider: "codex", wait: false });
+      expect(isAvailable).toHaveBeenCalledTimes(2);
+      expect(afterProbeMiss.status).toBe("ready");
+      expect(afterProbeMiss.models).toHaveLength(1);
+    } finally {
+      manager.destroy();
+    }
+  });
+
+  test("a probe that reports no models keeps the catalog already discovered for that cwd", async () => {
+    const cwd = "/tmp/project";
+    const fetchCatalog = vi
+      .fn()
+      .mockResolvedValueOnce({
+        models: [{ provider: "codex", id: "gpt-5.4", label: "GPT-5.4" }],
+        modes: [] as AgentMode[],
+      })
+      .mockResolvedValue({ models: [] as AgentModelDefinition[], modes: [] as AgentMode[] });
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: {
+        claude: { enabled: false },
+        copilot: { enabled: false },
+        opencode: { enabled: false },
+        pi: { enabled: false },
+      },
+      extraClients: {
+        codex: createExtraClient("codex", {
+          async isAvailable() {
+            return true;
+          },
+          fetchCatalog,
+        }),
+      },
+    });
+    try {
+      const discovered = await manager.getProvider({ cwd, provider: "codex", wait: true });
+      expect(discovered.models).toHaveLength(1);
+
+      await manager.refreshSnapshotForCwd({ cwd, providers: ["codex"] });
+
+      const afterEmptyCatalog = await manager.getProvider({ cwd, provider: "codex", wait: false });
+      expect(fetchCatalog).toHaveBeenCalledTimes(2);
+      expect(afterEmptyCatalog.status).toBe("ready");
+      expect(afterEmptyCatalog.models).toHaveLength(1);
+    } finally {
+      manager.destroy();
+    }
+  });
+
+  test("resetting a warm snapshot to loading keeps the provider selectable", async () => {
+    const cwd = "/tmp/project";
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: {
+        claude: { enabled: false },
+        copilot: { enabled: false },
+        opencode: { enabled: false },
+        pi: { enabled: false },
+      },
+      extraClients: {
+        codex: createExtraClient("codex", {
+          async isAvailable() {
+            return true;
+          },
+          async fetchCatalog() {
+            return {
+              models: [{ provider: "codex", id: "gpt-5.4", label: "GPT-5.4" }],
+              modes: [] as AgentMode[],
+            };
+          },
+        }),
+      },
+    });
+    try {
+      const discovered = await manager.getProvider({ cwd, provider: "codex", wait: true });
+      expect(discovered.status).toBe("ready");
+
+      // refreshSettingsSnapshot resets every known cwd back to loading before re-probing.
+      // A warm catalog must not drop out of the new-agent picker while that runs.
+      const entries: ProviderSnapshotEntry[][] = [];
+      manager.on("change", (next) => entries.push(next));
+      const refreshed = manager.refreshSettingsSnapshot({});
+
+      const codexDuringReset = entries
+        .flat()
+        .filter((entry) => entry.provider === "codex")
+        .filter((entry) => (entry.models?.length ?? 0) > 0);
+      expect(codexDuringReset.length).toBeGreaterThan(0);
+      for (const entry of codexDuringReset) {
+        expect(entry.status).toBe("ready");
+      }
+      await refreshed;
     } finally {
       manager.destroy();
     }
