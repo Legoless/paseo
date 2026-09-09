@@ -352,30 +352,19 @@ export class DirectorySync {
     if (!checkpoints) return Promise.resolve();
     this.cacheLoad ??= (async () => {
       const revision = this.revision;
-      const initial = useSessionStore.getState().sessions[this.serverId];
-      if (!initial) return;
-      const initialAgents = initial.agents;
-      const initialWorkspaces = initial.workspaces;
-      const initialProjects = initial.projects;
-      const pristine =
-        initialAgents.size === 0 && initialWorkspaces.size === 0 && initialProjects.size === 0;
       const cached = await checkpoints.readDirectory(this.serverId);
-      if (this.cacheAccepted || !pristine || this.revision !== revision) return;
-      const session = useSessionStore.getState().sessions[this.serverId];
-      if (
-        !session ||
-        session.agents !== initialAgents ||
-        session.workspaces !== initialWorkspaces ||
-        session.projects !== initialProjects
-      ) {
-        return;
-      }
+      if (this.cacheAccepted) return;
+      if (!useSessionStore.getState().sessions[this.serverId]) return;
       this.agents.commitCached(cached.agents);
       this.workspaces.commitCached(cached);
-      this.cursors = cached.checkpoint ?? {};
+      if (this.revision === revision) this.cursors = cached.checkpoint ?? {};
       this.cacheAccepted = true;
     })();
     return this.cacheLoad;
+  }
+
+  restoreCachedDirectory(): Promise<void> {
+    return this.loadCachedDirectory();
   }
 
   async fetchTimeline(

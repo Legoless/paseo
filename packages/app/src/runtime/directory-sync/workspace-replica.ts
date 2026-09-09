@@ -93,7 +93,16 @@ export class WorkspaceDirectoryReplica {
     workspaces: Map<string, WorkspaceDescriptor>;
     projects: Map<string, ProjectDescriptor>;
   }): void {
-    this.commit(input, []);
+    const live = this.read();
+    const workspaces = new Map(input.workspaces);
+    for (const [workspaceId, workspace] of live.workspaces) {
+      workspaces.set(workspaceId, workspace);
+    }
+    const projects = new Map(input.projects);
+    for (const [projectId, project] of live.projects) {
+      projects.set(projectId, project);
+    }
+    this.commit({ workspaces, projects }, []);
     useSessionStore.getState().setHasWorkspaceDirectorySnapshot(this.serverId, true);
   }
 
