@@ -29,6 +29,7 @@ extraResources:
     to: variant.json
 mac:
   artifactName: "Paseo-Neo-${version}-${arch}.${ext}"
+  minimumSystemVersion: "13.0.0"
   category: public.app-category.developer-tools
   icon: assets/icon.icns
   # Notarization requires the hardened runtime, and the hardened runtime requires
