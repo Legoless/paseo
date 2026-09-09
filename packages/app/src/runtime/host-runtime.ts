@@ -1511,6 +1511,12 @@ export class HostRuntimeStore {
       projectIconCache.setHosts(profiles.map((profile) => profile.serverId));
       await projectIconCache.restore();
       this.syncHosts(profiles);
+      for (const profile of profiles) {
+        void this.directorySyncByServer
+          .get(profile.serverId)
+          ?.restoreCachedDirectory()
+          .catch(() => undefined);
+      }
     } catch (error) {
       console.error("[HostRuntime] Failed to load host registry from storage", error);
     } finally {
@@ -2272,6 +2278,17 @@ export class HostRuntimeStore {
     for (const controller of this.controllers.values()) {
       controller.ensureConnected();
     }
+  }
+
+  setAppVisible(visible: boolean): void {
+    // Keep normal reconnect backoff running while hidden, for as long as the OS
+    // lets us execute. Foregrounding bypasses that backoff without closing healthy sockets.
+    if (!visible) {
+      void this.replicaCache.flush();
+      return;
+    }
+
+    this.ensureConnectedAll();
   }
 
   runProbeCycleNow(serverId?: string): Promise<void> {
