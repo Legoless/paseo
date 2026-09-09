@@ -11,10 +11,12 @@ export const ja: TranslationResources = {
       confirm: "確認",
       close: "閉じる",
       copy: "コピー",
+      copyLine: "行をコピー",
       dismiss: "閉じる",
       retry: "再試行",
       search: "検索",
       select: "選択",
+      selectAll: "すべて選択",
     },
     placeholders: {
       search: "検索...",
@@ -34,6 +36,7 @@ export const ja: TranslationResources = {
     errors: {
       error: "エラー",
       unableToSave: "保存できません",
+      unableToCopy: "コピーできません",
       nameRequired: "名前は必須です",
       daemonUnavailable: "デーモンが利用できません",
       daemonClientUnavailable: "デーモンクライアントが利用できません",

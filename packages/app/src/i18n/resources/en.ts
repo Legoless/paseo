@@ -8,10 +8,12 @@ export const en = {
       confirm: "Confirm",
       close: "Close",
       copy: "Copy",
+      copyLine: "Copy line",
       dismiss: "Dismiss",
       retry: "Retry",
       search: "Search",
       select: "Select",
+      selectAll: "Select all",
     },
     placeholders: {
       search: "Search...",
@@ -31,6 +33,7 @@ export const en = {
     errors: {
       error: "Error",
       unableToSave: "Unable to save",
+      unableToCopy: "Unable to copy",
       nameRequired: "Name is required",
       daemonUnavailable: "Daemon unavailable",
       daemonClientUnavailable: "Daemon client unavailable",

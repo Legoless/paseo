@@ -11,10 +11,12 @@ export const fr: TranslationResources = {
       confirm: "Confirmer",
       close: "Fermer",
       copy: "Copie",
+      copyLine: "Copier la ligne",
       dismiss: "Rejeter",
       retry: "Réessayer",
       search: "Recherche",
       select: "Sélectionner",
+      selectAll: "Tout sélectionner",
     },
     placeholders: {
       search: "Recherche...",
@@ -34,6 +36,7 @@ export const fr: TranslationResources = {
     errors: {
       error: "Erreur",
       unableToSave: "Impossible d'enregistrer",
+      unableToCopy: "Impossible de copier",
       nameRequired: "Le nom est requis",
       daemonUnavailable: "Daemonindisponible",
       daemonClientUnavailable: "ClientDaemonindisponible",

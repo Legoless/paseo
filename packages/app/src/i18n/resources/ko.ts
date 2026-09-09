@@ -11,10 +11,12 @@ export const ko: TranslationResources = {
       confirm: "확인",
       close: "닫기",
       copy: "복사",
+      copyLine: "줄 복사",
       dismiss: "닫기",
       retry: "다시 시도",
       search: "검색",
       select: "선택",
+      selectAll: "모두 선택",
     },
     placeholders: {
       search: "검색...",
@@ -34,6 +36,7 @@ export const ko: TranslationResources = {
     errors: {
       error: "오류",
       unableToSave: "저장할 수 없습니다",
+      unableToCopy: "복사할 수 없습니다",
       nameRequired: "이름을 입력하세요",
       daemonUnavailable: "데몬을 사용할 수 없습니다",
       daemonClientUnavailable: "데몬 클라이언트를 사용할 수 없습니다",
