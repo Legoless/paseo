@@ -61,25 +61,18 @@ function resolveWorkspaceTitle({
 
 function buildChatDraftComposerArgs({
   serverId,
-  isConnected,
   workspaceDirectory,
   sourceDirectory,
   pendingWorkspaceSetup,
 }: {
   serverId: string;
-  isConnected: boolean;
   workspaceDirectory: string | undefined;
   sourceDirectory: string;
   pendingWorkspaceSetup: { creationMethod: string } | null;
 }) {
   return {
     initialServerId: serverId || null,
-    initialValues:
-      workspaceDirectory || sourceDirectory
-        ? { workingDir: workspaceDirectory || sourceDirectory }
-        : undefined,
     isVisible: pendingWorkspaceSetup !== null,
-    onlineServerIds: isConnected && serverId ? [serverId] : [],
     lockedWorkingDir: workspaceDirectory || sourceDirectory || undefined,
   };
 }
@@ -186,7 +179,6 @@ export function WorkspaceSetupDialog() {
     draftKey: `workspace-setup:${serverId}:${sourceDirectory}`,
     composer: buildChatDraftComposerArgs({
       serverId,
-      isConnected,
       workspaceDirectory: workspace?.workspaceDirectory,
       sourceDirectory,
       pendingWorkspaceSetup,
