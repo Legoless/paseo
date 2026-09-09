@@ -240,7 +240,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
   const setAgentStreamTail = useSessionStore((state) => state.setAgentStreamTail);
   const setAgentStreamHead = useSessionStore((state) => state.setAgentStreamHead);
   const applyAgentTurnLiveness = useSessionStore((state) => state.applyAgentTurnLiveness);
-  const clearAgentTurnLiveness = useSessionStore((state) => state.clearAgentTurnLiveness);
   const clearAgentStreamHead = useSessionStore((state) => state.clearAgentStreamHead);
   const setInitializingAgents = useSessionStore((state) => state.setInitializingAgents);
   const bumpHistorySyncGeneration = useSessionStore((state) => state.bumpHistorySyncGeneration);
@@ -419,15 +418,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       setInitializingAgents(serverId, new Map());
     }
   }, [flushAgentLastActivity, serverId, isConnected, setInitializingAgents]);
-
-  useEffect(
-    () =>
-      client.subscribeConnectionStatus((connection) => {
-        if (connection.status === "connected") return;
-        clearAgentTurnLiveness(serverId);
-      }),
-    [clearAgentTurnLiveness, client, serverId],
-  );
 
   const applyWorkspaceSetupProgress = useCallback(
     (payload: WorkspaceSetupProgressPayload) => {
