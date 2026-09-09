@@ -308,6 +308,9 @@ export type BrowserAutomationExecuteRequestMessage = BrowserAutomationExecuteReq
 export type BrowserAutomationExecuteResponseMessage = BrowserAutomationExecuteResponse;
 
 export interface DaemonClientConfig {
+  /** Deliver compact bodies/hash references to a caller-owned snapshot cache.
+   * The default keeps public SDK snapshot entries expanded. */
+  providerSnapshots?: "wire";
   url: string;
   clientId: string;
   clientType?: "mobile" | "browser" | "cli" | "mcp" | "hub";
@@ -4759,7 +4762,7 @@ export class DaemonClient {
       },
       responseType: "get_providers_snapshot_response",
     });
-    return normalizeProvidersSnapshotPayload(payload);
+    return normalizeProvidersSnapshotPayload(payload, this.config.providerSnapshots !== "wire");
   }
 
   async getDaemonConfig(
@@ -5748,6 +5751,9 @@ export class DaemonClient {
           [CLIENT_CAPS.providerSubagents]: true,
           [CLIENT_CAPS.projectUpdates]: true,
           [CLIENT_CAPS.compactProviderSnapshots]: true,
+          ...(this.config.providerSnapshots === "wire"
+            ? { [CLIENT_CAPS.providerSnapshotReferences]: true }
+            : {}),
           ...this.config.capabilities,
         },
         ...(this.config.appVersion ? { appVersion: this.config.appVersion } : {}),
@@ -6169,7 +6175,10 @@ export class DaemonClient {
   }
 
   private handleSessionMessage(msg: SessionOutboundMessage): void {
-    const consumerMessage = normalizeProviderSnapshotUpdateMessage(msg);
+    const consumerMessage = normalizeProviderSnapshotUpdateMessage(
+      msg,
+      this.config.providerSnapshots !== "wire",
+    );
 
     if (consumerMessage.type === "status") {
       const serverInfo = parseServerInfoStatusPayload(consumerMessage.payload);
