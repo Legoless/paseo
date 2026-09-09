@@ -3,6 +3,7 @@ import { isAgentWorkspaceLabelKey } from "@getpaseo/protocol/agent-labels";
 
 import {
   AgentRunCancellationError,
+  type AgentMetadataOrigin,
   type AgentRunCancellationResult,
   type ManagedAgent,
 } from "./agent-manager.js";
@@ -33,6 +34,7 @@ export interface LifecycleAgentManager {
       title?: string;
       labels?: Record<string, string>;
     },
+    origin?: AgentMetadataOrigin,
   ): Promise<void>;
 }
 
@@ -163,6 +165,8 @@ export async function updateAgentCommand(
     agentId: string;
     name?: string;
     labels?: Record<string, string>;
+    /** Defaults to "agent": a caller that does not say is not trusted with a name. */
+    origin?: AgentMetadataOrigin;
   },
 ): Promise<UpdateAgentResult> {
   const title = input.name?.trim();
@@ -182,10 +186,14 @@ export async function updateAgentCommand(
     };
   }
 
-  await dependencies.agentManager.updateAgentMetadata(input.agentId, {
-    ...(title ? { title } : {}),
-    ...(labels ? { labels } : {}),
-  });
+  await dependencies.agentManager.updateAgentMetadata(
+    input.agentId,
+    {
+      ...(title ? { title } : {}),
+      ...(labels ? { labels } : {}),
+    },
+    input.origin ?? "agent",
+  );
 
   return {
     accepted: true,

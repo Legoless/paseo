@@ -517,6 +517,15 @@ interface AgentMetadataPatch {
   labels?: AgentLabelPatch;
 }
 
+/**
+ * Who asked for a metadata write. There is no principal on the socket to read
+ * this from — every connection is admitted as the owner — so it is a fact about
+ * the route: the client RPC is a person, the MCP tool is the agent renaming
+ * itself. "agent" is the default so a route nobody tagged cannot overwrite a
+ * name a person chose.
+ */
+export type AgentMetadataOrigin = "user" | "agent";
+
 interface RegisterSessionOptions {
   createdAt?: Date;
   updatedAt?: Date;
@@ -1839,7 +1848,11 @@ export class AgentManager {
     this.emitState(agent);
   }
 
-  async setTitle(agentId: string, title: string): Promise<void> {
+  async setTitle(
+    agentId: string,
+    title: string,
+    options?: { titleSetByUser?: boolean },
+  ): Promise<void> {
     const agent = this.requireAgent(agentId);
     const normalizedTitle = title.trim();
     if (!normalizedTitle) {
@@ -1853,7 +1866,10 @@ export class AgentManager {
       return;
     }
     this.touchUpdatedAt(agent);
-    await this.persistSnapshot(agent, { title: normalizedTitle });
+    await this.persistSnapshot(agent, {
+      title: normalizedTitle,
+      ...(options?.titleSetByUser ? { titleSetByUser: true } : {}),
+    });
     this.emitState(agent, { persist: false });
   }
 
@@ -1987,7 +2003,7 @@ export class AgentManager {
   private async writeStoredMetadata(
     agentId: string,
     patch: AgentMetadataPatch,
-    options?: { workspaceLabelsAuthoritative?: boolean },
+    options?: { workspaceLabelsAuthoritative?: boolean; titleSetByUser?: boolean },
   ): Promise<StoredAgentRecord> {
     const registry = this.requireRegistry();
     const record = await registry.get(agentId);
@@ -1998,6 +2014,7 @@ export class AgentManager {
     const nextRecord = {
       ...record,
       ...(patch.title ? { title: patch.title } : {}),
+      ...(options?.titleSetByUser ? { titleSetByUser: true } : {}),
       ...(patch.labels ? { labels: applyLabelPatch(record.labels, patch.labels) } : {}),
       updatedAt: this.nextStoredUpdatedAt(record),
     };
@@ -2153,9 +2170,10 @@ export class AgentManager {
       title?: string;
       labels?: Record<string, string>;
     },
+    origin: AgentMetadataOrigin = "agent",
   ): Promise<void> {
     await this.runLifecycleMutation(agentId, () =>
-      this.updateAgentMetadataUnlocked(agentId, updates),
+      this.updateAgentMetadataUnlocked(agentId, updates, origin),
     );
   }
 
@@ -2203,11 +2221,23 @@ export class AgentManager {
       title?: string;
       labels?: Record<string, string>;
     },
+    origin: AgentMetadataOrigin = "agent",
   ): Promise<void> {
+    // A person's rename wins over every later automatic one. Both write paths
+    // below funnel through here, so this is the only place the rule is stated —
+    // and labels are never blocked, only the title.
+    const byUser = origin === "user" && Boolean(updates.title);
+    const title = (await this.titleAcceptsWrite(agentId, updates.title, origin))
+      ? updates.title
+      : undefined;
+    if (!title && !updates.labels) {
+      return;
+    }
+
     const liveAgent = this.getAgent(agentId);
     if (liveAgent) {
-      if (updates.title) {
-        await this.setTitle(agentId, updates.title);
+      if (title) {
+        await this.setTitle(agentId, title, { titleSetByUser: byUser });
       }
       if (updates.labels) {
         await this.writeLabels(agentId, updates.labels);
@@ -2218,10 +2248,30 @@ export class AgentManager {
     // A stored agent has no live object to emit state from, so the write has to
     // announce itself: without this a rename lands on disk and no client hears
     // about it until the next full fetch.
-    const record = await this.writeStoredMetadata(agentId, updates);
+    const record = await this.writeStoredMetadata(
+      agentId,
+      { ...updates, ...(title ? { title } : { title: undefined }) },
+      { titleSetByUser: byUser },
+    );
     if (!record.internal) {
       this.dispatch({ type: "stored_agent_state", record });
     }
+  }
+
+  /** Only a person may overwrite a title a person chose. */
+  private async titleAcceptsWrite(
+    agentId: string,
+    title: string | undefined,
+    origin: AgentMetadataOrigin,
+  ): Promise<boolean> {
+    if (!title) {
+      return false;
+    }
+    if (origin === "user") {
+      return true;
+    }
+    const stored = await this.registry?.get(agentId);
+    return stored?.titleSetByUser !== true;
   }
 
   private async runLifecycleMutation<T>(agentId: string, mutation: () => Promise<T>): Promise<T> {
@@ -3788,6 +3838,7 @@ export class AgentManager {
     agent: ManagedAgent,
     options?: {
       title?: string | null;
+      titleSetByUser?: boolean;
       internal?: boolean;
       workspaceLabelsAuthoritative?: boolean;
     },

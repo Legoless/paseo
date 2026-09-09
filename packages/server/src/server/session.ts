@@ -3010,7 +3010,12 @@ export class Session {
     try {
       const result = await updateAgentCommand(
         { agentManager: this.agentManager },
-        { agentId, name, labels },
+        // The client RPC is the rename modal and `paseo agent update --name`.
+        // ponytail: route stands in for identity — every socket is admitted as
+        // the owner, so an agent that shells out to the CLI still counts as a
+        // user here. Needs real principal separation to close, which does not
+        // exist yet; this covers the agent naming its own tab, which is the bug.
+        { agentId, name, labels, origin: "user" },
       );
 
       if (!result.accepted) {
