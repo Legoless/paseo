@@ -18,6 +18,7 @@ import {
 import {
   isExplorerSidebarOpen,
   openExplorerSidebarView,
+  paneOffersExplorerToggle,
   resolveExplorerSidebarPresentation,
   toggleExplorerSidebar,
 } from "@/workspace-tabs/explorer-sidebar";
@@ -101,6 +102,17 @@ describe("Explorer sidebar", () => {
             ?.target.kind
         : null;
     expect(activeExplorerTarget).toBe("files");
+  });
+
+  it("offers the Explorer toggle on agent and terminal work, not on empty or browser panes", () => {
+    expect(paneOffersExplorerToggle("agent")).toBe(true);
+    expect(paneOffersExplorerToggle("draft")).toBe(true);
+    expect(paneOffersExplorerToggle("terminal")).toBe(true);
+    expect(paneOffersExplorerToggle("provider_subagent")).toBe(true);
+    expect(paneOffersExplorerToggle("browser")).toBe(false);
+    expect(paneOffersExplorerToggle("new_tab")).toBe(false);
+    expect(paneOffersExplorerToggle("files")).toBe(false);
+    expect(paneOffersExplorerToggle(undefined)).toBe(false);
   });
 
   it("toggles the compact Explorer without changing its selected view", () => {

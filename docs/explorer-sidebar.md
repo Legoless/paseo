@@ -23,10 +23,11 @@ retention, while each shell owns its tabs, focus, dragging, resizing, and shortc
 ## Explorer sidebar
 
 `packages/app/src/workspace-tabs/explorer-sidebar.ts` owns show, hide, toggle, and view selection.
-On desktop, the shell renders inside the focused workspace pane. Every pane has an Explorer toggle
-at the top-right of its content surface. Explorer visibility is remembered per content tab of the
-focused pane; tabs that have never been toggled default closed. The dock uses its own persisted
-width and resize handle, and leaves the workspace header, tab rail, and sibling panes unchanged.
+On desktop, the shell renders inside the focused workspace pane. Agent, terminal, and new-agent
+panes have an Explorer toggle at the top-right of the content surface. Empty launchers and browser
+panes do not. Explorer visibility is remembered per content tab of the focused pane; tabs that have
+never been toggled default closed. The dock uses its own persisted width and resize handle, and
+leaves the workspace header, tab rail, and sibling panes unchanged.
 The tray's top-left carries the pane project badge, then the checkout label; Explorer stays at the
 top-right. The badge names the project whose member directory equals the pane's — the sidebar's
 Uncategorized rule from `packages/app/src/projects/workspace-groups.ts`, so a pane and its sidebar

@@ -46,6 +46,7 @@ import {
   resolveExplorerSidebarDockSizes,
   resolveExplorerSidebarWidth,
 } from "@/components/explorer-sidebar-layout";
+import { paneOffersExplorerToggle } from "@/workspace-tabs/explorer-sidebar";
 import { RetainedPanel } from "@/components/retained-panel";
 import {
   hasMultipleVisiblePanes,
@@ -249,11 +250,10 @@ function PaneProjectTray({
     },
     [onSwitchTabProject],
   );
-  // Every project action needs a project, and so does the menu that configures them. A pane
-  // holding only the launcher has none, so the tray collapses to the Explorer toggle — or, when
-  // the Explorer is already open, to nothing at all rather than an empty bar.
+  // Every project action needs a project, and so does the menu that configures them. A launcher
+  // or browser without a project has no tray: Explorer is only offered on agent and terminal work.
   const showProjectActions = Boolean(cwd);
-  const showExplorerToggle = !open;
+  const showExplorerToggle = !open && paneOffersExplorerToggle(activeTab?.target.kind);
   if (!showProjectActions && !showExplorerToggle) {
     return null;
   }
