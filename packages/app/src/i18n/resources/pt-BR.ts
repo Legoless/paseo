@@ -11,10 +11,12 @@ export const ptBR: TranslationResources = {
       confirm: "Confirmar",
       close: "Fechar",
       copy: "Copiar",
+      copyLine: "Copiar linha",
       dismiss: "Dispensar",
       retry: "Tentar novamente",
       search: "Buscar",
       select: "Selecionar",
+      selectAll: "Selecionar tudo",
     },
     placeholders: {
       search: "Buscar...",
@@ -34,6 +36,7 @@ export const ptBR: TranslationResources = {
     errors: {
       error: "Erro",
       unableToSave: "Não foi possível salvar",
+      unableToCopy: "Não foi possível copiar",
       nameRequired: "O nome é obrigatório",
       daemonUnavailable: "Daemon indisponível",
       daemonClientUnavailable: "Cliente do daemon indisponível",
