@@ -31,8 +31,17 @@ mac:
   artifactName: "Paseo-Neo-${version}-${arch}.${ext}"
   category: public.app-category.developer-tools
   icon: assets/icon.icns
-  hardenedRuntime: false
-  notarize: false
+  # Notarization requires the hardened runtime, and the hardened runtime requires
+  # these entitlements — Electron needs JIT, and dictation needs the microphone.
+  # An unnotarized build also silently loses macOS features that look like code
+  # bugs: app.setBadgeCount() reports success while the dock renders nothing.
+  # Credentials come from the environment, never this file. Export either
+  # APPLE_API_KEY + APPLE_API_KEY_ID + APPLE_API_ISSUER, or
+  # APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID (289M6XEDV4).
+  hardenedRuntime: true
+  notarize: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
   extraResources:
     - from: bin/paseo
       to: bin/paseoneo
