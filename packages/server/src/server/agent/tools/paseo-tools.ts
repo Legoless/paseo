@@ -2191,7 +2191,9 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         }
       }
 
-      await updateAgentCommand({ agentManager }, { agentId, name, labels });
+      // An agent may name a tab nobody has named. Once a person has, the title
+      // write is dropped here and the labels still apply.
+      await updateAgentCommand({ agentManager }, { agentId, name, labels, origin: "agent" });
 
       return {
         content: [],

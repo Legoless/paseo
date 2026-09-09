@@ -4140,6 +4140,83 @@ test("updateAgentMetadata dispatches stored_agent_state so a rename reaches clie
   rmSync(workdir, { recursive: true, force: true });
 });
 
+test("a user rename outranks later agent renames and survives a snapshot flush", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-title-ownership-live-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const manager = new AgentManager({
+    clients: {
+      codex: new TestAgentClient(),
+    },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000130",
+  });
+
+  const snapshot = await manager.createAgent(
+    {
+      provider: "codex",
+      cwd: workdir,
+    },
+    undefined,
+    { workspaceId: undefined },
+  );
+
+  // Nobody has named it, so the agent still may.
+  await manager.updateAgentMetadata(snapshot.id, { title: "Agent guess" }, "agent");
+  expect((await storage.get(snapshot.id))?.title).toBe("Agent guess");
+
+  await manager.updateAgentMetadata(snapshot.id, { title: "Mine" }, "user");
+  await manager.updateAgentMetadata(snapshot.id, { title: "Agent guess again" }, "agent");
+  expect((await storage.get(snapshot.id))?.title).toBe("Mine");
+
+  // The projection rebuilds the record from the live object, which does not
+  // carry the flag, so a flush is where this silently regresses.
+  await manager.setAgentWorkspaceId(snapshot.id, "workspace-1");
+  expect((await storage.get(snapshot.id))?.titleSetByUser).toBe(true);
+
+  await manager.updateAgentMetadata(snapshot.id, { title: "Agent guess once more" }, "agent");
+  expect((await storage.get(snapshot.id))?.title).toBe("Mine");
+
+  rmSync(workdir, { recursive: true, force: true });
+});
+
+test("a stored agent keeps its user title while agent labels still apply", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-title-ownership-stored-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const manager = new AgentManager({
+    clients: {
+      codex: new TestAgentClient(),
+    },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000131",
+  });
+
+  const snapshot = await manager.createAgent(
+    {
+      provider: "codex",
+      cwd: workdir,
+    },
+    undefined,
+    { workspaceId: undefined },
+  );
+  await manager.closeAgent(snapshot.id);
+  expect(manager.getAgent(snapshot.id)).toBeNull();
+
+  await manager.updateAgentMetadata(snapshot.id, { title: "Mine" }, "user");
+  await manager.updateAgentMetadata(
+    snapshot.id,
+    { title: "Agent guess", labels: { role: "worker" } },
+    "agent",
+  );
+
+  const after = await storage.get(snapshot.id);
+  expect(after?.title).toBe("Mine");
+  expect(after?.labels).toMatchObject({ role: "worker" });
+
+  rmSync(workdir, { recursive: true, force: true });
+});
+
 test("setAgentWorkspaceId re-parents a live agent and persists the new owner", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-workspace-move-live-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);

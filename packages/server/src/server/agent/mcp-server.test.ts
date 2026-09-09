@@ -3933,10 +3933,15 @@ describe("update_agent MCP tool", () => {
     expect(spies.agentManager.setAgentModel).toHaveBeenCalledWith("agent-1", "gpt-5.4");
     expect(spies.agentManager.setAgentThinkingOption).toHaveBeenCalledWith("agent-1", "high");
     expect(spies.agentManager.setAgentFeature).toHaveBeenCalledWith("agent-1", "fast_mode", true);
-    expect(spies.agentManager.updateAgentMetadata).toHaveBeenCalledWith("agent-1", {
-      title: "Updated agent",
-      labels: { role: "worker" },
-    });
+    // "agent" is what stops this tool overwriting a title a person chose.
+    expect(spies.agentManager.updateAgentMetadata).toHaveBeenCalledWith(
+      "agent-1",
+      {
+        title: "Updated agent",
+        labels: { role: "worker" },
+      },
+      "agent",
+    );
     expect(response.structuredContent).toEqual({ success: true });
   });
 
