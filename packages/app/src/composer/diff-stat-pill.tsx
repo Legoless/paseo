@@ -3,7 +3,7 @@ import { Pressable } from "react-native";
 import { useTranslation } from "react-i18next";
 import { DiffStat } from "@/components/diff-stat";
 import { composerPillStyles } from "@/composer/pill-styles";
-import { useVisibleWorkspaceDiffStat } from "@/composer/workspace-diff-stat";
+import { useVisibleMemberDiffStat } from "@/composer/workspace-diff-stat";
 
 interface ComposerDiffStatPillProps {
   additions: number;
@@ -39,13 +39,15 @@ export function ComposerDiffStatPill({ additions, deletions, onPress }: Composer
 export const WorkspaceDiffStatPill = memo(function WorkspaceDiffStatPill({
   serverId,
   workspaceId,
+  cwd,
   onPress,
 }: {
   serverId: string;
   workspaceId: string;
+  cwd: string;
   onPress: () => void;
 }): ReactElement | null {
-  const diffStat = useVisibleWorkspaceDiffStat(serverId, workspaceId);
+  const diffStat = useVisibleMemberDiffStat(serverId, workspaceId, cwd);
   if (!diffStat) {
     return null;
   }

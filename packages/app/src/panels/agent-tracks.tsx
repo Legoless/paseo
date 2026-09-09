@@ -1,6 +1,6 @@
 import { memo, useCallback, type ReactElement } from "react";
 import { WorkspaceDiffStatPill } from "@/composer/diff-stat-pill";
-import { useWorkspaceHasDiffStat } from "@/composer/workspace-diff-stat";
+import { useMemberHasDiffStat } from "@/composer/workspace-diff-stat";
 import { AgentTaskList } from "@/composer/task-list";
 import { ComposerTrackBar } from "@/composer/tracks";
 import { supportsDesktopPaneSplits, useIsCompactFormFactor } from "@/constants/layout";
@@ -50,7 +50,7 @@ export const AgentTracks = memo(function AgentTracks({
   hasPluginComposerPills: boolean;
 }): ReactElement | null {
   const { tabId, openTab } = usePaneContext();
-  const hasWorkspaceDiffStat = useWorkspaceHasDiffStat(serverId, workspaceId);
+  const hasWorkspaceDiffStat = useMemberHasDiffStat(serverId, workspaceId, cwd);
   const isCompact = useIsCompactFormFactor();
   const canSplit = supportsDesktopPaneSplits() && !isCompact;
   const openInSidePane = useSettings((settings) => settings.openInSidePane);
@@ -145,6 +145,7 @@ export const AgentTracks = memo(function AgentTracks({
       <WorkspaceDiffStatPill
         serverId={serverId}
         workspaceId={workspaceId}
+        cwd={cwd}
         onPress={handleOpenChanges}
       />
     </ComposerTrackBar>

@@ -26,7 +26,7 @@ import { KeyboardDock } from "@/components/keyboard-dock";
 import { FileDropZone } from "@/components/file-drop/file-drop-zone";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { Composer } from "@/composer";
-import { useWorkspaceHasDiffStat } from "@/composer/workspace-diff-stat";
+import { useMemberHasDiffStat } from "@/composer/workspace-diff-stat";
 import {
   resolveComposerTrackControlClearance,
   resolveComposerTrackTailClearance,
@@ -1369,6 +1369,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
           serverId={serverId}
           workspaceId={workspaceId}
           agentId={agentId}
+          cwd={cwd}
           agent={effectiveAgent}
           routeBottomAnchorRequest={routeBottomAnchorRequest}
           hasAppliedAuthoritativeHistory={hasAppliedAuthoritativeHistory}
@@ -1466,6 +1467,7 @@ const AgentStreamSection = memo(function AgentStreamSection({
   serverId,
   workspaceId,
   agentId,
+  cwd,
   agent,
   routeBottomAnchorRequest,
   hasAppliedAuthoritativeHistory,
@@ -1478,6 +1480,7 @@ const AgentStreamSection = memo(function AgentStreamSection({
   serverId: string;
   workspaceId: string;
   agentId?: string;
+  cwd: string;
   agent: AgentScreenAgent;
   routeBottomAnchorRequest: RouteBottomAnchorRequest;
   hasAppliedAuthoritativeHistory: boolean;
@@ -1487,7 +1490,7 @@ const AgentStreamSection = memo(function AgentStreamSection({
   onOpenWorkspaceFile?: (request: WorkspaceFileOpenRequest) => void;
 }) {
   const isCompactFormFactor = useIsCompactFormFactor();
-  const hasWorkspaceDiffStat = useWorkspaceHasDiffStat(serverId, workspaceId);
+  const hasWorkspaceDiffStat = useMemberHasDiffStat(serverId, workspaceId, cwd);
   const hasVisibleComposerTracks =
     hasActiveComposer && (hasVisibleAgentTracks || hasWorkspaceDiffStat);
   const bottomOverlayTailClearance = hasVisibleComposerTracks
