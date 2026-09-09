@@ -157,6 +157,45 @@ describe("buildProviderSwitchDraftSetup", () => {
       featureValues: {},
     });
   });
+
+  it("carries an agent profile's mode, thinking option and features", () => {
+    expect(
+      buildProviderSwitchDraftSetup({
+        cwd: "/repo",
+        provider: "codex",
+        model: "gpt-6-astra",
+        modeId: "full-access",
+        thinkingOptionId: "ultra",
+        featureValues: { auto_accept: true },
+      }),
+    ).toEqual({
+      provider: "codex",
+      cwd: "/repo",
+      modeId: "full-access",
+      model: "gpt-6-astra",
+      thinkingOptionId: "ultra",
+      featureValues: { auto_accept: true },
+    });
+  });
+
+  it("leaves a field the profile does not name to the new provider's default", () => {
+    expect(
+      buildProviderSwitchDraftSetup({
+        cwd: "/repo",
+        provider: "claude",
+        model: "",
+        modeId: "",
+        thinkingOptionId: "",
+      }),
+    ).toEqual({
+      provider: "claude",
+      cwd: "/repo",
+      modeId: null,
+      model: null,
+      thinkingOptionId: null,
+      featureValues: {},
+    });
+  });
 });
 
 describe("replaceOpenAgentWithDraft", () => {
