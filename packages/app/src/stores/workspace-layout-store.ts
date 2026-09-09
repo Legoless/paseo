@@ -191,7 +191,10 @@ const WorkspaceDraftTabSetupStorageSchema = z.strictObject({
   modeId: z.string().nullable(),
   model: z.string().nullable(),
   thinkingOptionId: z.string().nullable(),
-  featureValues: z.record(z.string(), z.union([z.boolean(), z.string(), z.null()])),
+  // Opaque provider payloads, and an agent profile's come from hand-edited
+  // config. A value this rejects would delete the whole persisted layout, so
+  // this matches the protocol's `unknown` rather than guessing the value shape.
+  featureValues: z.record(z.string(), z.unknown()),
 });
 const WorkspaceTabTargetStorageSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("new_tab"), labels: z.array(z.string()).optional() }),

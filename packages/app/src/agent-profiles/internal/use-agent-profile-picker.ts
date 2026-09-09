@@ -22,7 +22,19 @@ export interface DraftAgentProfileControls {
 }
 
 export type AgentProfileApplyTarget =
-  | { kind: "agent"; agentId: string; availableModeIds: readonly string[] | null }
+  | {
+      kind: "agent";
+      agentId: string;
+      /** The provider this process already is. A profile naming another one cannot be applied to it. */
+      provider: string;
+      availableModeIds: readonly string[] | null;
+      /**
+       * Restarts the agent as a fresh draft on the profile's provider, the way the
+       * picker's model rows already switch provider. Selection is persisted here
+       * first, so this only has to move the tab.
+       */
+      switchProvider: (profile: MaterializedAgentProfile) => void;
+    }
   | { kind: "draft"; controls: DraftAgentProfileControls };
 
 /** Everything the model picker renders for one profile. It never sees the profile itself. */
@@ -47,10 +59,9 @@ export interface AgentProfilePicker {
 export interface UseAgentProfilePickerInput {
   serverId: string | null;
   /**
-   * Providers this composer can actually run; pass a stable reference. A profile
-   * naming anything else is hidden rather than shown as a row that cannot do
-   * what it says — a live agent is one provider's process and cannot switch, and
-   * the draft form ignores a provider the host does not offer.
+   * Providers this composer can reach; pass a stable reference. Give it the same
+   * list the picker's model rows offer — a row the host does not offer is hidden
+   * rather than shown as a row that cannot do what it says.
    */
   availableProviders: readonly string[];
   target: AgentProfileApplyTarget;
@@ -138,6 +149,15 @@ export function useAgentProfilePicker(
 
       if (target.kind === "draft") {
         target.controls.applyProfile(resolved);
+        return;
+      }
+
+      // A running agent is one provider's process, so a profile naming another
+      // one restarts it as a draft instead of pushing a foreign model into it.
+      // Mode reconciliation is skipped: those mode ids describe the old provider.
+      if (resolved.provider !== target.provider) {
+        persistSelection(resolved);
+        target.switchProvider(resolved);
         return;
       }
 

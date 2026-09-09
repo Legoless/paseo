@@ -85,18 +85,26 @@ export function buildDraftAgentSetup(agent: Agent): WorkspaceDraftTabSetup {
   };
 }
 
+/**
+ * Seeds the draft that replaces an agent when its provider changes. A model row
+ * carries only a model; an agent profile also carries mode, thinking and
+ * features, and blank means "leave it to the new provider's defaults".
+ */
 export function buildProviderSwitchDraftSetup(input: {
   cwd: string;
   provider: AgentProvider;
   model: string;
+  modeId?: string;
+  thinkingOptionId?: string;
+  featureValues?: Record<string, unknown>;
 }): WorkspaceDraftTabSetup {
   return {
     provider: input.provider,
     cwd: input.cwd,
-    modeId: null,
-    model: input.model,
-    thinkingOptionId: null,
-    featureValues: {},
+    modeId: input.modeId || null,
+    model: input.model || null,
+    thinkingOptionId: input.thinkingOptionId || null,
+    featureValues: input.featureValues ?? {},
   };
 }
 
