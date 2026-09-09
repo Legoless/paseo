@@ -91,6 +91,7 @@ interface WebOverlayEntry {
 }
 
 const webOverlayEntries: WebOverlayEntry[] = [];
+const webOverlayListeners = new Set<() => void>();
 let webOverlayOrder = 0;
 let webOverlayListenersAttached = false;
 let webOverlayFocusCheckQueued = false;
@@ -109,6 +110,19 @@ function getTopWebOverlay(): WebOverlayEntry | undefined {
 
 export function hasActiveWebOverlay(): boolean {
   return getTopWebOverlay() !== undefined;
+}
+
+export function subscribeWebOverlays(listener: () => void): () => void {
+  webOverlayListeners.add(listener);
+  return () => {
+    webOverlayListeners.delete(listener);
+  };
+}
+
+function notifyWebOverlayListeners(): void {
+  for (const listener of webOverlayListeners) {
+    listener();
+  }
 }
 
 function getFocusableElements(scope: HTMLElement): HTMLElement[] {
@@ -211,6 +225,7 @@ function detachWebOverlayListeners(): void {
 function addWebOverlay(entry: WebOverlayEntry): (options?: RemoveWebOverlayOptions) => void {
   webOverlayEntries.push(entry);
   attachWebOverlayListeners();
+  notifyWebOverlayListeners();
 
   const focusFrame = window.requestAnimationFrame(() => {
     const scope = entry.getScope();
@@ -224,6 +239,7 @@ function addWebOverlay(entry: WebOverlayEntry): (options?: RemoveWebOverlayOptio
     const index = webOverlayEntries.findIndex((candidate) => candidate.id === entry.id);
     if (index !== -1) webOverlayEntries.splice(index, 1);
     detachWebOverlayListeners();
+    notifyWebOverlayListeners();
     if (
       options?.restoreFocus !== false &&
       entry.restoreFocus &&

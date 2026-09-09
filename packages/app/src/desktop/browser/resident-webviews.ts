@@ -4,17 +4,19 @@ import {
   type DesktopBrowserBridge,
 } from "@/desktop/host";
 import type { BrowserViewport } from "@/desktop/browser/store";
-import { WEB_SURFACE_PLANE } from "@/lib/overlay-root";
+import { hasActiveWebOverlay, subscribeWebOverlays, WEB_SURFACE_PLANE } from "@/lib/overlay-root";
 
 const RESIDENT_BROWSER_HOST_ID = "paseo-browser-resident-webviews";
 const BROWSER_ID_ATTRIBUTE = "data-paseo-browser-id";
 const BROWSER_SURFACE_ATTRIBUTE = "data-paseo-browser-surface";
+const BROWSER_VISIBLE_AREA_ATTRIBUTE = "data-paseo-visible-area";
 const RESIDENT_VIEWPORT_WIDTH = 1280;
 const RESIDENT_VIEWPORT_HEIGHT = 800;
 
 const residentWebviewsByBrowserId = new Map<string, HTMLElement>();
 const residentSurfacesByBrowserId = new Map<string, HTMLElement>();
 const residentWebviewSizesByBrowserId = new Map<string, { width: number; height: number }>();
+let overlayPointerEventsSubscription: (() => void) | null = null;
 
 interface BrowserWebviewElement extends HTMLElement {
   src: string;
@@ -107,6 +109,7 @@ function applyResidentHostParkingStyle(host: HTMLElement): void {
 
 function applyParkedBrowserSurfaceStyle(surface: HTMLElement): void {
   surface.setAttribute("aria-hidden", "true");
+  surface.removeAttribute(BROWSER_VISIBLE_AREA_ATTRIBUTE);
   surface.style.position = "fixed";
   surface.style.left = "0";
   surface.style.top = "0";
@@ -118,6 +121,39 @@ function applyParkedBrowserSurfaceStyle(surface: HTMLElement): void {
   surface.style.display = "block";
   surface.style.visibility = "visible";
   surface.style.transform = "";
+}
+
+function presentedBrowserPointerEvents(hasVisibleArea: boolean): "auto" | "none" {
+  return hasVisibleArea && !hasActiveWebOverlay() ? "auto" : "none";
+}
+
+function applyPresentedBrowserPointerEvents(
+  surface: HTMLElement,
+  webview: HTMLElement,
+  hasVisibleArea: boolean,
+): void {
+  surface.setAttribute(BROWSER_VISIBLE_AREA_ATTRIBUTE, hasVisibleArea ? "true" : "false");
+  const pointerEvents = presentedBrowserPointerEvents(hasVisibleArea);
+  surface.style.pointerEvents = pointerEvents;
+  webview.style.pointerEvents = pointerEvents;
+}
+
+function syncPresentedBrowserPointerEvents(): void {
+  for (const [browserId, surface] of residentSurfacesByBrowserId) {
+    if (surface.getAttribute("aria-hidden") === "true") continue;
+    const webview = residentWebviewsByBrowserId.get(browserId);
+    if (!webview) continue;
+    applyPresentedBrowserPointerEvents(
+      surface,
+      webview,
+      surface.getAttribute(BROWSER_VISIBLE_AREA_ATTRIBUTE) !== "false",
+    );
+  }
+}
+
+function ensureOverlayPointerEventsSubscription(): void {
+  if (overlayPointerEventsSubscription || typeof document === "undefined") return;
+  overlayPointerEventsSubscription = subscribeWebOverlays(syncPresentedBrowserPointerEvents);
 }
 
 function getBrowserSurface(browserId: string, ownerDocument: Document): HTMLElement {
@@ -184,6 +220,7 @@ function applyResidentWebviewStyle(webview: HTMLElement, browserId: string | nul
   webview.style.top = "0";
   webview.style.marginTop = "0";
   webview.style.zIndex = "0";
+  webview.style.pointerEvents = "none";
 }
 
 function clearResidentWebviewParkingStyle(webview: HTMLElement): void {
@@ -270,6 +307,7 @@ export function presentBrowserWebview(
   const surfaceRight = Math.floor(right);
   const surfaceBottom = Math.floor(bottom);
   const hasVisibleArea = surfaceRight > surfaceLeft && surfaceBottom > surfaceTop;
+  ensureOverlayPointerEventsSubscription();
   surface.setAttribute("aria-hidden", "false");
   surface.style.position = "fixed";
   surface.style.left = `${surfaceLeft}px`;
@@ -278,7 +316,6 @@ export function presentBrowserWebview(
   surface.style.height = `${Math.max(0, surfaceBottom - surfaceTop)}px`;
   surface.style.overflow = "hidden";
   surface.style.opacity = "1";
-  surface.style.pointerEvents = hasVisibleArea ? "auto" : "none";
   surface.style.display = "flex";
   surface.style.visibility = "visible";
   clearResidentWebviewParkingStyle(webview);
@@ -291,6 +328,10 @@ export function presentBrowserWebview(
   webview.style.position = "absolute";
   webview.style.left = `${Math.round(anchorBounds.left - surfaceLeft)}px`;
   webview.style.top = `${Math.round(anchorBounds.top - surfaceTop)}px`;
+  // Electron <webview> is a native compositor surface: CSS z-index can paint
+  // overlay-root above it while clicks still land in the guest. Drop pointer
+  // events for as long as a host overlay is registered.
+  applyPresentedBrowserPointerEvents(surface, webview, hasVisibleArea);
 }
 
 export function prepareBrowserWebview(

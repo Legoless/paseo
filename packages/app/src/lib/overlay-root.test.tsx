@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { dispatchTopWebOverlayKeyDown, useWebOverlayRegistration } from "./overlay-root";
+import {
+  dispatchTopWebOverlayKeyDown,
+  hasActiveWebOverlay,
+  subscribeWebOverlays,
+  useWebOverlayRegistration,
+} from "./overlay-root";
 
 describe("useWebOverlayRegistration", () => {
   let opener: HTMLButtonElement;
@@ -87,5 +92,27 @@ describe("useWebOverlayRegistration", () => {
     const event = new KeyboardEvent("keydown", { key: "Process", bubbles: true });
     expect(dispatchTopWebOverlayKeyDown(event)).toBe(false);
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("notifies subscribers when an overlay registers and unregisters", () => {
+    const seen: boolean[] = [];
+    const unsubscribe = subscribeWebOverlays(() => {
+      seen.push(hasActiveWebOverlay());
+    });
+
+    const { result, rerender, unmount } = renderHook(
+      ({ active }: { active: boolean }) =>
+        useWebOverlayRegistration({ active, layer: 20, onKeyDown: () => false }),
+      { initialProps: { active: true } },
+    );
+
+    act(() => result.current(scope));
+    expect(seen).toEqual([true]);
+
+    act(() => rerender({ active: false }));
+    expect(seen).toEqual([true, false]);
+
+    unsubscribe();
+    unmount();
   });
 });
