@@ -1062,7 +1062,9 @@ async function collectOpenCodeImportableSessionsFromSdk(
   });
 
   if (response.error) {
-    throw new Error(`Failed to list OpenCode sessions: ${JSON.stringify(response.error)}`);
+    throw new Error(
+      `Failed to list OpenCode sessions: ${toDiagnosticErrorMessage(response.error)}`,
+    );
   }
 
   return selectOpenCodeSessionsForWorkspace(response.data ?? [], options?.cwd)
@@ -1458,7 +1460,9 @@ export class OpenCodeAgentClient implements AgentClient {
       );
 
       if (response.error) {
-        throw new Error(`Failed to create OpenCode session: ${JSON.stringify(response.error)}`);
+        throw new Error(
+          `Failed to create OpenCode session: ${toDiagnosticErrorMessage(response.error)}`,
+        );
       }
 
       const session = response.data;
@@ -1797,7 +1801,11 @@ export class OpenCodeAgentClient implements AgentClient {
     );
 
     if (response.error) {
-      throw new Error(`Failed to fetch OpenCode providers: ${JSON.stringify(response.error)}`);
+      throw new Error(
+        `Failed to fetch OpenCode providers in ${directory}: ${toDiagnosticErrorMessage(
+          response.error,
+        )}`,
+      );
     }
 
     const providers = response.data;
@@ -1865,6 +1873,12 @@ export class OpenCodeAgentClient implements AgentClient {
       // modes. OpenCode users can rename or delete any agent (including
       // "build"/"plan"), so a hardcoded fallback can validate a mode that
       // does not actually exist, which then fails at prompt time.
+      // Say so: the catalog still publishes, so a silent [] looks like a provider that genuinely
+      // has no modes rather than one whose mode discovery broke.
+      this.logger.warn(
+        { directory, err: response.error ? toDiagnosticErrorMessage(response.error) : "no data" },
+        "OpenCode mode discovery failed; publishing catalog without modes",
+      );
       return [];
     }
 
@@ -4919,7 +4933,9 @@ class OpenCodeAgentSession implements AgentSession {
         directory: this.config.cwd,
       });
       if (response.error) {
-        throw new Error(`OpenCode session.delete failed: ${JSON.stringify(response.error)}`);
+        throw new Error(
+          `OpenCode session.delete failed: ${toDiagnosticErrorMessage(response.error)}`,
+        );
       }
     } catch (error) {
       this.logger.debug(
