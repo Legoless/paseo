@@ -51,11 +51,11 @@
       }
     </style>
     <style>
-      button,
-      a,
-      input,
-      textarea,
-      select,
+      button:not([aria-hidden="true"]),
+      a:not([aria-hidden="true"]),
+      input:not([aria-hidden="true"]),
+      textarea:not([aria-hidden="true"]),
+      select:not([aria-hidden="true"]),
       [role="button"],
       [role="link"],
       [role="textbox"],
@@ -65,7 +65,7 @@
       [role="checkbox"],
       [role="slider"],
       [role="menuitem"],
-      [tabindex],
+      [tabindex]:not([tabindex="-1"]),
       [contenteditable="true"] {
         -webkit-app-region: no-drag !important;
       }
