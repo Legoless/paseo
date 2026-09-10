@@ -370,11 +370,19 @@ export function createWorkerTerminalManager(
         }
         // The pin lives in the worker: session.setTitle switches the session to
         // manual mode and drops its OSC subscription, so the shell can no longer
-        // take the title back. Mirroring the title here instead would last until
-        // the next prompt redraw. The echoed terminalTitleChange updates the
-        // cached record and broadcasts terminals_changed.
+        // take the title back.
         sendBestEffortRequest({
           type: "setTitle",
+          terminalId: record.info.id,
+          title: manualTitle,
+        });
+        // Mirror it here too, before the worker echoes back. The rename RPC answers on this call,
+        // and the client refetches the terminal list the moment it resolves — reading a mirror that
+        // still held the shell-derived title is what made a renamed tab snap back. Safe for a
+        // manual title specifically, because the worker has just stopped accepting OSC updates for
+        // this session; an auto title mirrored here would only survive to the next prompt redraw.
+        handleTerminalTitleChangeEvent({
+          type: "terminalTitleChange",
           terminalId: record.info.id,
           title: manualTitle,
         });
