@@ -4221,7 +4221,7 @@ describe("workspace-layout-store actions", () => {
     expect(findPaneById(layout.root, paneId)?.hidden).toBeUndefined();
   });
 
-  it("an explicit pane-local open moves an existing tab into that pane", () => {
+  it("an explicit pane-local open focuses an existing tab where the user left it", () => {
     const workspaceKey = createWorkspaceKey();
     const store = workspaceLayoutStore.getState();
     store.openTab({
@@ -4247,9 +4247,11 @@ describe("workspace-layout-store actions", () => {
     const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
     expect(reopened).toBe(changesTabId);
     expect(collectAllTabs(layout.root).filter((tab) => tab.tabId === changesTabId)).toHaveLength(1);
-    expect(findPaneContainingTab(layout.root, changesTabId as string)?.id).toBe("main");
+    expect(findPaneContainingTab(layout.root, changesTabId as string)?.id).toBe(
+      explorerSidebarPaneId,
+    );
     expect(layout.focusedPaneId).toBe("main");
-    expect(findPaneById(layout.root, "main")?.focusedTabId).toBe(changesTabId);
+    expect(findPaneById(layout.root, explorerSidebarPaneId)?.focusedTabId).toBe(changesTabId);
   });
 
   it("a preferred open focuses an existing tab where the user left it", () => {
@@ -4281,7 +4283,37 @@ describe("workspace-layout-store actions", () => {
     expect(findPaneContainingTab(layout.root, fileTabId)?.id).toBe("main");
     expect(layout.focusedPaneId).toBe("main");
   });
-  it("leaves the default tabs in Explorer when content is claimed by main", () => {
+
+  it("an open on an existing tab does not move it across ordinary split panes", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    const firstTabId = store.openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "agent-1" },
+      intent: "reveal",
+    }) as string;
+    const splitPaneId = store.ensureSidePane(workspaceKey) as string;
+    const secondTabId = store.openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "agent-2" },
+      intent: "reveal",
+      placement: { mode: "pane", paneId: splitPaneId },
+    }) as string;
+
+    const reopened = store.openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "agent-1" },
+      intent: "reveal",
+      placement: { mode: "pane", paneId: splitPaneId },
+    });
+
+    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+    expect(reopened).toBe(firstTabId);
+    expect(findPaneContainingTab(layout.root, firstTabId)?.id).toBe("main");
+    expect(findPaneContainingTab(layout.root, secondTabId)?.id).toBe(splitPaneId);
+    expect(layout.focusedPaneId).toBe("main");
+  });
+  it("leaves the default tabs in Explorer when content is moved to main", () => {
     const workspaceKey = createWorkspaceKey();
     const store = workspaceLayoutStore.getState();
     store.openTab({
@@ -4297,12 +4329,7 @@ describe("workspace-layout-store actions", () => {
       placement: { mode: "pane", paneId },
     }) as string;
 
-    store.openTab({
-      workspaceKey: workspaceKey,
-      target: { kind: "working_diff" },
-      intent: "reveal",
-      placement: { mode: "pane", paneId: "main" },
-    });
+    store.moveTabToPane(workspaceKey, changesTabId, "main");
 
     const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
     expect(findPaneContainingTab(layout.root, changesTabId)?.id).toBe("main");
