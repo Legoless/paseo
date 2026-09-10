@@ -3,6 +3,7 @@ import { getOpenAgentTabLabel } from "@getpaseo/protocol/agent-labels";
 import { useEffect, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/session-store";
 import { getOrCreateClientId } from "@/utils/client-id";
+import { isNotFoundErrorMessage, toErrorMessage } from "@/utils/error-messages";
 import type { WorkspaceTab } from "@/workspace-tabs/model";
 import { getAgentTabsNeedingOpenLabel } from "./open-tab-labels";
 
@@ -65,17 +66,23 @@ export function useOpenAgentTabLabels(input: {
           pendingAgentIdsRef.current.add(agentId);
           try {
             await client.updateAgent(agentId, { labels: { [label]: "true" } });
+            pendingAgentIdsRef.current.delete(agentId);
           } catch (error) {
             console.warn("[OpenAgentTabLabels] Failed to mark open subagent tab", {
               error,
               agentId,
             });
+            if (isNotFoundErrorMessage(toErrorMessage(error))) {
+              // The agent is gone. Leaving the id in the pending set keeps it out of every later
+              // selection, so a stale tab stops re-asking forever; the prune above releases it if
+              // the tab is ever closed. Retrying a deleted agent only spams the daemon log.
+              continue;
+            }
+            pendingAgentIdsRef.current.delete(agentId);
             retryTimerRef.current ??= setTimeout(() => {
               retryTimerRef.current = null;
               setRetryVersion(increment);
             }, 2_000);
-          } finally {
-            pendingAgentIdsRef.current.delete(agentId);
           }
         }
       } catch (error) {
