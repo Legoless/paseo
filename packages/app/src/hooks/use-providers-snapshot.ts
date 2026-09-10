@@ -38,7 +38,10 @@ export function selectorOpenRefetchDecision(input: {
     return "refetch-stale";
   }
   const selectedEntry = input.entries?.find((entry) => entry.provider === input.selectedProvider);
-  if (!selectedEntry || selectedEntry.status === "loading") {
+  // A cold failure has no catalog to fall back on and replica queries never go stale on their own,
+  // so opening the picker is the only moment left to re-probe it. Without this the provider stays
+  // broken until the user finds the Retry button behind the error page.
+  if (!selectedEntry || selectedEntry.status === "loading" || selectedEntry.status === "error") {
     return "refetch-always";
   }
   return "refetch-stale";
