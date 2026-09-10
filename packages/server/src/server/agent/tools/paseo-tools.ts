@@ -2243,6 +2243,11 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       if (existing.archivedAt) {
         throw new Error(`Workspace ${workspaceId} is archived`);
       }
+      // A name the user typed outranks an agent's. Same rule the agent-title path enforces through
+      // updateAgentCommand's `origin: "agent"`, which this tool has no equivalent of.
+      if (existing.titleSetByUser) {
+        throw new Error(`Workspace ${workspaceId} was renamed by the user and cannot be renamed`);
+      }
 
       await options.workspaceRegistry.upsert({
         ...existing,

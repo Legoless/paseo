@@ -3319,6 +3319,9 @@ export class Session {
       const updated = await this.workspaceRegistry.update(workspaceId, (existing) => ({
         ...existing,
         title: nextTitle,
+        // Clearing the field is the user asking for the derived name back, which hands the
+        // workspace to the auto-namer again.
+        ...(nextTitle ? { titleSetByUser: true } : { titleSetByUser: false }),
         updatedAt,
       }));
       if (!updated) {
