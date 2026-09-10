@@ -1848,6 +1848,10 @@ export const es: TranslationResources = {
     archiveTooltip: "Cerrar subagente",
     archiveFinishedAction: "Cerrar subagentes finalizados",
     archiveFinishedRetry: "Reintentar ({{failed}}/{{total}})",
+    stopAction: "Detener subagente",
+    stopTooltip: "Detén este subagente, no su agente principal",
+    stopFailed: "No se pudo detener el subagente: {{reason}}",
+    stopAlreadyFinished: "Ese subagente ya había terminado.",
   },
   panels: {
     draft: {

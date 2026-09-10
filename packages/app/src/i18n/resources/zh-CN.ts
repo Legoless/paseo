@@ -1782,6 +1782,10 @@ export const zhCN: TranslationResources = {
     archiveTooltip: "关闭 subagent",
     archiveFinishedAction: "关闭已完成的 subagent",
     archiveFinishedRetry: "重试 ({{failed}}/{{total}})",
+    stopAction: "停止子代理",
+    stopTooltip: "仅停止此子代理，不影响父代理",
+    stopFailed: "无法停止子代理：{{reason}}",
+    stopAlreadyFinished: "该子代理已经结束。",
   },
   panels: {
     draft: {

@@ -1819,6 +1819,10 @@ export const ja: TranslationResources = {
     archiveTooltip: "サブエージェントを閉じる",
     archiveFinishedAction: "完了したサブエージェントを閉じる",
     archiveFinishedRetry: "再試行 ({{failed}}/{{total}})",
+    stopAction: "サブエージェントを停止",
+    stopTooltip: "親エージェントではなく、このサブエージェントを停止します",
+    stopFailed: "サブエージェントを停止できませんでした: {{reason}}",
+    stopAlreadyFinished: "そのサブエージェントはすでに完了していました。",
   },
   panels: {
     draft: {
