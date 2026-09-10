@@ -125,18 +125,20 @@ Provider session connection owns every process it spawns until the session is re
 `connect()` must dispose that process before rethrowing; the manager cannot clean up a session it never
 received.
 
-## Tabs vs archive
+## Tabs vs archive (Consolidated Close)
 
-These are two distinct concepts that used to be conflated:
+User-facing UI consolidates "archive" and "close" into "Close" everywhere (workspaces, panes, tabs, and projects). The unified mental model is that closing removes items from the active UI everywhere, while cached files and persisted records remain on disk so they can be retrieved or reopened manually.
 
-| Concept                    | Scope      | Triggers                   |
-| -------------------------- | ---------- | -------------------------- |
-| **Tab** (workspace layout) | Per-client | User opens/closes a view   |
-| **Archive** (lifecycle)    | Global     | Explicit lifecycle gesture |
+Internally and on the wire, the lifecycle preserves the distinct behaviors:
 
-Closing a tab on a **root agent** still archives — the tab is the agent's home, so closing it means "I'm done with this agent." A confirm dialog protects against archiving a running agent by accident.
+| Concept                    | Scope      | Triggers               | Wire / Persistence                     |
+| -------------------------- | ---------- | ---------------------- | -------------------------------------- |
+| **Tab** (workspace layout) | Per-client | User closes a view/tab | Tab removed from client state          |
+| **Close** (lifecycle)      | Global     | Explicit close action  | Archived on daemon, files kept on disk |
 
-Closing a tab on a **subagent** (any agent with `parentAgentId`) is **layout-only**. The app clears the current client's open-tab label before removing the tab. Another client's open tab remains protected. The agent stays unarchived and stays in its parent's track, so a later parent archive cascades to it when no client still has it open. The user can re-open the tab from the track at any time. Single and bulk tab close apply the same policy.
+Closing a tab on a **root agent** closes/archives the agent session — the tab is the agent's home, so closing it means "I'm done with this agent." A confirm dialog protects against closing a running agent by accident.
+
+Closing a tab on a **subagent** (any agent with `parentAgentId`) is **layout-only**. The app clears the current client's open-tab label before removing the tab. Another client's open tab remains protected. The agent stays unarchived and stays in its parent's track, so a later parent close cascades to it when no client still has it open. The user can re-open the tab from the track at any time. Single and bulk tab close apply the same policy.
 
 The asymmetry is intentional: a subagent's persistent relationship lives in the parent's track. Same-workspace subagents are not auto-opened as tabs; the user opens one from that track when needed. A cross-workspace subagent is also auto-opened as a tab in its own workspace so opening that workspace does not appear empty. It remains in the parent's track until it is actually detached.
 

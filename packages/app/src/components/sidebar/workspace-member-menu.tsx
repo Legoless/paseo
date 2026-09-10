@@ -8,7 +8,6 @@ import {
   MoreVertical,
   SquarePen,
   Tag,
-  Trash2,
   X,
 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -36,7 +35,6 @@ import { TerminalProfileIcon } from "@/components/terminal-profile-icon";
 import { useLaunchProjectTab } from "@/hooks/use-launch-project-tab";
 
 const ThemedMoreVertical = withUnistyles(MoreVertical);
-const ThemedTrash2 = withUnistyles(Trash2);
 const ThemedCopy = withUnistyles(Copy);
 const ThemedGitBranch = withUnistyles(GitBranch);
 const ThemedExternalLink = withUnistyles(ExternalLink);
@@ -62,7 +60,6 @@ const styles = StyleSheet.create(() => ({
   },
 }));
 
-const trash2LeadingIcon = <ThemedTrash2 size={14} uniProps={foregroundMutedColorMapping} />;
 const copyLeadingIcon = <ThemedCopy size={14} uniProps={foregroundMutedColorMapping} />;
 const branchLeadingIcon = <ThemedGitBranch size={14} uniProps={foregroundMutedColorMapping} />;
 const openLeadingIcon = <ThemedExternalLink size={14} uniProps={foregroundMutedColorMapping} />;
@@ -160,7 +157,7 @@ export function WorkspaceMemberMenuItems({
         <WorkspaceMenuItem
           surface={surface}
           testID={`sidebar-member-menu-remove-${member.memberKey}`}
-          leading={trash2LeadingIcon}
+          leading={closeLeadingIcon}
           onSelect={onRemove}
         >
           {t("sidebar.project.actions.removeFromWorkspace")}

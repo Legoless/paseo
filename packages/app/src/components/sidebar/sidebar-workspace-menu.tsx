@@ -11,7 +11,6 @@ import * as Clipboard from "expo-clipboard";
 import { type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
-  Archive,
   Circle,
   CircleCheck,
   Copy,
@@ -22,6 +21,7 @@ import {
   Pin,
   PinOff,
   Tag,
+  X,
 } from "lucide-react-native";
 import { isWeb } from "@/constants/platform";
 import { getForgePresentation, normalizeForge } from "@/git/forge";
@@ -64,7 +64,7 @@ const foregroundMutedColorMapping = (theme: Theme) => ({
 
 const ThemedMoreVertical = withUnistyles(MoreVertical);
 const ThemedCopy = withUnistyles(Copy);
-const ThemedArchive = withUnistyles(Archive);
+const ThemedX = withUnistyles(X);
 const ThemedPencil = withUnistyles(Pencil);
 const ThemedCircle = withUnistyles(Circle);
 const ThemedCircleCheck = withUnistyles(CircleCheck);
@@ -80,7 +80,7 @@ const markAsReadLeadingIcon = (
   <ThemedCircleCheck size={14} uniProps={foregroundMutedColorMapping} />
 );
 const markAsUnreadLeadingIcon = <ThemedCircle size={14} uniProps={foregroundMutedColorMapping} />;
-const archiveLeadingIcon = <ThemedArchive size={14} uniProps={foregroundMutedColorMapping} />;
+const archiveLeadingIcon = <ThemedX size={14} uniProps={foregroundMutedColorMapping} />;
 const pinLeadingIcon = <ThemedPin size={14} uniProps={foregroundMutedColorMapping} />;
 const unpinLeadingIcon = <ThemedPinOff size={14} uniProps={foregroundMutedColorMapping} />;
 const addProjectLeadingIcon = <ThemedFolderPlus size={14} uniProps={foregroundMutedColorMapping} />;

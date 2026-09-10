@@ -343,7 +343,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     help: {
       id: "archive-workspace",
       section: "workspaces",
-      label: "Archive workspace",
+      label: "Close workspace",
     },
   },
   {
@@ -356,7 +356,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     help: {
       id: "archive-workspace",
       section: "workspaces",
-      label: "Archive workspace",
+      label: "Close workspace",
     },
   },
 

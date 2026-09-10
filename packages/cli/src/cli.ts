@@ -110,7 +110,7 @@ export function createCli(): Command {
     withOutput(runWaitCommand),
   );
 
-  addJsonAndDaemonHostOptions(addArchiveOptions(program.command("archive"))).action(
+  addJsonAndDaemonHostOptions(addArchiveOptions(program.command("archive").alias("close"))).action(
     withOutput(runArchiveCommand),
   );
 

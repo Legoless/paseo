@@ -330,10 +330,8 @@ describe("translation resources", () => {
 
   it("includes sidebar and workspace creation keys for the Batch 4C migration", () => {
     expect(en.sidebar.workspace.actions.copyPath).toBe("Copy path");
-    expect(en.sidebar.project.confirmations.removeTitle).toBe("Remove project?");
-    expect(en.sidebar.project.toasts.updateHostToRemove).toBe(
-      "Update the host to remove projects.",
-    );
+    expect(en.sidebar.project.confirmations.removeTitle).toBe("Close project?");
+    expect(en.sidebar.project.toasts.updateHostToRemove).toBe("Update the host to close projects.");
     expect(en.newWorkspace.title).toBe("New workspace");
     expect(en.newWorkspace.refPicker.searchPlaceholder).toBe("Search branches and PRs");
     expect(en.openProject.tiles.addProject.title).toBe("Add a project");
@@ -385,14 +383,14 @@ describe("translation resources", () => {
     expect(en.agentList.dateSections.older).toBe("Older");
     expect(en.agentList.status.initializing).toBe("Starting");
     expect(en.agentList.status.running).toBe("Running");
-    expect(en.agentList.badges.archived).toBe("Archived");
+    expect(en.agentList.badges.archived).toBe("Closed");
     expect(en.agentList.badges.pending).toBe("{{count}} pending");
     expect(en.agentList.badges.attention).toBe("Attention");
     expect(en.agentList.archiveSheet.hostOffline).toBe("Host offline");
     expect(en.agentList.archiveSheet.runningAgent).toBe(
-      "This agent is still running. Archiving it will stop the agent.",
+      "This agent is still running. Closing it will stop the agent.",
     );
-    expect(en.agentList.archiveSheet.archive).toBe("Archive");
+    expect(en.agentList.archiveSheet.archive).toBe("Close");
   });
 
   it("includes message utility keys for the Batch 4I migration", () => {
@@ -572,15 +570,15 @@ describe("translation resources", () => {
     expect(en.workspace.route.hostOffline).toBe("{{hostName}} is offline");
     expect(en.workspace.route.cannotReachHost).toBe("Cannot reach {{hostName}}");
     expect(en.workspace.route.hostStatus).toBe("Host status: {{status}}");
-    expect(en.workspace.route.recovery.archivedTitle).toBe("Workspace archived");
+    expect(en.workspace.route.recovery.archivedTitle).toBe("Workspace closed");
     expect(en.workspace.route.recovery.unavailableTitle).toBe("Workspace unavailable");
     expect(en.message.compaction.loading).toBe("Compacting...");
     expect(en.message.compaction.auto).toBe("Context automatically compacted");
     expect(en.message.compaction.manual).toBe("Context manually compacted");
     expect(en.message.compaction.withTokens).toBe("Context compacted ({{tokens}}K tokens)");
     expect(en.message.compaction.completed).toBe("Context compacted");
-    expect(en.agentPanel.archived.callout).toBe("This agent is archived");
-    expect(en.agentPanel.archived.unarchive).toBe("Unarchive");
+    expect(en.agentPanel.archived.callout).toBe("This agent is closed");
+    expect(en.agentPanel.archived.unarchive).toBe("Reopen");
     expect(en.desktop.quitting.title).toBe("Quitting Paseo...");
     expect(en.desktop.quitting.detail).toBe("Stopping the local daemon.");
     expect(en.composer.attachments.dropImagesHere).toBe("Drop images here");
