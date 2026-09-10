@@ -664,6 +664,8 @@ export const ko: TranslationResources = {
         switchProjectTitle: "프로젝트를 변경할까요?",
         switchProjectMessage:
           "이 에이전트의 대화는 삭제되고 선택한 프로젝트에서 새 대화가 시작됩니다.",
+        switchProjectTerminalMessage:
+          "이 터미널은 선택한 프로젝트의 새 터미널로 대체됩니다. 실행 중인 프로세스는 중지됩니다.",
         switchProject: "변경",
         archiveRunningAgentTitle: "실행 중인 에이전트를 보관할까요?",
         archiveRunningAgentMessage:

@@ -2752,6 +2752,23 @@ function WorkspaceScreenContent({
         return;
       }
 
+      if (target.kind === "terminal") {
+        // A live shell's cwd cannot be moved from outside, so re-pointing means a fresh terminal
+        // in the new project swapped into this same tab.
+        const confirmed = await confirmDialog({
+          title: t("workspace.tabs.confirmations.switchProjectTitle"),
+          message: t("workspace.tabs.confirmations.switchProjectTerminalMessage"),
+          confirmLabel: t("workspace.tabs.confirmations.switchProject"),
+          cancelLabel: t("workspace.tabs.confirmations.cancel"),
+          destructive: true,
+        });
+        if (!confirmed) {
+          return;
+        }
+        createTerminal({ destination: { kind: "replace", tabId: input.tabId }, cwd: input.cwd });
+        return;
+      }
+
       const session = useSessionStore.getState().sessions[normalizedServerId];
       const agent =
         session?.agents?.get(target.agentId) ?? session?.agentDetails?.get(target.agentId) ?? null;
@@ -2793,6 +2810,7 @@ function WorkspaceScreenContent({
     [
       archiveAgent,
       hideWorkspaceAgent,
+      createTerminal,
       normalizedServerId,
       persistenceKey,
       replaceWorkspaceTabTarget,

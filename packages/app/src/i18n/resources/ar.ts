@@ -663,6 +663,8 @@ export const ar: TranslationResources = {
         switchProjectTitle: "تغيير المشروع؟",
         switchProjectMessage:
           "سيتم تجاهل محادثة هذا الوكيل وبدء محادثة جديدة في المشروع الذي تختاره.",
+        switchProjectTerminalMessage:
+          "سيتم استبدال هذه الطرفية بأخرى جديدة في المشروع الذي تختاره. سيتم إيقاف أي عملية قيد التشغيل.",
         switchProject: "تغيير",
         archiveRunningAgentTitle: "وكيل تشغيل الأرشيف؟",
         archiveRunningAgentMessage:

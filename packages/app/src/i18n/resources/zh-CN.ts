@@ -660,6 +660,8 @@ export const zhCN: TranslationResources = {
         closeTerminalMessage: "此 Terminal 中任何正在运行的进程都会立即停止。",
         switchProjectTitle: "切换项目？",
         switchProjectMessage: "此 Agent 的对话将被丢弃，并在你选择的项目中开始新的对话。",
+        switchProjectTerminalMessage:
+          "此终端将被所选项目中的新终端替换。任何正在运行的进程都会停止。",
         switchProject: "切换",
         archiveRunningAgentTitle: "归档正在运行的 Agent？",
         archiveRunningAgentMessage: "此 Agent 仍在运行。归档会停止该 Agent 并关闭标签。",

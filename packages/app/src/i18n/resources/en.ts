@@ -660,6 +660,8 @@ export const en = {
         switchProjectTitle: "Switch project?",
         switchProjectMessage:
           "This agent's conversation will be discarded and a new one started in the project you pick.",
+        switchProjectTerminalMessage:
+          "This terminal is replaced by a new one in the project you pick. Any running process is stopped.",
         switchProject: "Switch",
         archiveRunningAgentTitle: "Archive running agent?",
         archiveRunningAgentMessage:
