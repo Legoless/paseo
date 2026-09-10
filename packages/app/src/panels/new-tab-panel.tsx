@@ -4,7 +4,6 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
   type ComponentType,
   type ReactElement,
 } from "react";
@@ -135,11 +134,22 @@ function useNewTabDescriptor() {
 }
 
 const NewTabPanel = memo(function NewTabPanel(): ReactElement {
-  const { host, serverId, workspaceId, tabId } = usePaneContext();
-  // Local to this launcher: you pick a project and immediately launch, so there is nothing worth
-  // persisting. null means home.
+  const { host, serverId, workspaceId, tabId, target, retargetCurrentTab } = usePaneContext();
   const { t } = useTranslation();
-  const [selectedProjectCwd, setSelectedProjectCwd] = useState<string | null>(null);
+  // The pick lives on the tab, so it outlives a remount and comes back with its pane after a
+  // relaunch. A pane emptied by closing its last tab inherits that tab's project the same way.
+  // null means home.
+  const selectedProjectCwd = target.kind === "new_tab" ? (target.cwd ?? null) : null;
+  const setSelectedProjectCwd = useCallback(
+    (cwd: string | null) => {
+      if (target.kind !== "new_tab") {
+        return;
+      }
+      const { cwd: _previous, ...rest } = target;
+      retargetCurrentTab({ ...rest, ...(cwd ? { cwd } : {}) });
+    },
+    [retargetCurrentTab, target],
+  );
   const homeDirectory = useHostHomeDirectory(serverId);
   // Against a daemon too old to send a home directory there is nothing to fall back to, so the
   // launch keeps the workspace's own project.

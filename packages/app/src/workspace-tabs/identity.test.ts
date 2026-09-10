@@ -16,6 +16,19 @@ describe("New tab identity", () => {
     );
   });
 
+  it("keeps the launcher's remembered project and drops a blank one", () => {
+    expect(normalizeWorkspaceTabTarget({ kind: "new_tab", cwd: "  /repo/app  " })).toEqual({
+      kind: "new_tab",
+      cwd: "/repo/app",
+    });
+    expect(normalizeWorkspaceTabTarget({ kind: "new_tab", cwd: "   " })).toEqual({
+      kind: "new_tab",
+    });
+    expect(
+      normalizeWorkspaceTabTarget({ kind: "new_tab", labels: ["Ready"], cwd: "/repo/app" }),
+    ).toEqual({ kind: "new_tab", labels: ["Ready"], cwd: "/repo/app" });
+  });
+
   it("normalizes labels without making launcher tabs share identity", () => {
     expect(
       normalizeWorkspaceTabTarget({ kind: "new_tab", labels: [" Ready ", "ready", ""] }),

@@ -33,7 +33,16 @@ export type PluginWorkspaceTabTarget =
     };
 
 export type WorkspaceTabTarget =
-  | { kind: "new_tab"; labels?: string[] }
+  | {
+      kind: "new_tab";
+      labels?: string[];
+      /**
+       * Project this launcher opens its tab in. Mirrors `draft.cwd` below — the launcher hands it
+       * straight to the draft it creates. A pane that outlives its last tab inherits it from that
+       * tab, so an emptied pane still points at the project the user left it on.
+       */
+      cwd?: string;
+    }
   | {
       kind: "draft";
       draftId: string;
