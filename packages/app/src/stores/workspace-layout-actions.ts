@@ -108,14 +108,12 @@ interface InsertSplitInternalResult {
 /**
  * Where an open wants its tab, and how hard it wants it there.
  *
- * The distinction only shows up when the tab already exists somewhere. A user who
- * picks Changes from a specific pane's `+` menu is placing it there and expects it
- * to arrive. A file link in an agent's output is a supporting open with an opinion
- * about new tabs only — it must never yank a tab out from under the pane the user
- * deliberately moved it to.
+ * Tabs are organized by the user directly. An open on an already-open tab always
+ * focuses it where the user left it and never moves it across panes. Placement hints
+ * determine where new tabs open.
  */
 export type WorkspaceTabPlacement =
-  /** Pane-local affordance: new tabs open here, existing tabs move here. */
+  /** Pane-local affordance: new tabs open here. */
   | { mode: "pane"; paneId: string }
   /** Implicit open: new tabs open here, existing tabs stay where the user left them. */
   | { mode: "prefer"; paneId: string }
@@ -1559,27 +1557,14 @@ export function revealTargetInLayout(input: CreateTabInLayoutInput): OpenTabInLa
 }
 
 /**
- * Brings an already-open tab to the user. Only an explicit pane-local placement
- * relocates it; every other open finds it where the user last put it.
+ * Brings an already-open tab to the user. Focuses the tab where the user left it;
+ * tabs are organized by the user directly and never jump panes automatically.
  */
 function revealExistingTab(input: {
   layout: WorkspaceLayout;
   tabId: string;
   placement: WorkspaceTabPlacement;
 }): WorkspaceLayout {
-  if (input.placement.mode === "pane") {
-    const currentPane = findPaneContainingTab(asInternalNode(input.layout.root), input.tabId);
-    if (currentPane?.id !== input.placement.paneId) {
-      const moved = moveTabToPaneInLayout({
-        layout: input.layout,
-        tabId: input.tabId,
-        toPaneId: input.placement.paneId,
-      });
-      if (moved) {
-        return moved;
-      }
-    }
-  }
   return focusTabInLayout({ layout: input.layout, tabId: input.tabId }) ?? input.layout;
 }
 

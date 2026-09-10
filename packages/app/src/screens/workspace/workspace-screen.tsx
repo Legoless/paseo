@@ -2128,7 +2128,10 @@ function WorkspaceScreenContent({
         return false;
       }
       const pending = pendingByDraftId[tab.target.draftId];
-      return pending?.serverId === normalizedServerId && pending.lifecycle === "active";
+      return (
+        pending?.serverId === normalizedServerId &&
+        (pending.lifecycle === "active" || pending.lifecycle === "sent")
+      );
     });
 
     reconcileWorkspaceTabs(persistenceKey, {
