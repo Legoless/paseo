@@ -159,8 +159,8 @@ export const ru: TranslationResources = {
       fileTooLarge: "Файл {{fileName}} слишком большой (максимальный размер: {{size}})",
     },
     clientCommands: {
-      archiveAgent: "Архивировать текущего агента",
-      freshDraft: "Архивировать этого агента и создать новый черновик",
+      archiveAgent: "Закрыть текущего агента",
+      freshDraft: "Закрыть этого агента и создать новый черновик",
     },
     github: {
       searching: "Идет поиск...",
@@ -225,8 +225,8 @@ export const ru: TranslationResources = {
       reconnecting: "Повторное подключение",
       timelineSyncFailed: "Не удалось обновить историю агента.",
       timelineSyncRetrying: "Повторная попытка…",
-      archivingTitle: "Агент перемещается в архив...",
-      archivingSubtitle: "Подождите, пока агент будет перемещён в архив.",
+      archivingTitle: "Закрытие агента...",
+      archivingSubtitle: "Подождите, пока агент будет закрыт.",
     },
     unavailable: {
       selectedHost: "Выбранный хост",
@@ -242,8 +242,8 @@ export const ru: TranslationResources = {
       showAgainWhenReachable: "Агент снова появится, как только хост станет доступен.",
     },
     archived: {
-      callout: "Этот агент находится в архиве",
-      unarchive: "Разархивировать",
+      callout: "Этот агент закрыт",
+      unarchive: "Открыть снова",
     },
   },
   sessions: {
@@ -276,14 +276,14 @@ export const ru: TranslationResources = {
       closed: "Закрыт",
     },
     badges: {
-      archived: "В архиве",
+      archived: "Закрыт",
       pending: "На рассмотрении: {{count}}",
       attention: "Внимание",
     },
     archiveSheet: {
       hostOffline: "Хост не в сети",
-      runningAgent: "Этот агент всё ещё работает. Перемещение в архив остановит его.",
-      archive: "Архивировать",
+      runningAgent: "Этот агент всё ещё работает. Закрытие остановит его.",
+      archive: "Закрыть",
     },
   },
   message: {
@@ -402,13 +402,13 @@ export const ru: TranslationResources = {
       needsHostUpgrade: "Обновите хост, чтобы восстановить это рабочее пространство",
       manageHost: "Управление хостом",
       recovery: {
-        archivedTitle: "Рабочая область в архиве",
+        archivedTitle: "Рабочая область закрыта",
         restoreDescription:
-          "Рабочее пространство «{{workspaceName}}» было архивировано, а его worktree удалён. Восстановите ветку {{branch}}, чтобы снова открыть рабочее пространство.",
+          "Рабочее пространство «{{workspaceName}}» было закрыто, а его worktree удалён. Восстановите ветку {{branch}}, чтобы снова открыть рабочее пространство.",
         unarchiveDescription:
-          "Рабочее пространство «{{workspaceName}}» находится в архиве. Разархивируйте его, чтобы снова открыть.",
+          "Рабочее пространство «{{workspaceName}}» закрыто. Откройте его снова, чтобы продолжить.",
         restoreAction: "Восстановить",
-        unarchiveAction: "Разархивировать",
+        unarchiveAction: "Открыть снова",
         restoringTitle: "Восстановление рабочего пространства",
         restoringAction: "Восстановление...",
         unavailableTitle: "Рабочая область недоступна",
@@ -662,7 +662,7 @@ export const ru: TranslationResources = {
           "Вкладок с несохранёнными изменениями: {{count}}. При закрытии черновики будут удалены.",
         close: "Закрыть",
         cancel: "Отмена",
-        archive: "Архивировать",
+        archive: "Закрыть",
         closeTerminalTitle: "Закрыть терминал?",
         closeTerminalMessage:
           "Любой запущенный процесс в этом терминале будет немедленно остановлен.",
@@ -672,23 +672,23 @@ export const ru: TranslationResources = {
         switchProjectTerminalMessage:
           "Этот терминал будет заменён новым в выбранном проекте. Все запущенные процессы будут остановлены.",
         switchProject: "Сменить",
-        archiveRunningAgentTitle: "Архивировать работающего агента?",
+        archiveRunningAgentTitle: "Закрыть работающего агента?",
         archiveRunningAgentMessage:
-          "Этот агент всё ещё работает. При архивировании агент будет остановлен, а вкладка закрыта.",
+          "Этот агент всё ещё работает. При закрытии агент будет остановлен, а вкладка закрыта.",
         closeTabsLeftTitle: "Закрыть вкладки слева?",
         closeTabsRightTitle: "Закрыть вкладки справа?",
         closeOtherTabsTitle: "Закрыть другие вкладки?",
         bulk: {
-          all: "Будут архивированы агенты ({{agents}}), закрыты терминалы ({{terminals}}) и вкладки ({{tabs}}). Все запущенные процессы в закрытых терминалах будут немедленно остановлены.",
+          all: "Будут закрыты агенты ({{agents}}), закрыты терминалы ({{terminals}}) и вкладки ({{tabs}}). Все запущенные процессы в закрытых терминалах будут немедленно остановлены.",
           agentsAndTerminals:
-            "Будут архивированы агенты ({{agents}}) и закрыты терминалы ({{terminals}}). Все запущенные процессы в закрытых терминалах будут немедленно остановлены.",
+            "Будут закрыты агенты ({{agents}}) и закрыты терминалы ({{terminals}}). Все запущенные процессы в закрытых терминалах будут немедленно остановлены.",
           terminalsAndTabs:
             "Будут закрыты терминалы ({{terminals}}) и вкладки ({{tabs}}). Все запущенные процессы в закрытых терминалах будут немедленно остановлены.",
-          agentsAndTabs: "Будут архивированы агенты ({{agents}}) и закрыты вкладки ({{tabs}}).",
+          agentsAndTabs: "Будут закрыты агенты ({{agents}}) и закрыты вкладки ({{tabs}}).",
           terminals:
             "Будут закрыты терминалы ({{terminals}}). Все запущенные процессы в них будут немедленно остановлены.",
           tabs: "Будут закрыты вкладки ({{tabs}}).",
-          agents: "Будут архивированы агенты ({{agents}}).",
+          agents: "Будут закрыты агенты ({{agents}}).",
         },
       },
     },
@@ -793,9 +793,9 @@ export const ru: TranslationResources = {
           success: "Обновлено",
         },
         archive: {
-          label: "Архивировать рабочее пространство",
-          pending: "Архивирование...",
-          success: "В архиве",
+          label: "Закрыть рабочее пространство",
+          pending: "Закрытие...",
+          success: "Закрыто",
         },
         mergePr: {
           squash: "Выполнить слияние PR (squash)",
@@ -852,7 +852,7 @@ export const ru: TranslationResources = {
           updateCurrent: "Обновление недоступно: эта ветка уже синхронизирована с {{baseRef}}.",
           mergePrNoGithub: "Слияние PR сейчас недоступно: GitHub не подключён.",
           archiveNotWorktree:
-            "Архивирование недоступно: это рабочее пространство не было создано как worktree Paseo.",
+            "Закрытие недоступно: это рабочее пространство не было создано как worktree Paseo.",
           mergePrNoForge: "Слияние {{noun}} сейчас недоступно: {{brand}} не подключён.",
           mergePrMissing: "Слияние PR недоступно: PR ещё не создан.",
           mergePrDraft: "Слияние PR недоступно: PR всё ещё является черновиком.",
@@ -879,8 +879,8 @@ export const ru: TranslationResources = {
           failedMergeFromBase: "Не удалось выполнить слияние с базовой веткой",
         },
         archiveWarning: {
-          title: "Архивировать «{{workspaceName}}»?",
-          confirm: "Архивировать",
+          title: "Закрыть «{{workspaceName}}»?",
+          confirm: "Закрыть",
           cancel: "Отмена",
           uncommittedChanges: "Незафиксированные изменения",
           uncommittedChangesWithDiff: "Незафиксированные изменения ({{diffStat}})",
@@ -1166,23 +1166,22 @@ export const ru: TranslationResources = {
         openNewWindowFailed: "Не удалось открыть новое окно",
         openFolder: "Открыть в файловом менеджере",
         openFolderFailed: "Не удалось открыть папку",
-        remove: "Удалить проект",
-        removeFromWorkspace: "Удалить из рабочего пространства",
+        remove: "Закрыть проект",
+        removeFromWorkspace: "Закрыть проект",
         moveToWorkspace: "Переместить в рабочее пространство",
         noOtherWorkspaces: "Нет других рабочих пространств",
-        removing: "Удаление...",
+        removing: "Закрытие...",
       },
       confirmations: {
-        removeTitle: "Удалить проект?",
-        removeMessage:
-          "Удалить проект «{{projectName}}» с боковой панели?\n\nФайлы на диске не будут изменены.",
-        removeConfirm: "Удалить",
+        removeTitle: "Закрыть проект?",
+        removeMessage: "Закрыть проект «{{projectName}}»?\n\nФайлы на диске не будут изменены.",
+        removeConfirm: "Закрыть",
         cancel: "Отмена",
       },
       toasts: {
         hostDisconnected: "Хост не подключён",
         removeFailed: "Не удалось удалить некоторые рабочие пространства.",
-        updateHostToRemove: "Обновите хост, чтобы удалять проекты.",
+        updateHostToRemove: "Обновите хост, чтобы закрывать проекты.",
       },
       empty: {
         title: "Пока нет проектов",
@@ -1216,10 +1215,10 @@ export const ru: TranslationResources = {
         markAsUnread: "Отметить как непрочитанное",
         pin: "Закрепить вверху",
         unpin: "Открепить",
-        archive: "Архивировать",
-        archiveWorkspace: "Архивировать рабочее пространство",
+        archive: "Закрыть",
+        archiveWorkspace: "Закрыть рабочее пространство",
         hideFromSidebar: "Скрыть на боковой панели",
-        archiving: "Архивирование...",
+        archiving: "Закрытие...",
         hiding: "Скрытие...",
       },
       confirmations: {
@@ -1240,7 +1239,7 @@ export const ru: TranslationResources = {
         branchNameCopied: "Имя ветки скопировано",
         hostDisconnected: "Хост не подключён",
         hideFailed: "Не удалось скрыть рабочее пространство",
-        archiveFailed: "Не удалось архивировать рабочее пространство",
+        archiveFailed: "Не удалось закрыть рабочее пространство",
       },
       uncategorized: "Без категории",
     },
@@ -1248,11 +1247,11 @@ export const ru: TranslationResources = {
       actions: {
         menu: "Действия агента",
         open: "Открыть агента",
-        archive: "Архивировать агента",
+        archive: "Закрыть агента",
       },
       confirmations: {
-        archiveTitle: "Архивировать агента?",
-        archiveMessage: "Этот агент будет архивирован.",
+        archiveTitle: "Закрыть агента?",
+        archiveMessage: "Этот агент будет закрыт.",
       },
     },
   },
@@ -1830,9 +1829,9 @@ export const ru: TranslationResources = {
     pillLabelReadyToReview: "{{count}} на проверку",
     detachAction: "Отсоединить {{label}}",
     detachTooltip: "Отсоединить субагента",
-    archiveAction: "Архивировать {{label}}",
-    archiveTooltip: "Архивировать субагента",
-    archiveFinishedAction: "Архивировать завершенные субагенты",
+    archiveAction: "Закрыть {{label}}",
+    archiveTooltip: "Закрыть субагента",
+    archiveFinishedAction: "Закрыть завершенные субагенты",
     archiveFinishedRetry: "Повторить ({{failed}}/{{total}})",
   },
   panels: {
@@ -2250,7 +2249,7 @@ export const ru: TranslationResources = {
         openProject: "Открыть проект",
         newWorkspace: "Новое рабочее пространство",
         newWorktree: "Новый worktree",
-        archiveWorkspace: "Архивировать рабочее пространство",
+        archiveWorkspace: "Закрыть рабочее пространство",
         newTab: "Новая вкладка",
         closeCurrentTab: "Закрыть текущую вкладку",
         jumpToWorkspace: "Перейти к рабочему пространству",

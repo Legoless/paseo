@@ -2,18 +2,18 @@ import type { ConfirmDialogInput } from "@/utils/confirm-dialog";
 
 function archivedAgentsClause(agentCount: number): string {
   if (agentCount === 1) {
-    return ", and its agent will be archived";
+    return ", and its agent will be closed";
   }
   if (agentCount > 1) {
-    return `, and its ${agentCount} agents will be archived`;
+    return `, and its ${agentCount} agents will be closed`;
   }
   return "";
 }
 
 /**
- * The confirmation for removing a project from a workspace. Removing it archives whatever agents
+ * The confirmation for closing a project in a workspace. Closing it closes whatever agents
  * are still sitting in that directory, so the count is named here rather than discovered afterwards
- * — the archive is the part of this the user cannot undo by re-adding the project.
+ * — the close is the part of this the user cannot undo by re-adding the project.
  */
 export function buildRemoveWorkspaceMemberDialog(input: {
   projectName: string;
@@ -21,9 +21,9 @@ export function buildRemoveWorkspaceMemberDialog(input: {
 }): ConfirmDialogInput {
   const agents = archivedAgentsClause(input.agentCount);
   return {
-    title: "Remove project from workspace?",
+    title: "Close project?",
     message: `"${input.projectName}" will no longer be part of this workspace${agents}. Its directory stays on disk.`,
-    confirmLabel: "Remove",
+    confirmLabel: "Close",
     destructive: true,
   };
 }
@@ -39,16 +39,16 @@ export function removeWorkspaceMemberErrorMessage(input: {
   projectName: string;
 }): string {
   if (input.errorCode === "member_has_active_agents") {
-    return `"${input.projectName}" still has agents. Archive them, then remove the project.`;
+    return `"${input.projectName}" still has agents. Close them, then close the project.`;
   }
   if (input.errorCode === "member_has_live_terminals") {
-    return `"${input.projectName}" still has a running terminal. Close it, then remove the project.`;
+    return `"${input.projectName}" still has a running terminal. Close it, then close the project.`;
   }
   if (input.errorCode === "last_member") {
-    return "A workspace keeps at least one project. Add another before removing this one.";
+    return "A workspace keeps at least one project. Add another before closing this one.";
   }
   if (input.errorCode === "member_not_found") {
     return `"${input.projectName}" is not part of this workspace.`;
   }
-  return input.error ?? "Could not remove the project from this workspace.";
+  return input.error ?? "Could not close the project.";
 }

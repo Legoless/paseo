@@ -15,7 +15,7 @@ describe("removeWorkspaceMemberErrorMessage", () => {
         error: "Workspace wks_1 has an active agent at /Users/legoless",
         projectName,
       }),
-    ).toBe('"legoless" still has agents. Archive them, then remove the project.');
+    ).toBe('"legoless" still has agents. Close them, then close the project.');
 
     expect(
       removeWorkspaceMemberErrorMessage({
@@ -23,11 +23,11 @@ describe("removeWorkspaceMemberErrorMessage", () => {
         error: null,
         projectName,
       }),
-    ).toBe('"legoless" still has a running terminal. Close it, then remove the project.');
+    ).toBe('"legoless" still has a running terminal. Close it, then close the project.');
 
     expect(
       removeWorkspaceMemberErrorMessage({ errorCode: "last_member", error: null, projectName }),
-    ).toBe("A workspace keeps at least one project. Add another before removing this one.");
+    ).toBe("A workspace keeps at least one project. Add another before closing this one.");
   });
 
   test("falls back to the daemon's own words, then to a plain failure", () => {
@@ -42,7 +42,7 @@ describe("removeWorkspaceMemberErrorMessage", () => {
     ).toBe("Disk is read-only");
 
     expect(removeWorkspaceMemberErrorMessage({ errorCode: null, error: null, projectName })).toBe(
-      "Could not remove the project from this workspace.",
+      "Could not close the project.",
     );
   });
 });
@@ -53,17 +53,17 @@ describe("buildRemoveWorkspaceMemberDialog", () => {
       '"legoless" will no longer be part of this workspace. Its directory stays on disk.',
     );
     expect(buildRemoveWorkspaceMemberDialog({ projectName, agentCount: 1 }).message).toBe(
-      '"legoless" will no longer be part of this workspace, and its agent will be archived. Its directory stays on disk.',
+      '"legoless" will no longer be part of this workspace, and its agent will be closed. Its directory stays on disk.',
     );
     expect(buildRemoveWorkspaceMemberDialog({ projectName, agentCount: 5 }).message).toBe(
-      '"legoless" will no longer be part of this workspace, and its 5 agents will be archived. Its directory stays on disk.',
+      '"legoless" will no longer be part of this workspace, and its 5 agents will be closed. Its directory stays on disk.',
     );
   });
 
   test("stays destructive so the confirm button carries the warning", () => {
     expect(buildRemoveWorkspaceMemberDialog({ projectName, agentCount: 0 })).toMatchObject({
-      title: "Remove project from workspace?",
-      confirmLabel: "Remove",
+      title: "Close project?",
+      confirmLabel: "Close",
       destructive: true,
     });
   });

@@ -4572,6 +4572,12 @@ test("project.remove.request detaches projects while preserving independent acti
 
   session.projectRegistry.get = async (projectId: string) => projects.get(projectId) ?? null;
   session.projectRegistry.list = async () => Array.from(projects.values());
+  session.projectRegistry.archive = async (projectId: string, archivedAt: string) => {
+    const existing = projects.get(projectId);
+    if (existing) {
+      projects.set(projectId, { ...existing, updatedAt: archivedAt, archivedAt });
+    }
+  };
   session.projectRegistry.remove = async (projectId: string) => {
     projects.delete(projectId);
   };
@@ -4605,7 +4611,7 @@ test("project.remove.request detaches projects while preserving independent acti
     requestId: "req-remove-project",
   });
 
-  expect(projects.has(project.projectId)).toBe(false);
+  expect(projects.get(project.projectId)?.archivedAt).toBeTruthy();
   expect(workspaces.get(workspace.workspaceId)).toEqual({
     ...workspace,
     updatedAt: expect.any(String),
@@ -4666,6 +4672,12 @@ test("project.remove.request removes an already-empty project", async () => {
 
   session.projectRegistry.get = async (projectId: string) => projects.get(projectId) ?? null;
   session.projectRegistry.list = async () => Array.from(projects.values());
+  session.projectRegistry.archive = async (projectId: string, archivedAt: string) => {
+    const existing = projects.get(projectId);
+    if (existing) {
+      projects.set(projectId, { ...existing, updatedAt: archivedAt, archivedAt });
+    }
+  };
   session.projectRegistry.remove = async (projectId: string) => {
     projects.delete(projectId);
   };
@@ -4702,7 +4714,7 @@ test("project.remove.request removes an already-empty project", async () => {
     requestId: "req-remove-empty-project",
   });
 
-  expect(projects.has(project.projectId)).toBe(false);
+  expect(projects.get(project.projectId)?.archivedAt).toBeTruthy();
   expect(workspaces.get(archivedWorkspace.workspaceId)).toEqual({
     ...archivedWorkspace,
     members: [],
@@ -9563,6 +9575,12 @@ function createMemberTestRegistries(options?: { withMember?: boolean; memberCwd?
         const project = record as PersistedProjectRecord;
         projects.set(project.projectId, project);
       };
+      session.projectRegistry.archive = async (id: string, archivedAt: string) => {
+        const existing = projects.get(id);
+        if (existing) {
+          projects.set(id, { ...existing, updatedAt: archivedAt, archivedAt });
+        }
+      };
       session.projectRegistry.remove = async (id: string) => {
         projects.delete(id);
       };
@@ -10362,7 +10380,7 @@ test("project.remove.request strips a non-primary membership instead of archivin
   expect(workspace?.archivedAt).toBeNull();
   expect(workspace?.members).toHaveLength(1);
   expect(workspace?.members?.[0]).toMatchObject({ projectId: "proj-1", cwd: REPO_CWD });
-  expect(registries.projects.has("proj-2")).toBe(false);
+  expect(registries.projects.get("proj-2")?.archivedAt).toBeTruthy();
 });
 
 test("project.remove.request preserves the workspace and remaining members when its first project is removed", async () => {
@@ -10392,7 +10410,7 @@ test("project.remove.request preserves the workspace and remaining members when 
   expect(registries.workspaces.get("ws-1")?.members).toEqual([
     expect.objectContaining({ projectId: "proj-2", cwd: MEMBER_CWD }),
   ]);
-  expect(registries.projects.has("proj-1")).toBe(false);
+  expect(registries.projects.get("proj-1")?.archivedAt).toBeTruthy();
 });
 
 test("workspace member descriptors carry per-member diffStat and prefer the snapshot branch", async () => {

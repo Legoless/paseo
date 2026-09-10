@@ -151,11 +151,7 @@ import {
 } from "./workspace-registry.js";
 import { wrapSpokenInput } from "./voice-config.js";
 import { isVoicePermissionAllowed } from "./voice-permission-policy.js";
-import {
-  ProjectIconReader,
-  removeProjectCustomIcon,
-  setProjectCustomIcon,
-} from "../utils/project-custom-icon.js";
+import { ProjectIconReader, setProjectCustomIcon } from "../utils/project-custom-icon.js";
 import { VoiceSession } from "./session/voice/voice-session.js";
 import { CheckoutSession } from "./session/checkout/checkout-session.js";
 import {
@@ -3249,16 +3245,7 @@ export class Session {
           }
         }
       }
-      await this.projectRegistry.remove(resolvedProjectId);
-      await removeProjectCustomIcon({
-        paseoHome: this.paseoHome,
-        projectId: resolvedProjectId,
-      }).catch((error) => {
-        this.sessionLogger.warn(
-          { err: error, projectId: resolvedProjectId },
-          "Failed to clean up removed project icon",
-        );
-      });
+      await this.projectRegistry.archive(resolvedProjectId, new Date().toISOString());
       await this.emitWorkspaceUpdatesForWorkspaceIds(
         affectedWorkspaces.map((workspace) => workspace.workspaceId),
         { removedProjectId: projectId },

@@ -159,8 +159,8 @@ export const es: TranslationResources = {
       fileTooLarge: "{{fileName}} is too large (max {{size}})",
     },
     clientCommands: {
-      archiveAgent: "Archivar el agente actual",
-      freshDraft: "Archive este agente y comience un nuevo borrador",
+      archiveAgent: "Cerrar el agente actual",
+      freshDraft: "Cierre este agente y comience un nuevo borrador",
     },
     github: {
       searching: "Búsqueda...",
@@ -225,8 +225,8 @@ export const es: TranslationResources = {
       reconnecting: "Reconectando",
       timelineSyncFailed: "No se pudo actualizar el historial del agente.",
       timelineSyncRetrying: "Reintentando…",
-      archivingTitle: "Agente de archivo...",
-      archivingSubtitle: "Espere mientras archivamos este agente.",
+      archivingTitle: "Cerrando agente...",
+      archivingSubtitle: "Espere mientras cerramos este agente.",
     },
     unavailable: {
       selectedHost: "Anfitrión seleccionado",
@@ -243,8 +243,8 @@ export const es: TranslationResources = {
         "Le mostraremos a este agente nuevamente tan pronto como podamos comunicarnos con el anfitrión.",
     },
     archived: {
-      callout: "Este agente está archivado.",
-      unarchive: "Desarchivar",
+      callout: "Este agente está cerrado.",
+      unarchive: "Reabrir",
     },
   },
   sessions: {
@@ -277,14 +277,14 @@ export const es: TranslationResources = {
       closed: "Cerrado",
     },
     badges: {
-      archived: "Archivado",
+      archived: "Cerrado",
       pending: "{{count}}pendiente",
       attention: "Atención",
     },
     archiveSheet: {
       hostOffline: "Hostfuera de línea",
-      runningAgent: "Este agente todavía está ejecutándose. Archivarlo detendrá al agente.",
-      archive: "Archivo",
+      runningAgent: "Este agente todavía está ejecutándose. Cerrarlo detendrá al agente.",
+      archive: "Cerrar",
     },
   },
   message: {
@@ -403,13 +403,12 @@ export const es: TranslationResources = {
       needsHostUpgrade: "Actualiza tu host para restaurar este espacio de trabajo",
       manageHost: "Administrar host",
       recovery: {
-        archivedTitle: "Espacio de trabajo archivado",
+        archivedTitle: "Espacio de trabajo cerrado",
         restoreDescription:
-          "{{workspaceName}} se archivó y se eliminó su worktree. Restaura la rama {{branch}} para volver a abrirlo.",
-        unarchiveDescription:
-          "{{workspaceName}} está archivado. Desarchívalo para volver a abrirlo.",
+          "{{workspaceName}} se cerró y se eliminó su worktree. Restaura la rama {{branch}} para volver a abrirlo.",
+        unarchiveDescription: "{{workspaceName}} está cerrado. Reábrelo para volver a abrirlo.",
         restoreAction: "Restaurar",
-        unarchiveAction: "Desarchivar",
+        unarchiveAction: "Reabrir",
         restoringTitle: "Restaurando espacio de trabajo",
         restoringAction: "Restaurando...",
         unavailableTitle: "Espacio de trabajo no disponible",
@@ -662,7 +661,7 @@ export const es: TranslationResources = {
           "{{count}} pestaña(s) tienen cambios sin guardar. Al cerrar se descartarán esos borradores.",
         close: "Cerrar",
         cancel: "Cancelar",
-        archive: "Archivo",
+        archive: "Cerrar",
         closeTerminalTitle: "¿Cerrar terminal?",
         closeTerminalMessage:
           "Cualquier proceso en ejecución en esta terminal se detendrá inmediatamente.",
@@ -672,23 +671,23 @@ export const es: TranslationResources = {
         switchProjectTerminalMessage:
           "Esta terminal se reemplaza por una nueva en el proyecto que elijas. Se detiene cualquier proceso en ejecución.",
         switchProject: "Cambiar",
-        archiveRunningAgentTitle: "¿Agente de ejecución de archivos?",
+        archiveRunningAgentTitle: "¿Cerrar agente en ejecución?",
         archiveRunningAgentMessage:
-          "Este agente todavía está ejecutándose. Archivarlo detendrá al agente y cerrará la pestaña.",
+          "Este agente todavía está ejecutándose. Cerrarlo detendrá al agente y cerrará la pestaña.",
         closeTabsLeftTitle: "¿Cerrar pestañas a la izquierda?",
         closeTabsRightTitle: "¿Cerrar pestañas a la derecha?",
         closeOtherTabsTitle: "¿Cerrar otras pestañas?",
         bulk: {
-          all: "Esto archivará los agentes{{agents}}, cerrará los terminales{{terminals}}y cerrará las pestañas{{tabs}}. Cualquier proceso en ejecución en una terminal cerrada se detendrá inmediatamente.",
+          all: "Esto cerrará los agentes{{agents}}, cerrará los terminales{{terminals}}y cerrará las pestañas{{tabs}}. Cualquier proceso en ejecución en una terminal cerrada se detendrá inmediatamente.",
           agentsAndTerminals:
-            "Esto archivará los agentes{{agents}}y cerrará los terminales{{terminals}}. Cualquier proceso en ejecución en una terminal cerrada se detendrá inmediatamente.",
+            "Esto cerrará los agentes{{agents}}y cerrará los terminales{{terminals}}. Cualquier proceso en ejecución en una terminal cerrada se detendrá inmediatamente.",
           terminalsAndTabs:
             "Esto cerrará los terminales{{terminals}}y cerrará las pestañas{{tabs}}. Cualquier proceso en ejecución en una terminal cerrada se detendrá inmediatamente.",
-          agentsAndTabs: "Esto archivará los agentes{{agents}}y cerrará las pestañas{{tabs}}.",
+          agentsAndTabs: "Esto cerrará los agentes{{agents}}y cerrará las pestañas{{tabs}}.",
           terminals:
             "Esto cerrará los terminales{{terminals}}. Cualquier proceso en ejecución en una terminal cerrada se detendrá inmediatamente.",
           tabs: "Esto cerrará las pestañas{{tabs}}.",
-          agents: "Esto archivará los agentes{{agents}}.",
+          agents: "Esto cerrará los agentes{{agents}}.",
         },
       },
     },
@@ -793,9 +792,9 @@ export const es: TranslationResources = {
           success: "Actualizado",
         },
         archive: {
-          label: "Archivar espacio de trabajo",
-          pending: "Archivando...",
-          success: "Archivado",
+          label: "Cerrar espacio de trabajo",
+          pending: "Cerrando...",
+          success: "Cerrado",
         },
         mergePr: {
           squash: "Fusionar PR (squash)",
@@ -861,7 +860,7 @@ export const es: TranslationResources = {
           mergePrNoGithub:
             "FusionarPRno está disponible en este momento porqueGitHubno está conectado",
           archiveNotWorktree:
-            "El archivo no está disponible aquí porque este espacio de trabajo no se creó como un árbol de trabajoPaseo",
+            "Cerrar no está disponible aquí porque este espacio de trabajo no se creó como un árbol de trabajo Paseo",
           mergePrNoForge:
             "Fusionar {{noun}} no está disponible en este momento porque {{brand}} no está conectado",
           mergePrMissing:
@@ -895,8 +894,8 @@ export const es: TranslationResources = {
           failedMergeFromBase: "No se pudo fusionar desde la base",
         },
         archiveWarning: {
-          title: '¿Archivo "{{workspaceName}}"?',
-          confirm: "Archivo",
+          title: '¿Cerrar "{{workspaceName}}"?',
+          confirm: "Cerrar",
           cancel: "Cancelar",
           uncommittedChanges: "Cambios no confirmados",
           uncommittedChangesWithDiff: "Cambios no confirmados ({{diffStat}})",
@@ -1184,23 +1183,22 @@ export const es: TranslationResources = {
         openNewWindowFailed: "Couldn't open a new window",
         openFolder: "Open in file manager",
         openFolderFailed: "Couldn't open folder",
-        remove: "Eliminar proyecto",
-        removeFromWorkspace: "Quitar del espacio de trabajo",
+        remove: "Cerrar proyecto",
+        removeFromWorkspace: "Cerrar proyecto",
         moveToWorkspace: "Mover a otro espacio de trabajo",
         noOtherWorkspaces: "No hay otros espacios de trabajo",
-        removing: "Eliminando...",
+        removing: "Cerrando...",
       },
       confirmations: {
-        removeTitle: "¿Quitar proyecto?",
-        removeMessage:
-          '¿Quitar "{{projectName}}" de la barra lateral?\n\nLos archivos en el disco no se cambiarán.',
-        removeConfirm: "Eliminar",
+        removeTitle: "¿Cerrar proyecto?",
+        removeMessage: '¿Cerrar "{{projectName}}"?\n\nLos archivos en el disco no se cambiarán.',
+        removeConfirm: "Cerrar",
         cancel: "Cancelar",
       },
       toasts: {
         hostDisconnected: "Hostno está conectado",
         removeFailed: "No se pudieron eliminar algunos espacios de trabajo",
-        updateHostToRemove: "Actualiza el host para eliminar proyectos.",
+        updateHostToRemove: "Actualiza el host para cerrar proyectos.",
       },
       empty: {
         title: "Aún no hay proyectos",
@@ -1234,10 +1232,10 @@ export const es: TranslationResources = {
         markAsUnread: "Marcar como no leído",
         pin: "Anclar arriba",
         unpin: "Desanclar",
-        archive: "Archivo",
-        archiveWorkspace: "Archivar espacio de trabajo",
+        archive: "Cerrar",
+        archiveWorkspace: "Cerrar espacio de trabajo",
         hideFromSidebar: "Ocultar de la barra lateral",
-        archiving: "Archivando...",
+        archiving: "Cerrando...",
         hiding: "Ocultación...",
       },
       confirmations: {
@@ -1258,7 +1256,7 @@ export const es: TranslationResources = {
         branchNameCopied: "Nombre de la sucursal copiado",
         hostDisconnected: "Hostno está conectado",
         hideFailed: "No se pudo ocultar el espacio de trabajo",
-        archiveFailed: "No se pudo archivar el espacio de trabajo",
+        archiveFailed: "No se pudo cerrar el espacio de trabajo",
       },
       uncategorized: "Sin categoría",
     },
@@ -1266,11 +1264,11 @@ export const es: TranslationResources = {
       actions: {
         menu: "Acciones del agente",
         open: "Abrir agente",
-        archive: "Archivar agente",
+        archive: "Cerrar agente",
       },
       confirmations: {
-        archiveTitle: "¿Archivar agente?",
-        archiveMessage: "Este agente será archivado.",
+        archiveTitle: "¿Cerrar agente?",
+        archiveMessage: "Este agente se cerrará.",
       },
     },
   },
@@ -1846,9 +1844,9 @@ export const es: TranslationResources = {
     pillLabelReadyToReview: "{{count}} para revisar",
     detachAction: "Separar {{label}}",
     detachTooltip: "Separar subagente",
-    archiveAction: "Archivo{{label}}",
-    archiveTooltip: "Subagente de archivo",
-    archiveFinishedAction: "Archivar subagentes finalizados",
+    archiveAction: "Cerrar {{label}}",
+    archiveTooltip: "Cerrar subagente",
+    archiveFinishedAction: "Cerrar subagentes finalizados",
     archiveFinishedRetry: "Reintentar ({{failed}}/{{total}})",
   },
   panels: {
@@ -2264,7 +2262,7 @@ export const es: TranslationResources = {
         openProject: "Abrir proyecto",
         newWorkspace: "Nuevo espacio de trabajo",
         newWorktree: "Nuevo árbol de trabajo",
-        archiveWorkspace: "Archivar espacio de trabajo",
+        archiveWorkspace: "Cerrar espacio de trabajo",
         newTab: "Nueva pestaña",
         closeCurrentTab: "Cerrar pestaña actual",
         jumpToWorkspace: "Saltar al espacio de trabajo",

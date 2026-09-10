@@ -159,8 +159,8 @@ export const ko: TranslationResources = {
       fileTooLarge: "{{fileName}}이(가) 너무 큽니다 (최대 {{size}})",
     },
     clientCommands: {
-      archiveAgent: "현재 에이전트 보관",
-      freshDraft: "이 에이전트를 보관하고 새 초안을 시작합니다",
+      archiveAgent: "현재 에이전트 닫기",
+      freshDraft: "이 에이전트를 닫고 새 초안을 시작합니다",
     },
     github: {
       searching: "검색 중...",
@@ -225,8 +225,8 @@ export const ko: TranslationResources = {
       reconnecting: "다시 연결하는 중",
       timelineSyncFailed: "에이전트 기록을 새로고침할 수 없습니다.",
       timelineSyncRetrying: "재시도 중…",
-      archivingTitle: "에이전트 보관 중...",
-      archivingSubtitle: "이 에이전트를 보관하는 동안 잠시 기다려 주세요.",
+      archivingTitle: "에이전트 닫는 중...",
+      archivingSubtitle: "이 에이전트를 닫는 동안 잠시 기다려 주세요.",
     },
     unavailable: {
       selectedHost: "선택된 호스트",
@@ -241,8 +241,8 @@ export const ko: TranslationResources = {
       showAgainWhenReachable: "호스트에 연결되는 즉시 이 에이전트를 다시 표시합니다.",
     },
     archived: {
-      callout: "이 에이전트는 보관되었습니다",
-      unarchive: "보관 해제",
+      callout: "이 에이전트는 닫혔습니다",
+      unarchive: "다시 열기",
     },
   },
   sessions: {
@@ -275,14 +275,14 @@ export const ko: TranslationResources = {
       closed: "종료됨",
     },
     badges: {
-      archived: "보관됨",
+      archived: "닫힘",
       pending: "대기 {{count}}개",
       attention: "주의",
     },
     archiveSheet: {
       hostOffline: "호스트 오프라인",
-      runningAgent: "이 에이전트는 아직 실행 중입니다. 보관하면 에이전트가 중지됩니다.",
-      archive: "보관",
+      runningAgent: "이 에이전트는 아직 실행 중입니다. 닫으면 에이전트가 중지됩니다.",
+      archive: "닫기",
     },
   },
   message: {
@@ -401,12 +401,12 @@ export const ko: TranslationResources = {
       needsHostUpgrade: "이 워크스페이스를 복원하려면 호스트를 업데이트하세요.",
       manageHost: "호스트 관리",
       recovery: {
-        archivedTitle: "워크스페이스가 보관되었습니다",
+        archivedTitle: "워크스페이스가 닫혔습니다",
         restoreDescription:
-          "{{workspaceName}}가 보관되고 워크트리가 제거되었습니다. 다시 열려면 {{branch}} 브랜치를 복원하세요.",
-        unarchiveDescription: "{{workspaceName}}가 보관되었습니다. 다시 열려면 보관을 취소하세요.",
+          "{{workspaceName}}가 닫히고 워크트리가 제거되었습니다. 다시 열려면 {{branch}} 브랜치를 복원하세요.",
+        unarchiveDescription: "{{workspaceName}}가 닫혔습니다. 다시 열려면 다시 여세요.",
         restoreAction: "복원",
-        unarchiveAction: "보관 취소",
+        unarchiveAction: "다시 열기",
         restoringTitle: "워크스페이스 복원 중",
         restoringAction: "복원 중...",
         unavailableTitle: "워크스페이스를 사용할 수 없습니다",
@@ -652,7 +652,7 @@ export const ko: TranslationResources = {
       confirmations: {
         close: "닫기",
         cancel: "취소",
-        archive: "보관",
+        archive: "닫기",
         unsavedTitle: "저장되지 않은 변경사항",
         unsavedMessage: "이 탭에는 저장되지 않은 변경사항이 있습니다. 닫으면 초안이 삭제됩니다.",
         closeWithoutSaving: "저장하지 않고 닫기",
@@ -667,23 +667,23 @@ export const ko: TranslationResources = {
         switchProjectTerminalMessage:
           "이 터미널은 선택한 프로젝트의 새 터미널로 대체됩니다. 실행 중인 프로세스는 중지됩니다.",
         switchProject: "변경",
-        archiveRunningAgentTitle: "실행 중인 에이전트를 보관할까요?",
+        archiveRunningAgentTitle: "실행 중인 에이전트를 닫을까요?",
         archiveRunningAgentMessage:
-          "이 에이전트는 아직 실행 중입니다. 보관하면 에이전트가 중지되고 탭이 닫힙니다.",
+          "이 에이전트는 아직 실행 중입니다. 닫으면 에이전트가 중지되고 탭이 닫힙니다.",
         closeTabsLeftTitle: "왼쪽 탭을 닫을까요?",
         closeTabsRightTitle: "오른쪽 탭을 닫을까요?",
         closeOtherTabsTitle: "다른 탭을 닫을까요?",
         bulk: {
-          all: "에이전트 {{agents}}개를 보관하고, 터미널 {{terminals}}개를 닫고, 탭 {{tabs}}개를 닫습니다. 닫히는 터미널에서 실행 중인 프로세스는 즉시 중지됩니다.",
+          all: "에이전트 {{agents}}개를 닫고, 터미널 {{terminals}}개를 닫고, 탭 {{tabs}}개를 닫습니다. 닫히는 터미널에서 실행 중인 프로세스는 즉시 중지됩니다.",
           agentsAndTerminals:
-            "에이전트 {{agents}}개를 보관하고 터미널 {{terminals}}개를 닫습니다. 닫히는 터미널에서 실행 중인 프로세스는 즉시 중지됩니다.",
+            "에이전트 {{agents}}개를 닫고 터미널 {{terminals}}개를 닫습니다. 닫히는 터미널에서 실행 중인 프로세스는 즉시 중지됩니다.",
           terminalsAndTabs:
             "터미널 {{terminals}}개를 닫고 탭 {{tabs}}개를 닫습니다. 닫히는 터미널에서 실행 중인 프로세스는 즉시 중지됩니다.",
-          agentsAndTabs: "에이전트 {{agents}}개를 보관하고 탭 {{tabs}}개를 닫습니다.",
+          agentsAndTabs: "에이전트 {{agents}}개를 닫고 탭 {{tabs}}개를 닫습니다.",
           terminals:
             "터미널 {{terminals}}개를 닫습니다. 닫히는 터미널에서 실행 중인 프로세스는 즉시 중지됩니다.",
           tabs: "탭 {{tabs}}개를 닫습니다.",
-          agents: "에이전트 {{agents}}개를 보관합니다.",
+          agents: "에이전트 {{agents}}개를 닫습니다.",
         },
       },
     },
@@ -788,9 +788,9 @@ export const ko: TranslationResources = {
           success: "업데이트됨",
         },
         archive: {
-          label: "워크스페이스 보관",
-          pending: "보관하는 중...",
-          success: "보관됨",
+          label: "워크스페이스 닫기",
+          pending: "닫는 중...",
+          success: "닫힘",
         },
         mergePr: {
           squash: "PR 병합(스쿼시)",
@@ -844,7 +844,7 @@ export const ko: TranslationResources = {
             "이 브랜치가 이미 {{baseRef}}와 최신 상태이므로 업데이트를 사용할 수 없습니다",
           mergePrNoGithub: "GitHub가 연결되어 있지 않아 지금은 PR 병합을 사용할 수 없습니다",
           archiveNotWorktree:
-            "이 워크스페이스가 Paseo 워크트리로 생성되지 않아 여기서 보관을 사용할 수 없습니다",
+            "이 워크스페이스가 Paseo 워크트리로 생성되지 않아 여기서 닫기를 사용할 수 없습니다",
           mergePrNoForge:
             "{{brand}}가 연결되어 있지 않기 때문에 지금은 {{noun}} 병합을 사용할 수 없습니다.",
           mergePrMissing: "아직 풀 리퀘스트가 없어 PR 병합을 사용할 수 없습니다",
@@ -871,8 +871,8 @@ export const ko: TranslationResources = {
           failedMergeFromBase: "기준에서 병합하지 못했습니다",
         },
         archiveWarning: {
-          title: '"{{workspaceName}}"를 보관하시겠습니까?',
-          confirm: "보관",
+          title: '"{{workspaceName}}"를 닫으시겠습니까?',
+          confirm: "닫기",
           cancel: "취소",
           uncommittedChanges: "커밋되지 않은 변경 사항",
           uncommittedChangesWithDiff: "커밋되지 않은 변경 사항 ({{diffStat}})",
@@ -1157,23 +1157,22 @@ export const ko: TranslationResources = {
         openNewWindowFailed: "새 창을 열 수 없습니다",
         openFolder: "파일 관리자에서 열기",
         openFolderFailed: "폴더를 열 수 없습니다.",
-        remove: "프로젝트 제거",
-        removeFromWorkspace: "워크스페이스에서 제거",
+        remove: "프로젝트 닫기",
+        removeFromWorkspace: "프로젝트 닫기",
         moveToWorkspace: "워크스페이스로 이동",
         noOtherWorkspaces: "다른 워크스페이스가 없습니다",
-        removing: "제거하는 중...",
+        removing: "닫는 중...",
       },
       confirmations: {
-        removeTitle: "프로젝트를 제거할까요?",
-        removeMessage:
-          '"{{projectName}}"을(를) 사이드바에서 제거할까요?\n\n디스크의 파일은 변경되지 않습니다.',
-        removeConfirm: "제거",
+        removeTitle: "프로젝트를 닫을까요?",
+        removeMessage: '"{{projectName}}"을(를) 닫을까요?\n\n디스크의 파일은 변경되지 않습니다.',
+        removeConfirm: "닫기",
         cancel: "취소",
       },
       toasts: {
         hostDisconnected: "호스트가 연결되어 있지 않습니다",
         removeFailed: "일부 워크스페이스를 제거하지 못했습니다",
-        updateHostToRemove: "프로젝트를 제거하려면 호스트를 업데이트하세요.",
+        updateHostToRemove: "프로젝트를 닫으려면 호스트를 업데이트하세요.",
       },
       empty: {
         title: "아직 프로젝트가 없습니다",
@@ -1207,10 +1206,10 @@ export const ko: TranslationResources = {
         markAsUnread: "읽지 않음으로 표시",
         pin: "상단에 고정",
         unpin: "고정 해제",
-        archive: "보관",
-        archiveWorkspace: "워크스페이스 보관",
+        archive: "닫기",
+        archiveWorkspace: "워크스페이스 닫기",
         hideFromSidebar: "사이드바에서 숨기기",
-        archiving: "보관하는 중...",
+        archiving: "닫는 중...",
         hiding: "숨기는 중...",
       },
       confirmations: {
@@ -1231,7 +1230,7 @@ export const ko: TranslationResources = {
         branchNameCopied: "브랜치 이름이 복사되었습니다",
         hostDisconnected: "호스트가 연결되어 있지 않습니다",
         hideFailed: "워크스페이스를 숨기지 못했습니다",
-        archiveFailed: "워크스페이스를 보관하지 못했습니다.",
+        archiveFailed: "워크스페이스를 닫지 못했습니다.",
       },
       uncategorized: "분류되지 않음",
     },
@@ -1239,11 +1238,11 @@ export const ko: TranslationResources = {
       actions: {
         menu: "에이전트 작업",
         open: "에이전트 열기",
-        archive: "에이전트 보관",
+        archive: "에이전트 닫기",
       },
       confirmations: {
-        archiveTitle: "에이전트를 보관할까요?",
-        archiveMessage: "이 에이전트가 보관됩니다.",
+        archiveTitle: "에이전트를 닫을까요?",
+        archiveMessage: "이 에이전트가 닫힙니다.",
       },
     },
   },
@@ -1810,9 +1809,9 @@ export const ko: TranslationResources = {
     pillLabelReadyToReview: "{{count}}개 검토 대기",
     detachAction: "{{label}} 분리",
     detachTooltip: "하위 에이전트 분리",
-    archiveAction: "{{label}} 보관",
-    archiveTooltip: "서브에이전트 보관",
-    archiveFinishedAction: "완료된 하위 에이전트 보관",
+    archiveAction: "{{label}} 닫기",
+    archiveTooltip: "서브에이전트 닫기",
+    archiveFinishedAction: "완료된 하위 에이전트 닫기",
     archiveFinishedRetry: "다시 시도 ({{failed}}/{{total}})",
   },
   panels: {
@@ -2223,7 +2222,7 @@ export const ko: TranslationResources = {
         openProject: "프로젝트 열기",
         newWorkspace: "새 워크스페이스",
         newWorktree: "새 워크트리",
-        archiveWorkspace: "워크스페이스 보관",
+        archiveWorkspace: "워크스페이스 닫기",
         newTab: "새 탭",
         closeCurrentTab: "현재 탭 닫기",
         jumpToWorkspace: "워크스페이스로 이동",
