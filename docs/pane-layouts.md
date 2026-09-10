@@ -7,6 +7,18 @@ the sidebar kebab, the sidebar row's context menu, or the header menu next to th
 
 Layouts describe geometry only. Applying one never starts or stops an agent, terminal, or tab.
 
+## Pane lifecycle
+
+Panes are user-controlled. A pane outlives its last tab: closing, moving or splitting away the final
+tab leaves the pane in place holding a New tab launcher, and the launcher inherits the project the
+departing tab was in, so an emptied pane still points where the user left it. **Close pane** is the
+only thing that removes one — plus dismissing an empty pane's launcher, which is the same gesture by
+another affordance. `detachTabFromTree` in `packages/app/src/stores/workspace-layout-actions.ts`
+enforces this: tab removal has no way to reach `removePaneByPath`.
+
+Reconciliation obeys the same rule. An archived agent or a terminal the daemon no longer has leaves
+its pane standing rather than collapsing the split under whatever the user was reading next to it.
+
 ## Where the files live
 
 ```

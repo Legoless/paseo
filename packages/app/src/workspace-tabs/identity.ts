@@ -5,6 +5,18 @@ import {
   workspaceLabelKey,
 } from "@getpaseo/protocol/workspace-labels";
 
+function normalizeNewTabTarget(
+  value: Extract<WorkspaceTabTarget, { kind: "new_tab" }>,
+): WorkspaceTabTarget {
+  const labels = normalizeWorkspaceTabLabels(value.labels);
+  const cwd = trimNonEmpty(value.cwd);
+  return {
+    kind: "new_tab",
+    ...(labels ? { labels } : {}),
+    ...(cwd ? { cwd } : {}),
+  };
+}
+
 export function normalizeWorkspaceTabTarget(
   value: WorkspaceTabTarget | null | undefined,
 ): WorkspaceTabTarget | null {
@@ -29,8 +41,7 @@ export function normalizeWorkspaceTabTarget(
     };
   }
   if (value.kind === "new_tab") {
-    const labels = normalizeWorkspaceTabLabels(value.labels);
-    return labels ? { kind: "new_tab", labels } : { kind: "new_tab" };
+    return normalizeNewTabTarget(value);
   }
   if (value.kind === "agent") {
     const agentId = trimNonEmpty(value.agentId);

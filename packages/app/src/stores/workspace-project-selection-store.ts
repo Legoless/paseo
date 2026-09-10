@@ -1,33 +1,54 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCallback } from "react";
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { z } from "zod";
+import { createValidatedPersistStorage } from "@/storage/validated-persist-storage";
 import type { WorkspaceMemberDescriptor } from "@/stores/session-store";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 
 /**
  * Per-workspace pick of which project member feeds project-scoped surfaces
- * (explorer trees, terminal spawns). In-memory only — phase 1 does not persist
- * the pick across launches. Several members require an explicit selection.
+ * (explorer trees, terminal spawns). Several members require an explicit selection, and the pick
+ * is persisted so a relaunch does not drop a multi-project workspace back to "choose a project".
  */
 interface WorkspaceProjectSelectionState {
   selectedCwdByWorkspaceKey: Record<string, string>;
   setSelectedCwd: (input: { workspaceKey: string; cwd: string }) => void;
 }
 
-export const useWorkspaceProjectSelectionStore = create<WorkspaceProjectSelectionState>((set) => ({
-  selectedCwdByWorkspaceKey: {},
-  setSelectedCwd: ({ workspaceKey, cwd }) => {
-    const normalizedKey = workspaceKey.trim();
-    const normalizedCwd = cwd.trim();
-    if (!normalizedKey || !normalizedCwd) return;
-    set((state) => ({
-      selectedCwdByWorkspaceKey: {
-        ...state.selectedCwdByWorkspaceKey,
-        [normalizedKey]: normalizedCwd,
+const WorkspaceProjectSelectionPersistedStateSchema = z.strictObject({
+  selectedCwdByWorkspaceKey: z.record(z.string(), z.string()),
+});
+
+export const useWorkspaceProjectSelectionStore = create<WorkspaceProjectSelectionState>()(
+  persist(
+    (set) => ({
+      selectedCwdByWorkspaceKey: {},
+      setSelectedCwd: ({ workspaceKey, cwd }) => {
+        const normalizedKey = workspaceKey.trim();
+        const normalizedCwd = cwd.trim();
+        if (!normalizedKey || !normalizedCwd) return;
+        set((state) => ({
+          selectedCwdByWorkspaceKey: {
+            ...state.selectedCwdByWorkspaceKey,
+            [normalizedKey]: normalizedCwd,
+          },
+        }));
       },
-    }));
-  },
-}));
+    }),
+    {
+      name: "workspace-project-selection",
+      storage: createValidatedPersistStorage(
+        AsyncStorage,
+        WorkspaceProjectSelectionPersistedStateSchema,
+      ),
+      partialize: (state) => ({ selectedCwdByWorkspaceKey: state.selectedCwdByWorkspaceKey }),
+      version: 1,
+    },
+  ),
+);
 
 const EMPTY_MEMBERS: WorkspaceMemberDescriptor[] = [];
 

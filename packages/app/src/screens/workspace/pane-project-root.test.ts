@@ -80,6 +80,13 @@ describe("pane project root without a project", () => {
     );
   });
 
+  it("gives a launcher its own remembered project", () => {
+    const remembered = tab({ kind: "new_tab", cwd: "/project-b" });
+    expect(
+      resolvePaneProjectRoot({ ...input, tabs: [remembered], activeTabId: remembered.tabId }),
+    ).toBe("/project-b");
+  });
+
   it("gives an empty pane no project", () => {
     expect(resolvePaneProjectRoot({ ...input, tabs: [], activeTabId: null })).toBe(null);
   });

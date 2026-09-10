@@ -41,7 +41,6 @@ import {
   restoreEmptyPanesInLayout,
   reconcileWorkspaceTabs,
   removePaneFromTree,
-  removeTabFromTree,
   reorderFocusedPaneTabsInLayout,
   reorderPaneTabsInLayout,
   setPaneHiddenInLayout,
@@ -79,7 +78,6 @@ export {
   insertSplit,
   normalizeLayout,
   removePaneFromTree,
-  removeTabFromTree,
   stripEphemeralTabsFromLayout,
 };
 export type {
@@ -197,7 +195,11 @@ const WorkspaceDraftTabSetupStorageSchema = z.strictObject({
   featureValues: z.record(z.string(), z.unknown()),
 });
 const WorkspaceTabTargetStorageSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("new_tab"), labels: z.array(z.string()).optional() }),
+  z.strictObject({
+    kind: z.literal("new_tab"),
+    labels: z.array(z.string()).optional(),
+    cwd: z.string().optional(),
+  }),
   z.strictObject({
     kind: z.literal("draft"),
     draftId: z.string(),
@@ -1044,21 +1046,15 @@ export function createWorkspaceLayoutStore(
             let nextLayout: WorkspaceLayout | null;
             let hidesExplorer = false;
 
+            // Dismissing a pane's launcher is how the user dismisses the empty pane itself — the
+            // one tab close that is a pane close. Every other close keeps the pane.
             if (closingPane?.tabIds.length === 1 && closingTab?.target.kind === "new_tab") {
               hidesExplorer = closingPane.id === explorerSidebarPaneId;
               nextLayout = hidesExplorer
                 ? setPaneHiddenInLayout({ layout, paneId: closingPane.id, hidden: true })
                 : closePaneInLayout({ layout, paneId: closingPane.id, explorerSidebarPaneId });
             } else {
-              const preserveEmptyPaneId =
-                closingPane?.id === "main" || closingPane?.id === explorerSidebarPaneId
-                  ? closingPane.id
-                  : null;
-              const closedLayout = closeTabInLayout({
-                layout,
-                tabId: normalizedTabId,
-                preserveEmptyPaneId,
-              });
+              const closedLayout = closeTabInLayout({ layout, tabId: normalizedTabId });
               hidesExplorer =
                 closingPane?.id === explorerSidebarPaneId && closingPane.tabIds.length === 1;
               const normalizedLayout =
@@ -1400,6 +1396,7 @@ export function createWorkspaceLayoutStore(
             position: input.position,
             maxTreeDepth: MAX_TREE_DEPTH,
             createNodeId: ids.createNodeId,
+            explorerSidebarPaneId,
           });
           if (!result) {
             return null;

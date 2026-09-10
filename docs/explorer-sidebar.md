@@ -98,8 +98,9 @@ lifecycle.
 layout store remembers one ordinary pane per workspace. The first side open creates a full-height
 right split around the workspace root; later side opens reuse it.
 
-Closing the pane or moving away its final tab removes it normally and clears the remembered id. A
-later side open creates a new pane. There is no hidden side-pane lifecycle.
+Moving away its final tab leaves the pane in place holding a launcher — panes are user-controlled,
+and only Close pane removes one. Closing it clears the remembered id, and a later side open creates
+a new pane. There is no hidden side-pane lifecycle.
 
 Placement intent still controls existing tabs:
 
