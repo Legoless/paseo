@@ -449,12 +449,11 @@ export class OpenCodeServerManager implements OpenCodeServerManagerLike {
           { ...generationLogContext(server), code, signal },
           "OpenCode server generation exited",
         );
-        resolveProcessExit(new Error(`OpenCode server exited with code ${code}`));
+        const exitDescription = describeServerExit({ server, code, signal });
+        resolveProcessExit(new Error(exitDescription));
         this.removeManagedServerRecord(server);
         if (!started) {
-          failStartup(
-            new Error(buildStartupErrorMessage(`OpenCode server exited with code ${code}`)),
-          );
+          failStartup(new Error(buildStartupErrorMessage(exitDescription)));
         }
         if (this.currentServer?.process === serverProcess) {
           this.currentServer = null;
@@ -598,6 +597,27 @@ export class OpenCodeServerManager implements OpenCodeServerManagerLike {
       this.logger.warn({ err: error, id }, "Failed to remove OpenCode helper process record");
     }
   }
+}
+
+/**
+ * "exited with code null" reads as a crash even when the daemon asked for the exit. A caller whose
+ * request died with the process needs to know which of the two happened, and on which port.
+ */
+function describeExitCause(code: number | null, signal: NodeJS.Signals | null): string {
+  if (code !== null) {
+    return `exited with code ${code}`;
+  }
+  return signal ? `exited on ${signal}` : "exited";
+}
+
+function describeServerExit(input: {
+  server: OpenCodeServerGeneration;
+  code: number | null;
+  signal: NodeJS.Signals | null;
+}): string {
+  const how = describeExitCause(input.code, input.signal);
+  const why = input.server.retired ? " after being retired" : "";
+  return `OpenCode server on port ${input.server.port} ${how}${why}`;
 }
 
 function generationLogContext(server: OpenCodeServerGeneration): Record<string, unknown> {
