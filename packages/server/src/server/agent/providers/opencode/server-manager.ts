@@ -48,6 +48,12 @@ export interface OpenCodeServerGeneration {
   url: string;
   refCount: number;
   retired: boolean;
+  /**
+   * Whether `ready` has settled. Until it does, `refCount === 0` does not mean "unused": every
+   * acquirer takes its reference only after `await server.ready`, so a starting generation has
+   * zero references and a queue of callers parked on it.
+   */
+  startupSettled: boolean;
   ready: Promise<void>;
   events: OpenCodeEventConsumer;
   managedProcessId?: string;
@@ -357,6 +363,7 @@ export class OpenCodeServerManager implements OpenCodeServerManagerLike {
       url,
       refCount: 0,
       retired: false,
+      startupSettled: false,
       ready: Promise.resolve(),
       events: this.createEventSource({ serverUrl: url, processExit, logger: this.logger }),
       managedProcessRecord,
@@ -404,6 +411,7 @@ export class OpenCodeServerManager implements OpenCodeServerManagerLike {
           return;
         }
         settled = true;
+        server.startupSettled = true;
         clearTimeout(timeout);
         reject(error);
       };
@@ -419,6 +427,7 @@ export class OpenCodeServerManager implements OpenCodeServerManagerLike {
         if (output.includes("listening on") && !settled) {
           started = true;
           settled = true;
+          server.startupSettled = true;
           clearTimeout(timeout);
           resolve();
         }
@@ -486,7 +495,12 @@ export class OpenCodeServerManager implements OpenCodeServerManagerLike {
   private async cleanupRetiredServers(): Promise<void> {
     const cleanup: Promise<void>[] = [];
     for (const server of Array.from(this.retiredServers)) {
-      if (server.refCount === 0) {
+      // Reaping a generation whose startup has not settled kills it under the callers waiting on
+      // `ready`, and rejects every one of them with "OpenCode server exited with code null" — a
+      // provider-catalog fan-out across projects wipes itself out that way.
+      // ponytail: the waiters are inferred from startup state rather than counted; count them if a
+      // generation ever gets reaped between `ready` settling and its waiter taking a reference.
+      if (server.refCount === 0 && server.startupSettled) {
         this.retiredServers.delete(server);
         cleanup.push(this.killServer(server));
       }
