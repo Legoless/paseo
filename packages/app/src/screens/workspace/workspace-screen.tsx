@@ -1070,11 +1070,11 @@ function WorkspaceHeaderTitleBar({
   return (
     <View style={styles.headerTitleContainer}>
       {isLoading ? (
-        <View style={styles.headerTitleTextGroup}>
+        <View style={styles.headerTitleTextGroup} pointerEvents="none">
           <View style={styles.headerTitleSkeleton} />
         </View>
       ) : (
-        <View style={styles.headerTitleTextGroup}>
+        <View style={styles.headerTitleTextGroup} pointerEvents="none">
           <ScreenTitle testID="workspace-header-title">{title}</ScreenTitle>
           <WorkspaceHeaderProjectRow
             subtitle={subtitle}
@@ -4383,6 +4383,7 @@ const styles = StyleSheet.create((theme) => ({
       xs: 0,
       md: theme.spacing[2],
     },
+    userSelect: "none",
   },
   // No width cap. A percentage cap resolves against the title group, whose own width comes from
   // this row's content, so it clips the project name while there is still room beside it.
@@ -4393,6 +4394,7 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[1.5],
     minWidth: 0,
     flexShrink: 1,
+    userSelect: "none",
   },
   headerProjectTitle: {
     color: theme.colors.foregroundMuted,

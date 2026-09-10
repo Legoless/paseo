@@ -1,4 +1,5 @@
-import { getIsElectronRuntime } from "@/constants/layout";
+import React from "react";
+import { getIsElectronRuntime, getIsElectronRuntimeMac } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
 
 /**
@@ -51,12 +52,15 @@ export function TitlebarDragRegion() {
     return null;
   }
 
+  const isMac = getIsElectronRuntimeMac();
+
   return (
     <>
       {/* Drag overlay — VS Code .titlebar-drag-region (titlebarpart.css:57-64) */}
       <div style={DRAG_OVERLAY_STYLE} />
-      {/* Top-edge resizer — VS Code .resizer (titlebarpart.css:249-256) */}
-      <div style={TOP_RESIZER_STYLE} />
+      {/* Top-edge resizer — VS Code .resizer (titlebarpart.css:249-256).
+          Windows/Linux only; on macOS, Electron handles edge resize natively. */}
+      {!isMac && <div style={TOP_RESIZER_STYLE} />}
     </>
   );
 }
