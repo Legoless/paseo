@@ -667,6 +667,8 @@ export const ptBR: TranslationResources = {
         switchProjectTitle: "Trocar de projeto?",
         switchProjectMessage:
           "A conversa deste agente será descartada e uma nova começará no projeto que você escolher.",
+        switchProjectTerminalMessage:
+          "Este terminal é substituído por um novo no projeto que você escolher. Qualquer processo em execução é interrompido.",
         switchProject: "Trocar",
         archiveRunningAgentTitle: "Arquivar agente em execução?",
         archiveRunningAgentMessage:

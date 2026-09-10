@@ -666,6 +666,8 @@ export const ja: TranslationResources = {
         switchProjectTitle: "プロジェクトを切り替えますか？",
         switchProjectMessage:
           "このエージェントの会話は破棄され、選んだプロジェクトで新しい会話が始まります。",
+        switchProjectTerminalMessage:
+          "このターミナルは選択したプロジェクトの新しいターミナルに置き換わります。実行中のプロセスは停止します。",
         switchProject: "切り替える",
         archiveRunningAgentTitle: "実行中のエージェントをアーカイブしますか？",
         archiveRunningAgentMessage:

@@ -669,6 +669,8 @@ export const ru: TranslationResources = {
         switchProjectTitle: "Сменить проект?",
         switchProjectMessage:
           "Переписка этого агента будет удалена, а новая начнётся в выбранном проекте.",
+        switchProjectTerminalMessage:
+          "Этот терминал будет заменён новым в выбранном проекте. Все запущенные процессы будут остановлены.",
         switchProject: "Сменить",
         archiveRunningAgentTitle: "Архивировать работающего агента?",
         archiveRunningAgentMessage:

@@ -669,6 +669,8 @@ export const es: TranslationResources = {
         switchProjectTitle: "¿Cambiar de proyecto?",
         switchProjectMessage:
           "Se descartará la conversación de este agente y comenzará una nueva en el proyecto que elijas.",
+        switchProjectTerminalMessage:
+          "Esta terminal se reemplaza por una nueva en el proyecto que elijas. Se detiene cualquier proceso en ejecución.",
         switchProject: "Cambiar",
         archiveRunningAgentTitle: "¿Agente de ejecución de archivos?",
         archiveRunningAgentMessage:
