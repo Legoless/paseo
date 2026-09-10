@@ -37,7 +37,10 @@ import {
 import { formatThinkingOptionLabel } from "@/agent-controls/labels";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
 import { CombinedModelSelector } from "@/components/combined-model-selector";
-import type { ProviderSelectorProvider } from "@/provider-selection/provider-selection";
+import {
+  getProviderSelectionError,
+  type ProviderSelectorProvider,
+} from "@/provider-selection/provider-selection";
 import { filterSelectableModels } from "@/provider-selection/model-catalog";
 import { useSessionStore } from "@/stores/session-store";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
@@ -956,6 +959,12 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
     handleCloseSheet,
     modelSelectorServerId,
   } = props;
+  const modelHint = useMemo(() => {
+    const reason = getProviderSelectionError(
+      modelSelectorProviders.find((entry) => entry.id === provider)?.modelSelection,
+    );
+    return reason ?? t(getAgentControlHintKey("model"));
+  }, [modelSelectorProviders, provider, t]);
   const modelToolbar = useMemo(
     () => ({ glyphSize, showCaret: presentation.showCarets }),
     [glyphSize, presentation.showCarets],
@@ -995,6 +1004,7 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
       ) : null}
 
       {canSelectModel ? (
+        // The pill only fits a state word, so the reason a provider has no models rides here.
         <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
           <TooltipTrigger asChild triggerRefProp="ref">
             <View style={styles.modelControl}>
@@ -1022,7 +1032,7 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
             </View>
           </TooltipTrigger>
           <TooltipContent side="top" align="center" offset={8}>
-            <Text style={styles.tooltipText}>{t(getAgentControlHintKey("model"))}</Text>
+            <Text style={styles.tooltipText}>{modelHint}</Text>
           </TooltipContent>
         </Tooltip>
       ) : null}
