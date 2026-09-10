@@ -384,11 +384,13 @@ function normalizeWorkspaceTab(value: unknown): WorkspaceTab | null {
   if (!tabId) {
     return null;
   }
+  const title = trimNonEmpty(tab.title);
   return {
     tabId,
     target,
     createdAt: typeof tab.createdAt === "number" ? tab.createdAt : Date.now(),
     ...(tab.state !== undefined ? { state: tab.state } : {}),
+    ...(title ? { title } : {}),
   };
 }
 
@@ -896,6 +898,9 @@ function replaceTabInTree(
             target: input.target,
             createdAt: tab.createdAt,
             ...(input.state !== undefined ? { state: input.state } : {}),
+            // Carried across the retarget on purpose: a launcher the user named keeps that name
+            // when it becomes a draft and then an agent.
+            ...(tab.title ? { title: tab.title } : {}),
           };
         }),
         focusedTabId:
@@ -1905,6 +1910,36 @@ export function setTabStateInLayout(input: {
       nextTabId: tab.tabId,
       target: tab.target,
       state: input.state,
+    }),
+    focusedPaneId: layout.focusedPaneId,
+    parentTabIdByTabId: input.layout.parentTabIdByTabId,
+  });
+}
+
+/** Empty clears the name and hands the tab back to its panel's derived label. */
+export function setTabTitleInLayout(input: {
+  layout: WorkspaceLayout;
+  tabId: string;
+  title: string | null;
+}): WorkspaceLayout | null {
+  const layout = asInternalLayout(input.layout);
+  const panePath = findPanePathContainingTab(layout.root, input.tabId);
+  if (!panePath) return null;
+  const title = input.title === null ? null : trimNonEmpty(input.title);
+  return withNormalizedParentTabMap({
+    root: replaceNodeAtPath(layout.root, panePath, (node) => {
+      invariant(node.kind === "pane", "Expected pane while titling tab");
+      return {
+        kind: "pane",
+        pane: {
+          ...node.pane,
+          tabs: node.pane.tabs.map((tab) => {
+            if (tab.tabId !== input.tabId) return tab;
+            const { title: _previous, ...rest } = tab;
+            return title ? { ...rest, title } : rest;
+          }),
+        },
+      };
     }),
     focusedPaneId: layout.focusedPaneId,
     parentTabIdByTabId: input.layout.parentTabIdByTabId,

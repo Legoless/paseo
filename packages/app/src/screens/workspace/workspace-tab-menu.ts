@@ -243,22 +243,22 @@ export function buildWorkspaceTabMenuEntries(
     });
   }
 
-  if (tab.target.kind === "agent" || tab.target.kind === "terminal") {
-    entries.push({
-      kind: "item",
-      key: "rename",
-      label: labels.rename,
-      icon: "pencil",
-      testID: `${menuTestIDBase}-rename`,
-      onSelect: () => {
-        onRenameTab(tab);
-      },
-    });
-    entries.push({
-      kind: "separator",
-      key: "rename-separator",
-    });
-  }
+  // Every tab can be named, whatever is in it and whatever state it is in. Agent and terminal
+  // renames write the entity's own title; the rest are named on the tab.
+  entries.push({
+    kind: "item",
+    key: "rename",
+    label: labels.rename,
+    icon: "pencil",
+    testID: `${menuTestIDBase}-rename`,
+    onSelect: () => {
+      onRenameTab(tab);
+    },
+  });
+  entries.push({
+    kind: "separator",
+    key: "rename-separator",
+  });
 
   entries.push({
     kind: "item",

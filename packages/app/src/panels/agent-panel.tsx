@@ -429,9 +429,29 @@ function DraftPanel() {
       } catch {
         toast.error(t("workspaceLabels.errors.update"));
       }
+      // A name the user typed on this tab before launching graduates to the agent itself, so the
+      // sidebar and every other device read the same name instead of the auto-generated one. The
+      // daemon marks it user-set, which is what keeps the auto-namer off it.
+      const persistenceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId });
+      const layoutStore = useWorkspaceLayoutStore.getState();
+      const tabTitle = persistenceKey
+        ? (layoutStore.getWorkspaceTabs(persistenceKey).find((entry) => entry.tabId === tabId)
+            ?.title ?? null)
+        : null;
+      const sessionClient = useSessionStore.getState().sessions[serverId]?.client;
+      if (persistenceKey && tabTitle && sessionClient) {
+        try {
+          await sessionClient.updateAgent(agentSnapshot.id, { name: tabTitle });
+          layoutStore.setTabTitle(persistenceKey, tabId, null);
+        } catch (error) {
+          // Keep the name on the tab: the label the user sees stays right even when the write
+          // fails, and it will be retried the next time they rename.
+          console.warn("[DraftPanel] failed to carry the tab name onto the agent", error);
+        }
+      }
       retargetCurrentTab({ kind: "agent", agentId: agentSnapshot.id });
     },
-    [labelDefinitions, retargetCurrentTab, serverId, t, toast],
+    [labelDefinitions, retargetCurrentTab, serverId, t, tabId, toast, workspaceId],
   );
 
   return (

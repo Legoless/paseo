@@ -73,6 +73,13 @@ export interface WorkspaceTab {
   target: WorkspaceTabTarget;
   createdAt: number;
   state?: JsonValue;
+  /**
+   * A name the user typed for this tab. Authoritative over whatever the panel derives, for every
+   * tab kind, and it survives the tab being retargeted — naming an empty launcher and then
+   * launching into it keeps the name. Kinds backed by a named entity (agent, terminal) write that
+   * entity's title instead, so there is only ever one name per thing.
+   */
+  title?: string;
 }
 
 export function buildWorkspaceTabPersistenceKey(input: {

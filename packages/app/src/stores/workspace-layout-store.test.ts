@@ -2743,6 +2743,59 @@ describe("workspace-layout-store actions", () => {
     expect(launcher?.target).toEqual({ kind: "new_tab", cwd: "/project-b" });
   });
 
+  it("setTabTitle names a tab of any kind and clearing hands it back to the derived label", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+
+    const tabId = store.openTab({
+      workspaceKey,
+      target: { kind: "changes_tree" },
+      intent: "reveal",
+    });
+
+    store.setTabTitle(workspaceKey, tabId!, "  release diff  ");
+    let tabs = workspaceLayoutStore.getState().getWorkspaceTabs(workspaceKey);
+    expect(tabs.find((tab) => tab.tabId === tabId)?.title).toBe("release diff");
+
+    store.setTabTitle(workspaceKey, tabId!, null);
+    tabs = workspaceLayoutStore.getState().getWorkspaceTabs(workspaceKey);
+    expect(tabs.find((tab) => tab.tabId === tabId)?.title).toBeUndefined();
+  });
+
+  it("keeps a tab's name when the launcher it was set on becomes a draft", () => {
+    const workspaceKey = createWorkspaceKey();
+    workspaceLayoutStore.setState((state) => ({
+      ...state,
+      layoutByWorkspace: {
+        ...state.layoutByWorkspace,
+        [workspaceKey]: {
+          root: {
+            kind: "pane",
+            pane: {
+              id: "main",
+              tabIds: ["tab-launcher"],
+              focusedTabId: "tab-launcher",
+              tabs: [{ tabId: "tab-launcher", target: { kind: "new_tab" }, createdAt: 1 }],
+            } as SplitPane,
+          },
+          focusedPaneId: "main",
+        },
+      },
+    }));
+
+    const store = workspaceLayoutStore.getState();
+    store.setTabTitle(workspaceKey, "tab-launcher", "deploy work");
+    // replaceTabInTree rebuilds the tab, so the name has to be carried across explicitly — this is
+    // the transition where naming an empty pane before launching into it has to survive.
+    store.replaceTab(workspaceKey, "tab-launcher", { kind: "draft", draftId: "draft-1" });
+
+    const draftTab = workspaceLayoutStore
+      .getState()
+      .getWorkspaceTabs(workspaceKey)
+      .find((tab) => tab.target.kind === "draft");
+    expect(draftTab?.title).toBe("deploy work");
+  });
+
   it("splitPane preserves four user-created levels beneath the explorer split", () => {
     useWorkspaceLayoutIds(
       "11111111-1111-1111-1111-111111111111",

@@ -5,10 +5,11 @@ import type { ListTerminalsResponse } from "@getpaseo/protocol/messages";
 import { useTranslation } from "react-i18next";
 import { AdaptiveRenameModal } from "@/components/rename-modal";
 import { useSessionStore } from "@/stores/session-store";
+import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 
 interface RenamingTabState {
-  kind: "terminal" | "agent";
+  kind: "terminal" | "agent" | "tab";
   id: string;
   currentTitle: string;
 }
@@ -19,6 +20,8 @@ interface UseWorkspaceTabRenameInput {
   queryClient: QueryClient;
   terminalsData: ListTerminalsResponse["payload"] | undefined;
   terminalsQueryKey: readonly unknown[];
+  /** Null while the workspace has no persistence key; renaming is unavailable until it does. */
+  persistenceKey: string | null;
 }
 
 interface UseWorkspaceTabRenameResult {
@@ -31,7 +34,15 @@ interface UseWorkspaceTabRenameResult {
 export function useWorkspaceTabRename(
   input: UseWorkspaceTabRenameInput,
 ): UseWorkspaceTabRenameResult {
-  const { client, normalizedServerId, queryClient, terminalsData, terminalsQueryKey } = input;
+  const {
+    client,
+    normalizedServerId,
+    queryClient,
+    terminalsData,
+    terminalsQueryKey,
+    persistenceKey,
+  } = input;
+  const setTabTitle = useWorkspaceLayoutStore((state) => state.setTabTitle);
   const { t } = useTranslation();
   const [renamingTab, setRenamingTab] = useState<RenamingTabState | null>(null);
 
@@ -50,7 +61,13 @@ export function useWorkspaceTabRename(
           useSessionStore.getState().sessions[normalizedServerId]?.agents?.get(agentId) ?? null;
         const currentTitle = agent?.title ?? "";
         setRenamingTab({ kind: "agent", id: agentId, currentTitle });
+        return;
       }
+      // Everything else — the launcher, Files, Changes, a diff, the browser — has no entity whose
+      // title could hold the name, so it lives on the tab.
+      // Opens blank when the tab has never been named: the derived label is computed by the
+      // panel's own hook at render time and is not reachable from here.
+      setRenamingTab({ kind: "tab", id: tab.tabId, currentTitle: tab.title ?? "" });
     },
     [normalizedServerId, terminalsData],
   );
@@ -58,10 +75,16 @@ export function useWorkspaceTabRename(
   const handleRenameModalSubmit = useCallback(
     async (nextTitle: string) => {
       if (!renamingTab) return;
+      const trimmed = nextTitle.trim();
+      if (renamingTab.kind === "tab") {
+        if (!persistenceKey) return;
+        // Empty hands the tab back to its panel's derived label.
+        setTabTitle(persistenceKey, renamingTab.id, trimmed || null);
+        return;
+      }
       if (!client) {
         throw new Error(t("workspace.terminal.hostDisconnected"));
       }
-      const trimmed = nextTitle.trim();
       if (renamingTab.kind === "terminal") {
         const result = await client.renameTerminal({
           terminalId: renamingTab.id,
@@ -81,7 +104,16 @@ export function useWorkspaceTabRename(
         queryKey: ["allAgents", normalizedServerId],
       });
     },
-    [client, normalizedServerId, queryClient, renamingTab, terminalsQueryKey, t],
+    [
+      client,
+      normalizedServerId,
+      persistenceKey,
+      queryClient,
+      renamingTab,
+      setTabTitle,
+      terminalsQueryKey,
+      t,
+    ],
   );
 
   const handleRenameModalClose = useCallback(() => {

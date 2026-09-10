@@ -45,6 +45,7 @@ import {
   reorderPaneTabsInLayout,
   setPaneHiddenInLayout,
   setTabStateInLayout,
+  setTabTitleInLayout,
   selectTabInPaneInLayout,
   splitPaneEmptyInLayout,
   splitWorkspaceRootRightInLayout,
@@ -130,6 +131,8 @@ interface WorkspaceLayoutStore {
     state?: JsonValue,
   ) => string | null;
   setTabState: (workspaceKey: string, tabId: string, state: JsonValue | undefined) => void;
+  /** Names a tab. Empty clears the name and returns it to its panel's derived label. */
+  setTabTitle: (workspaceKey: string, tabId: string, title: string | null) => void;
   convertDraftToAgent: (workspaceKey: string, tabId: string, agentId: string) => string | null;
   reconcileTabs: (workspaceKey: string, snapshot: WorkspaceTabSnapshot) => void;
   resolvePendingAgent: (workspaceKey: string, agentId: string) => void;
@@ -256,6 +259,7 @@ const WorkspaceTabStorageSchema = z.strictObject({
   target: WorkspaceTabTargetStorageSchema,
   createdAt: z.number(),
   state: z.json().optional(),
+  title: z.string().optional(),
 });
 const SplitNodeStorageSchema: z.ZodType<SplitNode> = z.lazy(() =>
   z.discriminatedUnion("kind", [
@@ -1220,6 +1224,25 @@ export function createWorkspaceLayoutStore(
               layout: getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey),
               tabId: normalizedTabId,
               state: tabState,
+            });
+            if (!layout) return state;
+            return {
+              layoutByWorkspace: {
+                ...state.layoutByWorkspace,
+                [normalizedWorkspaceKey]: layout,
+              },
+            };
+          });
+        },
+        setTabTitle: (workspaceKey, tabId, title) => {
+          const normalizedWorkspaceKey = trimNonEmpty(workspaceKey);
+          const normalizedTabId = trimNonEmpty(tabId);
+          if (!normalizedWorkspaceKey || !normalizedTabId) return;
+          set((state) => {
+            const layout = setTabTitleInLayout({
+              layout: getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey),
+              tabId: normalizedTabId,
+              title,
             });
             if (!layout) return state;
             return {

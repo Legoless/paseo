@@ -6,4 +6,6 @@ export interface WorkspaceTabDescriptor {
   kind: WorkspaceTabTarget["kind"];
   target: WorkspaceTabTarget;
   state?: import("@getpaseo/protocol/agent-types").JsonValue;
+  /** A name the user typed. Wins over the panel's derived label wherever a tab is rendered. */
+  title?: string;
 }

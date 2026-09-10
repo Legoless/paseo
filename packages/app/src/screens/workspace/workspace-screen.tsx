@@ -2385,6 +2385,7 @@ function WorkspaceScreenContent({
       queryClient,
       terminalsData: terminalsQuery.data,
       terminalsQueryKey,
+      persistenceKey,
     });
 
   const tabByKey = useMemo(() => {
@@ -2403,6 +2404,7 @@ function WorkspaceScreenContent({
         tabId: tab.tabId,
         kind: tab.target.kind,
         target: tab.target,
+        ...(tab.title ? { title: tab.title } : {}),
       });
     }
     return map;
