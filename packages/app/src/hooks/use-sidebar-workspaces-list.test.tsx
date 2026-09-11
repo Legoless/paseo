@@ -242,7 +242,7 @@ describe("useSidebarWorkspaceGroupSections", () => {
     ]);
   });
 
-  it("buckets workspace agents under their member and falls back to the primary", () => {
+  it("buckets workspace agents under their member and sends strays to uncategorized", () => {
     act(() => {
       seedAgents([
         agent({
@@ -270,9 +270,10 @@ describe("useSidebarWorkspaceGroupSections", () => {
     const section = latestGroupModel?.sectionsByWorkspaceKey.get(`${SERVER_ID}:ws-multi`);
     const memberA = section?.members.find((entry) => entry.projectId === "project-a");
     const memberB = section?.members.find((entry) => entry.projectId === "project-b");
-    expect(memberA?.agents.map((entry) => entry.agentId)).toEqual(["agent-a", "agent-stray"]);
+    expect(memberA?.agents.map((entry) => entry.agentId)).toEqual(["agent-a"]);
     expect(memberB?.agents.map((entry) => entry.agentId)).toEqual(["agent-b"]);
     expect(memberB?.agents[0]?.statusBucket).toBe("running");
+    expect(section?.uncategorized.agents.map((entry) => entry.agentId)).toEqual(["agent-stray"]);
   });
 
   it("creates no section for an orphan project with no workspace", () => {
