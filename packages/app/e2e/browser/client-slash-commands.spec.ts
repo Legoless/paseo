@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "../support/fixtures";
 import { composerLocator, expectComposerVisible, submitMessage } from "../support/helpers/composer";
 import { openAgentRoute, seedMockAgentWorkspace } from "../support/helpers/mock-agent";
+import { renameModalInput, renameModalSubmit } from "../support/helpers/rename";
 import {
   expectSessionRowArchived,
   expectWorkspaceTabHidden,
@@ -49,6 +50,30 @@ async function runClientSlashCommand(page: Page, command: "/quit" | "/clear"): P
   await input.fill(command);
   await expect(input).toHaveValue(command);
   await input.press("Enter");
+}
+
+// The chip used to drop out of the strip for a frame on /clear: the retarget swaps the
+// tab id, and the strip published a snapshot without the unresolved tab. The tracker
+// counts every present -> absent transition of the title in the main pane's row.
+function installTitleGapTracker(title: string): void {
+  const tracked = window as unknown as { __titleGaps: number };
+  tracked.__titleGaps = 0;
+  const row = document.querySelector(
+    '[data-testid="workspace-pane-main"] [data-testid="workspace-tabs-row"]',
+  );
+  if (!row) return;
+  let present = row.textContent?.includes(title) ?? false;
+  new MutationObserver(() => {
+    const now = row.textContent?.includes(title) ?? false;
+    if (present && !now) {
+      tracked.__titleGaps += 1;
+    }
+    present = now;
+  }).observe(row, { childList: true, subtree: true, characterData: true });
+}
+
+function readTitleGapCount(): number {
+  return (window as unknown as { __titleGaps: number }).__titleGaps;
 }
 
 async function selectClientSlashCommand(page: Page, query: string, label: string): Promise<void> {
@@ -142,6 +167,33 @@ test.describe("Client slash commands", () => {
         await createAgentFromReplacementDraft(page);
         await waitForReplacementAgentId(page, agentId);
         await expectAgentArchivedInSessions(page, title);
+      },
+    );
+  });
+
+  test("slash clear keeps a renamed tab's title on the chip without blinking", async ({ page }) => {
+    await withOpenReadyMockAgent(
+      page,
+      { title: "Slash clear renamed tab e2e" },
+      async ({ agentId }) => {
+        const tab = page.getByTestId(`workspace-tab-agent_${agentId}`).first();
+        await tab.click({ button: "right" });
+        await page.getByTestId(`workspace-tab-context-agent_${agentId}-rename`).click();
+        const modalPrefix = `workspace-tab-rename-modal-agent-${agentId}`;
+        const input = renameModalInput(page, modalPrefix);
+        await expect(input).toBeVisible({ timeout: 10_000 });
+        const renamed = "Renamed clear tab";
+        await input.fill(renamed);
+        await renameModalSubmit(page, modalPrefix).click();
+        await expect(tab).toContainText(renamed, { timeout: 15_000 });
+
+        const tabsRow = page.getByTestId("workspace-pane-main").getByTestId("workspace-tabs-row");
+        await page.evaluate(installTitleGapTracker, renamed);
+
+        await runClientSlashCommand(page, "/clear");
+        await expectComposerVisible(page);
+        await expect(tabsRow).toContainText(renamed);
+        expect(await page.evaluate(readTitleGapCount)).toBe(0);
       },
     );
   });
