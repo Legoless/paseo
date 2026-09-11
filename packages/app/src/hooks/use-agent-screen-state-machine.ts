@@ -65,6 +65,7 @@ function hasOptimisticCreateContinuity(input: AgentScreenMachineInput): boolean 
 function shouldBlockInitialAuthoritativeReadyState(input: AgentScreenMachineInput): boolean {
   return (
     !input.isArchived &&
+    !input.isArchivingCurrentAgent &&
     !hasOptimisticCreateContinuity(input) &&
     !input.hasHydratedHistoryBefore &&
     (input.needsAuthoritativeSync || input.isHistorySyncing)
@@ -119,6 +120,8 @@ function updateInitialSyncFailureMemory(args: {
     args.nextMemory.hadInitialSyncFailure = true;
   }
   if (
+    !args.input.isArchived &&
+    !args.input.isArchivingCurrentAgent &&
     args.input.visibilityCatchUpStatus === "error" &&
     args.input.visibilityCatchUpError &&
     !args.input.hasHydratedHistoryBefore
@@ -175,7 +178,7 @@ function resolveAgentScreenSync(args: {
   hadInitialSyncFailure: boolean;
 }): AgentScreenReadySyncState {
   const { input, hadInitialSyncFailure } = args;
-  if (input.isArchived) {
+  if (input.isArchived || input.isArchivingCurrentAgent) {
     return { status: "idle" };
   }
   if (!input.isConnected) {
@@ -245,6 +248,8 @@ export function deriveAgentScreenViewState({
   }
 
   if (
+    !input.isArchived &&
+    !input.isArchivingCurrentAgent &&
     input.visibilityCatchUpStatus === "error" &&
     input.visibilityCatchUpError &&
     !input.hasHydratedHistoryBefore &&

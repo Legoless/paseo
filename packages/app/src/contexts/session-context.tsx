@@ -443,6 +443,11 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     );
     const sync = getHostRuntimeStore().createViewedTimelineOwner(serverId, {
       initialDeliveryMode,
+      isAgentArchived: (agentId: string) => {
+        const session = useSessionStore.getState().sessions[serverId];
+        const agent = session?.agents?.get(agentId) ?? session?.agentDetails.get(agentId);
+        return agent?.archivedAt != null || agent?.status === "closed";
+      },
       setSubscription: (agentIds) => client.setAgentTimelineSubscription(agentIds),
       readCursor: (agentId) => {
         const timeline = selectAgentTimelineState(

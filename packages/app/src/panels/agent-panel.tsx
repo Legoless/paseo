@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { TFunction } from "i18next";
-import { SquarePen } from "lucide-react-native";
+import { SquarePen, X } from "lucide-react-native";
 import React, {
   memo,
   type ReactNode,
@@ -14,7 +14,7 @@ import React, {
   useSyncExternalStore,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { StyleSheet as RNStyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet as RNStyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import invariant from "tiny-invariant";
@@ -442,7 +442,6 @@ function DraftPanel() {
       if (persistenceKey && tabTitle && sessionClient) {
         try {
           await sessionClient.updateAgent(agentSnapshot.id, { name: tabTitle });
-          layoutStore.setTabTitle(persistenceKey, tabId, null);
         } catch (error) {
           // Keep the name on the tab: the label the user sees stays right even when the write
           // fails, and it will be retried the next time they rename.
@@ -1248,6 +1247,48 @@ function ChatAgentContent({
   );
 }
 
+interface TimelineSyncCalloutProps {
+  onRetry: () => void;
+  onDismiss: () => void;
+  isRetrying: boolean;
+}
+
+function TimelineSyncCallout({ onRetry, onDismiss, isRetrying }: TimelineSyncCalloutProps) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.timelineSyncCalloutRail}>
+      <View style={styles.timelineSyncCalloutContent}>
+        <View style={styles.timelineSyncCallout} testID="agent-timeline-sync-error">
+          <Text style={styles.timelineSyncCalloutText}>
+            {t("agentPanel.states.timelineSyncFailed")}
+          </Text>
+          <View style={styles.timelineSyncCalloutActions}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onPress={onRetry}
+              disabled={isRetrying}
+              testID="agent-timeline-sync-retry"
+            >
+              {isRetrying ? t("agentPanel.states.timelineSyncRetrying") : t("common.actions.retry")}
+            </Button>
+            <Pressable
+              onPress={onDismiss}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={t("common.actions.dismiss")}
+              testID="agent-timeline-sync-dismiss"
+              style={styles.timelineSyncCalloutDismissButton}
+            >
+              <ThemedX size={14} uniProps={foregroundMutedColorMapping} />
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   serverId,
   workspaceId,
@@ -1317,6 +1358,18 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
     archiveFinishedStatus: archiveFinishedSubagents.status,
     hasPluginComposerPills,
   });
+  const [isHistorySyncErrorDismissed, setIsHistorySyncErrorDismissed] = useState(false);
+  const prevSyncErrorRef = useRef(showHistorySyncError);
+  useEffect(() => {
+    if (showHistorySyncError !== prevSyncErrorRef.current) {
+      prevSyncErrorRef.current = showHistorySyncError;
+      setIsHistorySyncErrorDismissed(false);
+    }
+  }, [showHistorySyncError]);
+  const handleDismissHistorySyncError = useCallback(() => {
+    setIsHistorySyncErrorDismissed(true);
+  }, []);
+
   const rawAgentInputDraft = useAgentInputDraft({
     draftKey: buildDraftStoreKey({
       serverId,
@@ -1426,27 +1479,12 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
         <DockedChatSurface disabled={isArchivingCurrentAgent}>
           {contentContainer}
 
-          {showHistorySyncError ? (
-            <View style={styles.timelineSyncCalloutRail}>
-              <View style={styles.timelineSyncCalloutContent}>
-                <View style={styles.timelineSyncCallout} testID="agent-timeline-sync-error">
-                  <Text style={styles.timelineSyncCalloutText}>
-                    {t("agentPanel.states.timelineSyncFailed")}
-                  </Text>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onPress={retryTimelineSync}
-                    disabled={isRetryingHistorySync}
-                    testID="agent-timeline-sync-retry"
-                  >
-                    {isRetryingHistorySync
-                      ? t("agentPanel.states.timelineSyncRetrying")
-                      : t("common.actions.retry")}
-                  </Button>
-                </View>
-              </View>
-            </View>
+          {showHistorySyncError && !isHistorySyncErrorDismissed ? (
+            <TimelineSyncCallout
+              onRetry={retryTimelineSync}
+              onDismiss={handleDismissHistorySyncError}
+              isRetrying={isRetryingHistorySync}
+            />
           ) : null}
 
           {composerSection}
@@ -1706,6 +1744,13 @@ function ActiveAgentComposer({
 
       const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId });
       if (command.kind === "replace-agent-with-draft") {
+        const layoutStore = useWorkspaceLayoutStore.getState();
+        const currentTab = workspaceKey
+          ? layoutStore.getWorkspaceTabs(workspaceKey).find((entry) => entry.tabId === tabId)
+          : null;
+        if (workspaceKey && !currentTab?.title && agent.title && agent.title !== "Agent") {
+          layoutStore.setTabTitle(workspaceKey, tabId, agent.title);
+        }
         await replaceOpenAgentWithDraft({
           serverId,
           agentId,
@@ -1841,6 +1886,7 @@ function AgentSessionUnavailableState({
 }
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
+const ThemedX = withUnistyles(X);
 
 const foregroundMutedColorMapping = (theme: Theme) => ({
   color: theme.colors.foregroundMuted,
@@ -1898,6 +1944,17 @@ const styles = StyleSheet.create((theme) => ({
   timelineSyncCalloutText: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.base,
+  },
+  timelineSyncCalloutActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  timelineSyncCalloutDismissButton: {
+    padding: theme.spacing[1],
+    borderRadius: theme.borderRadius.full,
+    alignItems: "center",
+    justifyContent: "center",
   },
   historySyncOverlay: {
     position: "absolute",
