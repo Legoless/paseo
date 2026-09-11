@@ -12,6 +12,7 @@ import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-
 interface RenamingTabState {
   kind: "terminal" | "agent" | "tab";
   id: string;
+  tabId: string;
   currentTitle: string;
 }
 
@@ -52,21 +53,26 @@ export function useWorkspaceTabRename(
       if (tab.target.kind === "terminal") {
         const { terminalId } = tab.target;
         const terminal = terminalsData?.terminals.find((entry) => entry.id === terminalId) ?? null;
-        const currentTitle = terminal?.title ?? terminal?.name ?? currentLabel ?? "";
-        setRenamingTab({ kind: "terminal", id: terminalId, currentTitle });
+        const currentTitle = tab.title || terminal?.title || terminal?.name || currentLabel || "";
+        setRenamingTab({ kind: "terminal", id: terminalId, tabId: tab.tabId, currentTitle });
         return;
       }
       if (tab.target.kind === "agent") {
         const { agentId } = tab.target;
         const agent =
           useSessionStore.getState().sessions[normalizedServerId]?.agents?.get(agentId) ?? null;
-        const currentTitle = agent?.title ?? currentLabel ?? "";
-        setRenamingTab({ kind: "agent", id: agentId, currentTitle });
+        const currentTitle = tab.title || agent?.title || currentLabel || "";
+        setRenamingTab({ kind: "agent", id: agentId, tabId: tab.tabId, currentTitle });
         return;
       }
       // Everything else — the launcher, Files, Changes, a diff, the browser — has no entity whose
       // title could hold the name, so it lives on the tab.
-      setRenamingTab({ kind: "tab", id: tab.tabId, currentTitle: tab.title || currentLabel || "" });
+      setRenamingTab({
+        kind: "tab",
+        id: tab.tabId,
+        tabId: tab.tabId,
+        currentTitle: tab.title || currentLabel || "",
+      });
     },
     [normalizedServerId, terminalsData],
   );
@@ -75,10 +81,10 @@ export function useWorkspaceTabRename(
     async (nextTitle: string) => {
       if (!renamingTab) return;
       const trimmed = nextTitle.trim();
+      if (persistenceKey && renamingTab.tabId) {
+        setTabTitle(persistenceKey, renamingTab.tabId, trimmed || null);
+      }
       if (renamingTab.kind === "tab") {
-        if (!persistenceKey) return;
-        // Empty hands the tab back to its panel's derived label.
-        setTabTitle(persistenceKey, renamingTab.id, trimmed || null);
         return;
       }
       if (!client) {

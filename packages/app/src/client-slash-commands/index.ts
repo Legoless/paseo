@@ -1,5 +1,5 @@
 import type { AgentProvider } from "@getpaseo/protocol/agent-types";
-import type { Agent } from "@/stores/session-store";
+import { type Agent, useSessionStore } from "@/stores/session-store";
 import {
   buildWorkspaceTabPersistenceKey,
   type WorkspaceDraftTabSetup,
@@ -123,6 +123,9 @@ export interface ReplaceOpenAgentWithDraftInput {
 export async function replaceOpenAgentWithDraft(
   input: ReplaceOpenAgentWithDraftInput,
 ): Promise<void> {
+  const sync = useSessionStore.getState().sessions[input.serverId]?.viewedTimelineSync;
+  sync?.evictAgent?.(input.agentId);
+
   const workspaceKey = buildWorkspaceTabPersistenceKey({
     serverId: input.serverId,
     workspaceId: input.workspaceId,
@@ -136,5 +139,9 @@ export async function replaceOpenAgentWithDraft(
     draftId: input.draftId,
     setup: input.setup,
   });
-  await input.archiveAgent({ serverId: input.serverId, agentId: input.agentId });
+  try {
+    await input.archiveAgent({ serverId: input.serverId, agentId: input.agentId });
+  } catch (error) {
+    console.warn("[replaceOpenAgentWithDraft] failed to archive old agent", error);
+  }
 }

@@ -243,4 +243,33 @@ describe("replaceOpenAgentWithDraft", () => {
     expect(hideWorkspaceAgent).toHaveBeenCalledWith("server-1:workspace-1", "agent-1");
     expect(order).toEqual(["unpin", "hide", "retarget", "archive"]);
   });
+
+  it("does not throw when archiveAgent rejects", async () => {
+    const retargetCurrentTab = vi.fn();
+    const unpinWorkspaceAgent = vi.fn();
+    const hideWorkspaceAgent = vi.fn();
+    const archiveAgent = vi.fn(async () => {
+      throw new Error("archive timeout");
+    });
+
+    await expect(
+      replaceOpenAgentWithDraft({
+        serverId: "server-1",
+        agentId: "agent-1",
+        workspaceId: "workspace-1",
+        setup: buildProviderSwitchDraftSetup({
+          cwd: "/repo",
+          provider: "grok",
+          model: "grok-4",
+        }),
+        draftId: "draft-1",
+        retargetCurrentTab,
+        unpinWorkspaceAgent,
+        hideWorkspaceAgent,
+        archiveAgent,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(retargetCurrentTab).toHaveBeenCalled();
+  });
 });
