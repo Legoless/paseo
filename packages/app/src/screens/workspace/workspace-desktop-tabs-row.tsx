@@ -461,6 +461,12 @@ interface WorkspaceDesktopTabsRowProps {
 
 interface ResolvedWorkspaceDesktopTabsRowProps extends Omit<WorkspaceDesktopTabsRowProps, "tabs"> {
   tabs: ResolvedWorkspaceDesktopTabRowItem[];
+  /**
+   * Live tab count before presentation resolution drops unresolved tabs. While a
+   * retargeted tab (e.g. /clear agent -> draft) waits on its first presentation, the
+   * resolved list is short — publishing then would drop the chip for a frame.
+   */
+  expectedTabCount: number;
 }
 
 interface WorkspaceDesktopTabPresentationSlotProps {
@@ -901,7 +907,11 @@ export function WorkspaceDesktopTabsRow(props: WorkspaceDesktopTabsRowProps) {
 
   return (
     <>
-      <ResolvedWorkspaceDesktopTabsRow {...props} tabs={resolvedTabs} />
+      <ResolvedWorkspaceDesktopTabsRow
+        {...props}
+        tabs={resolvedTabs}
+        expectedTabCount={props.tabs.length}
+      />
       {props.tabs.map(({ tab }) => (
         <WorkspaceDesktopTabPresentationSlot
           key={`${tab.key}:${tab.kind}`}
@@ -919,6 +929,7 @@ function ResolvedWorkspaceDesktopTabsRow({
   paneId,
   isFocused = false,
   tabs,
+  expectedTabCount,
   normalizedServerId,
   normalizedWorkspaceId,
   setHoveredCloseTabKey,
@@ -1048,6 +1059,9 @@ function ResolvedWorkspaceDesktopTabsRow({
     if (tabsContainerWidth <= 0) {
       return;
     }
+    if (tabLabels.length !== expectedTabCount) {
+      return;
+    }
     const labelWidths = completeWorkspaceTabLabelWidths(tabLabels, labelMeasurements);
     if (!labelWidths) {
       return;
@@ -1067,7 +1081,7 @@ function ResolvedWorkspaceDesktopTabsRow({
         labelWidths,
       };
     });
-  }, [labelMeasurements, tabLabelSignature, tabLabels, tabs, tabsContainerWidth]);
+  }, [expectedTabCount, labelMeasurements, tabLabelSignature, tabLabels, tabs, tabsContainerWidth]);
 
   useLayoutEffect(() => {
     publishMeasuredTrack();
