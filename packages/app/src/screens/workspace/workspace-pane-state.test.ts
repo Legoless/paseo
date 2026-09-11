@@ -205,4 +205,54 @@ describe("workspace-pane-state", () => {
       }),
     ).toEqual({ kind: "split-side-pane", paneId: "main" });
   });
+
+  it("preserves custom tab title on descriptors and activeTab", () => {
+    const tabs: WorkspaceTab[] = [
+      {
+        ...createTab("file_/repo/README.md", { kind: "file", path: "/repo/README.md" }),
+        title: "Docs: README, Setup & Tips",
+      },
+      {
+        ...createTab("agent_agent-1", { kind: "agent", agentId: "agent-1" }),
+        title: "Feature: auth, login",
+      },
+      {
+        ...createTab("terminal_term-1", { kind: "terminal", terminalId: "term-1" }),
+      },
+    ];
+    const pane = {
+      id: "main",
+      tabIds: ["file_/repo/README.md", "agent_agent-1", "terminal_term-1"],
+      focusedTabId: "file_/repo/README.md",
+    };
+
+    const state = deriveWorkspacePaneState({ pane, tabs });
+
+    expect(state.tabs[0]?.descriptor.title).toBe("Docs: README, Setup & Tips");
+    expect(state.tabs[1]?.descriptor.title).toBe("Feature: auth, login");
+    expect(state.tabs[2]?.descriptor.title).toBeUndefined();
+    expect(state.activeTab?.descriptor.title).toBe("Docs: README, Setup & Tips");
+
+    const descriptors = getWorkspacePaneDescriptors({ pane, tabs });
+    expect(descriptors[0]?.title).toBe("Docs: README, Setup & Tips");
+    expect(descriptors[1]?.title).toBe("Feature: auth, login");
+    expect(descriptors[2]?.title).toBeUndefined();
+  });
+
+  it("ignores whitespace-only tab titles during normalization", () => {
+    const tabs: WorkspaceTab[] = [
+      {
+        ...createTab("file_/repo/README.md", { kind: "file", path: "/repo/README.md" }),
+        title: "   ",
+      },
+    ];
+    const pane = {
+      id: "main",
+      tabIds: ["file_/repo/README.md"],
+      focusedTabId: "file_/repo/README.md",
+    };
+
+    const state = deriveWorkspacePaneState({ pane, tabs });
+    expect(state.tabs[0]?.descriptor.title).toBeUndefined();
+  });
 });

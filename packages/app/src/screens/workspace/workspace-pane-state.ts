@@ -54,11 +54,13 @@ function normalizeWorkspaceTab(tab: WorkspaceTab): WorkspaceTab | null {
   if (!target) {
     return null;
   }
+  const title = trimNonEmpty(tab.title);
   return {
     tabId,
     target,
     createdAt: tab.createdAt,
     state: tab.state,
+    ...(title ? { title } : {}),
   };
 }
 
@@ -93,6 +95,7 @@ function normalizeWorkspacePaneTabs(tabs: WorkspaceTab[]): NormalizeWorkspacePan
     }
 
     openTabIds.add(normalizedTab.tabId);
+    const title = trimNonEmpty(normalizedTab.title);
     nextTabs.push({
       descriptor: {
         key: normalizedTab.tabId,
@@ -100,6 +103,7 @@ function normalizeWorkspacePaneTabs(tabs: WorkspaceTab[]): NormalizeWorkspacePan
         kind: normalizedTab.target.kind,
         target: normalizedTab.target,
         state: normalizedTab.state,
+        ...(title ? { title } : {}),
       },
     });
   }
