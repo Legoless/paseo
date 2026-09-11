@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { titlebarDragSurfaceStyle } from "@/components/desktop/titlebar-drag-region";
+import { isWeb } from "@/constants/platform";
 import { WORKSPACE_SECONDARY_HEADER_HEIGHT } from "@/constants/layout";
 import { iconButtonChromeGlyphSize } from "@/components/ui/icon-button-chrome";
 import { HEADER_CONTROL_HEIGHT } from "@/components/ui/control-geometry";
@@ -44,6 +45,7 @@ import {
 
 const TAB_GAP = 4;
 const TAB_DROP_INDICATOR_WIDTH = 4;
+const WORKSPACE_TAB_CHIP_DATASET = { workspaceTabChip: "true" };
 
 const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
@@ -120,6 +122,7 @@ function ExplorerSidebarTab({
               {...(dragHandleProps?.attributes as object | undefined)}
               {...(dragHandleProps?.listeners as object | undefined)}
               triggerRef={dragHandleProps?.setActivatorNodeRef as never}
+              dataSet={WORKSPACE_TAB_CHIP_DATASET}
               testID={`explorer-sidebar-tab-${item.tab.tabId}`}
               accessibilityRole="button"
               accessibilityLabel={presentation.tooltip}
@@ -416,6 +419,9 @@ const styles = StyleSheet.create((theme) => ({
   tabSlot: {
     position: "relative",
     marginHorizontal: TAB_GAP / 2,
+    ...(isWeb && {
+      WebkitAppRegion: "no-drag",
+    }),
   },
   tab: {
     height: HEADER_CONTROL_HEIGHT,
@@ -426,6 +432,9 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[1],
     userSelect: "none",
+    ...(isWeb && {
+      WebkitAppRegion: "no-drag",
+    }),
   },
   tabHovered: {
     backgroundColor: theme.colors.interactionHighlight,

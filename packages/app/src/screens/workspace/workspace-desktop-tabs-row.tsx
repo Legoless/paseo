@@ -107,6 +107,7 @@ const TAB_MIN_WIDTH = 96;
 const TAB_MAX_WIDTH = 160;
 const TAB_CLOSE_BUTTON_RESERVED_WIDTH = 0;
 const TAB_LABEL_LAYOUT_ALLOWANCE = 4;
+const WORKSPACE_TAB_CHIP_DATASET = { workspaceTabChip: "true" };
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const ThemedX = withUnistyles(X);
@@ -751,6 +752,7 @@ function TabChip({
     <View
       ref={middleClickRef}
       style={styles.tabHoverFrame}
+      dataSet={WORKSPACE_TAB_CHIP_DATASET}
       onPointerEnter={handleTabPointerEnter}
       onPointerLeave={handleTabPointerLeave}
     >
@@ -1497,6 +1499,9 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[1],
     userSelect: "none",
+    ...(isWeb && {
+      WebkitAppRegion: "no-drag",
+    }),
   },
   tabHovered: {
     backgroundColor: theme.colors.surface1,
@@ -1509,11 +1514,17 @@ const styles = StyleSheet.create((theme) => ({
   },
   tabHoverFrame: {
     position: "relative",
+    ...(isWeb && {
+      WebkitAppRegion: "no-drag",
+    }),
   },
   tabSlot: {
     position: "relative",
     overflow: "visible",
     marginHorizontal: TAB_CHIP_GAP / 2,
+    ...(isWeb && {
+      WebkitAppRegion: "no-drag",
+    }),
   },
   tabHandle: {
     flexDirection: "row",
@@ -1522,6 +1533,9 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minWidth: 0,
     userSelect: "none",
+    ...(isWeb && {
+      WebkitAppRegion: "no-drag",
+    }),
   },
   tabIcon: {
     width: TAB_ICON_WIDTH,
@@ -1555,6 +1569,9 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
     userSelect: "none",
+    ...(isWeb && {
+      WebkitAppRegion: "no-drag",
+    }),
   },
   tabLabelMeasurements: {
     position: "absolute",
