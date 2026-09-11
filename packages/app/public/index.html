@@ -52,21 +52,41 @@
     </style>
     <style>
       button:not([aria-hidden="true"]),
+      button:not([aria-hidden="true"]) *,
       a:not([aria-hidden="true"]),
+      a:not([aria-hidden="true"]) *,
       input:not([aria-hidden="true"]),
       textarea:not([aria-hidden="true"]),
       select:not([aria-hidden="true"]),
       [role="button"],
+      [role="button"] *,
       [role="link"],
+      [role="link"] *,
       [role="textbox"],
+      [role="textbox"] *,
       [role="combobox"],
+      [role="combobox"] *,
       [role="tab"],
+      [role="tab"] *,
       [role="switch"],
+      [role="switch"] *,
       [role="checkbox"],
+      [role="checkbox"] *,
       [role="slider"],
+      [role="slider"] *,
       [role="menuitem"],
+      [role="menuitem"] *,
       [tabindex]:not([tabindex="-1"]),
-      [contenteditable="true"] {
+      [tabindex]:not([tabindex="-1"]) *,
+      [contenteditable="true"],
+      [data-context-menu-trigger],
+      [data-context-menu-trigger] *,
+      [data-workspace-tab-chip],
+      [data-workspace-tab-chip] *,
+      [data-testid^="workspace-tab"],
+      [data-testid^="workspace-tab"] *,
+      [data-testid^="explorer-sidebar-tab"],
+      [data-testid^="explorer-sidebar-tab"] * {
         -webkit-app-region: no-drag !important;
       }
 

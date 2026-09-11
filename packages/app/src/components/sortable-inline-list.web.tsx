@@ -82,6 +82,7 @@ function SortableItem<T>({
       transition,
       opacity: computeDragOpacity(Boolean(externalDndContext), isDragging),
       zIndex: isDragging ? 1000 : 1,
+      WebkitAppRegion: "no-drag",
     }),
     [combinedTransform, transition, externalDndContext, isDragging],
   );

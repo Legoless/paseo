@@ -5,6 +5,7 @@ import { ContextMenuTrigger } from "./context-menu";
 
 const captured = vi.hoisted(() => ({
   style: undefined as unknown,
+  dataSet: undefined as unknown,
 }));
 
 vi.mock("react-native", () => ({
@@ -33,8 +34,9 @@ vi.mock("@/components/ui/menu", () => ({
 }));
 
 vi.mock("@/components/ui/press-highlight", () => ({
-  PressHighlight: (props: { style?: unknown }) => {
+  PressHighlight: (props: { style?: unknown; dataSet?: unknown }) => {
     captured.style = props.style;
+    captured.dataSet = props.dataSet;
     return null;
   },
 }));
@@ -49,5 +51,13 @@ describe("ContextMenuTrigger", () => {
     renderToStaticMarkup(<ContextMenuTrigger style={rowStyle} />);
 
     expect(captured.style).toBe(rowStyle);
+  });
+
+  it("marks the trigger with contextMenuTrigger dataset for desktop no-drag styling", () => {
+    vi.stubGlobal("React", React);
+
+    renderToStaticMarkup(<ContextMenuTrigger />);
+
+    expect(captured.dataSet).toEqual({ contextMenuTrigger: "true" });
   });
 });
