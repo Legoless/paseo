@@ -28,6 +28,7 @@ interface ExplorerSidebarDockProps {
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCreateNewTab: () => void;
   onMoveTabToMain: (tabId: string) => void;
+  onRenameTab?: (tab: WorkspaceTabDescriptor, currentLabel?: string) => void;
   onReorderTabsInPane: (paneId: string, tabIds: string[]) => void;
   buildPaneContentModel: (input: {
     paneId: string;
@@ -52,6 +53,7 @@ export function ExplorerSidebarDock({
   onCloseTab,
   onCreateNewTab,
   onMoveTabToMain,
+  onRenameTab,
   onReorderTabsInPane,
   buildPaneContentModel,
   trailingAccessory,
@@ -101,6 +103,7 @@ export function ExplorerSidebarDock({
             onCloseTab={onCloseTab}
             onCreateNewTab={onCreateNewTab}
             onMoveTabToMain={onMoveTabToMain}
+            onRenameTab={onRenameTab}
             onReorderTabs={handleReorderTabs}
             trailingAccessory={trailingAccessory}
           />

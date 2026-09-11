@@ -87,7 +87,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
     ]);
   });
 
-  it("omits agent copy actions and rename for draft tabs", () => {
+  it("omits agent copy actions and includes rename for draft tabs", () => {
     const entries = buildWorkspaceTabMenuEntries({
       surface: "mobile",
       tab: {
@@ -117,8 +117,8 @@ describe("buildWorkspaceTabMenuEntries", () => {
     expect(entries.some((entry) => entry.kind === "item" && entry.label === "Reload agent")).toBe(
       false,
     );
-    expect(entries.some((entry) => entry.kind === "item" && entry.label === "Rename")).toBe(false);
-    expect(entries.some((entry) => entry.kind === "separator")).toBe(false);
+    expect(entries.some((entry) => entry.kind === "item" && entry.label === "Rename")).toBe(true);
+    expect(entries.some((entry) => entry.kind === "separator")).toBe(true);
   });
 
   it("adds reload tooltip copy for agent tabs", () => {
@@ -233,6 +233,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
 
   it("includes copy file path for file tabs", () => {
     const onCopyFilePath = vi.fn();
+    const onRenameTab = vi.fn();
     const fileTab: WorkspaceTabDescriptor = {
       key: "file_abc",
       tabId: "file_abc",
@@ -250,7 +251,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCopyTerminalId: vi.fn(),
       onCopyFilePath,
       onReloadAgent: vi.fn(),
-      onRenameTab: vi.fn(),
+      onRenameTab,
       onCloseTab: vi.fn(),
       onCloseTabsBefore: vi.fn(),
       onCloseTabsAfter: vi.fn(),
@@ -261,7 +262,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
     expect(labels[0]).toBe("Copy file path");
     expect(labels).not.toContain("Copy resume command");
     expect(labels).not.toContain("Copy agent id");
-    expect(labels).not.toContain("Rename");
+    expect(labels).toContain("Rename");
     expect(labels).not.toContain("Reload agent");
 
     const copyFilePathEntry = entries.find(
@@ -272,6 +273,13 @@ describe("buildWorkspaceTabMenuEntries", () => {
     }
     copyFilePathEntry.onSelect();
     expect(onCopyFilePath).toHaveBeenCalledWith("/some/path.ts");
+
+    const renameEntry = entries.find((entry) => entry.kind === "item" && entry.label === "Rename");
+    if (!renameEntry || renameEntry.kind !== "item") {
+      throw new Error("Rename entry missing");
+    }
+    renameEntry.onSelect();
+    expect(onRenameTab).toHaveBeenCalledWith(fileTab);
   });
 
   it("uses a Changes close id for the working diff tab", () => {
@@ -364,5 +372,39 @@ describe("buildWorkspaceTabMenuEntries", () => {
       .find((entry) => entry.kind === "separator");
     expect(agentSeparator?.key).toBe("rename-separator");
     expect(terminalSeparator?.key).toBe("rename-separator");
+  });
+
+  it("includes rename for custom tab targets such as files, changes, and browser", () => {
+    const onRenameTab = vi.fn();
+    const filesTab: WorkspaceTabDescriptor = {
+      key: "files_tab",
+      tabId: "files_tab",
+      kind: "files",
+      target: { kind: "files" },
+    };
+    const entries = buildWorkspaceTabMenuEntries({
+      surface: "desktop",
+      tab: filesTab,
+      index: 0,
+      tabCount: 1,
+      menuTestIDBase: "workspace-tab-context-files_tab",
+      onCopyResumeCommand: vi.fn(),
+      onCopyAgentId: vi.fn(),
+      onCopyTerminalId: vi.fn(),
+      onCopyFilePath: vi.fn(),
+      onReloadAgent: vi.fn(),
+      onRenameTab,
+      onCloseTab: vi.fn(),
+      onCloseTabsBefore: vi.fn(),
+      onCloseTabsAfter: vi.fn(),
+      onCloseOtherTabs: vi.fn(),
+    });
+
+    const renameEntry = entries.find((entry) => entry.kind === "item" && entry.key === "rename");
+    if (!renameEntry || renameEntry.kind !== "item") {
+      throw new Error("Rename entry missing");
+    }
+    renameEntry.onSelect();
+    expect(onRenameTab).toHaveBeenCalledWith(filesTab);
   });
 });

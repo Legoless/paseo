@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { Text, View } from "react-native";
-import { ArrowLeftToLine, Plus, X } from "lucide-react-native";
+import { ArrowLeftToLine, Pencil, Plus, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import Animated from "react-native-reanimated";
@@ -60,6 +60,7 @@ interface ExplorerSidebarTabRailProps {
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCreateNewTab: () => void;
   onMoveTabToMain: (tabId: string) => void;
+  onRenameTab?: (tab: WorkspaceTabDescriptor, currentLabel?: string) => void;
   onReorderTabs: (tabs: WorkspaceTabDescriptor[]) => void;
   trailingAccessory?: ReactNode;
 }
@@ -72,24 +73,26 @@ function resolveExplorerSidebarTabBackdrop(): SurfaceBackdrop {
   return "surfaceSidebar";
 }
 
-function ExplorerSidebarTab({
+function ExplorerSidebarTabContent({
   item,
+  presentation,
   isDragging,
   dragHandleProps,
   onNavigateTab,
   onCloseTab,
   onMoveTabToMain,
-  normalizedServerId,
-  normalizedWorkspaceId,
+  onRenameTab,
+  canMoveToMain,
 }: {
   item: WorkspaceDesktopTabRowItem;
+  presentation: WorkspaceTabPresentation;
   isDragging: boolean;
   dragHandleProps?: DraggableListDragHandleProps;
   onNavigateTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => Promise<void> | void;
   onMoveTabToMain: (tabId: string) => void;
-  normalizedServerId: string;
-  normalizedWorkspaceId: string;
+  onRenameTab?: (tab: WorkspaceTabDescriptor, currentLabel?: string) => void;
+  canMoveToMain: boolean;
 }) {
   const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
@@ -106,86 +109,126 @@ function ExplorerSidebarTab({
     () => onMoveTabToMain(item.tab.tabId),
     [item.tab.tabId, onMoveTabToMain],
   );
-  const canMoveToMain = panelTargetSupportsHost(normalizedServerId, item.tab.target, "main");
+  const handleRename = useCallback(() => {
+    onRenameTab?.(item.tab, presentation.label);
+  }, [item.tab, onRenameTab, presentation.label]);
   const moveToMainLeading = useMemo(
     () => <ThemedArrowLeftToLine size={14} uniProps={mutedColorMapping} />,
     [],
   );
   const closeLeading = useMemo(() => <ThemedX size={14} uniProps={mutedColorMapping} />, []);
+  const renameLeading = useMemo(() => <ThemedPencil size={14} uniProps={mutedColorMapping} />, []);
   const accessibilityState = useMemo(() => ({ selected: item.isActive }), [item.isActive]);
+
+  return (
+    <ContextMenu>
+      <Tooltip delayDuration={300} enabledOnDesktop enabledOnMobile={false}>
+        <TooltipTrigger asChild triggerRefProp="triggerRef">
+          <ContextMenuTrigger
+            {...(dragHandleProps?.attributes as object | undefined)}
+            {...(dragHandleProps?.listeners as object | undefined)}
+            triggerRef={dragHandleProps?.setActivatorNodeRef as never}
+            dataSet={WORKSPACE_TAB_CHIP_DATASET}
+            testID={`explorer-sidebar-tab-${item.tab.tabId}`}
+            accessibilityRole="button"
+            accessibilityLabel={presentation.tooltip}
+            accessibilityState={accessibilityState}
+            onPress={handlePress}
+            onHoverIn={handleHoverIn}
+            onHoverOut={handleHoverOut}
+            style={[
+              styles.tab,
+              hovered ? styles.tabHovered : null,
+              item.isActive ? styles.tabActive : null,
+              isDragging ? styles.tabDragging : null,
+            ]}
+          >
+            <WorkspaceTabIcon
+              presentation={presentation}
+              active={item.isActive}
+              size={iconButtonChromeGlyphSize("small")}
+              strokeWidth={1.5}
+              backdrop={resolveExplorerSidebarTabBackdrop()}
+            />
+            <Text
+              selectable={false}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              style={[styles.tabLabel, item.isActive ? styles.tabLabelActive : null]}
+            >
+              {presentation.label}
+            </Text>
+          </ContextMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" align="center" offset={8}>
+          <Text style={styles.tooltipText}>{presentation.tooltip}</Text>
+        </TooltipContent>
+      </Tooltip>
+      <ContextMenuContent align="start" minWidth={180}>
+        {onRenameTab ? (
+          <ContextMenuItem leading={renameLeading} onSelect={handleRename}>
+            {t("workspace.tabs.menu.rename")}
+          </ContextMenuItem>
+        ) : null}
+        {canMoveToMain ? (
+          <ContextMenuItem leading={moveToMainLeading} onSelect={handleMoveToMain}>
+            {t("workspace.tabs.menu.moveToMain")}
+          </ContextMenuItem>
+        ) : null}
+        {canMoveToMain || onRenameTab ? <ContextMenuSeparator /> : null}
+        <ContextMenuItem leading={closeLeading} onSelect={handleClose}>
+          {t("workspace.tabs.menu.close")}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+function ExplorerSidebarTab({
+  item,
+  isDragging,
+  dragHandleProps,
+  onNavigateTab,
+  onCloseTab,
+  onMoveTabToMain,
+  onRenameTab,
+  normalizedServerId,
+  normalizedWorkspaceId,
+}: {
+  item: WorkspaceDesktopTabRowItem;
+  isDragging: boolean;
+  dragHandleProps?: DraggableListDragHandleProps;
+  onNavigateTab: (tabId: string) => void;
+  onCloseTab: (tabId: string) => Promise<void> | void;
+  onMoveTabToMain: (tabId: string) => void;
+  onRenameTab?: (tab: WorkspaceTabDescriptor, currentLabel?: string) => void;
+  normalizedServerId: string;
+  normalizedWorkspaceId: string;
+}) {
+  const canMoveToMain = panelTargetSupportsHost(normalizedServerId, item.tab.target, "main");
   const renderPresentation = useCallback(
     (presentation: WorkspaceTabPresentation) => (
-      <ContextMenu>
-        <Tooltip delayDuration={300} enabledOnDesktop enabledOnMobile={false}>
-          <TooltipTrigger asChild triggerRefProp="triggerRef">
-            <ContextMenuTrigger
-              {...(dragHandleProps?.attributes as object | undefined)}
-              {...(dragHandleProps?.listeners as object | undefined)}
-              triggerRef={dragHandleProps?.setActivatorNodeRef as never}
-              dataSet={WORKSPACE_TAB_CHIP_DATASET}
-              testID={`explorer-sidebar-tab-${item.tab.tabId}`}
-              accessibilityRole="button"
-              accessibilityLabel={presentation.tooltip}
-              accessibilityState={accessibilityState}
-              onPress={handlePress}
-              onHoverIn={handleHoverIn}
-              onHoverOut={handleHoverOut}
-              style={[
-                styles.tab,
-                hovered ? styles.tabHovered : null,
-                item.isActive ? styles.tabActive : null,
-                isDragging ? styles.tabDragging : null,
-              ]}
-            >
-              <WorkspaceTabIcon
-                presentation={presentation}
-                active={item.isActive}
-                size={iconButtonChromeGlyphSize("small")}
-                strokeWidth={1.5}
-                backdrop={resolveExplorerSidebarTabBackdrop()}
-              />
-              <Text
-                selectable={false}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-                style={[styles.tabLabel, item.isActive ? styles.tabLabelActive : null]}
-              >
-                {presentation.label}
-              </Text>
-            </ContextMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" align="center" offset={8}>
-            <Text style={styles.tooltipText}>{presentation.tooltip}</Text>
-          </TooltipContent>
-        </Tooltip>
-        <ContextMenuContent align="start" minWidth={180}>
-          {canMoveToMain ? (
-            <ContextMenuItem leading={moveToMainLeading} onSelect={handleMoveToMain}>
-              {t("workspace.tabs.menu.moveToMain")}
-            </ContextMenuItem>
-          ) : null}
-          {canMoveToMain ? <ContextMenuSeparator /> : null}
-          <ContextMenuItem leading={closeLeading} onSelect={handleClose}>
-            {t("workspace.tabs.menu.close")}
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
+      <ExplorerSidebarTabContent
+        item={item}
+        presentation={presentation}
+        isDragging={isDragging}
+        dragHandleProps={dragHandleProps}
+        onNavigateTab={onNavigateTab}
+        onCloseTab={onCloseTab}
+        onMoveTabToMain={onMoveTabToMain}
+        onRenameTab={onRenameTab}
+        canMoveToMain={canMoveToMain}
+      />
     ),
     [
-      accessibilityState,
+      canMoveToMain,
       dragHandleProps,
-      handleHoverIn,
-      handleHoverOut,
-      handleClose,
-      handleMoveToMain,
-      handlePress,
-      hovered,
       isDragging,
       item,
-      canMoveToMain,
-      closeLeading,
-      moveToMainLeading,
-      t,
+      onCloseTab,
+      onMoveTabToMain,
+      onNavigateTab,
+      onRenameTab,
     ],
   );
 
@@ -212,6 +255,7 @@ function CatalogIcon({
 
 const ThemedCatalogIcon = withUnistyles(CatalogIcon);
 const ThemedArrowLeftToLine = withUnistyles(ArrowLeftToLine);
+const ThemedPencil = withUnistyles(Pencil);
 const ThemedPlus = withUnistyles(Plus);
 const ThemedX = withUnistyles(X);
 
@@ -265,6 +309,7 @@ export function ExplorerSidebarTabRail({
   onCloseTab,
   onCreateNewTab,
   onMoveTabToMain,
+  onRenameTab,
   onReorderTabs,
   trailingAccessory,
 }: ExplorerSidebarTabRailProps) {
@@ -317,6 +362,7 @@ export function ExplorerSidebarTabRail({
             onNavigateTab={onNavigateTab}
             onCloseTab={onCloseTab}
             onMoveTabToMain={onMoveTabToMain}
+            onRenameTab={onRenameTab}
             normalizedServerId={normalizedServerId}
             normalizedWorkspaceId={normalizedWorkspaceId}
           />
@@ -331,6 +377,7 @@ export function ExplorerSidebarTabRail({
       onNavigateTab,
       onCloseTab,
       onMoveTabToMain,
+      onRenameTab,
       tabDropPreviewIndex,
       tabs.length,
     ],
