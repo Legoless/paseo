@@ -440,7 +440,7 @@ interface WorkspaceDesktopTabsRowProps {
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
-  onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onRenameTab: (tab: WorkspaceTabDescriptor, currentLabel?: string) => void;
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
@@ -1352,7 +1352,7 @@ function ResolvedDesktopTabChip({
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
-  onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onRenameTab: (tab: WorkspaceTabDescriptor, currentLabel?: string) => void;
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
@@ -1380,7 +1380,7 @@ function ResolvedDesktopTabChip({
         onCopyTerminalId,
         onCopyFilePath,
         onReloadAgent,
-        onRenameTab,
+        onRenameTab: (tabToRename) => onRenameTab(tabToRename, presentation.label),
         onCloseTab,
         onCloseTabsToLeft,
         onCloseTabsToRight,
@@ -1401,6 +1401,7 @@ function ResolvedDesktopTabChip({
       labels,
       onReloadAgent,
       onRenameTab,
+      presentation.label,
       tabCount,
     ],
   );

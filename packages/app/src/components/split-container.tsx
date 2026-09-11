@@ -128,7 +128,7 @@ interface SplitContainerProps {
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onSwitchTabProject: (input: { tabId: string; cwd: string }) => Promise<void> | void;
-  onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onRenameTab: (tab: WorkspaceTabDescriptor, currentLabel?: string) => void;
   onCloseTabsToLeft: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
@@ -1581,6 +1581,7 @@ function SplitPaneView({
                   onCloseTab={onCloseTab}
                   onCreateNewTab={handleCreateExplorerTab}
                   onMoveTabToMain={handleMoveExplorerTabToMain}
+                  onRenameTab={onRenameTab}
                   onReorderTabsInPane={onReorderTabsInPane}
                   buildPaneContentModel={buildPaneContentModel}
                   trailingAccessory={explorerTrailingAccessory}

@@ -472,7 +472,7 @@ interface MobileWorkspaceTabSwitcherProps {
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
-  onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onRenameTab: (tab: WorkspaceTabDescriptor, currentLabel?: string) => void;
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCloseTabsAbove: (tabId: string) => Promise<void> | void;
   onCloseTabsBelow: (tabId: string) => Promise<void> | void;
@@ -598,7 +598,7 @@ function MobileWorkspaceTabOption({
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
-  onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onRenameTab: (tab: WorkspaceTabDescriptor, currentLabel?: string) => void;
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCloseTabsAbove: (tabId: string) => Promise<void> | void;
   onCloseTabsBelow: (tabId: string) => Promise<void> | void;
@@ -623,26 +623,6 @@ function MobileWorkspaceTabOption({
     }),
     [t],
   );
-  const menuTestIDBase = `workspace-tab-menu-${tab.tabId}`;
-  const menuEntries = buildWorkspaceTabMenuEntries({
-    surface: "mobile",
-    tab,
-    index: tabIndex,
-    tabCount,
-    menuTestIDBase,
-    onCopyResumeCommand,
-    onCopyAgentId,
-    onCopyTerminalId,
-    onCopyFilePath,
-    onReloadAgent,
-    onRenameTab,
-    onCloseTab,
-    onCloseTabsBefore: onCloseTabsAbove,
-    onCloseTabsAfter: onCloseTabsBelow,
-    onCloseOtherTabs,
-    labels: tabMenuLabels,
-  });
-
   const fallbackLabels = useMemo(
     () => ({
       newTab: t("workspace.tabs.actions.newTab"),
@@ -658,6 +638,25 @@ function MobileWorkspaceTabOption({
     [t],
   );
   const fallbackLabel = getFallbackTabOptionLabel(tab, fallbackLabels);
+  const menuTestIDBase = `workspace-tab-menu-${tab.tabId}`;
+  const menuEntries = buildWorkspaceTabMenuEntries({
+    surface: "mobile",
+    tab,
+    index: tabIndex,
+    tabCount,
+    menuTestIDBase,
+    onCopyResumeCommand,
+    onCopyAgentId,
+    onCopyTerminalId,
+    onCopyFilePath,
+    onReloadAgent,
+    onRenameTab: (tabToRename) => onRenameTab(tabToRename, fallbackLabel),
+    onCloseTab,
+    onCloseTabsBefore: onCloseTabsAbove,
+    onCloseTabsAfter: onCloseTabsBelow,
+    onCloseOtherTabs,
+    labels: tabMenuLabels,
+  });
   const trailingAccessory = useMemo(
     () => (
       <MobileTabTrailingAccessory
