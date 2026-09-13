@@ -17,6 +17,8 @@ interface TerminalWebContentsIdentity {
 interface RegisteredTerminalWebContents extends TerminalWebContentsIdentity {
   setBackgroundThrottling(allowed: boolean): void;
   once(event: "destroyed", listener: () => void): void;
+  on(event: "did-finish-load", listener: () => void): void;
+  invalidate(): void;
 }
 
 interface ObservableTerminalGuest extends TerminalWebContentsIdentity {
@@ -119,6 +121,18 @@ export function preparePaseoTerminalWebContents(contents: RegisteredTerminalWebC
   contents.setBackgroundThrottling(false);
   contents.once("destroyed", () => {
     terminalRegistry.unregisterWebContents(webContentsId);
+  });
+  // An idle host issues the guest no BeginFrames, so a freshly attached terminal guest can
+  // sit painted-but-unpresented until the next user input. Invalidate twice after load: once
+  // for the shell, once after the daemon's restore stream has had time to land.
+  contents.on("did-finish-load", () => {
+    for (const delayMs of [300, 1200]) {
+      setTimeout(() => {
+        if (!contents.isDestroyed()) {
+          contents.invalidate();
+        }
+      }, delayMs);
+    }
   });
 }
 

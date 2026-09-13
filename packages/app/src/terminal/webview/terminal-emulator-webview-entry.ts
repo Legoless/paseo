@@ -90,6 +90,7 @@ type OutboundMessage =
   | { type: "swipeLeft"; streamKey: string }
   | { type: "swipeRight"; streamKey: string }
   | { type: "copySelection"; streamKey: string; text: string }
+  | { type: "heartbeat"; streamKey: string }
   | { type: "debug"; message: string; details?: unknown };
 
 declare global {
@@ -203,6 +204,10 @@ class TerminalWebViewBridge {
     this.root.addEventListener("pointermove", this.handlePointerMove, { passive: false });
     this.root.addEventListener("pointerup", this.handlePointerUp, { passive: true });
     this.root.addEventListener("pointercancel", this.handlePointerUp, { passive: true });
+  }
+
+  get mountedStreamKey(): string | null {
+    return this.streamKey;
   }
 
   receive = (message: InboundMessage): void => {
@@ -561,3 +566,15 @@ window.__PASEO_TERMINAL_WEBVIEW_BLUR__ = bridge.blur;
 window.__PASEO_TERMINAL_WEBVIEW_GET_SELECTION__ = bridge.getSelection;
 subscribeTerminalGuestMessages((message) => bridge.receive(message as InboundMessage));
 sendToNative({ type: "bridgeReady" });
+
+// Electron guests get no working `unresponsive` signal from the platform (verified on
+// Electron 41: neither the webview DOM event nor the WebContents listener fires for a hung
+// guest). The heartbeat is the hang detector: a blocked guest event loop stops the pings.
+if (resolveTerminalGuestTransportKind() === "electron") {
+  setInterval(() => {
+    const streamKey = bridge.mountedStreamKey;
+    if (streamKey) {
+      sendToNative({ type: "heartbeat", streamKey });
+    }
+  }, 2_000);
+}

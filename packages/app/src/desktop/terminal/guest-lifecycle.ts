@@ -10,6 +10,8 @@
  */
 export const TERMINAL_GUEST_BRIDGE_READY_TIMEOUT_MS = 2_500;
 export const TERMINAL_GUEST_RENDERER_READY_TIMEOUT_MS = 2_500;
+// Guest pings every 2s; missing more than two intervals means the guest event loop is blocked.
+export const TERMINAL_GUEST_HEARTBEAT_DEADLINE_MS = 5_000;
 
 export type TerminalGuestLifecyclePhase = "idle" | "mounting" | "ready" | "dead" | "hung";
 
@@ -21,6 +23,7 @@ export interface TerminalGuestLifecycleState {
   rendererReady: boolean;
   bridgeReadyDeadline: number | null;
   rendererReadyDeadline: number | null;
+  lastAliveAt: number | null;
 }
 
 export const INITIAL_TERMINAL_GUEST_LIFECYCLE_STATE: TerminalGuestLifecycleState = {
@@ -30,12 +33,14 @@ export const INITIAL_TERMINAL_GUEST_LIFECYCLE_STATE: TerminalGuestLifecycleState
   rendererReady: false,
   bridgeReadyDeadline: null,
   rendererReadyDeadline: null,
+  lastAliveAt: null,
 };
 
 export type TerminalGuestLifecycleEvent =
   | { type: "mount"; now: number }
   | { type: "bridgeReady"; now: number }
   | { type: "rendererReady"; now: number }
+  | { type: "heartbeat"; now: number }
   | { type: "renderProcessGone"; now: number; reason: string }
   | { type: "unresponsive"; now: number }
   | { type: "responsive"; now: number }
@@ -65,10 +70,16 @@ function armMounting(
     rendererReady: false,
     bridgeReadyDeadline: now + TERMINAL_GUEST_BRIDGE_READY_TIMEOUT_MS,
     rendererReadyDeadline: null,
+    lastAliveAt: null,
   };
 }
 
 function resolveTick(state: TerminalGuestLifecycleState, now: number): TerminalGuestLifecycleState {
+  if (state.phase === "ready") {
+    const heartbeatExpired =
+      state.lastAliveAt !== null && now - state.lastAliveAt >= TERMINAL_GUEST_HEARTBEAT_DEADLINE_MS;
+    return heartbeatExpired ? { ...state, phase: "hung" } : state;
+  }
   if (state.phase !== "mounting") {
     return state;
   }
@@ -109,7 +120,16 @@ export function reduceTerminalGuestLifecycle(
         rendererReady: true,
         bridgeReadyDeadline: null,
         rendererReadyDeadline: null,
+        lastAliveAt: event.now,
       };
+    case "heartbeat":
+      if (state.phase === "hung") {
+        return { ...state, phase: "ready", lastAliveAt: event.now };
+      }
+      if (state.phase === "ready" || state.phase === "mounting") {
+        return { ...state, lastAliveAt: event.now };
+      }
+      return state;
     case "renderProcessGone":
       return event.reason === "clean-exit" ? state : markDead(state);
     case "unresponsive":

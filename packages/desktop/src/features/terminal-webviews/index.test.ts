@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   TERMINAL_GUEST_STATE_EVENT,
   getPaseoTerminalWebviewRegistry,
@@ -10,7 +10,9 @@ import {
 
 class FakeTerminalGuest {
   public readonly backgroundThrottlingCalls: boolean[] = [];
+  public invalidateCount = 0;
   private destroyedListener: (() => void) | null = null;
+  private finishLoadListener: (() => void) | null = null;
   private destroyed = false;
 
   public constructor(public readonly id: number) {}
@@ -26,6 +28,19 @@ class FakeTerminalGuest {
   public once(event: "destroyed", listener: () => void): void {
     expect(event).toBe("destroyed");
     this.destroyedListener = listener;
+  }
+
+  public on(event: "did-finish-load", listener: () => void): void {
+    expect(event).toBe("did-finish-load");
+    this.finishLoadListener = listener;
+  }
+
+  public invalidate(): void {
+    this.invalidateCount += 1;
+  }
+
+  public finishLoad(): void {
+    this.finishLoadListener?.();
   }
 
   public destroy(): void {
@@ -71,6 +86,27 @@ describe("terminal webview attachment", () => {
 
     expect(registry.getTerminalIdForWebContents(guest.id)).toBeNull();
     expect(guest.backgroundThrottlingCalls).toEqual([false]);
+  });
+
+  test("invalidates the guest twice after load to force frame presentation", () => {
+    vi.useFakeTimers();
+    try {
+      const guest = new FakeTerminalGuest(703);
+      preparePaseoTerminalWebContents(guest);
+      expect(guest.invalidateCount).toBe(0);
+
+      guest.finishLoad();
+      vi.advanceTimersByTime(300);
+      expect(guest.invalidateCount).toBe(1);
+      vi.advanceTimersByTime(900);
+      expect(guest.invalidateCount).toBe(2);
+
+      guest.destroy();
+      vi.advanceTimersByTime(5_000);
+      expect(guest.invalidateCount).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("keeps one webContents per terminal id", () => {

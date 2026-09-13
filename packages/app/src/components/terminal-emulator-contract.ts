@@ -65,6 +65,12 @@ export interface TerminalEmulatorProps {
     disposition: "main" | "side",
   ) => Promise<void> | void;
   onRendererReadyChange?: (change: TerminalRendererReadyChange) => void;
+  /**
+   * Isolated-renderer only: the guest process was reloaded after a crash/hang and the
+   * stream must be re-created from scratch (the daemon dedups re-sends by stream revision,
+   * so only a fresh subscription re-delivers the snapshot).
+   */
+  onGuestReloaded?: () => void;
   pendingModifiers?: PendingTerminalModifiers;
   focusRequestToken?: number;
   resizeRequestToken?: number;

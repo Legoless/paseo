@@ -271,6 +271,7 @@ export function TerminalPane({
   useBlockMobilePanelOpenGestures(isMobile && isWorkspaceFocused && isPaneFocused && hasSelection);
   const emulatorRef = useRef<TerminalEmulatorHandle>(null);
   const isolatedTerminalRenderer = useIsolatedTerminalRenderer();
+  const [streamResetNonce, setStreamResetNonce] = useState(0);
   const terminalIdRef = useRef<string>(terminalId);
   const terminalPresentedRef = useRef(isTerminalPresented);
   terminalPresentedRef.current = isTerminalPresented;
@@ -337,6 +338,8 @@ export function TerminalPane({
     }
     emulatorRef.current?.blur();
   }, [isolatedTerminalRenderer, isPaneFocused, isWorkspaceFocused]);
+  const handleGuestReloaded = useCallback(() => setStreamResetNonce((nonce) => nonce + 1), []);
+
   const handleRendererReadyChange = useCallback(
     (change: TerminalRendererReadyChange) => {
       setRendererReadyStreamKey((current) => applyTerminalRendererReadyChange(current, change));
@@ -595,6 +598,7 @@ export function TerminalPane({
     handleStreamRestore,
     handleStreamSnapshot,
     isConnected,
+    streamResetNonce,
   ]);
 
   useEffect(() => {
@@ -613,6 +617,7 @@ export function TerminalPane({
     isConnected,
     isWorkspaceFocused,
     rendererReadyStreamKey,
+    streamResetNonce,
     terminalId,
     terminalStreamKey,
   ]);
@@ -1059,6 +1064,7 @@ export function TerminalPane({
     swipeGesturesEnabled,
     initialSnapshot,
     onRendererReadyChange: handleRendererReadyChange,
+    onGuestReloaded: handleGuestReloaded,
     onSwipeRight: handleSwipeRight,
     onSwipeLeft: handleSwipeLeft,
     onInput: handleTerminalData,

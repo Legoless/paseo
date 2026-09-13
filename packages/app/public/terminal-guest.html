@@ -36533,6 +36533,7 @@ WARNING: This link could potentially be dangerous`)
           // after another barrier it's false and the barrier applies immediately, saving a parse
           // cycle of latency. Cleared when a barrier starts (it gates every write before it).
           hasUngatedWrites = false;
+          needsTextureAtlasReset = true;
           inputModeDecoder = new TextDecoder();
           suppressInput = false;
           inputModeTracker = new TerminalInputModeTracker();
@@ -37156,6 +37157,13 @@ WARNING: This link could potentially be dangerous`)
               this.clearInFlightOutputTimeout();
               this.suppressInput = previousSuppressInput;
               expectedOperation.onCommitted?.();
+              if (expectedOperation.type === "snapshot" && this.needsTextureAtlasReset) {
+                this.needsTextureAtlasReset = false;
+                try {
+                  terminal.clearTextureAtlas();
+                } catch {}
+                this.refreshVisibleRows();
+              }
               this.processOutputQueue();
             };
             if (operation.type === "clear") {
@@ -37533,6 +37541,9 @@ body,
           tapStartX = 0;
           tapStartY = 0;
           tapMoved = false;
+          get mountedStreamKey() {
+            return this.streamKey;
+          }
           receive = (message) => {
             try {
               this.receiveUnsafe(message);
@@ -37851,6 +37862,14 @@ body,
         window.__PASEO_TERMINAL_WEBVIEW_GET_SELECTION__ = bridge.getSelection;
         subscribeTerminalGuestMessages((message) => bridge.receive(message));
         sendToNative({ type: "bridgeReady" });
+        if (resolveTerminalGuestTransportKind() === "electron") {
+          setInterval(() => {
+            const streamKey = bridge.mountedStreamKey;
+            if (streamKey) {
+              sendToNative({ type: "heartbeat", streamKey });
+            }
+          }, 2e3);
+        }
       })();
       /*! Bundled license information:
 
