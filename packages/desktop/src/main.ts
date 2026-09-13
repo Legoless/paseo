@@ -548,6 +548,14 @@ ipcMain.handle("paseo:browser:copy-element", (_event, payload: unknown) =>
   browserCapture.copy(payload),
 );
 
+ipcMain.handle("paseo:terminal:copy-to-clipboard", (_event, value: unknown) => {
+  if (typeof value !== "string" || value.length === 0) {
+    return false;
+  }
+  clipboard.writeText(value);
+  return true;
+});
+
 protocol.registerSchemesAsPrivileged([
   {
     scheme: APP_SCHEME,
@@ -762,6 +770,7 @@ async function createWindow(
     if (isPaseoTerminalWebviewAttach({ src: contents.getURL() })) {
       preparePaseoTerminalWebContents(contents);
       observePaseoTerminalGuestState(contents, mainWindow.webContents);
+      browserKeyboard.attachTerminalGuest({ contents, hostContents: mainWindow.webContents });
       return;
     }
     preparePaseoBrowserWebContents(contents);

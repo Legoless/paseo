@@ -36730,7 +36730,12 @@ WARNING: This link could potentially be dangerous`)
               if (!isMac && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
                 const key = event.key.toLowerCase();
                 if (key === "c" && terminal.hasSelection()) {
-                  void navigator.clipboard.writeText(terminal.getSelection());
+                  const selection = terminal.getSelection();
+                  if (this.callbacks.onCopySelection) {
+                    void this.callbacks.onCopySelection(selection);
+                  } else {
+                    void navigator.clipboard.writeText(selection);
+                  }
                   return false;
                 }
                 if (key === "v") {
@@ -36922,6 +36927,9 @@ WARNING: This link could potentially be dangerous`)
           }
           paste(text) {
             this.terminal?.paste(text);
+          }
+          getSelection() {
+            return this.terminal?.getSelection() ?? "";
           }
           renderSnapshot(input) {
             if (!input.state) {
@@ -37645,6 +37653,12 @@ body,
                     target,
                     disposition,
                   }),
+                ...(resolveTerminalGuestTransportKind() === "electron"
+                  ? {
+                      onCopySelection: (text) =>
+                        sendToNative({ type: "copySelection", streamKey: message.streamKey, text }),
+                    }
+                  : {}),
               },
             });
             runtime.setPendingModifiers({ pendingModifiers: message.pendingModifiers });
@@ -37668,6 +37682,9 @@ body,
           }
           blur = () => {
             this.runtime?.blur();
+          };
+          getSelection = () => {
+            return this.runtime?.getSelection() ?? "";
           };
           unmount(streamKey) {
             if (!this.runtime) {
@@ -37831,6 +37848,7 @@ body,
         var bridge = new TerminalWebViewBridge(root, host);
         window.__PASEO_TERMINAL_WEBVIEW_RECEIVE__ = bridge.receive;
         window.__PASEO_TERMINAL_WEBVIEW_BLUR__ = bridge.blur;
+        window.__PASEO_TERMINAL_WEBVIEW_GET_SELECTION__ = bridge.getSelection;
         subscribeTerminalGuestMessages((message) => bridge.receive(message));
         sendToNative({ type: "bridgeReady" });
       })();

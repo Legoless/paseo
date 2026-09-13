@@ -61,6 +61,7 @@ export interface TerminalEmulatorRuntimeCallbacks {
     target: TerminalLocalFileLinkTarget,
     disposition: "main" | "side",
   ) => Promise<void> | void;
+  onCopySelection?: (text: string) => Promise<void> | void;
   onInputModeChange?: (state: TerminalInputModeState) => Promise<void> | void;
 }
 
@@ -423,7 +424,12 @@ export class TerminalEmulatorRuntime {
 
         // Ctrl+C: copy selection to clipboard if text is selected, otherwise let xterm send SIGINT
         if (key === "c" && terminal.hasSelection()) {
-          void navigator.clipboard.writeText(terminal.getSelection());
+          const selection = terminal.getSelection();
+          if (this.callbacks.onCopySelection) {
+            void this.callbacks.onCopySelection(selection);
+          } else {
+            void navigator.clipboard.writeText(selection);
+          }
           return false;
         }
 
@@ -639,6 +645,10 @@ export class TerminalEmulatorRuntime {
 
   paste(text: string): void {
     this.terminal?.paste(text);
+  }
+
+  getSelection(): string {
+    return this.terminal?.getSelection() ?? "";
   }
 
   renderSnapshot(input: { state: TerminalState | null; onCommitted?: () => void }): void {

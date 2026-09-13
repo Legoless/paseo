@@ -21,6 +21,7 @@ import type {
 import type { PendingTerminalModifiers } from "@/utils/terminal-keys";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { getDesktopHost } from "@/desktop/host";
+import { selectTerminalClipboardWriter } from "@/desktop/terminal/copy-selection";
 import type {
   TerminalEmulatorHandle,
   TerminalEmulatorProps,
@@ -106,6 +107,7 @@ type BridgeOutboundMessage =
     }
   | { type: "swipeLeft"; streamKey: string }
   | { type: "swipeRight"; streamKey: string }
+  | { type: "copySelection"; streamKey: string; text: string }
   | { type: "debug"; message: string; details?: unknown };
 
 interface ElectronTerminalWebview extends HTMLElement {
@@ -125,6 +127,19 @@ interface RenderProcessGoneEvent extends Event {
 }
 
 const TERMINAL_GUEST_PATH = "/terminal-guest.html";
+const READ_GUEST_SELECTION_SCRIPT =
+  "window.__PASEO_TERMINAL_WEBVIEW_GET_SELECTION__ ? window.__PASEO_TERMINAL_WEBVIEW_GET_SELECTION__() : ''";
+
+async function writeTerminalClipboardText(text: string): Promise<void> {
+  const writer = selectTerminalClipboardWriter({
+    bridge: getDesktopHost()?.terminal,
+    fallback: {
+      writeText: (value) => navigator.clipboard.writeText(value),
+    },
+  });
+  await writer.writeText(text);
+}
+
 const HOST_STYLE: CSSProperties = {
   flex: 1,
   minHeight: 0,
@@ -300,7 +315,30 @@ export function IsolatedTerminalEmulator({
       paste: (text: string) => {
         sendToWebView({ type: "paste", streamKey, text });
       },
-      copySelection: async () => "",
+      copySelection: async (clipboard) => {
+        const webview = webviewRef.current;
+        if (!webview?.executeJavaScript) {
+          return "";
+        }
+        let selection = "";
+        try {
+          const result = await webview.executeJavaScript(READ_GUEST_SELECTION_SCRIPT);
+          if (typeof result === "string") {
+            selection = result;
+          }
+        } catch {
+          return "";
+        }
+        if (selection.length === 0) {
+          return "";
+        }
+        const writer = selectTerminalClipboardWriter({
+          bridge: getDesktopHost()?.terminal,
+          fallback: clipboard,
+        });
+        await writer.writeText(selection);
+        return selection;
+      },
       clear: () => {
         outputDecoderRef.current.decode();
         sendToWebView({ type: "clear", streamKey });
@@ -314,14 +352,17 @@ export function IsolatedTerminalEmulator({
       },
       blur: () => {
         const webview = webviewRef.current;
-        if (!webview?.executeJavaScript) {
+        if (!webview) {
           return;
         }
-        void webview
-          .executeJavaScript(
-            "window.__PASEO_TERMINAL_WEBVIEW_BLUR__ && window.__PASEO_TERMINAL_WEBVIEW_BLUR__(); true;",
-          )
-          .catch(() => {});
+        webview.blur();
+        if (webview.executeJavaScript) {
+          void webview
+            .executeJavaScript(
+              "window.__PASEO_TERMINAL_WEBVIEW_BLUR__ && window.__PASEO_TERMINAL_WEBVIEW_BLUR__(); true;",
+            )
+            .catch(() => {});
+        }
       },
     }),
     [sendToWebView, streamKey],
@@ -419,13 +460,14 @@ export function IsolatedTerminalEmulator({
         case "openExternalUrl":
           void openExternalUrl(message.url);
           break;
+        case "copySelection":
+          void writeTerminalClipboardText(message.text).catch(() => {});
+          break;
         case "swipeLeft":
           callbacksRef.current.onSwipeLeft?.();
           break;
         case "swipeRight":
           callbacksRef.current.onSwipeRight?.();
-          break;
-        case "debug":
           break;
       }
     },

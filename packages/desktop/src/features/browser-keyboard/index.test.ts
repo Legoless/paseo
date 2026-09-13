@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { PaseoBrowserWebviewRegistry } from "../browser-webviews/registry.js";
-import { BrowserKeyboard } from "./index.js";
+import { BrowserKeyboard, TERMINAL_SHORTCUT_OUTPUT_CHANNEL } from "./index.js";
 
 interface SentMessage {
   channel: string;
@@ -346,5 +346,67 @@ describe("BrowserKeyboard", () => {
 
     expect(wasPrevented).toBe(false);
     expect(guest.ignoredMenuShortcuts).toEqual([true]);
+  });
+});
+
+describe("BrowserKeyboard terminal guests", () => {
+  const terminalPolicy = {
+    menuPrefixes: [],
+    prefixes: [
+      { alt: false, code: "Digit", control: false, meta: true, repeat: false, shift: false },
+    ],
+  };
+
+  test("forwards a policy-matched guest chord to the host and prevents the guest default", () => {
+    const { keyboard } = createBrowserKeyboard();
+    const guest = new FakeBrowserContents(201);
+    const host = new FakeBrowserContents(202);
+    keyboard.publishTerminal(host.id, terminalPolicy);
+    keyboard.attachTerminalGuest({ contents: guest, hostContents: host });
+
+    const wasPrevented = guest.input(electronInput({ code: "Digit2", key: "2", meta: true }));
+
+    expect(wasPrevented).toBe(true);
+    expect(host.sent).toEqual([
+      {
+        channel: TERMINAL_SHORTCUT_OUTPUT_CHANNEL,
+        payload: {
+          alt: false,
+          code: "Digit2",
+          control: false,
+          key: "2",
+          meta: true,
+          repeat: false,
+          shift: false,
+        },
+      },
+    ]);
+  });
+
+  test("leaves terminal input untouched when no policy chord matches", () => {
+    const { keyboard } = createBrowserKeyboard();
+    const guest = new FakeBrowserContents(203);
+    const host = new FakeBrowserContents(204);
+    keyboard.publishTerminal(host.id, terminalPolicy);
+    keyboard.attachTerminalGuest({ contents: guest, hostContents: host });
+
+    const wasPrevented = guest.input(electronInput({ code: "KeyC", control: true, key: "c" }));
+
+    expect(wasPrevented).toBe(false);
+    expect(host.sent).toEqual([]);
+  });
+
+  test("stops forwarding once the host is detached", () => {
+    const { keyboard } = createBrowserKeyboard();
+    const guest = new FakeBrowserContents(205);
+    const host = new FakeBrowserContents(206);
+    keyboard.publishTerminal(host.id, terminalPolicy);
+    keyboard.attachTerminalGuest({ contents: guest, hostContents: host });
+    keyboard.detachHost(host.id);
+
+    const wasPrevented = guest.input(electronInput({ code: "Digit2", key: "2", meta: true }));
+
+    expect(wasPrevented).toBe(false);
+    expect(host.sent).toEqual([]);
   });
 });

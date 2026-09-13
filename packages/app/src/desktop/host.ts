@@ -183,6 +183,8 @@ export interface DesktopTerminalBridge {
   onGuestState?: (
     handler: (event: DesktopTerminalGuestStateEvent) => void,
   ) => (() => void) | Promise<() => void>;
+  setShortcutPolicy?: (input: BrowserKeyboardPolicy) => Promise<void>;
+  copyToClipboard?: (text: string) => Promise<boolean>;
 }
 
 export interface DesktopHostBridge {

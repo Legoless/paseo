@@ -328,6 +328,15 @@ export function TerminalPane({
     }
     emulatorRef.current?.blur();
   }, [isMobile, isWorkspaceFocused, mobileView]);
+  useEffect(() => {
+    if (!isolatedTerminalRenderer) {
+      return;
+    }
+    if (isPaneFocused && isWorkspaceFocused) {
+      return;
+    }
+    emulatorRef.current?.blur();
+  }, [isolatedTerminalRenderer, isPaneFocused, isWorkspaceFocused]);
   const handleRendererReadyChange = useCallback(
     (change: TerminalRendererReadyChange) => {
       setRendererReadyStreamKey((current) => applyTerminalRendererReadyChange(current, change));

@@ -4,6 +4,7 @@ import {
   type KeyboardShortcutInput,
   type ParsedShortcutBinding,
 } from "../../keyboard/keyboard-shortcuts";
+import type { KeyboardFocusScope } from "../../keyboard/actions";
 import type { KeyCombo } from "../../keyboard/shortcut-string";
 
 export interface BrowserShortcutPrefix {
@@ -33,6 +34,7 @@ interface BrowserShortcutPolicyInput {
   chordState?: ChordState;
   isMac: boolean;
   isDesktop: boolean;
+  focusScope?: KeyboardFocusScope;
 }
 
 export function shouldPublishBrowserShortcutPolicy(input: {
@@ -72,6 +74,34 @@ export function parseBrowserShortcutInput(value: unknown): BrowserShortcutInput 
 
   return {
     browserId,
+    key,
+    code,
+    altKey: value.alt,
+    ctrlKey: value.control,
+    metaKey: value.meta,
+    shiftKey: value.shift,
+    repeat: value.repeat ?? false,
+  };
+}
+
+export function parseTerminalShortcutInput(value: unknown): KeyboardShortcutInput | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { code, key } = value;
+  if (typeof code !== "string" || typeof key !== "string") {
+    return null;
+  }
+  if (
+    typeof value.alt !== "boolean" ||
+    typeof value.control !== "boolean" ||
+    typeof value.meta !== "boolean" ||
+    typeof value.shift !== "boolean" ||
+    (value.repeat !== undefined && typeof value.repeat !== "boolean")
+  ) {
+    return null;
+  }
+  return {
     key,
     code,
     altKey: value.alt,
@@ -150,7 +180,7 @@ function buildBrowserShortcutPrefixes(input: BrowserShortcutPolicyInput): Browse
   const context = {
     isMac: input.isMac,
     isDesktop: input.isDesktop,
-    focusScope: "browser" as const,
+    focusScope: input.focusScope ?? ("browser" as const),
     commandCenterOpen: false,
   };
 
