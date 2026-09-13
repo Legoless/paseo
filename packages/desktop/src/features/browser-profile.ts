@@ -3,6 +3,8 @@ const LEGACY_BROWSER_ID_PATTERN =
   /^(?:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|\d{13,}-[0-9a-f]+)$/i;
 const MAX_LEGACY_BROWSER_PROFILES = 1000;
 
+// Electron 41 removed "websql" from clearStorageData storages (and added "shadercache",
+// which is GPU cache, not user data — deliberately not cleared here).
 const PASEO_BROWSER_STORAGE_TYPES = [
   "cookies",
   "filesystem",
@@ -10,7 +12,6 @@ const PASEO_BROWSER_STORAGE_TYPES = [
   "localstorage",
   "serviceworkers",
   "cachestorage",
-  "websql",
 ] as const;
 
 interface BrowserProfileSession {
