@@ -1,3 +1,4 @@
+import { buildTerminalCwdById } from "@/screens/workspace/terminals/state";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import type { JsonValue } from "@getpaseo/protocol/agent-types";
 import { getOpenAgentTabLabel } from "@getpaseo/protocol/agent-labels";
@@ -203,7 +204,7 @@ import { getIsElectron, isNative, isWeb } from "@/constants/platform";
 import type { SurfaceBackdrop } from "@/styles/surface-backdrop";
 import { buildHostRootRoute, buildSettingsHostRoute } from "@/utils/host-routes";
 import { useWorkspaceTerminals } from "@/screens/workspace/terminals/use-workspace-terminals";
-import type { ListTerminalsResponse, TerminalProfile } from "@getpaseo/protocol/messages";
+import type { TerminalProfile } from "@getpaseo/protocol/messages";
 import { useWorkspaceHeaderActions } from "@/screens/workspace/use-workspace-header-actions";
 import {
   WorkspaceHeaderMenuDesktop,
@@ -258,16 +259,6 @@ function getWorkspaceScripts(
 
 function getWorkspaceMemberCount(workspace: WorkspaceDescriptor | null): number {
   return workspace?.members.length ?? 1;
-}
-
-function buildTerminalCwdById(
-  payload: ListTerminalsResponse["payload"] | undefined,
-): Map<string, string> {
-  const result = new Map<string, string>();
-  for (const terminal of payload?.terminals ?? []) {
-    if (terminal.cwd) result.set(terminal.id, terminal.cwd);
-  }
-  return result;
 }
 
 function DesktopFallbackExplorerToggle({

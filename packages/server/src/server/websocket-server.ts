@@ -1638,6 +1638,7 @@ export class VoiceAssistantWebSocketServer {
         paneLayouts: true,
         // COMPAT(customCommands): added in v0.8.0, remove gate after 2028-03-01.
         customCommands: true,
+        customCommandsEditing: true,
         // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
         providersSnapshot: true,
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.

@@ -250,8 +250,8 @@ export const MutableDaemonConfigSchema = z
     paneLayouts: z.array(PaneLayoutSchema).optional(),
     /** One line per unusable layout file, pre-formatted for display. */
     paneLayoutErrors: z.array(z.string()).optional(),
-    // Daemon-owned and read-only: sourced from `$PASEO_HOME/commands.json`, not from
-    // config.json, which is why neither field appears in MutableDaemonConfigPatchSchema.
+    // Sourced from `$PASEO_HOME/commands.json`; edited through commands.global.set,
+    // independently of config.json patches.
     // COMPAT(customCommands): added in v0.8.0, remove optional parsing after 2028-03-01.
     customCommands: z.array(CustomCommandWireSchema).optional(),
     /** One formatted line when the commands file cannot be used. */
@@ -1423,6 +1423,13 @@ export const DaemonGetPairingOfferRequestSchema = z.object({
 export const DaemonConfigReloadRequestSchema = z.object({
   type: z.literal("daemon.config.reload.request"),
   requestId: z.string(),
+});
+
+export const CommandsGlobalSetRequestSchema = z.object({
+  type: z.literal("commands.global.set.request"),
+  requestId: z.string(),
+  commands: z.array(CustomCommandWireSchema),
+  expectedCommands: z.array(CustomCommandWireSchema),
 });
 
 export const CommandsProjectListRequestSchema = z.object({
@@ -3139,6 +3146,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   DaemonGetStatusRequestSchema,
   DaemonGetPairingOfferRequestSchema,
   DaemonConfigReloadRequestSchema,
+  CommandsGlobalSetRequestSchema,
   CommandsProjectListRequestSchema,
   HubManagementDaemonConnectRequestSchema,
   HubManagementDaemonGetStatusRequestSchema,
@@ -3492,6 +3500,8 @@ export const ServerInfoStatusPayloadSchema = z
         paneLayouts: z.boolean().optional(),
         // COMPAT(customCommands): added in v0.8.0, remove gate after 2028-03-01.
         customCommands: z.boolean().optional(),
+        // COMPAT(customCommandsEditing): added in v0.8.0, remove gate after 2028-03-01.
+        customCommandsEditing: z.boolean().optional(),
         // COMPAT(checkoutForgeSetAutoMerge): added in v0.2.0-beta.1. Remove the
         // feature gate and checkoutGithubSetAutoMerge fallback after 2027-01-17
         // once the supported daemon floor is >= v0.2.0.
@@ -4943,6 +4953,14 @@ export const DaemonConfigReloadResponseSchema = z.object({
       overrideControlledPaths: z.array(z.string()),
     })
     .passthrough(),
+});
+
+export const CommandsGlobalSetResponseSchema = z.object({
+  type: z.literal("commands.global.set.response"),
+  payload: z.object({
+    requestId: z.string(),
+    config: MutableDaemonConfigSchema,
+  }),
 });
 
 export const CommandsProjectListResponseSchema = z.object({
@@ -6690,6 +6708,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   DaemonGetStatusResponseSchema,
   DaemonGetPairingOfferResponseSchema,
   DaemonConfigReloadResponseSchema,
+  CommandsGlobalSetResponseSchema,
   CommandsProjectListResponseSchema,
   HubManagementDaemonConnectResponseSchema,
   HubManagementDaemonGetStatusResponseSchema,

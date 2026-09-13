@@ -87,9 +87,8 @@ test.describe("workspace pane agent visibility", () => {
       ).toBeVisible();
       const labelsItem = contextMenu.locator('[data-testid^="sidebar-agent-menu-labels-"]');
       await expect(labelsItem).toBeVisible();
-      await expect(
-        contextMenu.locator('[data-testid^="sidebar-agent-menu-archive-"]'),
-      ).toBeVisible();
+      await expect(contextMenu.getByText("Close", { exact: true })).toHaveCount(1);
+      await expect(contextMenu.getByText("Close agent", { exact: true })).toHaveCount(0);
       await expect(contextMenu.locator('[data-testid^="sidebar-agent-menu-close-"]')).toBeVisible();
 
       await labelsItem.click();

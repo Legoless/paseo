@@ -81,12 +81,18 @@ export function MenuPage({ depth, children }: PropsWithChildren<{ depth: number 
 
 export function MenuLabel({
   children,
+  leading,
   style,
   testID,
-}: PropsWithChildren<{ style?: ViewStyle | ViewStyle[]; testID?: string }>): ReactElement {
+}: PropsWithChildren<{
+  leading?: ReactNode;
+  style?: ViewStyle | ViewStyle[];
+  testID?: string;
+}>): ReactElement {
   const labelContainerStyle = useMemo(() => [styles.labelContainer, style], [style]);
   return (
     <View style={labelContainerStyle} testID={testID}>
+      {leading}
       <Text style={styles.labelText}>{children}</Text>
     </View>
   );
@@ -386,11 +392,15 @@ const styles = StyleSheet.create((theme) => ({
     gap: MENU_ROW_GAP,
   },
   labelContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],
     paddingTop: theme.spacing[2],
     paddingBottom: theme.spacing[1],
   },
   labelText: {
+    flexShrink: 1,
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
   },

@@ -1,3 +1,4 @@
+import type { CustomCommand } from "@getpaseo/protocol/custom-commands";
 import type { z } from "zod";
 import { CLIENT_CAPS, type ClientCapability } from "@getpaseo/protocol/client-capabilities";
 import type { AgentAttentionNotificationPayload } from "@getpaseo/protocol/agent-attention-notification";
@@ -4945,6 +4946,12 @@ export class DaemonClient {
         repoRoot,
       },
       responseType: "read_project_config_response",
+    });
+  }
+
+  async setGlobalCommands(commands: CustomCommand[], expectedCommands: CustomCommand[]) {
+    return this.sendNamespacedCorrelatedSessionRequest<"commands.global.set.response">({
+      message: { type: "commands.global.set.request", commands, expectedCommands },
     });
   }
 

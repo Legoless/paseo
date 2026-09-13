@@ -6,8 +6,21 @@ default, presses Enter. Commands are JSON files the daemon serves; the app never
 itself.
 
 The dropdown sits next to the Git actions: in each pane's project tray, in the workspace header on
-desktop without pane splits, and in the compact header cluster on mobile. The tray's visibility
-ellipsis menu can hide it.
+desktop without pane splits, and in the compact header cluster on mobile. Use the tray’s ellipsis
+menu (left or right click) to show or hide **Commands**, alongside Branch,
+Editor, and Push. An enabled dropdown stays visible even when no commands exist; **Manage commands…**
+opens **Settings → Host → Commands** for that host.
+
+## Editing commands
+
+Use **Settings → Host → Commands** to add, edit, or delete global commands. Set the name, text,
+Agent or Terminal target, whether to submit immediately, and an optional keyboard shortcut.
+These commands are available across the host’s projects. Project-specific commands remain file-authored.
+
+Settings writes the global file atomically and updates connected clients without a daemon restart
+or reload. Renaming preserves command identity and shortcut overrides. A stale editor cannot overwrite
+another window’s changes: close it and reopen the command to use the latest version. A malformed
+commands file must be repaired before Settings can save over it.
 
 ## Where the files live
 
@@ -67,8 +80,8 @@ record the built-ins use. Mobile has no keyboard shortcuts — the menu is the o
 
 ## Refresh model
 
-There is no file watcher on either file. Global commands reload on `paseo daemon reload` and ride
-the daemon config payload (`customCommands`, plus `customCommandErrors` when the file is unusable).
+There is no file watcher on either file. Global file edits reload on `paseo daemon reload`; Settings
+saves apply immediately. Global commands ride the daemon config payload (`customCommands`, plus `customCommandErrors` when the file is unusable).
 Project commands are fetched per workspace project cwd through `commands.project.list.request` —
 on workspace entry and each time the menu opens.
 
@@ -78,4 +91,5 @@ to read or parse lands as a muted error row in the menu, and a broken global fil
 — the commands themselves are better absent than half-applied.
 
 `server_info.features.customCommands` gates the whole feature: against an older daemon the dropdown
-and the shortcuts are absent.
+and the shortcuts are absent. Settings editing additionally requires
+`server_info.features.customCommandsEditing` and `daemon.manage` permission.

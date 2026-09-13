@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildTerminalCwdById,
   canCreateWorkspaceTerminal,
   collectKnownTerminalIds,
   collectScriptTerminalIds,
@@ -106,5 +107,34 @@ describe("workspace terminal state", () => {
       requestId: "existing",
       terminals: [],
     });
+  });
+});
+
+describe("terminal project directories", () => {
+  it("keeps the project tray attached after a directory-scoped terminal refresh", () => {
+    expect(
+      buildTerminalCwdById({
+        cwd: "/repo",
+        terminals: [listedTerminal("terminal")],
+        requestId: "refresh",
+      }),
+    ).toEqual(new Map([["terminal", "/repo"]]));
+  });
+
+  it("uses each terminal directory for workspace-wide responses", () => {
+    expect(
+      buildTerminalCwdById({
+        terminals: [
+          { ...listedTerminal("first"), cwd: "/first" },
+          { ...listedTerminal("second"), cwd: "/second" },
+        ],
+        requestId: "refresh",
+      }),
+    ).toEqual(
+      new Map([
+        ["first", "/first"],
+        ["second", "/second"],
+      ]),
+    );
   });
 });

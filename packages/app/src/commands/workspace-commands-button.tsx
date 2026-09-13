@@ -1,7 +1,16 @@
+import { router } from "expo-router";
+import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
 import { useCallback, useEffect, useMemo, type ReactElement } from "react";
 import { Text, View } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, MessageSquare, SquareSlash, SquareTerminal } from "lucide-react-native";
+import {
+  ChevronDown,
+  Folder,
+  Globe,
+  MessageSquare,
+  SquareSlash,
+  SquareTerminal,
+} from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import type { CustomCommand } from "@getpaseo/protocol/custom-commands";
@@ -49,6 +58,8 @@ interface WorkspaceCommandsButtonProps {
   hideLabels?: boolean;
 }
 
+const ThemedFolder = withUnistyles(Folder);
+const ThemedGlobe = withUnistyles(Globe);
 const ThemedSquareSlash = withUnistyles(SquareSlash);
 const ThemedSquareTerminal = withUnistyles(SquareTerminal);
 const ThemedMessageSquare = withUnistyles(MessageSquare);
@@ -126,6 +137,8 @@ function CommandsMenuContent({
   onSelect,
 }: CommandsMenuContentProps): ReactElement {
   const { t } = useTranslation();
+  const projectIcon = useMemo(() => <ThemedFolder size={14} uniProps={mutedColorMapping} />, []);
+  const globalIcon = useMemo(() => <ThemedGlobe size={14} uniProps={mutedColorMapping} />, []);
   const renderCommand = (command: CustomCommand) => (
     <CommandMenuItem
       key={command.id}
@@ -138,12 +151,16 @@ function CommandsMenuContent({
   return (
     <>
       {projectCommands.length > 0 ? (
-        <DropdownMenuLabel>{t("workspace.commands.groups.project")}</DropdownMenuLabel>
+        <DropdownMenuLabel leading={projectIcon} testID="workspace-commands-project-group">
+          {t("workspace.commands.groups.project")}
+        </DropdownMenuLabel>
       ) : null}
       {projectCommands.map(renderCommand)}
       {projectCommands.length > 0 && globalCommands.length > 0 ? <DropdownMenuSeparator /> : null}
       {globalCommands.length > 0 ? (
-        <DropdownMenuLabel>{t("workspace.commands.groups.global")}</DropdownMenuLabel>
+        <DropdownMenuLabel leading={globalIcon} testID="workspace-commands-global-group">
+          {t("workspace.commands.groups.global")}
+        </DropdownMenuLabel>
       ) : null}
       {globalCommands.map(renderCommand)}
       {projectError ? (
@@ -294,11 +311,18 @@ export function WorkspaceCommandsButton({
     [presentation],
   );
 
-  const hasCommands = projectEntry.project.length > 0 || visibleGlobalCommands.length > 0;
-  const hasErrors = projectEntry.projectError !== null || globalEntry.globalErrors.length > 0;
-  if (!supported || (!hasCommands && !hasErrors)) {
+  const openSettings = useCallback(() => {
+    router.push(buildSettingsHostSectionRoute(serverId, "commands"));
+  }, [serverId]);
+  if (!supported) {
     return null;
   }
+  const hasContent = Boolean(
+    projectEntry.project.length ||
+    visibleGlobalCommands.length ||
+    projectEntry.projectError ||
+    globalEntry.globalErrors.length,
+  );
 
   return (
     <View style={presentation === "ghost" ? styles.ghostButtonFrame : styles.splitButton}>
@@ -334,6 +358,10 @@ export function WorkspaceCommandsButton({
             conflicts={conflicts}
             onSelect={handleSelect}
           />
+          {hasContent ? <DropdownMenuSeparator /> : null}
+          <DropdownMenuItem onSelect={openSettings} testID="workspace-commands-settings">
+            {t("settings.commands.manage")}
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </View>
