@@ -746,6 +746,22 @@ export const fr: TranslationResources = {
         stopFailed: "Échec de l'arrêt de{{scriptName}}",
       },
     },
+    commands: {
+      title: "Commandes",
+      groups: {
+        project: "Projet",
+        global: "Global",
+      },
+      accessibility: {
+        trigger: "Commandes de l’espace de travail",
+      },
+      shortcutTaken: "Raccourci déjà utilisé",
+      errors: {
+        noAgentTarget: "Aucun onglet de discussion pour exécuter cette commande",
+        noTerminalTarget: "Aucun onglet de terminal pour exécuter cette commande",
+        sendFailed: "Échec de l’envoi de la commande",
+      },
+    },
     tree: {
       showFolderTree: "Afficher l'arborescence des dossiers",
       hideFolderTree: "Masquer l'arborescence des dossiers",
@@ -2268,6 +2284,7 @@ export const fr: TranslationResources = {
         tabsPanes: "Onglets et volets",
         layout: "Disposition",
         agentInput: "EntréeAgent",
+        commands: "Commandes",
       },
       help: {
         openProject: "Projet ouvert",

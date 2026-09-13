@@ -5,7 +5,9 @@ import { persist } from "zustand/middleware";
 import { z } from "zod";
 import { createValidatedPersistStorage } from "@/storage/validated-persist-storage";
 import type { WorkspaceMemberDescriptor } from "@/stores/session-store";
+import { useSessionStore } from "@/stores/session-store";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
+import { selectWorkspace } from "@/stores/session-store-hooks/selectors";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 
 /**
@@ -69,6 +71,23 @@ export interface SelectedWorkspaceProject {
   member: WorkspaceMemberDescriptor | null;
   members: WorkspaceMemberDescriptor[];
   setSelected: (cwd: string) => void;
+}
+
+/**
+ * The hook's resolution, without the hook: the keyboard handler and other non-React callers
+ * need the same "selected member's directory" answer synchronously from store state.
+ */
+export function resolveSelectedWorkspaceCwd(serverId: string, workspaceId: string): string | null {
+  const workspace = selectWorkspace(useSessionStore.getState(), serverId, workspaceId);
+  if (!workspace) {
+    return null;
+  }
+  const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId });
+  const selectedCwd = workspaceKey
+    ? (useWorkspaceProjectSelectionStore.getState().selectedCwdByWorkspaceKey[workspaceKey] ?? null)
+    : null;
+  const member = resolveSelectedWorkspaceMember({ members: workspace.members, selectedCwd });
+  return member?.workspaceDirectory ?? null;
 }
 
 export function useSelectedWorkspaceProject(

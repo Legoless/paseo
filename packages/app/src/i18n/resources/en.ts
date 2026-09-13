@@ -736,6 +736,22 @@ export const en = {
         stopFailed: "Failed to stop {{scriptName}}",
       },
     },
+    commands: {
+      title: "Commands",
+      groups: {
+        project: "Project",
+        global: "Global",
+      },
+      accessibility: {
+        trigger: "Workspace commands",
+      },
+      shortcutTaken: "Shortcut in use",
+      errors: {
+        noAgentTarget: "No chat tab to run this command in",
+        noTerminalTarget: "No terminal tab to run this command in",
+        sendFailed: "Failed to send command",
+      },
+    },
     tree: {
       showFolderTree: "Show folder tree",
       hideFolderTree: "Hide folder tree",
@@ -2318,6 +2334,7 @@ export const en = {
         tabsPanes: "Tabs & Panes",
         layout: "Layout",
         agentInput: "Agent Input",
+        commands: "Commands",
       },
       help: {
         openProject: "Open project",

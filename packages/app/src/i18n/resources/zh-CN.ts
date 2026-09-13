@@ -735,6 +735,22 @@ export const zhCN: TranslationResources = {
         stopFailed: "停止 {{scriptName}} 失败",
       },
     },
+    commands: {
+      title: "命令",
+      groups: {
+        project: "项目",
+        global: "全局",
+      },
+      accessibility: {
+        trigger: "工作区命令",
+      },
+      shortcutTaken: "快捷键已被占用",
+      errors: {
+        noAgentTarget: "没有可运行此命令的聊天标签页",
+        noTerminalTarget: "没有可运行此命令的终端标签页",
+        sendFailed: "命令发送失败",
+      },
+    },
     tree: {
       showFolderTree: "显示文件夹树",
       hideFolderTree: "隐藏文件夹树",
@@ -2186,6 +2202,7 @@ export const zhCN: TranslationResources = {
         tabsPanes: "标签和窗格",
         layout: "布局",
         agentInput: "Agent 输入",
+        commands: "命令",
       },
       help: {
         openProject: "打开项目",

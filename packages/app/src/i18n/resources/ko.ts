@@ -740,6 +740,22 @@ export const ko: TranslationResources = {
         stopFailed: "{{scriptName}}를 중지하지 못했습니다.",
       },
     },
+    commands: {
+      title: "명령",
+      groups: {
+        project: "프로젝트",
+        global: "전역",
+      },
+      accessibility: {
+        trigger: "워크스페이스 명령",
+      },
+      shortcutTaken: "사용 중인 단축키",
+      errors: {
+        noAgentTarget: "이 명령을 실행할 채팅 탭이 없습니다",
+        noTerminalTarget: "이 명령을 실행할 터미널 탭이 없습니다",
+        sendFailed: "명령을 보내지 못했습니다",
+      },
+    },
     tree: {
       showFolderTree: "폴더 트리 표시",
       hideFolderTree: "폴더 트리 숨기기",
@@ -2222,6 +2238,7 @@ export const ko: TranslationResources = {
         tabsPanes: "탭 및 창",
         layout: "레이아웃",
         agentInput: "에이전트 입력",
+        commands: "명령",
       },
       help: {
         openProject: "프로젝트 열기",

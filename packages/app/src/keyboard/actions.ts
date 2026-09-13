@@ -55,10 +55,12 @@ export type KeyboardActionId =
   | "workspace.pin"
   | "view.toggle.focus"
   | "theme.cycle"
+  | "userCommand.run"
   | "message-input.action";
 
 export type KeyboardShortcutPayload =
   | { index: number }
   | { delta: 1 | -1 }
   | { kind: MessageInputKeyboardActionKind }
+  | { commandId: string }
   | null;

@@ -7,6 +7,7 @@ import { AgentProviderSchema } from "./provider-manifest.js";
 import { TOOL_CALL_ICON_NAMES } from "./agent-types.js";
 import { WORKSPACE_LABEL_COLORS } from "./workspace-labels.js";
 import { PaneLayoutSchema } from "./workspace-layouts.js";
+import { CustomCommandWireSchema } from "./custom-commands.js";
 import {
   ChatCreateRequestSchema,
   ChatListRequestSchema,
@@ -249,6 +250,12 @@ export const MutableDaemonConfigSchema = z
     paneLayouts: z.array(PaneLayoutSchema).optional(),
     /** One line per unusable layout file, pre-formatted for display. */
     paneLayoutErrors: z.array(z.string()).optional(),
+    // Daemon-owned and read-only: sourced from `$PASEO_HOME/commands.json`, not from
+    // config.json, which is why neither field appears in MutableDaemonConfigPatchSchema.
+    // COMPAT(customCommands): added in v0.8.0, remove optional parsing after 2028-03-01.
+    customCommands: z.array(CustomCommandWireSchema).optional(),
+    /** One formatted line when the commands file cannot be used. */
+    customCommandErrors: z.array(z.string()).optional(),
     agentProfiles: z.array(AgentProfileSchema).optional(),
     skills: z.object({ selection: AgentSkillSelectionSchema.optional() }).strict().optional(),
     pluginsEnabled: z.boolean().optional(),
@@ -1417,6 +1424,14 @@ export const DaemonConfigReloadRequestSchema = z.object({
   type: z.literal("daemon.config.reload.request"),
   requestId: z.string(),
 });
+
+export const CommandsProjectListRequestSchema = z.object({
+  type: z.literal("commands.project.list.request"),
+  requestId: z.string(),
+  /** Pane cwd; the daemon resolves the owning project root from it. */
+  cwd: z.string(),
+});
+export type CommandsProjectListRequest = z.infer<typeof CommandsProjectListRequestSchema>;
 
 export const HubManagementDaemonConnectRequestSchema = z.object({
   type: z.literal("hub.management.daemon.connect.request"),
@@ -3124,6 +3139,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   DaemonGetStatusRequestSchema,
   DaemonGetPairingOfferRequestSchema,
   DaemonConfigReloadRequestSchema,
+  CommandsProjectListRequestSchema,
   HubManagementDaemonConnectRequestSchema,
   HubManagementDaemonGetStatusRequestSchema,
   HubManagementDaemonDisconnectRequestSchema,
@@ -3474,6 +3490,8 @@ export const ServerInfoStatusPayloadSchema = z
         agentLabels: z.boolean().optional(),
         // COMPAT(paneLayouts): added in v0.8.0, remove gate after 2028-03-01.
         paneLayouts: z.boolean().optional(),
+        // COMPAT(customCommands): added in v0.8.0, remove gate after 2028-03-01.
+        customCommands: z.boolean().optional(),
         // COMPAT(checkoutForgeSetAutoMerge): added in v0.2.0-beta.1. Remove the
         // feature gate and checkoutGithubSetAutoMerge fallback after 2027-01-17
         // once the supported daemon floor is >= v0.2.0.
@@ -4926,6 +4944,21 @@ export const DaemonConfigReloadResponseSchema = z.object({
     })
     .passthrough(),
 });
+
+export const CommandsProjectListResponseSchema = z.object({
+  type: z.literal("commands.project.list.response"),
+  payload: z
+    .object({
+      requestId: z.string(),
+      commands: z.array(CustomCommandWireSchema),
+      /** The `.paseo-neo/commands.json` that was read; null when no file applied. */
+      sourcePath: z.string().nullable(),
+      /** Display-ready read/parse error; null on success or when no file applied. */
+      error: z.string().nullable(),
+    })
+    .passthrough(),
+});
+export type CommandsProjectListResponse = z.infer<typeof CommandsProjectListResponseSchema>;
 
 export const DiagnosticsResponseSchema = z.object({
   type: z.literal("diagnostics.response"),
@@ -6657,6 +6690,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   DaemonGetStatusResponseSchema,
   DaemonGetPairingOfferResponseSchema,
   DaemonConfigReloadResponseSchema,
+  CommandsProjectListResponseSchema,
   HubManagementDaemonConnectResponseSchema,
   HubManagementDaemonGetStatusResponseSchema,
   HubManagementDaemonDisconnectResponseSchema,

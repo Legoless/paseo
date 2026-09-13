@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter } from "expo-router";
+import { useStoreWithEqualityFn } from "zustand/traditional";
+import equal from "fast-deep-equal";
 import { getIsElectronRuntime } from "@/constants/layout";
 import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
 import { setCommandCenterFocusRestoreElement } from "@/utils/command-center-focus-restore";
@@ -10,9 +12,13 @@ import {
   type ChordState,
   type KeyboardShortcutInput,
   resolveKeyboardShortcut,
+  applyShortcutOverrides,
   buildEffectiveBindings,
   getWorkspaceIndexJumpModifierKey,
 } from "@/keyboard/keyboard-shortcuts";
+import { buildCommandBindings } from "@/commands/custom-commands-model";
+import { selectMergedCustomCommands, useCustomCommandsStore } from "@/stores/custom-commands-store";
+import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selection-store";
 import { resolveKeyboardFocusScope } from "@/keyboard/focus-scope";
 import {
   buildBrowserKeyboardPolicy,
@@ -28,6 +34,9 @@ import {
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { useKeyboardShortcutOverrides } from "@/hooks/use-keyboard-shortcut-overrides";
+import { useToast } from "@/contexts/toast-context";
+import { useSessionStore } from "@/stores/session-store";
+import { runCustomCommand } from "@/commands/run-custom-command";
 import { isNative } from "@/constants/platform";
 import { keyboardShortcutsAvailable } from "@/keyboard/availability";
 import { getDesktopHost, isElectronRuntime } from "@/desktop/host";
@@ -40,6 +49,9 @@ import {
   useActiveWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
 import { dispatchTopWebOverlayKeyDown } from "@/lib/overlay-root";
+import type { CustomCommand } from "@getpaseo/protocol/custom-commands";
+
+const NO_ACTIVE_COMMANDS: CustomCommand[] = [];
 
 export function useKeyboardShortcuts({
   enabled,
@@ -61,9 +73,9 @@ export function useKeyboardShortcuts({
   const keyboardActionDispatcher = useKeyboardActionDispatcher();
   const pathname = usePathname();
   const router = useRouter();
+  const toast = useToast();
   const resetModifiers = useKeyboardShortcutsStore((s) => s.resetModifiers);
   const { overrides } = useKeyboardShortcutOverrides();
-  const bindings = useMemo(() => buildEffectiveBindings(overrides), [overrides]);
   const shortcutsAvailable = keyboardShortcutsAvailable({ isNative, isCompact: isMobile });
   const isDesktopApp = getIsElectronRuntime();
   const isMac = getShortcutOs() === "mac";
@@ -76,6 +88,29 @@ export function useKeyboardShortcuts({
   const activeWorkspaceSelection = useActiveWorkspaceSelection();
   const keyboardWorkspaceSelectionRef = useRef<ActiveWorkspaceSelection | null>(null);
   const badgeModifierKeyRef = useRef<string | null | undefined>(undefined);
+
+  // Dynamic bindings for the active workspace's custom commands, appended after the defaults
+  // so a built-in always wins a shared combo (the matcher takes the first match). User
+  // overrides apply by binding id, the same record the shipped bindings read.
+  const { cwd: activeWorkspaceCwd } = useSelectedWorkspaceProject(
+    activeWorkspaceSelection?.serverId ?? null,
+    activeWorkspaceSelection?.workspaceId ?? null,
+  );
+  const activeWorkspaceCommands = useStoreWithEqualityFn(
+    useCustomCommandsStore,
+    (state) =>
+      activeWorkspaceSelection
+        ? selectMergedCustomCommands(state, activeWorkspaceSelection.serverId, activeWorkspaceCwd)
+        : NO_ACTIVE_COMMANDS,
+    equal,
+  );
+  const bindings = useMemo(() => {
+    const commandBindings = applyShortcutOverrides(
+      buildCommandBindings(activeWorkspaceCommands),
+      overrides,
+    );
+    return [...buildEffectiveBindings(overrides), ...commandBindings];
+  }, [overrides, activeWorkspaceCommands]);
 
   const publishBrowserShortcutPolicy = useCallback(
     (chordState?: ChordState) => {
@@ -163,16 +198,24 @@ export function useKeyboardShortcuts({
       "cycle-theme": cycleTheme,
     };
 
-    const performShortcutAction = (
-      action: ShortcutAction,
-      event: KeyboardEvent | null,
-      browserFocusRestoreElement: HTMLElement | null = null,
+    const performRouterAction = (
+      action: Extract<ShortcutAction, { kind: "router-replace" | "router-back" | "router-push" }>,
     ): boolean => {
       switch (action.kind) {
-        case "none":
-          return false;
-        case "dispatch":
-          return keyboardActionDispatcher.dispatch(action.action);
+        case "router-replace":
+          router.replace(action.route as Parameters<typeof router.replace>[0]);
+          return true;
+        case "router-back":
+          router.back();
+          return true;
+        case "router-push":
+          router.push(action.route as Parameters<typeof router.push>[0]);
+          return true;
+      }
+    };
+
+    const performNavigationAction = (action: ShortcutAction): boolean | null => {
+      switch (action.kind) {
         case "navigate-workspace":
           keyboardWorkspaceSelectionRef.current = {
             serverId: action.serverId,
@@ -187,20 +230,45 @@ export function useKeyboardShortcuts({
           router.replace(buildOpenProjectRoute());
           return true;
         case "router-replace":
-          router.replace(action.route as Parameters<typeof router.replace>[0]);
-          return true;
         case "router-back":
-          router.back();
-          return true;
         case "router-push":
-          router.push(action.route as Parameters<typeof router.push>[0]);
-          return true;
+          return performRouterAction(action);
         case "open-project-picker":
           void openProjectPickerAction();
           return true;
+        default:
+          return null;
+      }
+    };
+
+    const performShortcutAction = (
+      action: ShortcutAction,
+      event: KeyboardEvent | null,
+      browserFocusRestoreElement: HTMLElement | null = null,
+    ): boolean => {
+      const navigated = performNavigationAction(action);
+      if (navigated !== null) {
+        return navigated;
+      }
+      switch (action.kind) {
+        case "none":
+          return false;
+        case "dispatch":
+          return keyboardActionDispatcher.dispatch(action.action);
         case "callback":
           callbacksByName[action.name]?.();
           return true;
+        case "run-custom-command": {
+          const client = useSessionStore.getState().sessions[action.serverId]?.client ?? null;
+          void runCustomCommand({
+            serverId: action.serverId,
+            workspaceId: action.workspaceId,
+            command: action.command,
+            client,
+            onError: (message) => toast.error(message),
+          });
+          return true;
+        }
         case "command-center-toggle": {
           if (action.nextOpen) {
             if (event) {
@@ -217,6 +285,8 @@ export function useKeyboardShortcuts({
         case "shortcuts-dialog-toggle":
           useKeyboardShortcutsStore.getState().setShortcutsDialogOpen(action.nextOpen);
           return true;
+        default:
+          return false;
       }
     };
 
@@ -431,6 +501,7 @@ export function useKeyboardShortcuts({
     resetModifiers,
     router,
     shortcutsAvailable,
+    toast,
     toggleAgentList,
     toggleBothSidebars,
   ]);

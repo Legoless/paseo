@@ -51,6 +51,12 @@ interface DraftStoreActions {
     draftKey: string;
     attachment: WorkspaceFileComposerAttachment;
   }) => Promise<void>;
+  /**
+   * Replace a draft's text from outside the composer (custom commands). Bumps
+   * `textReplacementRequestByDraftKey` so a mounted composer re-publishes the new text the
+   * same way `replaceText` does in the hook — the store write alone never reaches it.
+   */
+  replaceDraftText: (input: { draftKey: string; text: string }) => Promise<void>;
   getCreateModalDraft: () => DraftInput | null;
   saveCreateModalDraft: (draft: DraftInput | null) => void;
   collectActiveAttachmentIds: () => string[];
@@ -58,6 +64,7 @@ interface DraftStoreActions {
 
 interface DraftStoreRuntimeState {
   attachmentFocusRequestByDraftKey: Record<string, number>;
+  textReplacementRequestByDraftKey: Record<string, number>;
 }
 
 type DraftStore = DraftStoreState & DraftStoreRuntimeState & DraftStoreActions;
@@ -254,6 +261,7 @@ export const useDraftStore = create<DraftStore>()(
       drafts: {},
       createModalDraft: null,
       attachmentFocusRequestByDraftKey: {},
+      textReplacementRequestByDraftKey: {},
 
       getDraftInput: (draftKey) => {
         const record = get().drafts[draftKey];
@@ -384,6 +392,29 @@ export const useDraftStore = create<DraftStore>()(
             attachmentFocusRequestByDraftKey: {
               ...state.attachmentFocusRequestByDraftKey,
               [draftKey]: (state.attachmentFocusRequestByDraftKey[draftKey] ?? 0) + 1,
+            },
+          };
+        });
+        scheduleAttachmentGc();
+      },
+
+      replaceDraftText: async ({ draftKey, text }) => {
+        await get().hydrateDraftInput({ draftKey });
+        set((state) => {
+          const existing = state.drafts[draftKey];
+          const draft = toDraftInputIfReady(existing) ?? { text: "", attachments: [] };
+          return {
+            drafts: {
+              ...state.drafts,
+              [draftKey]: createDraftRecord({
+                draft: { ...draft, text },
+                lifecycle: "active",
+                previousVersion: existing?.version,
+              }),
+            },
+            textReplacementRequestByDraftKey: {
+              ...state.textReplacementRequestByDraftKey,
+              [draftKey]: (state.textReplacementRequestByDraftKey[draftKey] ?? 0) + 1,
             },
           };
         });

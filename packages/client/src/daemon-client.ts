@@ -488,6 +488,10 @@ type ReadProjectConfigPayload = Extract<
   SessionOutboundMessage,
   { type: "read_project_config_response" }
 >["payload"];
+type ListProjectCommandsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "commands.project.list.response" }
+>["payload"];
 type WriteProjectConfigPayload = Extract<
   SessionOutboundMessage,
   { type: "write_project_config_response" }
@@ -4941,6 +4945,16 @@ export class DaemonClient {
         repoRoot,
       },
       responseType: "read_project_config_response",
+    });
+  }
+
+  async listProjectCommands(cwd: string, requestId?: string): Promise<ListProjectCommandsPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"commands.project.list.response">({
+      requestId,
+      message: {
+        type: "commands.project.list.request",
+        cwd,
+      },
     });
   }
 

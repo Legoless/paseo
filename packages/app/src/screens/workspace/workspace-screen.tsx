@@ -39,6 +39,8 @@ import {
 import { SplitContainer } from "@/components/split-container";
 import { RetainedPanel } from "@/components/retained-panel";
 import { WorkspaceActions } from "@/git/workspace-actions";
+import { WorkspaceCommandsButton } from "@/commands/workspace-commands-button";
+import { useCustomCommandsSupported } from "@/commands/use-custom-commands-supported";
 import { WorkspaceOpenInEditorButton } from "@/workspace/open-in-editor/button";
 import { WorkspaceScriptsButton } from "@/screens/workspace/workspace-scripts-button";
 import { ImportSessionSheet } from "@/components/import-session-sheet";
@@ -1008,6 +1010,7 @@ interface WorkspaceHeaderTitleBarProps {
   isSubtitleDistinct: boolean;
   normalizedServerId: string;
   normalizedWorkspaceId: string;
+  workspaceDirectory: string | null;
   workspaceScripts: WorkspaceDescriptor["scripts"];
   liveTerminalIds: string[];
   showWorkspaceSetup: boolean;
@@ -1041,6 +1044,7 @@ function WorkspaceHeaderTitleBar({
   isSubtitleDistinct,
   normalizedServerId,
   normalizedWorkspaceId,
+  workspaceDirectory,
   workspaceScripts,
   liveTerminalIds,
   showWorkspaceSetup,
@@ -1066,6 +1070,7 @@ function WorkspaceHeaderTitleBar({
   onViewScriptTerminal,
   onOpenUrlInBrowserTab,
 }: WorkspaceHeaderTitleBarProps) {
+  const customCommandsSupported = useCustomCommandsSupported(normalizedServerId);
   return (
     <View style={styles.headerTitleContainer}>
       {isLoading ? (
@@ -1134,6 +1139,15 @@ function WorkspaceHeaderTitleBar({
             onScriptTerminalStarted={onScriptTerminalStarted}
             onViewTerminal={onViewScriptTerminal}
             onOpenUrlInBrowserTab={onOpenUrlInBrowserTab}
+            hideLabels
+            presentation="ghost"
+          />
+        ) : null}
+        {isMobile && customCommandsSupported && workspaceDirectory ? (
+          <WorkspaceCommandsButton
+            serverId={normalizedServerId}
+            workspaceId={normalizedWorkspaceId}
+            cwd={workspaceDirectory}
             hideLabels
             presentation="ghost"
           />
@@ -1657,6 +1671,7 @@ function WorkspaceScreenContent({
   const supportsProvidersSnapshot = useSessionStore(
     (state) => state.sessions[normalizedServerId]?.serverInfo?.features?.providersSnapshot === true,
   );
+  const customCommandsSupported = useCustomCommandsSupported(normalizedServerId);
   const { cwd: workspaceDirectory } = useSelectedWorkspaceProject(
     normalizedServerId,
     normalizedWorkspaceId,
@@ -3983,6 +3998,14 @@ function WorkspaceScreenContent({
         {!isMobile && !canRenderDesktopPaneSplits && workspaceDirectory ? (
           <>
             <WorkspaceActions serverId={normalizedServerId} cwd={workspaceDirectory} />
+            {customCommandsSupported ? (
+              <WorkspaceCommandsButton
+                serverId={normalizedServerId}
+                workspaceId={normalizedWorkspaceId}
+                cwd={workspaceDirectory}
+                hideLabels
+              />
+            ) : null}
             <DesktopFallbackExplorerToggle
               visible={!canRenderDesktopPaneSplits}
               owner={explorerToggleOwner}
@@ -4014,6 +4037,7 @@ function WorkspaceScreenContent({
       normalizedServerId,
       normalizedWorkspaceId,
       workspaceDirectory,
+      customCommandsSupported,
       activeFileLocation,
       liveTerminalIds,
       handleScriptTerminalStarted,
@@ -4076,6 +4100,7 @@ function WorkspaceScreenContent({
                 isSubtitleDistinct={isWorkspaceHeaderSubtitleDistinct}
                 normalizedServerId={normalizedServerId}
                 normalizedWorkspaceId={normalizedWorkspaceId}
+                workspaceDirectory={workspaceDirectory}
                 workspaceScripts={workspaceScripts}
                 liveTerminalIds={liveTerminalIds}
                 showWorkspaceSetup={showWorkspaceSetup}
@@ -4131,6 +4156,7 @@ function WorkspaceScreenContent({
       workspaceHeaderSubtitle,
       workspaceHeaderTitle,
       isWorkspaceHeaderSubtitleDistinct,
+      workspaceDirectory,
       workspaceScripts,
     ],
   );

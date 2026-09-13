@@ -745,6 +745,22 @@ export const es: TranslationResources = {
         stopFailed: "No se pudo detener{{scriptName}}",
       },
     },
+    commands: {
+      title: "Comandos",
+      groups: {
+        project: "Proyecto",
+        global: "Global",
+      },
+      accessibility: {
+        trigger: "Comandos del espacio de trabajo",
+      },
+      shortcutTaken: "Atajo en uso",
+      errors: {
+        noAgentTarget: "No hay ninguna pestaña de chat para ejecutar este comando",
+        noTerminalTarget: "No hay ninguna pestaña de terminal para ejecutar este comando",
+        sendFailed: "No se pudo enviar el comando",
+      },
+    },
     tree: {
       showFolderTree: "Mostrar árbol de carpetas",
       hideFolderTree: "Ocultar árbol de carpetas",
@@ -2262,6 +2278,7 @@ export const es: TranslationResources = {
         tabsPanes: "Pestañas y paneles",
         layout: "Diseño",
         agentInput: "EntradaAgent",
+        commands: "Comandos",
       },
       help: {
         openProject: "Abrir proyecto",
