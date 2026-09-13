@@ -42,7 +42,11 @@ import {
   setupDragDropPrevention,
   buildStandardContextMenuItems,
 } from "./window/window-manager.js";
-import { setupDarwinCompositorWatchdog } from "./window/compositor-watchdog/index.js";
+import {
+  registerTerminalGuestCompositorWatchdogTarget,
+  setupDarwinCompositorWatchdog,
+  unregisterTerminalGuestCompositorWatchdogTarget,
+} from "./window/compositor-watchdog/index.js";
 import { resolveDesktopWindowChromeMode, windowChromeModeArgument } from "./window/chrome.js";
 import { registerDialogHandlers } from "./features/dialogs.js";
 import {
@@ -771,6 +775,10 @@ async function createWindow(
       preparePaseoTerminalWebContents(contents);
       observePaseoTerminalGuestState(contents, mainWindow.webContents);
       browserKeyboard.attachTerminalGuest({ contents, hostContents: mainWindow.webContents });
+      registerTerminalGuestCompositorWatchdogTarget({ contents, hostWindow: mainWindow });
+      contents.once("destroyed", () => {
+        unregisterTerminalGuestCompositorWatchdogTarget(contents.id);
+      });
       return;
     }
     preparePaseoBrowserWebContents(contents);
