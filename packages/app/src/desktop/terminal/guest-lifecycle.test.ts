@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   INITIAL_TERMINAL_GUEST_LIFECYCLE_STATE,
   TERMINAL_GUEST_BRIDGE_READY_TIMEOUT_MS,
+  TERMINAL_GUEST_HEARTBEAT_DEADLINE_MS,
   TERMINAL_GUEST_RENDERER_READY_TIMEOUT_MS,
   isTerminalGuestOverlayVisible,
   reduceTerminalGuestLifecycle,
@@ -27,6 +28,7 @@ describe("terminal guest lifecycle reducer", () => {
       rendererReady: false,
       bridgeReadyDeadline: null,
       rendererReadyDeadline: null,
+      lastAliveAt: null,
     });
   });
 
@@ -172,6 +174,52 @@ describe("terminal guest lifecycle reducer", () => {
         ),
       ),
     ).toBe(true);
+  });
+
+  test("heartbeat silences the hang watchdog while ready", () => {
+    const ready = reduce(
+      INITIAL_TERMINAL_GUEST_LIFECYCLE_STATE,
+      { type: "mount", now: 0 },
+      { type: "bridgeReady", now: 100 },
+      { type: "rendererReady", now: 200 },
+    );
+    expect(ready.phase).toBe("ready");
+    expect(ready.lastAliveAt).toBe(200);
+
+    const alive = reduce(ready, {
+      type: "tick",
+      now: 200 + TERMINAL_GUEST_HEARTBEAT_DEADLINE_MS - 1,
+    });
+    expect(alive.phase).toBe("ready");
+
+    const withBeat = reduce(alive, { type: "heartbeat", now: 5_000 });
+    expect(withBeat.lastAliveAt).toBe(5_000);
+    expect(
+      reduce(withBeat, { type: "tick", now: 5_000 + TERMINAL_GUEST_HEARTBEAT_DEADLINE_MS - 1 })
+        .phase,
+    ).toBe("ready");
+  });
+
+  test("missed heartbeats mark a ready guest hung, and a resumed guest recovers", () => {
+    const ready = reduce(
+      INITIAL_TERMINAL_GUEST_LIFECYCLE_STATE,
+      { type: "mount", now: 0 },
+      { type: "bridgeReady", now: 100 },
+      { type: "rendererReady", now: 200 },
+    );
+    const hung = reduce(ready, { type: "tick", now: 200 + TERMINAL_GUEST_HEARTBEAT_DEADLINE_MS });
+    expect(hung.phase).toBe("hung");
+    expect(isTerminalGuestOverlayVisible(hung)).toBe(true);
+
+    const recovered = reduce(hung, { type: "heartbeat", now: 10_000 });
+    expect(recovered.phase).toBe("ready");
+    expect(recovered.lastAliveAt).toBe(10_000);
+  });
+
+  test("heartbeats without a mounted guest never mark the guest alive", () => {
+    const state = reduce(INITIAL_TERMINAL_GUEST_LIFECYCLE_STATE, { type: "heartbeat", now: 1_000 });
+    expect(state.phase).toBe("idle");
+    expect(state.lastAliveAt).toBeNull();
   });
 });
 

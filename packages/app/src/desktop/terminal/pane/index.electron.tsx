@@ -91,6 +91,7 @@ type BridgeOutboundMessage =
       meta: boolean;
     }
   | { type: "pendingModifiersConsumed"; streamKey: string }
+  | { type: "heartbeat"; streamKey: string }
   | { type: "inputModeChange"; streamKey: string; state: TerminalInputModeState }
   | { type: "openExternalUrl"; streamKey: string; url: string }
   | {
@@ -207,6 +208,7 @@ export function IsolatedTerminalEmulator({
   onResolveLocalFileLink,
   onOpenLocalFileLink,
   onRendererReadyChange,
+  onGuestReloaded,
   pendingModifiers = { ctrl: false, shift: false, alt: false },
   focusRequestToken = 0,
   resizeRequestToken = 0,
@@ -223,6 +225,8 @@ export function IsolatedTerminalEmulator({
   const outputDecoderRef = useRef(new TextDecoder());
   const mountRequestedStreamKeyRef = useRef<string | null>(null);
   const rendererReadyStreamKeyRef = useRef<string | null>(null);
+  const focusOnReadyAfterReloadRef = useRef(false);
+  const needsHostRepaintRef = useRef(true);
   const mountConfigRef = useRef({
     streamKey,
     initialSnapshot,
@@ -251,6 +255,7 @@ export function IsolatedTerminalEmulator({
     onPendingModifiersConsumed,
     onInputModeChange,
     onRendererReadyChange,
+    onGuestReloaded,
     onResolveLocalFileLink,
     onOpenLocalFileLink,
     onSwipeLeft,
@@ -264,6 +269,7 @@ export function IsolatedTerminalEmulator({
     onPendingModifiersConsumed,
     onInputModeChange,
     onRendererReadyChange,
+    onGuestReloaded,
     onResolveLocalFileLink,
     onOpenLocalFileLink,
     onSwipeLeft,
@@ -277,6 +283,27 @@ export function IsolatedTerminalEmulator({
       return;
     }
     webview.send(TERMINAL_GUEST_MESSAGE_CHANNEL, JSON.stringify(message));
+    // A recreated webview's surface is not re-presented by the embedder until the host
+    // composites the region again (verified: content sits painted-but-invisible for minutes
+    // with a live guest). The first content message after a mount is when the guest actually
+    // has something on its surface, so invalidate the host container once, right after it.
+    if (
+      needsHostRepaintRef.current &&
+      (message.type === "restoreOutput" ||
+        message.type === "renderSnapshot" ||
+        message.type === "writeOutput")
+    ) {
+      needsHostRepaintRef.current = false;
+      const host = hostRef.current;
+      if (host) {
+        setTimeout(() => {
+          host.style.filter = "brightness(0.999)";
+          setTimeout(() => {
+            host.style.filter = "";
+          }, 100);
+        }, 100);
+      }
+    }
   }, []);
 
   const flushPendingMessages = useCallback(() => {
@@ -372,28 +399,46 @@ export function IsolatedTerminalEmulator({
     outputDecoderRef.current.decode();
   }, [streamKey]);
 
-  const handleLifecycleMessage = useCallback((message: BridgeOutboundMessage): boolean => {
-    if (message.type === "bridgeReady") {
-      bridgeReadyRef.current = true;
-      dispatchLifecycle({ type: "bridgeReady", now: Date.now() });
-      setBridgeReadyVersion((value) => value + 1);
-      return true;
-    }
-    if (message.type === "rendererReady") {
-      if (message.streamKey === mountRequestedStreamKeyRef.current) {
-        rendererReadyStreamKeyRef.current = message.isReady ? message.streamKey : null;
-        if (message.isReady) {
-          dispatchLifecycle({ type: "rendererReady", now: Date.now() });
-        }
+  const handleLifecycleMessage = useCallback(
+    (message: BridgeOutboundMessage): boolean => {
+      if (message.type === "heartbeat") {
+        dispatchLifecycle({ type: "heartbeat", now: Date.now() });
+        return true;
       }
-      callbacksRef.current.onRendererReadyChange?.({
-        streamKey: message.streamKey,
-        isReady: message.isReady,
-      });
-      return true;
-    }
-    return false;
-  }, []);
+      if (message.type === "bridgeReady") {
+        bridgeReadyRef.current = true;
+        dispatchLifecycle({ type: "bridgeReady", now: Date.now() });
+        setBridgeReadyVersion((value) => value + 1);
+        return true;
+      }
+      if (message.type === "rendererReady") {
+        if (message.streamKey === mountRequestedStreamKeyRef.current) {
+          rendererReadyStreamKeyRef.current = message.isReady ? message.streamKey : null;
+          if (message.isReady) {
+            dispatchLifecycle({ type: "rendererReady", now: Date.now() });
+            // A reload-initiated remount is the user resuming the terminal. Electron does not
+            // route keys into a recreated webview on its own, so hand it focus explicitly. Route
+            // through the pane's focus handler so the size-claim dedupe ref resets — the stream
+            // cache may be empty here (a restore clears it) and only a daemon claim re-sends the
+            // current snapshot.
+            if (focusOnReadyAfterReloadRef.current) {
+              focusOnReadyAfterReloadRef.current = false;
+              webviewRef.current?.focus();
+              sendToWebView({ type: "focus", streamKey, forceRefocus: true });
+              callbacksRef.current.onFocus?.();
+            }
+          }
+        }
+        callbacksRef.current.onRendererReadyChange?.({
+          streamKey: message.streamKey,
+          isReady: message.isReady,
+        });
+        return true;
+      }
+      return false;
+    },
+    [sendToWebView, streamKey],
+  );
 
   const resolveLocalFileLink = useCallback(
     async (message: Extract<BridgeOutboundMessage, { type: "resolveLocalFileLink" }>) => {
@@ -491,7 +536,11 @@ export function IsolatedTerminalEmulator({
         return;
       }
 
-      if (message.type === "bridgeReady" || message.type === "rendererReady") {
+      if (
+        message.type === "bridgeReady" ||
+        message.type === "rendererReady" ||
+        message.type === "heartbeat"
+      ) {
         handleLifecycleMessage(message);
         return;
       }
@@ -542,6 +591,7 @@ export function IsolatedTerminalEmulator({
     webview.addEventListener("destroyed", handleDestroyed);
     host.replaceChildren(webview);
     webviewRef.current = webview;
+    needsHostRepaintRef.current = true;
     dispatchLifecycle({ type: "mount", now: Date.now() });
 
     return () => {
@@ -593,7 +643,7 @@ export function IsolatedTerminalEmulator({
   }, []);
 
   useEffect(() => {
-    if (lifecycle.phase !== "mounting") {
+    if (lifecycle.phase !== "mounting" && lifecycle.phase !== "ready") {
       return;
     }
     const timer = setInterval(() => {
@@ -603,6 +653,8 @@ export function IsolatedTerminalEmulator({
   }, [lifecycle.phase]);
 
   const handleReloadGuest = useCallback(() => {
+    focusOnReadyAfterReloadRef.current = true;
+    callbacksRef.current.onGuestReloaded?.();
     scheduleDeferredReload(() => {
       dispatchLifecycle({ type: "reload", now: Date.now() });
     });

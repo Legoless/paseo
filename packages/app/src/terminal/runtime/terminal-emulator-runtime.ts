@@ -189,6 +189,7 @@ export class TerminalEmulatorRuntime {
   // after another barrier it's false and the barrier applies immediately, saving a parse
   // cycle of latency. Cleared when a barrier starts (it gates every write before it).
   private hasUngatedWrites = false;
+  private needsTextureAtlasReset = true;
   private readonly inputModeDecoder = new TextDecoder();
   private suppressInput = false;
   private readonly inputModeTracker = new TerminalInputModeTracker();
@@ -929,6 +930,19 @@ export class TerminalEmulatorRuntime {
       this.clearInFlightOutputTimeout();
       this.suppressInput = previousSuppressInput;
       expectedOperation.onCommitted?.();
+      if (expectedOperation.type === "snapshot" && this.needsTextureAtlasReset) {
+        this.needsTextureAtlasReset = false;
+        // A terminal mounted into a fresh renderer surface paints blank until the canvas
+        // glyph atlas is regenerated (verified: Electron webview remount shows nothing while
+        // the buffer holds the full restore). The first snapshot commit is the first moment
+        // content exists, so reset the atlas and repaint here.
+        try {
+          terminal.clearTextureAtlas();
+        } catch {
+          // Renderer without a texture atlas (e.g. DOM renderer) — nothing to reset.
+        }
+        this.refreshVisibleRows();
+      }
       this.processOutputQueue();
     };
 
