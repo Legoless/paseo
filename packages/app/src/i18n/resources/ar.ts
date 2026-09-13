@@ -2077,6 +2077,11 @@ export const ar: TranslationResources = {
         description: "استخدام طرفية WebView السابقة بعد إعادة فتح الطرفية",
         accessibilityLabel: "استخدام عارض الطرفية السابق",
       },
+      isolatedTerminalRenderer: {
+        label: "عزل عارض الطرفية",
+        description: "عرض كل طرفية في عملية منفصلة (سطح المكتب فقط)",
+        accessibilityLabel: "عزل عارض الطرفية",
+      },
       testAudio: "اختبار الصوت",
       playTest: "لعب الاختبار",
       playing: "جارٍ اللعب...",

@@ -53,6 +53,9 @@ import { useBlockMobilePanelOpenGestures } from "@/mobile-panels/provider";
 import { useSessionStore } from "@/stores/session-store";
 import { toXtermTheme } from "@/utils/to-xterm-theme";
 import TerminalEmulator, { type TerminalEmulatorHandle } from "./terminal-emulator";
+import type { TerminalEmulatorProps } from "./terminal-emulator-contract";
+import { IsolatedTerminalEmulator } from "@/desktop/terminal/pane";
+import { useIsolatedTerminalRenderer } from "@/terminal/guest/use-isolated-terminal-renderer";
 import { TerminalFloatingCopyAction, TerminalPasteAction } from "./terminal-copy-paste-actions";
 import {
   createTerminalResizeDebouncer,
@@ -267,6 +270,7 @@ export function TerminalPane({
   const [resizeRequestToken, setResizeRequestToken] = useState(0);
   useBlockMobilePanelOpenGestures(isMobile && isWorkspaceFocused && isPaneFocused && hasSelection);
   const emulatorRef = useRef<TerminalEmulatorHandle>(null);
+  const isolatedTerminalRenderer = useIsolatedTerminalRenderer();
   const terminalIdRef = useRef<string>(terminalId);
   const terminalPresentedRef = useRef(isTerminalPresented);
   terminalPresentedRef.current = isTerminalPresented;
@@ -1031,6 +1035,37 @@ export function TerminalPane({
     terminalStreamKey,
   });
 
+  // Identical prop set for both renderers so behavior parity is structural, not duplicated.
+  const emulatorProps = {
+    dom: TERMINAL_EMULATOR_DOM_PROPS,
+    streamKey: terminalStreamKey,
+    supportsTerminalInputModeReplay,
+    testId: "terminal-surface",
+    xtermTheme,
+    scrollbackLines: settings.terminalScrollbackLines,
+    fontFamily: terminalFontFamily,
+    fontSize: settings.codeFontSize,
+    keyboardInset,
+    isKeyboardVisible,
+    swipeGesturesEnabled,
+    initialSnapshot,
+    onRendererReadyChange: handleRendererReadyChange,
+    onSwipeRight: handleSwipeRight,
+    onSwipeLeft: handleSwipeLeft,
+    onInput: handleTerminalData,
+    onFocus: handleTerminalFocus,
+    onResize: handleTerminalResize,
+    onTerminalKey: handleTerminalKey,
+    onInputModeChange: handleInputModeChange,
+    onSelectionChange: handleSelectionChange,
+    onResolveLocalFileLink: handleResolveLocalFileLink,
+    onOpenLocalFileLink: handleOpenLocalFileLink,
+    onPendingModifiersConsumed: handlePendingModifiersConsumed,
+    pendingModifiers: modifiers,
+    focusRequestToken,
+    resizeRequestToken,
+  } satisfies Omit<TerminalEmulatorProps, "ref">;
+
   if (!client || !isConnected) {
     return (
       <View style={styles.centerState}>
@@ -1043,36 +1078,11 @@ export function TerminalPane({
     <Animated.View style={containerStyle}>
       <View style={styles.outputContainer}>
         <View style={styles.terminalGestureContainer}>
-          <TerminalEmulator
-            ref={emulatorRef}
-            dom={TERMINAL_EMULATOR_DOM_PROPS}
-            streamKey={terminalStreamKey}
-            supportsTerminalInputModeReplay={supportsTerminalInputModeReplay}
-            testId="terminal-surface"
-            xtermTheme={xtermTheme}
-            scrollbackLines={settings.terminalScrollbackLines}
-            fontFamily={terminalFontFamily}
-            fontSize={settings.codeFontSize}
-            keyboardInset={keyboardInset}
-            isKeyboardVisible={isKeyboardVisible}
-            swipeGesturesEnabled={swipeGesturesEnabled}
-            initialSnapshot={initialSnapshot}
-            onRendererReadyChange={handleRendererReadyChange}
-            onSwipeRight={handleSwipeRight}
-            onSwipeLeft={handleSwipeLeft}
-            onInput={handleTerminalData}
-            onFocus={handleTerminalFocus}
-            onResize={handleTerminalResize}
-            onTerminalKey={handleTerminalKey}
-            onInputModeChange={handleInputModeChange}
-            onSelectionChange={handleSelectionChange}
-            onResolveLocalFileLink={handleResolveLocalFileLink}
-            onOpenLocalFileLink={handleOpenLocalFileLink}
-            onPendingModifiersConsumed={handlePendingModifiersConsumed}
-            pendingModifiers={modifiers}
-            focusRequestToken={focusRequestToken}
-            resizeRequestToken={resizeRequestToken}
-          />
+          {isolatedTerminalRenderer ? (
+            <IsolatedTerminalEmulator ref={emulatorRef} {...emulatorProps} />
+          ) : (
+            <TerminalEmulator ref={emulatorRef} {...emulatorProps} />
+          )}
         </View>
 
         {showLoadingOverlay ? (

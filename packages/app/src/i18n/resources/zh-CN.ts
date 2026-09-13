@@ -2052,6 +2052,11 @@ export const zhCN: TranslationResources = {
         description: "重新打开终端后使用之前的 WebView 终端",
         accessibilityLabel: "使用旧版终端渲染器",
       },
+      isolatedTerminalRenderer: {
+        label: "隔离终端渲染器",
+        description: "在独立进程中渲染每个终端（仅桌面端）",
+        accessibilityLabel: "隔离终端渲染器",
+      },
       testAudio: "测试音频",
       playTest: "播放测试",
       playing: "正在播放...",

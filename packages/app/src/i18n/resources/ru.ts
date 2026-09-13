@@ -2111,6 +2111,11 @@ export const ru: TranslationResources = {
         description: "Использовать прежний WebView-терминал после повторного открытия",
         accessibilityLabel: "Использовать прежний рендерер терминала",
       },
+      isolatedTerminalRenderer: {
+        label: "Изолировать рендерер терминала",
+        description: "Отрисовывать каждый терминал в отдельном процессе (только для компьютера)",
+        accessibilityLabel: "Изолировать рендерер терминала",
+      },
       testAudio: "Проверка звука",
       playTest: "Воспроизвести тестовый звук",
       playing: "Воспроизведение...",

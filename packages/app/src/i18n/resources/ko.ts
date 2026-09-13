@@ -2088,6 +2088,11 @@ export const ko: TranslationResources = {
         description: "터미널을 다시 열 때 이전 WebView 터미널을 사용합니다.",
         accessibilityLabel: "레거시 터미널 렌더러 사용",
       },
+      isolatedTerminalRenderer: {
+        label: "터미널 렌더러 격리",
+        description: "각 터미널을 별도 프로세스에서 렌더링합니다(데스크톱 전용).",
+        accessibilityLabel: "터미널 렌더러 격리",
+      },
       testAudio: "오디오 테스트",
       playTest: "테스트 재생",
       playing: "재생 중...",

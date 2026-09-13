@@ -11,6 +11,10 @@ import type {
   TerminalLocalFileLinkSource,
   TerminalLocalFileLinkTarget,
 } from "../local-links/terminal-local-link-provider";
+import {
+  sendTerminalGuestMessage,
+  subscribeTerminalGuestMessages,
+} from "./terminal-emulator-webview-transport";
 
 interface MountMessage {
   type: "mount";
@@ -88,16 +92,13 @@ type OutboundMessage =
 
 declare global {
   interface Window {
-    ReactNativeWebView?: {
-      postMessage?: (data: string) => void;
-    };
     __PASEO_TERMINAL_WEBVIEW_RECEIVE__?: (message: InboundMessage) => void;
     __PASEO_TERMINAL_WEBVIEW_BLUR__?: () => void;
   }
 }
 
 const sendToNative = (message: OutboundMessage): void => {
-  window.ReactNativeWebView?.postMessage?.(JSON.stringify(message));
+  sendTerminalGuestMessage(message);
 };
 
 const TERMINAL_BACKGROUND_CSS_VAR = "--paseo-terminal-background";
@@ -544,4 +545,5 @@ document.body.appendChild(root);
 const bridge = new TerminalWebViewBridge(root, host);
 window.__PASEO_TERMINAL_WEBVIEW_RECEIVE__ = bridge.receive;
 window.__PASEO_TERMINAL_WEBVIEW_BLUR__ = bridge.blur;
+subscribeTerminalGuestMessages((message) => bridge.receive(message as InboundMessage));
 sendToNative({ type: "bridgeReady" });

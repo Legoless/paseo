@@ -2094,6 +2094,11 @@ export const ja: TranslationResources = {
         description: "ターミナルを開き直した後、以前の WebView ターミナルを使用します",
         accessibilityLabel: "以前のターミナルレンダラーを使用",
       },
+      isolatedTerminalRenderer: {
+        label: "ターミナルレンダラーを分離",
+        description: "各ターミナルを個別のプロセスで描画します（デスクトップのみ）",
+        accessibilityLabel: "ターミナルレンダラーを分離",
+      },
       testAudio: "音声をテスト",
       playTest: "テスト再生",
       playing: "再生中...",

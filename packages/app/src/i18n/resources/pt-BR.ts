@@ -2111,6 +2111,11 @@ export const ptBR: TranslationResources = {
         description: "Usa o terminal WebView anterior após reabrir um terminal",
         accessibilityLabel: "Usar renderizador de terminal anterior",
       },
+      isolatedTerminalRenderer: {
+        label: "Isolar renderizador de terminal",
+        description: "Renderiza cada terminal em seu próprio processo (somente desktop)",
+        accessibilityLabel: "Isolar renderizador de terminal",
+      },
       testAudio: "Testar áudio",
       playTest: "Reproduzir teste",
       playing: "Reproduzindo...",

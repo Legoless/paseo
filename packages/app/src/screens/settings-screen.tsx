@@ -130,7 +130,7 @@ import {
 } from "@/utils/host-routes";
 import { useLastWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { returnFromSettings, type SettingsView } from "@/navigation/settings-navigation";
-import { isNative, isWeb } from "@/constants/platform";
+import { getIsElectron, isNative, isWeb } from "@/constants/platform";
 
 // ---------------------------------------------------------------------------
 // View model
@@ -511,6 +511,8 @@ function GeneralSection({
 interface DiagnosticsSectionProps {
   useLegacyTerminalRenderer: boolean;
   onUseLegacyTerminalRendererChange: (value: boolean) => void;
+  useIsolatedTerminalRenderer: boolean;
+  onUseIsolatedTerminalRendererChange: (value: boolean) => void;
   voiceAudioEngine: ReturnType<typeof useVoiceAudioEngineOptional>;
   isPlaybackTestRunning: boolean;
   playbackTestResult: string | null;
@@ -520,6 +522,8 @@ interface DiagnosticsSectionProps {
 function DiagnosticsSection({
   useLegacyTerminalRenderer,
   onUseLegacyTerminalRendererChange,
+  useIsolatedTerminalRenderer,
+  onUseIsolatedTerminalRendererChange,
   voiceAudioEngine,
   isPlaybackTestRunning,
   playbackTestResult,
@@ -550,6 +554,26 @@ function DiagnosticsSection({
                 "settings.diagnostics.legacyTerminalRenderer.accessibilityLabel",
               )}
               testID="legacy-terminal-renderer-switch"
+            />
+          </View>
+        ) : null}
+        {getIsElectron() ? (
+          <View style={settingsStyles.row} testID="isolated-terminal-renderer-row">
+            <View style={settingsStyles.rowContent}>
+              <Text style={settingsStyles.rowTitle}>
+                {t("settings.diagnostics.isolatedTerminalRenderer.label")}
+              </Text>
+              <Text style={settingsStyles.rowHint}>
+                {t("settings.diagnostics.isolatedTerminalRenderer.description")}
+              </Text>
+            </View>
+            <Switch
+              value={useIsolatedTerminalRenderer}
+              onValueChange={onUseIsolatedTerminalRendererChange}
+              accessibilityLabel={t(
+                "settings.diagnostics.isolatedTerminalRenderer.accessibilityLabel",
+              )}
+              testID="isolated-terminal-renderer-switch"
             />
           </View>
         ) : null}
@@ -1263,6 +1287,13 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     [updateSettings],
   );
 
+  const handleUseIsolatedTerminalRendererChange = useCallback(
+    (useIsolatedTerminalRenderer: boolean) => {
+      void updateSettings({ useIsolatedTerminalRenderer });
+    },
+    [updateSettings],
+  );
+
   const handlePlaybackTest = useCallback(async () => {
     if (!voiceAudioEngine || isPlaybackTestRunning) {
       return;
@@ -1497,6 +1528,8 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
               <DiagnosticsSection
                 useLegacyTerminalRenderer={settings.useLegacyTerminalRenderer}
                 onUseLegacyTerminalRendererChange={handleUseLegacyTerminalRendererChange}
+                useIsolatedTerminalRenderer={settings.useIsolatedTerminalRenderer}
+                onUseIsolatedTerminalRendererChange={handleUseIsolatedTerminalRendererChange}
                 voiceAudioEngine={voiceAudioEngine}
                 isPlaybackTestRunning={isPlaybackTestRunning}
                 playbackTestResult={playbackTestResult}
