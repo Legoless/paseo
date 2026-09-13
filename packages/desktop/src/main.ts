@@ -15,6 +15,7 @@ import {
   autoUpdater as electronAutoUpdater,
   BrowserWindow,
   clipboard,
+  ClipboardItem,
   Menu,
   ipcMain,
   nativeImage,
@@ -517,8 +518,20 @@ ipcMain.handle("paseo:browser:clear-profile", async (_event, rawLegacyBrowserIds
 
 const browserCapture = createBrowserCaptureService<Electron.NativeImage>({
   findGuest: getPaseoBrowserWebContentsForHostWindow,
-  decodeImage: (dataUrl) => nativeImage.createFromDataURL(dataUrl),
-  clipboard,
+  clipboard: {
+    write: (entries) =>
+      clipboard.write([
+        new ClipboardItem(
+          Object.fromEntries(
+            Object.entries(entries).map(([mimeType, data]) => [
+              mimeType,
+              typeof data === "string" ? data : new Blob([data], { type: mimeType }),
+            ]),
+          ),
+        ),
+      ]),
+    writeText: (text) => clipboard.writeText(text),
+  },
   warn: (event, details) => log.warn(`[browser-capture] ${event}`, details),
 });
 
