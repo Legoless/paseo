@@ -2387,6 +2387,24 @@ export class Session {
     }
   }
 
+  private dispatchCustomCommandsMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "commands.global.set.request":
+        this.emit({
+          type: "commands.global.set.response",
+          payload: {
+            requestId: msg.requestId,
+            config: this.daemonConfigStore.setCustomCommands(msg.commands, msg.expectedCommands),
+          },
+        });
+        return undefined;
+      case "commands.project.list.request":
+        return this.projectCommandsSession.handleCommandsProjectListRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
   private dispatchAgentConfigMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     switch (msg.type) {
       case "set_agent_mode_request":
@@ -2434,10 +2452,8 @@ export class Session {
         return this.projectConfigSession.handleReadProjectConfigRequest(msg);
       case "write_project_config_request":
         return this.projectConfigSession.handleWriteProjectConfigRequest(msg);
-      case "commands.project.list.request":
-        return this.projectCommandsSession.handleCommandsProjectListRequest(msg);
       default:
-        return undefined;
+        return this.dispatchCustomCommandsMessage(msg);
     }
   }
 

@@ -1,3 +1,8 @@
+import { readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { parseCustomCommandsFile, type CustomCommand } from "@getpaseo/protocol/custom-commands";
+import { CUSTOM_COMMANDS_FILENAME, loadCustomCommands } from "./custom-commands.js";
+import { writePrivateFileAtomicSync } from "./private-files.js";
 import {
   loadPersistedConfig,
   savePersistedConfig,
@@ -339,6 +344,49 @@ export class DaemonConfigStore {
   public patch(partial: MutableDaemonConfigPatch): MutableDaemonConfig {
     const parsedPatch = pickSupportedPatchFields(MutableDaemonConfigPatchSchema.parse(partial));
     return this.applySupportedPatch(parsedPatch);
+  }
+
+  public setCustomCommands(
+    commands: CustomCommand[],
+    expectedCommands: CustomCommand[],
+  ): MutableDaemonConfig {
+    const parsed = parseCustomCommandsFile({ commands });
+    if (!parsed.ok) throw new Error(parsed.error);
+    const ids = new Set<string>();
+    for (const command of parsed.data.commands) {
+      if (!command.title.trim() || !command.text.trim() || ids.has(command.id)) {
+        throw new Error("Commands must have a name, text, and unique id");
+      }
+      ids.add(command.id);
+    }
+    const loaded = loadCustomCommands(this.paseoHome);
+    if (loaded.errors.length) throw new Error(loaded.errors.join("\n"));
+    if (!isEqualValue(loaded.commands, expectedCommands)) {
+      this.applyReplacement(
+        { ...this.current, customCommands: loaded.commands, customCommandErrors: [] },
+        { removedProviders: [] },
+      );
+      throw new Error("Commands changed. Close the editor and try again.");
+    }
+    const filePath = join(this.paseoHome, CUSTOM_COMMANDS_FILENAME);
+    let previous: string | null = null;
+    try {
+      previous = readFileSync(filePath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    writePrivateFileAtomicSync(filePath, JSON.stringify(parsed.data, null, 2) + "\n");
+    try {
+      this.applyReplacement(
+        { ...this.current, customCommands: parsed.data.commands, customCommandErrors: [] },
+        { removedProviders: [] },
+      );
+    } catch (error) {
+      if (previous === null) rmSync(filePath, { force: true });
+      else writePrivateFileAtomicSync(filePath, previous);
+      throw error;
+    }
+    return this.current;
   }
 
   public setAgentSkillSelection(selection: AgentSkillSelection): MutableDaemonConfig {

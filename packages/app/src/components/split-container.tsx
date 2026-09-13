@@ -39,6 +39,7 @@ import type { Theme } from "@/styles/theme";
 import { ResizeHandle } from "@/components/resize-handle";
 import { PaneContentToolbar, ToolbarButton } from "@/components/ui/pane-content-toolbar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { ContextMenuTrigger } from "@/components/ui/context-menu";
 import { WorkspaceActions } from "@/git/workspace-actions";
 import { WorkspaceCommandsButton } from "@/commands/workspace-commands-button";
 import { useCustomCommandsSupported } from "@/commands/use-custom-commands-supported";
@@ -290,14 +291,16 @@ function PaneProjectTray({
         ) : null}
         {showProjectActions ? (
           <DropdownMenu>
-            <ToolbarButton
-              kind="menu"
-              label={t("workspace.header.actions.workspaceActions")}
-              testID="pane-project-commands-toggle"
-              tooltipSide="left"
-            >
-              <ThemedEllipsis size={14} uniProps={extraMutedIconMapping} />
-            </ToolbarButton>
+            <ContextMenuTrigger contextOnly>
+              <ToolbarButton
+                kind="menu"
+                label={t("workspace.header.actions.workspaceActions")}
+                testID="pane-project-commands-toggle"
+                tooltipSide="left"
+              >
+                <ThemedEllipsis size={14} uniProps={extraMutedIconMapping} />
+              </ToolbarButton>
+            </ContextMenuTrigger>
             <DropdownMenuContent align="end" minWidth={180} testID="pane-project-commands-menu">
               <DropdownMenuItem
                 selected={visibleActions.branch}
