@@ -15,6 +15,16 @@ pty (node-pty, forked worker process)
   → xterm.write (back-to-back; xterm batches internally)
 ```
 
+With the isolated renderer enabled (Electron desktop, Settings → Diagnostics → **Isolated terminal renderer**), the client tail forks per terminal:
+
+```
+  → stream router → TerminalPane relay (main renderer, 1:1 passthrough)
+  → webview.send / ipc-message → guest renderer process (public/terminal-guest.html)
+  → same emulator runtime → xterm.write
+```
+
+A terminal guest crash or hang then kills one tab, not the app: the stream subscription and daemon session live in the main renderer and survive the guest. The tradeoff is one extra JSON message per terminal event across IPC; the daemon coalescer still bounds the rate, so the hop is flat, not compounding. If profiling ever shows the hop matters, the guest can subscribe to the daemon directly — the seam is the per-terminal emulator creation in `terminal-pane.tsx`, no UI change needed.
+
 Terminal frames share the daemon main event loop with all agent traffic. The `eventLoopDelay` block in the `ws_runtime_metrics` log line (every 30s in `daemon.log`) is the ground truth for "the daemon is busy" — p99/max there directly bound worst-case terminal frame delay.
 
 ## Invariants (the easy-to-break ones)
@@ -27,6 +37,19 @@ Terminal frames share the daemon main event loop with all agent traffic. The `ev
 - **Plugin daemon sessions report IPC queue bytes.** Their virtual socket increments `bufferedAmount` before `process.send` and decrements it only in the send callback. Text and binary frames share that ordered queue, so the normal snapshot catch-up and physical high-water gates remain valid for server-side plugin SDK traffic.
 - **Client output writes are not serialized per frame.** The emulator runtime drains contiguous plain writes straight into xterm (which buffers internally). Only barrier ops (`clear`, `snapshot`, `suppressInput` writes) wait — behind a zero-length sentinel write — so resets can't interleave with in-flight output.
 - **Retained terminal tabs in the focused workspace keep their streams.** Hidden mounted terminals continue applying output, so switching tabs does not resubscribe or request a fresh snapshot. The retained-panel LRU bounds the number of live streams; terminals in an unfocused workspace detach.
+- **The isolated-renderer relay adds no second coalescing window.** Coalescing stays in the daemon; the main renderer forwards one decoded stream event as one guest message. A second window anywhere on the relay breaks the leading-edge flush.
+- **A guest reload or eviction must re-create the stream subscription.** The daemon dedups re-sends by stream revision, and the pane's snapshot cache can be empty (`handleStreamRestore` clears it), so reusing the existing subscription after a remount restores nothing — the guest stays blank. `onGuestReloaded` bumps the pane's stream-reset nonce through both stream effects, which is the same path a fresh page load takes.
+- **Hang detection for guests is the heartbeat, not the OS.** Electron 41 fires no `unresponsive` for a hung webview guest (verified: minutes of a blocked guest, no DOM event, no WebContents event). The guest pings every 2s and the pane marks it hung after 5s of silence. `render-process-gone` still fires for crashes; `clean-exit` is teardown, never a crash.
+- **A fresh guest surface paints blank until two kicks land.** The xterm canvas glyph atlas is invalid on a newly attached renderer surface — the runtime resets it at the first snapshot commit (`needsTextureAtlasReset`). And an idle host issues the guest no BeginFrames, so content can sit painted-but-unpresented: the pane invalidates the host container once after the first content message, and the main process calls `webContents.invalidate()` at +300ms/+1200ms after `did-finish-load`.
+
+## Isolated renderer boundary (Electron desktop)
+
+Off-Electron, everything above collapses to the embedded renderer — the `.web`/native stubs of `packages/app/src/desktop/terminal/pane/` are never reached behind the gate. With the gate on:
+
+- Each terminal tab is a `<webview>` running `terminal-guest.html` in its own renderer process. The attach guard in `packages/desktop/src/main.ts` admits only the same-origin guest URL and forces the sandboxed preload.
+- A crashed or hung guest shows an in-tab reload affordance (`guest-lifecycle.ts`); reload remounts, re-subscribes, and resumes the live stream. Other tabs never see it.
+- Live guests are LRU-capped at 8 (`isolated-terminal-guest-budget.ts`); evicting the eldest unmounts its webview, and presenting the tab remounts through the reload path. The cap exists because each guest costs a process (~30–80MB); make it a setting only if users ask.
+- On macOS the compositor watchdog (`packages/desktop/src/window/compositor-watchdog/`) probes guests as additional targets of the same global GPU-restart recovery as the main window.
 - **Terminal size has one daemon-owned claimant.** Focus and direct interaction send a `claim`; later geometry changes from that connection send `update`. A claim transfers ownership even when the dimensions are unchanged, while an update from any other connection is ignored. This lets an owning pane follow splits and keyboard insets without allowing an idle phone or browser to steal the PTY size.
 
 ## Measuring
