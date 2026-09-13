@@ -17,6 +17,7 @@ import { resolveKeyboardFocusScope } from "@/keyboard/focus-scope";
 import {
   buildBrowserKeyboardPolicy,
   parseBrowserShortcutInput,
+  parseTerminalShortcutInput,
   shouldPublishBrowserShortcutPolicy,
 } from "@/desktop/browser/shortcuts";
 import type { KeyboardFocusScope, KeyboardShortcutPayload } from "@/keyboard/actions";
@@ -93,6 +94,23 @@ export function useKeyboardShortcuts({
     [bindings, enabled, isDesktopApp, isMac, shortcutsAvailable],
   );
 
+  const publishTerminalShortcutPolicy = useCallback(
+    (chordState?: ChordState) => {
+      const policy =
+        enabled && shortcutsAvailable
+          ? buildBrowserKeyboardPolicy({
+              bindings,
+              chordState,
+              isMac,
+              isDesktop: isDesktopApp,
+              focusScope: "terminal",
+            })
+          : { menuPrefixes: [], prefixes: [] };
+      void getDesktopHost()?.terminal?.setShortcutPolicy?.(policy);
+    },
+    [bindings, enabled, isDesktopApp, isMac, shortcutsAvailable],
+  );
+
   useEffect(() => {
     if (activeWorkspaceSelection) {
       keyboardWorkspaceSelectionRef.current = activeWorkspaceSelection;
@@ -105,7 +123,8 @@ export function useKeyboardShortcuts({
     }
 
     publishBrowserShortcutPolicy();
-  }, [isDesktopApp, publishBrowserShortcutPolicy]);
+    publishTerminalShortcutPolicy();
+  }, [isDesktopApp, publishBrowserShortcutPolicy, publishTerminalShortcutPolicy]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -255,6 +274,7 @@ export function useKeyboardShortcuts({
       focusScope: KeyboardFocusScope;
       domEvent: KeyboardEvent | null;
       browserFocusRestoreElement?: HTMLElement | null;
+      publishOrigin?: "browser" | "terminal";
     }) => {
       const store = useKeyboardShortcutsStore.getState();
       const previousChordState = chordStateRef.current;
@@ -274,11 +294,14 @@ export function useKeyboardShortcuts({
             timeoutId: null,
           };
           publishBrowserShortcutPolicy();
+          publishTerminalShortcutPolicy();
         },
         bindings,
       });
       chordStateRef.current = result.nextChordState;
-      if (
+      if (input.publishOrigin === "terminal") {
+        publishTerminalShortcutPolicy(result.nextChordState);
+      } else if (
         shouldPublishBrowserShortcutPolicy({
           isBrowserInput: "browserId" in input.event,
           previousChordState,
@@ -395,6 +418,20 @@ export function useKeyboardShortcuts({
           });
         })
       : null;
+    const terminalShortcutSubscription = isElectronRuntime()
+      ? getDesktopHost()?.events?.on?.("terminal-shortcut-input", (payload) => {
+          const input = parseTerminalShortcutInput(payload);
+          if (!input) {
+            return;
+          }
+          resolveAndPerformShortcut({
+            event: input,
+            focusScope: "terminal",
+            domEvent: null,
+            publishOrigin: "terminal",
+          });
+        })
+      : null;
     return () => {
       if (chordStateRef.current.timeoutId !== null) {
         clearTimeout(chordStateRef.current.timeoutId);
@@ -413,6 +450,11 @@ export function useKeyboardShortcuts({
       } else {
         void browserShortcutSubscription?.then((dispose) => dispose());
       }
+      if (typeof terminalShortcutSubscription === "function") {
+        terminalShortcutSubscription();
+      } else {
+        void terminalShortcutSubscription?.then((dispose) => dispose());
+      }
     };
   }, [
     bindings,
@@ -428,6 +470,7 @@ export function useKeyboardShortcuts({
     openProjectPickerAction,
     pathname,
     publishBrowserShortcutPolicy,
+    publishTerminalShortcutPolicy,
     resetModifiers,
     router,
     shortcutsAvailable,

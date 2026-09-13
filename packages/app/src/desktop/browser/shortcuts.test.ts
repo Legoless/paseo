@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildBrowserKeyboardPolicy,
   parseBrowserShortcutInput,
+  parseTerminalShortcutInput,
   shouldPublishBrowserShortcutPolicy,
 } from "./shortcuts";
 import { buildEffectiveBindings, resolveKeyboardShortcut } from "../../keyboard/keyboard-shortcuts";
@@ -318,5 +319,62 @@ describe("parseBrowserShortcutInput", () => {
     },
   ])("rejects $name", ({ payload }) => {
     expect(parseBrowserShortcutInput(payload)).toBeNull();
+  });
+});
+
+describe("parseTerminalShortcutInput", () => {
+  it("normalizes a forwarded terminal guest chord without a browser identity", () => {
+    expect(
+      parseTerminalShortcutInput({
+        key: "3",
+        code: "Digit3",
+        meta: true,
+        control: false,
+        shift: false,
+        alt: false,
+      }),
+    ).toEqual({
+      key: "3",
+      code: "Digit3",
+      metaKey: true,
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      repeat: false,
+    });
+  });
+
+  it.each([
+    {
+      name: "a missing key",
+      payload: { code: "Digit3", meta: true, control: false, shift: false, alt: false },
+    },
+    {
+      name: "a malformed modifier",
+      payload: { key: "3", code: "Digit3", meta: "yes", control: false, shift: false, alt: false },
+    },
+  ])("rejects $name", ({ payload }) => {
+    expect(parseTerminalShortcutInput(payload)).toBeNull();
+  });
+});
+
+describe("buildBrowserKeyboardPolicy focus scope", () => {
+  it("excludes terminal-disabled bindings when building for the terminal guest", () => {
+    const bindings = buildEffectiveBindings({ "agent-new-ctrl-shift-o-non-mac": "Ctrl+O" });
+
+    const browserPolicy = buildBrowserKeyboardPolicy({ bindings, isMac: false, isDesktop: true });
+    const terminalPolicy = buildBrowserKeyboardPolicy({
+      bindings,
+      isMac: false,
+      isDesktop: true,
+      focusScope: "terminal",
+    });
+
+    expect(browserPolicy.prefixes).toContainEqual(
+      expect.objectContaining({ code: "KeyO", control: true }),
+    );
+    expect(terminalPolicy.prefixes).not.toContainEqual(
+      expect.objectContaining({ code: "KeyO", control: true }),
+    );
   });
 });

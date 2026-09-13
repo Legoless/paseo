@@ -12,6 +12,7 @@ import type {
   TerminalLocalFileLinkTarget,
 } from "../local-links/terminal-local-link-provider";
 import {
+  resolveTerminalGuestTransportKind,
   sendTerminalGuestMessage,
   subscribeTerminalGuestMessages,
 } from "./terminal-emulator-webview-transport";
@@ -88,12 +89,14 @@ type OutboundMessage =
     }
   | { type: "swipeLeft"; streamKey: string }
   | { type: "swipeRight"; streamKey: string }
+  | { type: "copySelection"; streamKey: string; text: string }
   | { type: "debug"; message: string; details?: unknown };
 
 declare global {
   interface Window {
     __PASEO_TERMINAL_WEBVIEW_RECEIVE__?: (message: InboundMessage) => void;
     __PASEO_TERMINAL_WEBVIEW_BLUR__?: () => void;
+    __PASEO_TERMINAL_WEBVIEW_GET_SELECTION__?: () => string;
   }
 }
 
@@ -333,6 +336,12 @@ class TerminalWebViewBridge {
             target,
             disposition,
           }),
+        ...(resolveTerminalGuestTransportKind() === "electron"
+          ? {
+              onCopySelection: (text: string) =>
+                sendToNative({ type: "copySelection", streamKey: message.streamKey, text }),
+            }
+          : {}),
       },
     });
     runtime.setPendingModifiers({ pendingModifiers: message.pendingModifiers });
@@ -358,6 +367,10 @@ class TerminalWebViewBridge {
 
   blur = (): void => {
     this.runtime?.blur();
+  };
+
+  getSelection = (): string => {
+    return this.runtime?.getSelection() ?? "";
   };
 
   private unmount(streamKey: string | null): void {
@@ -545,5 +558,6 @@ document.body.appendChild(root);
 const bridge = new TerminalWebViewBridge(root, host);
 window.__PASEO_TERMINAL_WEBVIEW_RECEIVE__ = bridge.receive;
 window.__PASEO_TERMINAL_WEBVIEW_BLUR__ = bridge.blur;
+window.__PASEO_TERMINAL_WEBVIEW_GET_SELECTION__ = bridge.getSelection;
 subscribeTerminalGuestMessages((message) => bridge.receive(message as InboundMessage));
 sendToNative({ type: "bridgeReady" });

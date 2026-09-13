@@ -7,6 +7,7 @@ import {
   matchesBrowserShortcutPolicy,
   parseBrowserKeyboardPolicy,
   parseBrowserShortcutInput,
+  resolveTerminalShortcutInput,
 } from "./policy.js";
 
 export type { BrowserKeyboardPolicy } from "./policy.js";
@@ -17,6 +18,9 @@ const POLICY_REQUEST_CHANNEL = "paseo:browser-keyboard-policy-request";
 const SHORTCUT_INPUT_CHANNEL = "paseo:browser-shortcut-input";
 const SHORTCUT_OUTPUT_CHANNEL = "paseo:event:browser-shortcut-input";
 const RESERVED_SHORTCUT_OUTPUT_CHANNEL = "paseo:event:browser-shortcut";
+const TERMINAL_POLICY_INPUT_CHANNEL = "paseo:terminal:set-shortcut-policy";
+
+export const TERMINAL_SHORTCUT_OUTPUT_CHANNEL = "paseo:event:terminal-shortcut-input";
 
 interface BrowserKeyboardContentsIdentity {
   readonly id: number;
@@ -52,6 +56,14 @@ interface BrowserKeyboardHostContents extends BrowserKeyboardContentsIdentity {
   send(channel: string, ...args: unknown[]): void;
 }
 
+interface TerminalKeyboardGuestContents extends BrowserKeyboardContentsIdentity {
+  on(
+    event: "before-input-event",
+    listener: (event: BrowserKeyboardInputEvent, input: Electron.Input) => void,
+  ): void;
+  once(event: "destroyed", listener: () => void): void;
+}
+
 interface BrowserKeyboardGuest {
   contents: BrowserKeyboardGuestContents;
   hostContents: BrowserKeyboardHostContents;
@@ -60,12 +72,20 @@ interface BrowserKeyboardGuest {
 export class BrowserKeyboard {
   private readonly attachedGuestsByWebContentsId = new Map<number, BrowserKeyboardGuest>();
   private readonly policiesByHostWebContentsId = new Map<number, BrowserKeyboardPolicy>();
+  private readonly terminalPoliciesByHostWebContentsId = new Map<number, BrowserKeyboardPolicy>();
+  private readonly attachedTerminalHostsByWebContentsId = new Map<
+    number,
+    BrowserKeyboardHostContents
+  >();
 
   public constructor(private readonly browserRegistry: PaseoBrowserWebviewRegistry) {}
 
   public registerIpc(): void {
     ipcMain.handle(POLICY_INPUT_CHANNEL, (event, rawPolicy: unknown) => {
       this.publish(event.sender.id, rawPolicy);
+    });
+    ipcMain.handle(TERMINAL_POLICY_INPUT_CHANNEL, (event, rawPolicy: unknown) => {
+      this.publishTerminal(event.sender.id, rawPolicy);
     });
     ipcMain.on(SHORTCUT_INPUT_CHANNEL, (event, rawInput: unknown) => {
       this.forwardShortcutInput(event.sender, rawInput);
@@ -161,6 +181,46 @@ export class BrowserKeyboard {
 
   public detachHost(hostWebContentsId: number): void {
     this.policiesByHostWebContentsId.delete(hostWebContentsId);
+    this.terminalPoliciesByHostWebContentsId.delete(hostWebContentsId);
+  }
+
+  public publishTerminal(hostWebContentsId: number, rawPolicy: unknown): void {
+    const policy = parseBrowserKeyboardPolicy(rawPolicy);
+    if (!policy) {
+      return;
+    }
+    this.terminalPoliciesByHostWebContentsId.set(hostWebContentsId, policy);
+  }
+
+  public attachTerminalGuest(input: {
+    contents: TerminalKeyboardGuestContents;
+    hostContents: BrowserKeyboardHostContents;
+  }): void {
+    const webContentsId = input.contents.id;
+    if (this.attachedTerminalHostsByWebContentsId.get(webContentsId) === input.hostContents) {
+      return;
+    }
+    this.attachedTerminalHostsByWebContentsId.set(webContentsId, input.hostContents);
+    input.contents.once("destroyed", () => {
+      if (this.attachedTerminalHostsByWebContentsId.get(webContentsId) === input.hostContents) {
+        this.attachedTerminalHostsByWebContentsId.delete(webContentsId);
+      }
+    });
+    input.contents.on("before-input-event", (event, keyboardInput) => {
+      if (input.hostContents.isDestroyed()) {
+        return;
+      }
+      const policy = this.terminalPoliciesByHostWebContentsId.get(input.hostContents.id);
+      if (!policy) {
+        return;
+      }
+      const shortcut = resolveTerminalShortcutInput(keyboardInput, policy);
+      if (!shortcut) {
+        return;
+      }
+      event.preventDefault();
+      input.hostContents.send(TERMINAL_SHORTCUT_OUTPUT_CHANNEL, shortcut);
+    });
   }
 
   private handleGuestInput(

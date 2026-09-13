@@ -180,6 +180,62 @@ export function matchesBrowserShortcutPolicy(
   return matchesBrowserShortcutPrefixes(policy.prefixes, input);
 }
 
+export interface TerminalShortcutInput {
+  alt: boolean;
+  code: string;
+  control: boolean;
+  key: string;
+  meta: boolean;
+  repeat: boolean;
+  shift: boolean;
+}
+
+export interface TerminalShortcutKeyboardEvent {
+  alt: boolean;
+  code: string;
+  control: boolean;
+  isAutoRepeat: boolean;
+  key: string;
+  meta: boolean;
+  shift: boolean;
+  type: string;
+}
+
+/**
+ * A terminal guest's `before-input-event` payload only becomes a forwarded app chord when it is a
+ * key down that matches the host's terminal-scoped policy. Everything else (Ctrl+C, Ctrl+D, …) is
+ * terminal input and must keep travelling to xterm untouched.
+ */
+export function resolveTerminalShortcutInput(
+  input: TerminalShortcutKeyboardEvent,
+  policy: BrowserKeyboardPolicy,
+): TerminalShortcutInput | null {
+  if (input.type !== "keyDown") {
+    return null;
+  }
+  const matches = matchesBrowserShortcutPolicy(policy, {
+    alt: input.alt,
+    code: input.code,
+    control: input.control,
+    key: input.key,
+    meta: input.meta,
+    repeat: input.isAutoRepeat,
+    shift: input.shift,
+  });
+  if (!matches) {
+    return null;
+  }
+  return {
+    alt: input.alt,
+    code: input.code,
+    control: input.control,
+    key: input.key,
+    meta: input.meta,
+    repeat: input.isAutoRepeat,
+    shift: input.shift,
+  };
+}
+
 export function classifyBrowserReservedShortcut(
   input: {
     alt: boolean;

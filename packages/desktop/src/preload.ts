@@ -147,5 +147,9 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
         ipcRenderer.removeListener("paseo:event:terminal-guest-state", listener);
       };
     },
+    setShortcutPolicy: (policy: BrowserKeyboardPolicy) =>
+      ipcRenderer.invoke("paseo:terminal:set-shortcut-policy", policy),
+    copyToClipboard: (text: string) =>
+      ipcRenderer.invoke("paseo:terminal:copy-to-clipboard", text) as Promise<boolean>,
   },
 });

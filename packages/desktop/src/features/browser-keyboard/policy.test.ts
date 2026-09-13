@@ -4,6 +4,7 @@ import {
   matchesBrowserShortcutPolicy,
   parseBrowserKeyboardPolicy,
   parseBrowserShortcutInput,
+  resolveTerminalShortcutInput,
 } from "./policy.js";
 
 describe("browser keyboard policy", () => {
@@ -227,5 +228,77 @@ describe("browser keyboard policy", () => {
         shift: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("terminal shortcut forwarding policy", () => {
+  const policy = parseBrowserKeyboardPolicy({
+    menuPrefixes: [],
+    prefixes: [
+      { alt: false, code: "Digit", control: false, meta: true, repeat: false, shift: false },
+      { alt: false, code: "KeyP", control: true, meta: false, repeat: false, shift: true },
+    ],
+  });
+
+  test("returns null unless the guest reports a key down", () => {
+    expect(
+      resolveTerminalShortcutInput(
+        {
+          alt: false,
+          code: "Digit1",
+          control: false,
+          isAutoRepeat: false,
+          key: "1",
+          meta: true,
+          shift: false,
+          type: "keyUp",
+        },
+        policy!,
+      ),
+    ).toBeNull();
+  });
+
+  test("returns null for chords that are terminal input, not app shortcuts", () => {
+    expect(
+      resolveTerminalShortcutInput(
+        {
+          alt: false,
+          code: "KeyC",
+          control: true,
+          isAutoRepeat: false,
+          key: "c",
+          meta: false,
+          shift: false,
+          type: "keyDown",
+        },
+        policy!,
+      ),
+    ).toBeNull();
+  });
+
+  test("returns the forwardable input for a matching app chord", () => {
+    expect(
+      resolveTerminalShortcutInput(
+        {
+          alt: false,
+          code: "Digit3",
+          control: false,
+          isAutoRepeat: false,
+          key: "3",
+          meta: true,
+          shift: false,
+          type: "keyDown",
+        },
+        policy!,
+      ),
+    ).toEqual({
+      alt: false,
+      code: "Digit3",
+      control: false,
+      key: "3",
+      meta: true,
+      repeat: false,
+      shift: false,
+    });
   });
 });
