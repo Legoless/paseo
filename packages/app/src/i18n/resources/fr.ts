@@ -559,6 +559,10 @@ export const fr: TranslationResources = {
       hostDisconnected: "Hostn'est pas connecté",
       updateHost: "Mettez à jour l’hôte pour utiliser le terminal natif.",
       unableToSubscribe: "Impossible de s'abonner au terminal",
+      rendererStopped: "Le rendu du terminal s'est arrêté",
+      rendererStoppedDescription:
+        "Rechargez pour restaurer ce terminal. Les autres onglets ne sont pas affectés.",
+      reload: "Recharger le terminal",
     },
     tabs: {
       loading: "Chargement...",

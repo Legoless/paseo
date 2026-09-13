@@ -4,6 +4,7 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type CSSProperties,
@@ -19,12 +20,21 @@ import type {
 } from "@/terminal/local-links/terminal-local-link-provider";
 import type { PendingTerminalModifiers } from "@/utils/terminal-keys";
 import { openExternalUrl } from "@/utils/open-external-url";
+import { getDesktopHost } from "@/desktop/host";
 import type {
   TerminalEmulatorHandle,
   TerminalEmulatorProps,
 } from "@/components/terminal-emulator-contract";
 import { shouldHandleTerminalBridgeMessage } from "@/components/terminal-webview-message-routing";
 import { TERMINAL_GUEST_MESSAGE_CHANNEL } from "@/terminal/webview/terminal-emulator-webview-transport";
+import {
+  INITIAL_TERMINAL_GUEST_LIFECYCLE_STATE,
+  isTerminalGuestOverlayVisible,
+  reduceTerminalGuestLifecycle,
+  scheduleDeferredReload,
+  shouldScheduleDeferredReload,
+} from "@/desktop/terminal/guest-lifecycle";
+import { TerminalGuestCrashOverlay } from "./crash-overlay";
 
 type BridgeInboundMessage =
   | {
@@ -102,11 +112,16 @@ interface ElectronTerminalWebview extends HTMLElement {
   src: string;
   send: (channel: string, ...args: unknown[]) => void;
   executeJavaScript?: (code: string) => Promise<unknown>;
+  getWebContentsId?: () => number;
 }
 
 interface WebviewIpcMessageEvent extends Event {
   channel: string;
   args: unknown[];
+}
+
+interface RenderProcessGoneEvent extends Event {
+  details?: { reason?: string };
 }
 
 const TERMINAL_GUEST_PATH = "/terminal-guest.html";
@@ -184,6 +199,10 @@ export function IsolatedTerminalEmulator({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const webviewRef = useRef<ElectronTerminalWebview | null>(null);
   const [bridgeReadyVersion, setBridgeReadyVersion] = useState(0);
+  const [lifecycle, dispatchLifecycle] = useReducer(
+    reduceTerminalGuestLifecycle,
+    INITIAL_TERMINAL_GUEST_LIFECYCLE_STATE,
+  );
   const bridgeReadyRef = useRef(false);
   const pendingMessagesRef = useRef<BridgeInboundMessage[]>([]);
   const outputDecoderRef = useRef(new TextDecoder());
@@ -315,12 +334,16 @@ export function IsolatedTerminalEmulator({
   const handleLifecycleMessage = useCallback((message: BridgeOutboundMessage): boolean => {
     if (message.type === "bridgeReady") {
       bridgeReadyRef.current = true;
+      dispatchLifecycle({ type: "bridgeReady", now: Date.now() });
       setBridgeReadyVersion((value) => value + 1);
       return true;
     }
     if (message.type === "rendererReady") {
       if (message.streamKey === mountRequestedStreamKeyRef.current) {
         rendererReadyStreamKeyRef.current = message.isReady ? message.streamKey : null;
+        if (message.isReady) {
+          dispatchLifecycle({ type: "rendererReady", now: Date.now() });
+        }
       }
       callbacksRef.current.onRendererReadyChange?.({
         streamKey: message.streamKey,
@@ -462,12 +485,27 @@ export function IsolatedTerminalEmulator({
     webview.style.border = "0";
     webview.style.display = "flex";
     webview.style.background = "transparent";
+    const handleRenderProcessGone = (event: Event) => {
+      const reason = (event as RenderProcessGoneEvent).details?.reason ?? "unknown";
+      if (!shouldScheduleDeferredReload(reason)) {
+        return;
+      }
+      dispatchLifecycle({ type: "renderProcessGone", now: Date.now(), reason });
+    };
+    const handleDestroyed = () => {
+      dispatchLifecycle({ type: "destroyed", now: Date.now() });
+    };
     webview.addEventListener("ipc-message", stableIpcMessageListener);
+    webview.addEventListener("render-process-gone", handleRenderProcessGone);
+    webview.addEventListener("destroyed", handleDestroyed);
     host.replaceChildren(webview);
     webviewRef.current = webview;
+    dispatchLifecycle({ type: "mount", now: Date.now() });
 
     return () => {
       webview.removeEventListener("ipc-message", stableIpcMessageListener);
+      webview.removeEventListener("render-process-gone", handleRenderProcessGone);
+      webview.removeEventListener("destroyed", handleDestroyed);
       webview.remove();
       if (webviewRef.current === webview) {
         webviewRef.current = null;
@@ -477,7 +515,56 @@ export function IsolatedTerminalEmulator({
       mountRequestedStreamKeyRef.current = null;
       rendererReadyStreamKeyRef.current = null;
     };
-  }, [stableIpcMessageListener]);
+  }, [lifecycle.epoch, stableIpcMessageListener]);
+
+  useEffect(() => {
+    const terminal = getDesktopHost()?.terminal;
+    if (!terminal?.onGuestState) {
+      return () => {};
+    }
+    const unsubscribe = terminal.onGuestState((event) => {
+      const webview = webviewRef.current;
+      if (!webview?.getWebContentsId) {
+        return;
+      }
+      let webContentsId: number;
+      try {
+        webContentsId = webview.getWebContentsId();
+      } catch {
+        return;
+      }
+      if (event.webContentsId !== webContentsId) {
+        return;
+      }
+      if (event.state === "unresponsive") {
+        dispatchLifecycle({ type: "unresponsive", now: Date.now() });
+      } else if (event.state === "responsive") {
+        dispatchLifecycle({ type: "responsive", now: Date.now() });
+      }
+    });
+    if (typeof unsubscribe === "function") {
+      return unsubscribe;
+    }
+    return () => {
+      void unsubscribe?.then((dispose) => dispose());
+    };
+  }, []);
+
+  useEffect(() => {
+    if (lifecycle.phase !== "mounting") {
+      return;
+    }
+    const timer = setInterval(() => {
+      dispatchLifecycle({ type: "tick", now: Date.now() });
+    }, 250);
+    return () => clearInterval(timer);
+  }, [lifecycle.phase]);
+
+  const handleReloadGuest = useCallback(() => {
+    scheduleDeferredReload(() => {
+      dispatchLifecycle({ type: "reload", now: Date.now() });
+    });
+  }, []);
 
   useEffect(() => {
     if (bridgeReadyVersion <= 0) return;
@@ -545,6 +632,9 @@ export function IsolatedTerminalEmulator({
   return (
     <View style={rootStyle} testID={testId}>
       {createElement("div", { ref: hostRef, style: HOST_STYLE })}
+      {isTerminalGuestOverlayVisible(lifecycle) ? (
+        <TerminalGuestCrashOverlay onReload={handleReloadGuest} />
+      ) : null}
     </View>
   );
 }

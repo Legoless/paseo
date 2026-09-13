@@ -559,6 +559,10 @@ export const ja: TranslationResources = {
       hostDisconnected: "ホストが接続されていません",
       updateHost: "ネイティブターミナルを使用するにはホストを更新してください。",
       unableToSubscribe: "ターミナルに接続できません",
+      rendererStopped: "ターミナルレンダラーが停止しました",
+      rendererStoppedDescription:
+        "再読み込みしてこのターミナルを復元します。他のタブには影響しません。",
+      reload: "ターミナルを再読み込み",
     },
     tabs: {
       loading: "読み込み中...",

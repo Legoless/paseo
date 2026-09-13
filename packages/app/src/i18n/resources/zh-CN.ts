@@ -555,6 +555,9 @@ export const zhCN: TranslationResources = {
       hostDisconnected: "Host 未连接",
       updateHost: "请更新主机以使用原生终端渲染器。",
       unableToSubscribe: "无法订阅 Terminal",
+      rendererStopped: "终端渲染器已停止",
+      rendererStoppedDescription: "重新加载以恢复此终端。其他标签页不受影响。",
+      reload: "重新加载终端",
     },
     tabs: {
       loading: "正在加载...",

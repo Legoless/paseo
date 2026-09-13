@@ -560,6 +560,10 @@ export const ru: TranslationResources = {
       hostDisconnected: "Хост не подключён",
       updateHost: "Обновите хост, чтобы использовать нативный рендерер терминала.",
       unableToSubscribe: "Не удалось подключиться к терминалу",
+      rendererStopped: "Рендерер терминала остановлен",
+      rendererStoppedDescription:
+        "Перезагрузите, чтобы восстановить этот терминал. Другие вкладки не затронуты.",
+      reload: "Перезагрузить терминал",
     },
     tabs: {
       loading: "Загрузка...",

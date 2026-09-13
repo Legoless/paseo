@@ -559,6 +559,10 @@ export const ptBR: TranslationResources = {
       hostDisconnected: "Host não está conectado",
       updateHost: "Atualize o host para usar o renderizador de terminal nativo.",
       unableToSubscribe: "Não foi possível assinar o terminal",
+      rendererStopped: "O renderizador do terminal parou",
+      rendererStoppedDescription:
+        "Recarregue para restaurar este terminal. As outras abas não são afetadas.",
+      reload: "Recarregar terminal",
     },
     tabs: {
       loading: "Carregando...",

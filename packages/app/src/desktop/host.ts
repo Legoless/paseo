@@ -172,6 +172,19 @@ export interface DesktopInvokeBridge {
   invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 }
 
+export type DesktopTerminalGuestState = "unresponsive" | "responsive";
+
+export interface DesktopTerminalGuestStateEvent {
+  webContentsId: number;
+  state: DesktopTerminalGuestState;
+}
+
+export interface DesktopTerminalBridge {
+  onGuestState?: (
+    handler: (event: DesktopTerminalGuestStateEvent) => void,
+  ) => (() => void) | Promise<() => void>;
+}
+
 export interface DesktopHostBridge {
   platform?: string;
   windowChromeMode?: string;
@@ -187,6 +200,7 @@ export interface DesktopHostBridge {
   webUtils?: DesktopWebUtilsBridge;
   menu?: DesktopMenuBridge;
   browser?: DesktopBrowserBridge;
+  terminal?: DesktopTerminalBridge;
 }
 
 declare global {

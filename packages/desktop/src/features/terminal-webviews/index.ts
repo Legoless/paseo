@@ -1,5 +1,14 @@
 const TERMINAL_GUEST_PATH = "/terminal-guest.html";
 
+export const TERMINAL_GUEST_STATE_EVENT = "paseo:event:terminal-guest-state";
+
+export type TerminalGuestState = "unresponsive" | "responsive";
+
+export interface TerminalGuestStateEvent {
+  webContentsId: number;
+  state: TerminalGuestState;
+}
+
 interface TerminalWebContentsIdentity {
   readonly id: number;
   isDestroyed(): boolean;
@@ -8,6 +17,14 @@ interface TerminalWebContentsIdentity {
 interface RegisteredTerminalWebContents extends TerminalWebContentsIdentity {
   setBackgroundThrottling(allowed: boolean): void;
   once(event: "destroyed", listener: () => void): void;
+}
+
+interface ObservableTerminalGuest extends TerminalWebContentsIdentity {
+  on(event: "unresponsive" | "responsive", listener: () => void): void;
+}
+
+interface TerminalGuestStateHost {
+  send(channel: string, payload: TerminalGuestStateEvent): void;
 }
 
 /**
@@ -103,4 +120,24 @@ export function preparePaseoTerminalWebContents(contents: RegisteredTerminalWebC
   contents.once("destroyed", () => {
     terminalRegistry.unregisterWebContents(webContentsId);
   });
+}
+
+/**
+ * The `<webview>` element does not expose `unresponsive`/`responsive` DOM events, so the main
+ * process observes the guest WebContents and forwards the state to the host renderer. The guest URL
+ * carries no terminal id, so the payload is keyed by guest WebContents id and the pane matches it
+ * against its own `getWebContentsId()`.
+ */
+export function observePaseoTerminalGuestState(
+  contents: ObservableTerminalGuest,
+  host: TerminalGuestStateHost,
+): void {
+  const forward = (state: TerminalGuestState) => {
+    if (contents.isDestroyed()) {
+      return;
+    }
+    host.send(TERMINAL_GUEST_STATE_EVENT, { webContentsId: contents.id, state });
+  };
+  contents.on("unresponsive", () => forward("unresponsive"));
+  contents.on("responsive", () => forward("responsive"));
 }
