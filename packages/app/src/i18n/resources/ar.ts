@@ -740,6 +740,22 @@ export const ar: TranslationResources = {
         stopFailed: "فشل إيقاف{{scriptName}}",
       },
     },
+    commands: {
+      title: "الأوامر",
+      groups: {
+        project: "المشروع",
+        global: "عام",
+      },
+      accessibility: {
+        trigger: "أوامر مساحة العمل",
+      },
+      shortcutTaken: "الاختصار مستخدم",
+      errors: {
+        noAgentTarget: "لا توجد علامة تبويب محادثة لتشغيل هذا الأمر فيها",
+        noTerminalTarget: "لا توجد علامة تبويب طرفية لتشغيل هذا الأمر فيها",
+        sendFailed: "فشل إرسال الأمر",
+      },
+    },
     tree: {
       showFolderTree: "إظهار شجرة المجلدات",
       hideFolderTree: "إخفاء شجرة المجلدات",
@@ -2212,6 +2228,7 @@ export const ar: TranslationResources = {
         tabsPanes: "علامات التبويب والأجزاء",
         layout: "التخطيط",
         agentInput: "إدخال Agent",
+        commands: "الأوامر",
       },
       help: {
         openProject: "مشروع مفتوح",

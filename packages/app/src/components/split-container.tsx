@@ -40,6 +40,8 @@ import { ResizeHandle } from "@/components/resize-handle";
 import { PaneContentToolbar, ToolbarButton } from "@/components/ui/pane-content-toolbar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { WorkspaceActions } from "@/git/workspace-actions";
+import { WorkspaceCommandsButton } from "@/commands/workspace-commands-button";
+import { useCustomCommandsSupported } from "@/commands/use-custom-commands-supported";
 import { useCheckoutStatusQuery } from "@/git/use-status-query";
 import { WorkspaceOpenInEditorButton } from "@/workspace/open-in-editor/button";
 import {
@@ -241,9 +243,11 @@ function PaneProjectTray({
   const { t } = useTranslation();
   const visibleActions = usePanelStore((state) => state.paneProjectActions);
   const toggleAction = usePanelStore((state) => state.togglePaneProjectAction);
+  const customCommandsSupported = useCustomCommandsSupported(serverId);
   const toggleBranch = useCallback(() => toggleAction("branch"), [toggleAction]);
   const toggleEditor = useCallback(() => toggleAction("editor"), [toggleAction]);
   const toggleGitActions = useCallback(() => toggleAction("gitActions"), [toggleAction]);
+  const toggleCustomCommands = useCallback(() => toggleAction("customCommands"), [toggleAction]);
   const switchTabProject = useCallback(
     (input: { tabId: string; cwd: string }) => {
       void onSwitchTabProject(input);
@@ -275,6 +279,14 @@ function PaneProjectTray({
         ) : null}
         {visibleActions.gitActions && cwd ? (
           <WorkspaceActions serverId={serverId} cwd={cwd} />
+        ) : null}
+        {visibleActions.customCommands && customCommandsSupported && cwd ? (
+          <WorkspaceCommandsButton
+            serverId={serverId}
+            workspaceId={workspaceId}
+            cwd={cwd}
+            hideLabels
+          />
         ) : null}
         {showProjectActions ? (
           <DropdownMenu>
@@ -311,6 +323,16 @@ function PaneProjectTray({
               >
                 {t("workspace.git.actions.push.label")}
               </DropdownMenuItem>
+              {customCommandsSupported ? (
+                <DropdownMenuItem
+                  selected={visibleActions.customCommands}
+                  showSelectedCheck
+                  closeOnSelect={false}
+                  onSelect={toggleCustomCommands}
+                >
+                  {t("workspace.commands.title")}
+                </DropdownMenuItem>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}

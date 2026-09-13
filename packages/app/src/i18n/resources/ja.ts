@@ -741,6 +741,22 @@ export const ja: TranslationResources = {
         stopFailed: "{{scriptName}}の停止に失敗しました",
       },
     },
+    commands: {
+      title: "コマンド",
+      groups: {
+        project: "プロジェクト",
+        global: "グローバル",
+      },
+      accessibility: {
+        trigger: "ワークスペースコマンド",
+      },
+      shortcutTaken: "使用中のショートカット",
+      errors: {
+        noAgentTarget: "このコマンドを実行するチャットタブがありません",
+        noTerminalTarget: "このコマンドを実行するターミナルタブがありません",
+        sendFailed: "コマンドの送信に失敗しました",
+      },
+    },
     tree: {
       showFolderTree: "フォルダツリーを表示",
       hideFolderTree: "フォルダツリーを非表示",
@@ -2229,6 +2245,7 @@ export const ja: TranslationResources = {
         tabsPanes: "タブ＆ペイン",
         layout: "レイアウト",
         agentInput: "エージェント入力",
+        commands: "コマンド",
       },
       help: {
         openProject: "プロジェクトを開く",

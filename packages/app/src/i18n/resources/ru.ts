@@ -746,6 +746,22 @@ export const ru: TranslationResources = {
         stopFailed: "Не удалось остановить скрипт {{scriptName}}",
       },
     },
+    commands: {
+      title: "Команды",
+      groups: {
+        project: "Проект",
+        global: "Глобальные",
+      },
+      accessibility: {
+        trigger: "Команды рабочей области",
+      },
+      shortcutTaken: "Сочетание уже занято",
+      errors: {
+        noAgentTarget: "Нет вкладки чата для выполнения этой команды",
+        noTerminalTarget: "Нет вкладки терминала для выполнения этой команды",
+        sendFailed: "Не удалось отправить команду",
+      },
+    },
     tree: {
       showFolderTree: "Показать дерево папок",
       hideFolderTree: "Скрыть дерево папок",
@@ -2249,6 +2265,7 @@ export const ru: TranslationResources = {
         tabsPanes: "Вкладки и панели",
         layout: "Макет",
         agentInput: "Ввод для агента",
+        commands: "Команды",
       },
       help: {
         openProject: "Открыть проект",

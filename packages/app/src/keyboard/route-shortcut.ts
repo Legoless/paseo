@@ -1,10 +1,13 @@
 import type { KeyboardShortcutPayload, MessageInputKeyboardActionKind } from "@/keyboard/actions";
 import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
+import type { CustomCommand } from "@getpaseo/protocol/custom-commands";
 import { buildSettingsRoute, parseHostWorkspaceRouteFromPathname } from "@/utils/host-routes";
 import {
   getRelativeSidebarShortcutTarget,
   type SidebarShortcutWorkspaceTarget,
 } from "@/utils/sidebar-shortcuts";
+import { selectMergedCustomCommands, useCustomCommandsStore } from "@/stores/custom-commands-store";
+import { resolveSelectedWorkspaceCwd } from "@/stores/workspace-project-selection-store";
 
 export interface ShortcutRoutingContext {
   pathname: string;
@@ -32,6 +35,12 @@ export type ShortcutAction =
   | { kind: "router-push"; route: string }
   | { kind: "open-project-picker" }
   | { kind: "callback"; name: ShortcutCallbackName }
+  | {
+      kind: "run-custom-command";
+      serverId: string;
+      workspaceId: string;
+      command: CustomCommand;
+    }
   | { kind: "command-center-toggle"; nextOpen: boolean; scope?: "files" }
   | { kind: "shortcuts-dialog-toggle"; nextOpen: boolean };
 
@@ -87,7 +96,7 @@ const MESSAGE_INPUT_DISPATCH: Record<
   "mode-cycle": { id: "message-input.mode-cycle", scope: "message-input" },
 };
 
-function hasPayloadKey<K extends "index" | "delta" | "kind">(
+function hasPayloadKey<K extends "index" | "delta" | "kind" | "commandId">(
   payload: KeyboardShortcutPayload,
   key: K,
 ): payload is Extract<KeyboardShortcutPayload, Record<K, unknown>> {
@@ -161,6 +170,35 @@ function routeMessageInputAction(payload: KeyboardShortcutPayload): ShortcutActi
   return dispatch(action);
 }
 
+/**
+ * A user-command binding fires against whatever workspace is active. The command list comes
+ * from the custom-commands store (populated by the workspace's dropdown), never a fresh fetch;
+ * anything that cannot resolve — no workspace, no commands for it, an id the file no longer
+ * has — is a no-op.
+ */
+function routeUserCommandRun(
+  payload: KeyboardShortcutPayload,
+  ctx: ShortcutRoutingContext,
+): ShortcutAction {
+  if (!hasPayloadKey(payload, "commandId")) return NONE;
+  const target = ctx.navigationActiveWorkspace ?? parseHostWorkspaceRouteFromPathname(ctx.pathname);
+  if (!target) return NONE;
+  const cwd = resolveSelectedWorkspaceCwd(target.serverId, target.workspaceId);
+  const commands = selectMergedCustomCommands(
+    useCustomCommandsStore.getState(),
+    target.serverId,
+    cwd,
+  );
+  const command = commands.find((candidate) => candidate.id === payload.commandId) ?? null;
+  if (!command) return NONE;
+  return {
+    kind: "run-custom-command",
+    serverId: target.serverId,
+    workspaceId: target.workspaceId,
+    command,
+  };
+}
+
 function routeSettingsToggle(ctx: ShortcutRoutingContext): ShortcutAction {
   if (!ctx.pathname.startsWith("/settings")) {
     return { kind: "router-push", route: buildSettingsRoute() };
@@ -203,6 +241,8 @@ export function routeKeyboardShortcut(
       return routeWorkspaceNavigateRelative(input.payload, ctx);
     case "message-input.action":
       return routeMessageInputAction(input.payload);
+    case "userCommand.run":
+      return routeUserCommandRun(input.payload, ctx);
     case "agent.new":
       return { kind: "open-project-picker" };
     case "settings.toggle":

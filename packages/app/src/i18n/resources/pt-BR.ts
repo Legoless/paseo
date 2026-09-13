@@ -742,6 +742,22 @@ export const ptBR: TranslationResources = {
         stopFailed: "Falha ao parar {{scriptName}}",
       },
     },
+    commands: {
+      title: "Comandos",
+      groups: {
+        project: "Projeto",
+        global: "Global",
+      },
+      accessibility: {
+        trigger: "Comandos do workspace",
+      },
+      shortcutTaken: "Atalho em uso",
+      errors: {
+        noAgentTarget: "Nenhuma aba de chat para executar este comando",
+        noTerminalTarget: "Nenhuma aba de terminal para executar este comando",
+        sendFailed: "Falha ao enviar o comando",
+      },
+    },
     tree: {
       showFolderTree: "Mostrar árvore de pastas",
       hideFolderTree: "Ocultar árvore de pastas",
@@ -2245,6 +2261,7 @@ export const ptBR: TranslationResources = {
         tabsPanes: "Abas e painéis",
         layout: "Layout",
         agentInput: "Entrada do agente",
+        commands: "Comandos",
       },
       help: {
         openProject: "Abrir projeto",

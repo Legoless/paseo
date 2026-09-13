@@ -83,7 +83,8 @@ interface ShortcutWhen {
 type ShortcutPayloadDef =
   | { type: "index" }
   | { type: "delta"; delta: 1 | -1 }
-  | { type: "message-input"; kind: MessageInputKeyboardActionKind };
+  | { type: "message-input"; kind: MessageInputKeyboardActionKind }
+  | { type: "user-command"; commandId: string };
 
 interface ShortcutHelp {
   id: string;
@@ -1209,32 +1210,49 @@ export const DEFAULT_BINDINGS: readonly ParsedShortcutBinding[] =
 
 export type ShortcutOverrides = Record<string, string | null>;
 
-export function buildEffectiveBindings(overrides: ShortcutOverrides): ParsedShortcutBinding[] {
-  return DEFAULT_BINDINGS.map(function (binding) {
-    const override = overrides[binding.id];
-    if (override === UNASSIGNED_COMBO) {
-      return { ...binding, combo: "", parsedChord: [] };
-    }
-    // Storage is unvalidated JSON, so anything can turn up here.
-    if (typeof override !== "string") {
-      return binding;
-    }
-    let parsedChord: KeyCombo[];
-    try {
-      parsedChord = parseBindingChord(override);
-    } catch {
-      return binding;
-    }
-    const lastCombo = parsedChord.at(-1);
-    if (binding.repeat === false && lastCombo) {
-      lastCombo.repeat = false;
-    }
-    if (!binding.help?.defaultDisplayKeys) {
-      return { ...binding, combo: override, parsedChord };
-    }
-    const { defaultDisplayKeys: _defaultDisplayKeys, ...help } = binding.help;
-    return { ...binding, combo: override, parsedChord, help };
+/**
+ * One binding after its stored override. Dynamic bindings (user commands) flow through the
+ * same path as the shipped defaults: overrides are keyed by binding id in a single record.
+ */
+export function applyShortcutOverride(
+  binding: ParsedShortcutBinding,
+  override: string | null | undefined,
+): ParsedShortcutBinding {
+  if (override === UNASSIGNED_COMBO) {
+    return { ...binding, combo: "", parsedChord: [] };
+  }
+  // Storage is unvalidated JSON, so anything can turn up here.
+  if (typeof override !== "string") {
+    return binding;
+  }
+  let parsedChord: KeyCombo[];
+  try {
+    parsedChord = parseBindingChord(override);
+  } catch {
+    return binding;
+  }
+  const lastCombo = parsedChord.at(-1);
+  if (binding.repeat === false && lastCombo) {
+    lastCombo.repeat = false;
+  }
+  if (!binding.help?.defaultDisplayKeys) {
+    return { ...binding, combo: override, parsedChord };
+  }
+  const { defaultDisplayKeys: _defaultDisplayKeys, ...help } = binding.help;
+  return { ...binding, combo: override, parsedChord, help };
+}
+
+export function applyShortcutOverrides(
+  bindings: readonly ParsedShortcutBinding[],
+  overrides: ShortcutOverrides,
+): ParsedShortcutBinding[] {
+  return bindings.map(function (binding) {
+    return applyShortcutOverride(binding, overrides[binding.id]);
   });
+}
+
+export function buildEffectiveBindings(overrides: ShortcutOverrides): ParsedShortcutBinding[] {
+  return applyShortcutOverrides(DEFAULT_BINDINGS, overrides);
 }
 
 // --- Matching engine ---
@@ -1337,6 +1355,8 @@ function resolvePayload(
       return { delta: def.delta };
     case "message-input":
       return { kind: def.kind };
+    case "user-command":
+      return { commandId: def.commandId };
     default:
       throw new Error("unreachable");
   }

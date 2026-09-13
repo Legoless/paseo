@@ -4,6 +4,9 @@ import { View, Text, type PressableStateCallbackType } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { MoreHorizontal, Pencil, Undo2, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { useStoreWithEqualityFn } from "zustand/traditional";
+import equal from "fast-deep-equal";
+import type { CustomCommand } from "@getpaseo/protocol/custom-commands";
 import type { Theme } from "@/styles/theme";
 import { settingsStyles } from "@/styles/settings";
 import { SettingsSection } from "@/screens/settings/settings-section";
@@ -17,12 +20,20 @@ import {
 import { Shortcut } from "@/components/ui/shortcut";
 import { useKeyboardShortcutOverrides } from "@/hooks/use-keyboard-shortcut-overrides";
 import {
+  applyShortcutOverrides,
   buildKeyboardShortcutHelpSections,
   getBindingIdForAction,
   getDefaultKeysForAction,
   resolveShortcutKeysForAction,
   type KeyboardShortcutHelpRow,
 } from "@/keyboard/keyboard-shortcuts";
+import {
+  buildCommandBindings,
+  shortcutKeysForCommandBinding,
+} from "@/commands/custom-commands-model";
+import { selectMergedCustomCommands, useCustomCommandsStore } from "@/stores/custom-commands-store";
+import { useLastWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
+import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selection-store";
 import {
   comboStringToShortcutKeys,
   heldModifiersFromEvent,
@@ -36,6 +47,7 @@ import { isNative } from "@/constants/platform";
 import { getDesktopHost } from "@/desktop/host";
 
 const EMPTY_CAPTURED_COMBOS: string[] = [];
+const NO_WORKSPACE_COMMANDS: CustomCommand[] = [];
 
 const ThemedMoreHorizontal = withUnistyles(MoreHorizontal);
 const ThemedPencil = withUnistyles(Pencil);
@@ -193,7 +205,9 @@ function ShortcutActionsMenu({
         hitSlop={8}
         style={triggerStyle}
         accessibilityRole="button"
-        accessibilityLabel={t("settings.shortcuts.actions.menu", { name: t(row.labelKey) })}
+        accessibilityLabel={t("settings.shortcuts.actions.menu", {
+          name: row.labelKey ? t(row.labelKey) : row.label,
+        })}
         testID={`shortcut-actions-${row.id}`}
       >
         {({ hovered, open }) => (
@@ -278,7 +292,7 @@ function ShortcutRow({
 
   return (
     <View style={rowStyle}>
-      <Text style={styles.rowLabel}>{t(row.labelKey)}</Text>
+      <Text style={styles.rowLabel}>{row.labelKey ? t(row.labelKey) : row.label}</Text>
       <View style={styles.rowActions}>
         <View style={styles.rowKeys}>
           <ShortcutRowKeys
@@ -337,6 +351,54 @@ export function KeyboardShortcutsSection() {
   const isMac = getShortcutOs() === "mac";
   const isDesktopApp = getIsElectronRuntime();
   const sections = buildKeyboardShortcutHelpSections({ isMac, isDesktop: isDesktopApp });
+
+  // Dynamic bindings carry no help rows, so the workspace's custom commands get their own
+  // group here, built from the same store the keyboard handler resolves against. The
+  // settings route has no active workspace in the URL — the last one stands in.
+  const lastWorkspaceSelection = useLastWorkspaceSelection();
+  const { cwd: lastWorkspaceCwd } = useSelectedWorkspaceProject(
+    lastWorkspaceSelection?.serverId ?? null,
+    lastWorkspaceSelection?.workspaceId ?? null,
+  );
+  const workspaceCommands = useStoreWithEqualityFn(
+    useCustomCommandsStore,
+    (state) =>
+      lastWorkspaceSelection
+        ? selectMergedCustomCommands(state, lastWorkspaceSelection.serverId, lastWorkspaceCwd)
+        : NO_WORKSPACE_COMMANDS,
+    equal,
+  );
+  const commandRows = useMemo(() => {
+    const defaultBindings = buildCommandBindings(workspaceCommands);
+    const effectiveBindings = applyShortcutOverrides(defaultBindings, overrides);
+    const rows: Array<{
+      row: KeyboardShortcutHelpRow;
+      bindingId: string;
+      displayChord: ShortcutKey[][] | null;
+      hasDefault: boolean;
+    }> = [];
+    for (const [index, command] of workspaceCommands.entries()) {
+      const defaultBinding = defaultBindings[index];
+      const effectiveBinding = effectiveBindings[index];
+      if (!defaultBinding || !effectiveBinding) {
+        continue;
+      }
+      rows.push({
+        // User-authored titles are content, not translation keys — labelKey stays empty and
+        // the row renders `label` directly.
+        row: {
+          id: effectiveBinding.id,
+          label: command.title,
+          labelKey: "",
+          chord: shortcutKeysForCommandBinding(effectiveBinding),
+        },
+        bindingId: effectiveBinding.id,
+        displayChord: shortcutKeysForCommandBinding(effectiveBinding),
+        hasDefault: defaultBinding.parsedChord.length > 0,
+      });
+    }
+    return rows;
+  }, [workspaceCommands, overrides]);
 
   const cancelCapture = useCallback(() => {
     setCapturedCombos([]);
@@ -489,6 +551,41 @@ export function KeyboardShortcutsSection() {
           </SettingsSection>
         );
       })}
+      {commandRows.length > 0 ? (
+        <SettingsSection title={t("settings.shortcuts.sections.commands")}>
+          <View style={settingsStyles.card}>
+            {commandRows.map(function (commandRow, index) {
+              const hasOverride = commandRow.bindingId in overrides;
+              return (
+                <View key={commandRow.bindingId}>
+                  <ShortcutRowContainer
+                    row={commandRow.row}
+                    bindingId={commandRow.bindingId}
+                    displayChord={commandRow.displayChord}
+                    hasOverride={hasOverride}
+                    hasDefault={commandRow.hasDefault}
+                    isCapturing={capturingBindingId === commandRow.bindingId}
+                    capturedCombos={
+                      capturingBindingId === commandRow.bindingId
+                        ? capturedCombos
+                        : EMPTY_CAPTURED_COMBOS
+                    }
+                    heldModifiers={
+                      capturingBindingId === commandRow.bindingId ? heldModifiers : null
+                    }
+                    onStartCapture={startCapture}
+                    onSaveCapture={saveCapture}
+                    onCancelCapture={cancelCapture}
+                    onClearOverride={handleClearOverride}
+                    onRemoveOverride={handleRemoveOverride}
+                  />
+                  {index < commandRows.length - 1 && <View style={styles.separator} />}
+                </View>
+              );
+            })}
+          </View>
+        </SettingsSection>
+      ) : null}
     </>
   );
 }
