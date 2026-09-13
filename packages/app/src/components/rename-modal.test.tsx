@@ -1,8 +1,10 @@
+// @vitest-environment jsdom
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdaptiveRenameModal } from "./rename-modal";
+import type { EditingTextInputHandle, EditingTextInputProps } from "./ui/text-input";
 
 const { theme, adaptiveInputState } = vi.hoisted(() => ({
   adaptiveInputState: {
@@ -68,17 +70,10 @@ vi.mock("@/components/adaptive-modal-sheet", async () => {
       children,
     );
   };
-  // Mirrors production AdaptiveTextInput: native-owned input seeded by
-  // initialValue, remounted (via key) when resetKey changes so the new
-  // initialValue takes effect.
-  const AdaptiveTextInput = ReactModule.forwardRef<HTMLInputElement, Record<string, unknown>>(
+  const { EditingTextInput } = await import("./ui/text-input/text-input.web");
+  const AdaptiveTextInput = ReactModule.forwardRef<EditingTextInputHandle, EditingTextInputProps>(
     (props, ref) => {
       const p = props as {
-        initialValue?: string;
-        defaultValue?: string;
-        editable?: boolean;
-        maxLength?: number;
-        testID?: string;
         onChangeText?: (next: string) => void;
         onSubmitEditing?: () => void;
       };
@@ -86,20 +81,7 @@ vi.mock("@/components/adaptive-modal-sheet", async () => {
         onChangeText: p.onChangeText,
         onSubmitEditing: p.onSubmitEditing,
       };
-      return ReactModule.createElement("input", {
-        ref,
-        defaultValue: p.initialValue ?? p.defaultValue ?? "",
-        disabled: p.editable === false,
-        maxLength: p.maxLength,
-        "data-testid": p.testID,
-        onChange: (e: { target: { value: string } }) => p.onChangeText?.(e.target.value),
-        onKeyDown: (e: { key: string; preventDefault: () => void }) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            p.onSubmitEditing?.();
-          }
-        },
-      });
+      return ReactModule.createElement(EditingTextInput, { ...props, ref });
     },
   );
   return { AdaptiveModalSheet, AdaptiveTextInput };
