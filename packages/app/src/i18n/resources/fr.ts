@@ -2130,6 +2130,11 @@ export const fr: TranslationResources = {
         description: "Utilise l’ancien terminal WebView après la réouverture d’un terminal",
         accessibilityLabel: "Utiliser l’ancien rendu du terminal",
       },
+      isolatedTerminalRenderer: {
+        label: "Isoler le rendu du terminal",
+        description: "Rend chaque terminal dans son propre processus (bureau uniquement)",
+        accessibilityLabel: "Isoler le rendu du terminal",
+      },
       testAudio: "Tester le son",
       playTest: "Jouer à l'essai",
       playing: "Jouant...",

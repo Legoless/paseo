@@ -71,6 +71,10 @@ import {
   unregisterPaseoBrowserHost,
 } from "./features/browser-webviews/index.js";
 import {
+  isPaseoTerminalWebviewAttach,
+  preparePaseoTerminalWebContents,
+} from "./features/terminal-webviews/index.js";
+import {
   clearPaseoBrowserProfile,
   getLegacyPaseoBrowserProfileSession,
   PASEO_BROWSER_PROFILE_PARTITION,
@@ -562,6 +566,10 @@ function getBrowserKeyboardPreloadPath(): string {
   return path.join(__dirname, "features", "browser-keyboard", "guest-preload.js");
 }
 
+function getTerminalGuestPreloadPath(): string {
+  return path.join(__dirname, "features", "terminal-webviews", "guest-preload.js");
+}
+
 function getAppDistDir(): string {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, "app-dist");
@@ -726,7 +734,8 @@ async function createWindow(
   setupDefaultContextMenu(mainWindow);
   setupDragDropPrevention(mainWindow);
   mainWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
-    if (!isPaseoBrowserWebviewAttach(params)) {
+    const isTerminalGuest = isPaseoTerminalWebviewAttach(params);
+    if (!isTerminalGuest && !isPaseoBrowserWebviewAttach(params)) {
       event.preventDefault();
       return;
     }
@@ -744,9 +753,15 @@ async function createWindow(
     delete params.preload;
     delete (webPreferences as { preloadURL?: string }).preloadURL;
     delete (params as { preloadURL?: string }).preloadURL;
-    webPreferences.preload = getBrowserKeyboardPreloadPath();
+    webPreferences.preload = isTerminalGuest
+      ? getTerminalGuestPreloadPath()
+      : getBrowserKeyboardPreloadPath();
   });
   mainWindow.webContents.on("did-attach-webview", (_event, contents) => {
+    if (isPaseoTerminalWebviewAttach({ src: contents.getURL() })) {
+      preparePaseoTerminalWebContents(contents);
+      return;
+    }
     preparePaseoBrowserWebContents(contents);
     contents.once("destroyed", () => {
       pendingBrowserWindowOpenRequests.delete(contents.id);

@@ -2127,6 +2127,11 @@ export const es: TranslationResources = {
         description: "Usa el terminal WebView anterior al volver a abrir un terminal",
         accessibilityLabel: "Usar el renderizador de terminal anterior",
       },
+      isolatedTerminalRenderer: {
+        label: "Aislar el renderizador de terminal",
+        description: "Renderiza cada terminal en su propio proceso (solo escritorio)",
+        accessibilityLabel: "Aislar el renderizador de terminal",
+      },
       testAudio: "audio de prueba",
       playTest: "Prueba de juego",
       playing: "Jugando...",
