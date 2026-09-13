@@ -35,6 +35,7 @@ import {
   scheduleDeferredReload,
   shouldScheduleDeferredReload,
 } from "@/desktop/terminal/guest-lifecycle";
+import { createIsolatedTerminalGuestBudget } from "@/terminal/guest/isolated-terminal-guest-budget";
 import { TerminalGuestCrashOverlay } from "./crash-overlay";
 
 type BridgeInboundMessage =
@@ -131,6 +132,9 @@ const TERMINAL_GUEST_PATH = "/terminal-guest.html";
 const READ_GUEST_SELECTION_SCRIPT =
   "window.__PASEO_TERMINAL_WEBVIEW_GET_SELECTION__ ? window.__PASEO_TERMINAL_WEBVIEW_GET_SELECTION__() : ''";
 
+// Shared across every mounted isolated terminal so the LRU cap bounds total guest processes.
+const isolatedTerminalGuestBudget = createIsolatedTerminalGuestBudget();
+
 async function writeTerminalClipboardText(text: string): Promise<void> {
   const writer = selectTerminalClipboardWriter({
     bridge: getDesktopHost()?.terminal,
@@ -209,6 +213,7 @@ export function IsolatedTerminalEmulator({
   onOpenLocalFileLink,
   onRendererReadyChange,
   onGuestReloaded,
+  isPresented = false,
   pendingModifiers = { ctrl: false, shift: false, alt: false },
   focusRequestToken = 0,
   resizeRequestToken = 0,
@@ -216,11 +221,13 @@ export function IsolatedTerminalEmulator({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const webviewRef = useRef<ElectronTerminalWebview | null>(null);
   const [bridgeReadyVersion, setBridgeReadyVersion] = useState(0);
+  const [isEvicted, setIsEvicted] = useState(false);
   const [lifecycle, dispatchLifecycle] = useReducer(
     reduceTerminalGuestLifecycle,
     INITIAL_TERMINAL_GUEST_LIFECYCLE_STATE,
   );
   const bridgeReadyRef = useRef(false);
+  const isEvictedRef = useRef(false);
   const pendingMessagesRef = useRef<BridgeInboundMessage[]>([]);
   const outputDecoderRef = useRef(new TextDecoder());
   const mountRequestedStreamKeyRef = useRef<string | null>(null);
@@ -277,6 +284,11 @@ export function IsolatedTerminalEmulator({
   };
 
   const sendToWebView = useCallback((message: BridgeInboundMessage) => {
+    // An evicted guest has no webview; drop output instead of buffering it (the fresh
+    // subscription on remount re-delivers the snapshot).
+    if (isEvictedRef.current) {
+      return;
+    }
     const webview = webviewRef.current;
     if (!bridgeReadyRef.current || !webview) {
       pendingMessagesRef.current.push(message);
@@ -564,11 +576,43 @@ export function IsolatedTerminalEmulator({
   }, []);
 
   useEffect(() => {
+    return isolatedTerminalGuestBudget.subscribe((evictedKeys) => {
+      if (!evictedKeys.includes(streamKey)) {
+        return;
+      }
+      isEvictedRef.current = true;
+      callbacksRef.current.onRendererReadyChange?.({ streamKey, isReady: false });
+      dispatchLifecycle({ type: "evicted", now: Date.now() });
+      setIsEvicted(true);
+    });
+  }, [streamKey]);
+
+  useEffect(() => {
+    if (!isPresented) {
+      return;
+    }
+    isolatedTerminalGuestBudget.present(streamKey);
+    if (!isEvictedRef.current) {
+      return;
+    }
+    // Remounting an evicted guest is a reload: reset the stream so the daemon re-delivers the
+    // snapshot (a reused subscription yields nothing), then recreate the webview.
+    isEvictedRef.current = false;
+    focusOnReadyAfterReloadRef.current = true;
+    callbacksRef.current.onGuestReloaded?.();
+    setIsEvicted(false);
+  }, [isPresented, streamKey, isEvicted]);
+
+  useEffect(() => {
+    if (isEvicted) {
+      return () => {};
+    }
     const host = hostRef.current;
     if (!host) {
       return () => {};
     }
 
+    const guestKey = mountConfigRef.current.streamKey;
     const webview = document.createElement("webview") as ElectronTerminalWebview;
     webview.src = `${window.location.origin}${TERMINAL_GUEST_PATH}`;
     webview.style.width = "100%";
@@ -592,6 +636,7 @@ export function IsolatedTerminalEmulator({
     host.replaceChildren(webview);
     webviewRef.current = webview;
     needsHostRepaintRef.current = true;
+    isolatedTerminalGuestBudget.present(guestKey);
     dispatchLifecycle({ type: "mount", now: Date.now() });
 
     return () => {
@@ -606,8 +651,9 @@ export function IsolatedTerminalEmulator({
       pendingMessagesRef.current = [];
       mountRequestedStreamKeyRef.current = null;
       rendererReadyStreamKeyRef.current = null;
+      isolatedTerminalGuestBudget.release(guestKey);
     };
-  }, [lifecycle.epoch, stableIpcMessageListener]);
+  }, [lifecycle.epoch, stableIpcMessageListener, isEvicted]);
 
   useEffect(() => {
     const terminal = getDesktopHost()?.terminal;

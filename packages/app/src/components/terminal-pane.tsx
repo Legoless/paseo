@@ -1065,6 +1065,7 @@ export function TerminalPane({
     initialSnapshot,
     onRendererReadyChange: handleRendererReadyChange,
     onGuestReloaded: handleGuestReloaded,
+    isPresented: isTerminalPresented,
     onSwipeRight: handleSwipeRight,
     onSwipeLeft: handleSwipeLeft,
     onInput: handleTerminalData,

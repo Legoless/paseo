@@ -135,6 +135,38 @@ describe("terminal guest lifecycle reducer", () => {
     expect(state.phase).toBe("dead");
   });
 
+  test("evicted drops to idle without the crash overlay and stops the heartbeat watchdog", () => {
+    const ready = reduce(
+      INITIAL_TERMINAL_GUEST_LIFECYCLE_STATE,
+      { type: "mount", now: 0 },
+      { type: "bridgeReady", now: 100 },
+      { type: "rendererReady", now: 200 },
+    );
+    const evicted = reduce(ready, { type: "evicted", now: 300 });
+    expect(evicted.phase).toBe("idle");
+    expect(isTerminalGuestOverlayVisible(evicted)).toBe(false);
+    expect(evicted.lastAliveAt).toBeNull();
+    expect(evicted.bridgeReadyDeadline).toBeNull();
+    expect(evicted.rendererReadyDeadline).toBeNull();
+    // A tick long after the heartbeat deadline must not mark an evicted guest hung.
+    expect(
+      reduce(evicted, { type: "tick", now: 300 + TERMINAL_GUEST_HEARTBEAT_DEADLINE_MS }).phase,
+    ).toBe("idle");
+  });
+
+  test("an evicted guest re-arms mounting on the next mount", () => {
+    const evicted = reduce(
+      INITIAL_TERMINAL_GUEST_LIFECYCLE_STATE,
+      { type: "mount", now: 0 },
+      { type: "bridgeReady", now: 100 },
+      { type: "rendererReady", now: 200 },
+      { type: "evicted", now: 300 },
+    );
+    const remounted = reduce(evicted, { type: "mount", now: 400 });
+    expect(remounted.phase).toBe("mounting");
+    expect(remounted.bridgeReadyDeadline).toBe(400 + TERMINAL_GUEST_BRIDGE_READY_TIMEOUT_MS);
+  });
+
   test("reload bumps the epoch and re-arms the bridge watchdog", () => {
     const dead = reduce(
       INITIAL_TERMINAL_GUEST_LIFECYCLE_STATE,

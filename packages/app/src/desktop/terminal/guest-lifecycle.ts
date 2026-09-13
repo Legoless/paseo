@@ -45,6 +45,7 @@ export type TerminalGuestLifecycleEvent =
   | { type: "unresponsive"; now: number }
   | { type: "responsive"; now: number }
   | { type: "destroyed"; now: number }
+  | { type: "evicted"; now: number }
   | { type: "reload"; now: number }
   | { type: "tick"; now: number };
 
@@ -138,6 +139,17 @@ export function reduceTerminalGuestLifecycle(
       return state.phase === "hung" ? { ...state, phase: "ready" } : state;
     case "destroyed":
       return markDead(state);
+    case "evicted":
+      // Normal operation, not a crash: idle stops the heartbeat watchdog without the crash overlay.
+      return {
+        ...state,
+        phase: "idle",
+        bridgeReady: false,
+        rendererReady: false,
+        bridgeReadyDeadline: null,
+        rendererReadyDeadline: null,
+        lastAliveAt: null,
+      };
     case "reload":
       return armMounting(state, event.now, state.epoch + 1);
     case "tick":

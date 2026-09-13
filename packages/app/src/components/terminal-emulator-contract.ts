@@ -71,6 +71,11 @@ export interface TerminalEmulatorProps {
    * so only a fresh subscription re-delivers the snapshot).
    */
   onGuestReloaded?: () => void;
+  /**
+   * Isolated-renderer only: the tab is visible in a focused workspace. Drives the guest LRU budget
+   * (present = most-recently-used) and remounts an evicted guest. Ignored by the embedded renderer.
+   */
+  isPresented?: boolean;
   pendingModifiers?: PendingTerminalModifiers;
   focusRequestToken?: number;
   resizeRequestToken?: number;
