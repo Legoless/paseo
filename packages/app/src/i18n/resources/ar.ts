@@ -555,6 +555,9 @@ export const ar: TranslationResources = {
       hostDisconnected: "Host غير متصل",
       updateHost: "حدّث المضيف لاستخدام عارض الطرفية الأصلي.",
       unableToSubscribe: "غير قادر على الاشتراك في المحطة",
+      rendererStopped: "توقف عارض الطرفية",
+      rendererStoppedDescription: "أعد التحميل لاستعادة هذه الطرفية. لن تتأثر علامات التبويب الأخرى.",
+      reload: "إعادة تحميل الطرفية",
     },
     tabs: {
       loading: "تحميل...",

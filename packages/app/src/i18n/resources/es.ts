@@ -559,6 +559,10 @@ export const es: TranslationResources = {
       hostDisconnected: "Hostno está conectado",
       updateHost: "Actualiza el host para usar el renderizador de terminal nativo.",
       unableToSubscribe: "No se puede suscribir al terminal",
+      rendererStopped: "El renderizador de terminal se detuvo",
+      rendererStoppedDescription:
+        "Recarga para restaurar este terminal. Las demás pestañas no se ven afectadas.",
+      reload: "Recargar terminal",
     },
     tabs: {
       loading: "Cargando...",

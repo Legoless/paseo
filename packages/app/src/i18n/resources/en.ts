@@ -553,6 +553,9 @@ export const en = {
       hostDisconnected: "Host is not connected",
       updateHost: "Update the host to use the native terminal renderer.",
       unableToSubscribe: "Unable to subscribe to terminal",
+      rendererStopped: "Terminal renderer stopped",
+      rendererStoppedDescription: "Reload to restore this terminal. Other tabs are unaffected.",
+      reload: "Reload terminal",
     },
     tabs: {
       loading: "Loading...",

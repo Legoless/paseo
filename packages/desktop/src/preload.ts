@@ -137,4 +137,15 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
     copyElement: (payload: { text?: string; imageDataUrl?: string }) =>
       ipcRenderer.invoke("paseo:browser:copy-element", payload),
   },
+  terminal: {
+    onGuestState: (handler: EventHandler): (() => void) => {
+      const listener = (_ipcEvent: Electron.IpcRendererEvent, payload: unknown) => {
+        handler(payload);
+      };
+      ipcRenderer.on("paseo:event:terminal-guest-state", listener);
+      return () => {
+        ipcRenderer.removeListener("paseo:event:terminal-guest-state", listener);
+      };
+    },
+  },
 });

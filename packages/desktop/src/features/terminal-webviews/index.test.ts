@@ -1,8 +1,11 @@
 import { describe, expect, test } from "vitest";
 import {
+  TERMINAL_GUEST_STATE_EVENT,
   getPaseoTerminalWebviewRegistry,
   isPaseoTerminalWebviewAttach,
+  observePaseoTerminalGuestState,
   preparePaseoTerminalWebContents,
+  type TerminalGuestStateEvent,
 } from "./index.js";
 
 class FakeTerminalGuest {
@@ -81,5 +84,69 @@ describe("terminal webview attachment", () => {
 
     registry.unregisterTerminal("terminal-a");
     expect(registry.getWebContentsIdForTerminal("terminal-a")).toBeNull();
+  });
+});
+
+class FakeObservableTerminalGuest {
+  private readonly listeners = new Map<string, Array<() => void>>();
+  private destroyed = false;
+
+  public constructor(public readonly id: number) {}
+
+  public isDestroyed(): boolean {
+    return this.destroyed;
+  }
+
+  public on(event: "unresponsive" | "responsive", listener: () => void): void {
+    const listeners = this.listeners.get(event) ?? [];
+    listeners.push(listener);
+    this.listeners.set(event, listeners);
+  }
+
+  public emit(event: "unresponsive" | "responsive"): void {
+    for (const listener of this.listeners.get(event) ?? []) {
+      listener();
+    }
+  }
+
+  public destroy(): void {
+    this.destroyed = true;
+  }
+}
+
+describe("terminal guest state forwarding", () => {
+  test("forwards unresponsive and responsive to the host renderer", () => {
+    const guest = new FakeObservableTerminalGuest(901);
+    const sent: Array<{ channel: string; payload: TerminalGuestStateEvent }> = [];
+    observePaseoTerminalGuestState(guest, {
+      send: (channel, payload) => sent.push({ channel, payload }),
+    });
+
+    guest.emit("unresponsive");
+    guest.emit("responsive");
+
+    expect(sent).toEqual([
+      {
+        channel: TERMINAL_GUEST_STATE_EVENT,
+        payload: { webContentsId: 901, state: "unresponsive" },
+      },
+      {
+        channel: TERMINAL_GUEST_STATE_EVENT,
+        payload: { webContentsId: 901, state: "responsive" },
+      },
+    ]);
+  });
+
+  test("drops events from a destroyed guest", () => {
+    const guest = new FakeObservableTerminalGuest(902);
+    const sent: TerminalGuestStateEvent[] = [];
+    observePaseoTerminalGuestState(guest, {
+      send: (_channel, payload) => sent.push(payload),
+    });
+
+    guest.destroy();
+    guest.emit("unresponsive");
+
+    expect(sent).toEqual([]);
   });
 });

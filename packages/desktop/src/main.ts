@@ -72,6 +72,7 @@ import {
 } from "./features/browser-webviews/index.js";
 import {
   isPaseoTerminalWebviewAttach,
+  observePaseoTerminalGuestState,
   preparePaseoTerminalWebContents,
 } from "./features/terminal-webviews/index.js";
 import {
@@ -760,6 +761,7 @@ async function createWindow(
   mainWindow.webContents.on("did-attach-webview", (_event, contents) => {
     if (isPaseoTerminalWebviewAttach({ src: contents.getURL() })) {
       preparePaseoTerminalWebContents(contents);
+      observePaseoTerminalGuestState(contents, mainWindow.webContents);
       return;
     }
     preparePaseoBrowserWebContents(contents);
