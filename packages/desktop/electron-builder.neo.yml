@@ -31,8 +31,14 @@ mac:
   artifactName: "Paseo-Neo-${version}-${arch}.${ext}"
   category: public.app-category.developer-tools
   icon: assets/icon.icns
-  hardenedRuntime: false
-  notarize: false
+  # Notarization requires the hardened runtime. An unnotarized build silently
+  # loses macOS features that look like code bugs: setBadgeCount reports
+  # success while the Dock paints nothing. Credentials come from the
+  # environment (APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER).
+  hardenedRuntime: true
+  notarize: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
   extraResources:
     - from: bin/paseo
       to: bin/paseoneo
