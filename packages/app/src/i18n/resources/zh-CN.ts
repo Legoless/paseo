@@ -2131,6 +2131,10 @@ export const zhCN: TranslationResources = {
         title: "聊天大纲",
         description: "显示用于在提示词之间跳转的大纲",
       },
+      paneStatusGlow: {
+        title: "窗格状态光晕",
+        description: "按状态为智能体窗格着色",
+      },
       fonts: {
         title: "字体",
         systemDefault: "系统默认",

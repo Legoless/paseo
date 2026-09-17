@@ -2263,6 +2263,10 @@ export const en = {
         title: "Chat outline",
         description: "Show an outline for jumping between prompts",
       },
+      paneStatusGlow: {
+        title: "Pane status glow",
+        description: "Show a status-colored glow around agent panes",
+      },
       fonts: {
         title: "Fonts",
         systemDefault: "System default",

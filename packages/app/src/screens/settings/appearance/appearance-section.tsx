@@ -271,6 +271,30 @@ function ChatOutlineRow({ value, onChange }: ChatOutlineRowProps) {
   );
 }
 
+interface PaneStatusGlowRowProps {
+  value: boolean;
+  onChange: (value: boolean) => void;
+}
+
+function PaneStatusGlowRow({ value, onChange }: PaneStatusGlowRowProps) {
+  const { t } = useTranslation();
+  return (
+    <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
+      <View style={settingsStyles.rowContent}>
+        <Text style={settingsStyles.rowTitle}>{t("settings.appearance.paneStatusGlow.title")}</Text>
+        <Text style={settingsStyles.rowHint}>
+          {t("settings.appearance.paneStatusGlow.description")}
+        </Text>
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        accessibilityLabel={t("settings.appearance.paneStatusGlow.title")}
+      />
+    </View>
+  );
+}
+
 const TOOL_CALL_DETAIL_LEVELS: readonly AppSettings["toolCallDetailLevel"][] = [
   "detailed",
   "overview",
@@ -588,6 +612,13 @@ export function AppearanceSection() {
     [updateSettings],
   );
 
+  const handlePaneStatusGlowChange = useCallback(
+    (paneStatusGlowEnabled: boolean) => {
+      void updateSettings({ paneStatusGlowEnabled });
+    },
+    [updateSettings],
+  );
+
   const commitUiFontFamily = useCallback(
     (value: string) => {
       const sanitized = sanitizeFontFamily(value);
@@ -707,6 +738,10 @@ export function AppearanceSection() {
               onChange={handleChatOutlineChange}
             />
           ) : null}
+          <PaneStatusGlowRow
+            value={settings.paneStatusGlowEnabled}
+            onChange={handlePaneStatusGlowChange}
+          />
         </View>
       </SettingsSection>
       <SettingsSection title={t("settings.appearance.fonts.title")}>

@@ -2211,6 +2211,10 @@ export const fr: TranslationResources = {
         title: "Plan de la discussion",
         description: "Afficher un plan pour passer d’une requête à l’autre",
       },
+      paneStatusGlow: {
+        title: "Halo de volet",
+        description: "Colorer les volets d’agent selon l’état",
+      },
       fonts: {
         title: "Polices",
         systemDefault: "Valeur par défaut du système",

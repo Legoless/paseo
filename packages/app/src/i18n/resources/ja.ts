@@ -2174,6 +2174,10 @@ export const ja: TranslationResources = {
         title: "チャットのアウトライン",
         description: "プロンプト間を移動するためのアウトラインを表示します",
       },
+      paneStatusGlow: {
+        title: "ペインのステータスグロー",
+        description: "エージェントのペインを状態色で縁取ります",
+      },
       fonts: {
         title: "フォント",
         systemDefault: "システムデフォルト",

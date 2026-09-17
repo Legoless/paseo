@@ -2168,6 +2168,10 @@ export const ko: TranslationResources = {
         title: "채팅 개요",
         description: "프롬프트 사이를 이동하기 위한 개요 표시",
       },
+      paneStatusGlow: {
+        title: "창 상태 글로우",
+        description: "에이전트 창에 상태 색 테두리를 표시합니다",
+      },
       fonts: {
         title: "글꼴",
         systemDefault: "시스템 기본값",
