@@ -77,18 +77,20 @@ function getSystemColorScheme(): ColorScheme {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-async function updateDockBadge(count?: number) {
-  if (isNative || !getIsElectron()) return;
+async function updateDockBadge(count?: number): Promise<boolean> {
+  if (isNative || !getIsElectron()) return false;
 
   const desktopWindow = getDesktopHost()?.window?.getCurrentWindow?.();
   if (!desktopWindow || typeof desktopWindow.setBadgeCount !== "function") {
-    return;
+    return false;
   }
 
   try {
     await desktopWindow.setBadgeCount(count);
+    return true;
   } catch (error) {
     console.warn("[useFaviconStatus] Failed to update dock badge", error);
+    return false;
   }
 }
 
@@ -119,8 +121,12 @@ export function useFaviconStatus() {
 
     const dockBadgeCount = deriveDockBadgeCountFromAgents(agents);
     if (dockBadgeCount !== lastDockBadgeCountRef.current) {
-      lastDockBadgeCountRef.current = dockBadgeCount;
-      void updateDockBadge(dockBadgeCount);
+      void (async () => {
+        const applied = await updateDockBadge(dockBadgeCount);
+        if (applied) {
+          lastDockBadgeCountRef.current = dockBadgeCount;
+        }
+      })();
     }
   }, [agents, colorScheme]);
 }
