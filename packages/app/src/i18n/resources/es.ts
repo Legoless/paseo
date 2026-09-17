@@ -2207,6 +2207,10 @@ export const es: TranslationResources = {
         title: "Esquema del chat",
         description: "Muestra un esquema para saltar entre instrucciones",
       },
+      paneStatusGlow: {
+        title: "Resplandor del panel",
+        description: "Colorear los paneles de agente según el estado",
+      },
       fonts: {
         title: "Fuentes",
         systemDefault: "Valor predeterminado del sistema",

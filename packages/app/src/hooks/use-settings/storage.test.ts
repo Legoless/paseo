@@ -209,6 +209,26 @@ describe("loadAppSettingsFromStorage", () => {
     expect(result.chatOutlineEnabled).toBe(false);
   });
 
+  it("enables pane status glow by default", async () => {
+    const deps = makeDeps();
+
+    const result = await loadAppSettingsFromStorage(deps);
+
+    expect(result.paneStatusGlowEnabled).toBe(true);
+  });
+
+  it("loads a disabled pane status glow preference", async () => {
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ paneStatusGlowEnabled: false }),
+      }),
+    });
+
+    const result = await loadAppSettingsFromStorage(deps);
+
+    expect(result.paneStatusGlowEnabled).toBe(false);
+  });
+
   it("collapses legacy diff destinations into the former Explorer choice", async () => {
     const deps = makeDeps({
       storage: createInMemoryKeyValueStorage({

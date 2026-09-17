@@ -2191,6 +2191,10 @@ export const ptBR: TranslationResources = {
         title: "Estrutura do chat",
         description: "Mostrar uma estrutura para navegar entre prompts",
       },
+      paneStatusGlow: {
+        title: "Brilho do painel",
+        description: "Colorir painéis de agente conforme o status",
+      },
       fonts: {
         title: "Fontes",
         systemDefault: "Sistema padrão",

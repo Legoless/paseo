@@ -2193,6 +2193,10 @@ export const ru: TranslationResources = {
         title: "Оглавление чата",
         description: "Показывать оглавление для перехода между запросами",
       },
+      paneStatusGlow: {
+        title: "Свечение панели",
+        description: "Подсвечивать панели агентов по статусу",
+      },
       fonts: {
         title: "Шрифты",
         systemDefault: "Системный шрифт",

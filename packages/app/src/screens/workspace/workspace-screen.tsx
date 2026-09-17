@@ -173,6 +173,7 @@ import {
   WorkspacePaneContent,
   type WorkspacePaneContentModel,
 } from "@/screens/workspace/workspace-pane-content";
+import { WorkspacePaneStatusGlow } from "@/screens/workspace/pane-status-glow";
 import { useMountedTabSet } from "@/screens/workspace/use-mounted-tab-set";
 import { WorkspaceFocusProvider } from "@/workspace/focus";
 import { DiffDocumentWorkspaceCacheProvider } from "@/git/diff-document/workspace-cache";
@@ -868,6 +869,11 @@ const MobileMountedTabSlot = memo(function MobileMountedTabSlot({
           content={content}
           isWorkspaceFocused={isWorkspaceFocused}
           isPaneFocused={isPaneFocused}
+        />
+        <WorkspacePaneStatusGlow
+          tab={tabDescriptor}
+          serverId={content.paneContextValue.serverId}
+          workspaceId={content.paneContextValue.workspaceId}
         />
       </RetainedPanel>
     </RenderProfile>

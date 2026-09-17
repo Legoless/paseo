@@ -2156,6 +2156,10 @@ export const ar: TranslationResources = {
         title: "مخطط المحادثة",
         description: "عرض مخطط للتنقل بين المطالبات",
       },
+      paneStatusGlow: {
+        title: "توهج اللوحة",
+        description: "تلوين لوحات الوكيل حسب الحالة",
+      },
       fonts: {
         title: "الخطوط",
         systemDefault: "الافتراضي للنظام",

@@ -73,6 +73,12 @@ function terminalTab(page: Page, terminalId: string) {
   return page.getByTestId(`workspace-tab-terminal_${terminalId}`).first();
 }
 
+function terminalPane(page: Page, terminalId: string) {
+  return page.locator('[data-testid^="workspace-pane-"]').filter({
+    has: terminalTab(page, terminalId),
+  });
+}
+
 async function expectTerminalTabStatus(
   page: Page,
   terminalId: string,
@@ -83,6 +89,19 @@ async function expectTerminalTabStatus(
   ).toBeVisible({
     timeout: 15_000,
   });
+}
+
+async function expectTerminalPaneGlow(
+  page: Page,
+  terminalId: string,
+  status: TabStatusBucket,
+): Promise<void> {
+  const glow = terminalPane(page, terminalId).locator('[data-testid="workspace-pane-status-glow"]');
+  if (status === "none") {
+    await expect(glow).toHaveCount(0);
+    return;
+  }
+  await expect(glow).toHaveAttribute("data-status-glow", status, { timeout: 15_000 });
 }
 
 async function focusTerminalTab(page: Page, terminalId: string): Promise<void> {
@@ -153,10 +172,13 @@ test.describe("Terminal activity indicators", () => {
   }) => {
     await withTerminalActivityFixture(harness, async ({ activityTerminal, focusTerminal }) => {
       await harness.openTerminal(page, { terminalId: activityTerminal.terminal.id });
-      await harness.openTerminal(page, { terminalId: focusTerminal.id });
-
       await activityTerminal.report("running");
       await expectTerminalTabStatus(page, activityTerminal.terminal.id, tabStatusBucket("running"));
+      await expectTerminalPaneGlow(page, activityTerminal.terminal.id, tabStatusBucket("running"));
+
+      await harness.openTerminal(page, { terminalId: focusTerminal.id });
+      await expectTerminalTabStatus(page, activityTerminal.terminal.id, tabStatusBucket("running"));
+      await expectTerminalPaneGlow(page, focusTerminal.id, "none");
 
       await activityTerminal.report("idle");
       await expectTerminalTabStatus(page, activityTerminal.terminal.id, tabStatusBucket("idle"));
@@ -176,6 +198,7 @@ test.describe("Terminal activity indicators", () => {
         timeoutMs: 15_000,
       });
       await expectTerminalTabStatus(page, activityTerminal.terminal.id, "none");
+      await expectTerminalPaneGlow(page, activityTerminal.terminal.id, "none");
     });
   });
 });

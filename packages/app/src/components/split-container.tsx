@@ -85,6 +85,7 @@ import {
   WorkspaceTabPresentationResolver,
   WorkspaceTabIcon,
 } from "@/screens/workspace/workspace-tab-presentation";
+import { WorkspacePaneStatusGlow } from "@/screens/workspace/pane-status-glow";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import { PaneProjectBadge } from "@/components/pane-project-badge";
 import {
@@ -1589,6 +1590,13 @@ function SplitPaneView({
             </>
           ) : null}
         </View>
+        {activeTabDescriptor ? (
+          <WorkspacePaneStatusGlow
+            tab={activeTabDescriptor}
+            serverId={normalizedServerId}
+            workspaceId={normalizedWorkspaceId}
+          />
+        ) : null}
       </View>
     </RenderProfile>
   );
