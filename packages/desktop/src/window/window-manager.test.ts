@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  applyDockBadgeCount,
   applyMacWindowControlsUpdate,
   DEFAULT_WINDOW_HEIGHT,
   DEFAULT_WINDOW_WIDTH,
@@ -27,6 +28,50 @@ describe("window-manager", () => {
       expect(readBadgeCount(1.5)).toBe(0);
       expect(readBadgeCount("2")).toBe(0);
       expect(readBadgeCount({ count: 2 })).toBe(0);
+    });
+  });
+
+  describe("applyDockBadgeCount", () => {
+    it("sets the numeric count and the macOS dock string together", () => {
+      const setBadgeCount = vi.fn().mockReturnValue(true);
+      const setBadge = vi.fn();
+
+      applyDockBadgeCount({
+        count: 3,
+        platform: "darwin",
+        app: { setBadgeCount, dock: { setBadge } },
+      });
+
+      expect(setBadgeCount).toHaveBeenCalledWith(3);
+      expect(setBadge).toHaveBeenCalledWith("3");
+    });
+
+    it("clears the macOS dock string when the count is zero", () => {
+      const setBadgeCount = vi.fn().mockReturnValue(true);
+      const setBadge = vi.fn();
+
+      applyDockBadgeCount({
+        count: 0,
+        platform: "darwin",
+        app: { setBadgeCount, dock: { setBadge } },
+      });
+
+      expect(setBadgeCount).toHaveBeenCalledWith(0);
+      expect(setBadge).toHaveBeenCalledWith("");
+    });
+
+    it("does not touch dock.setBadge off darwin", () => {
+      const setBadgeCount = vi.fn().mockReturnValue(true);
+      const setBadge = vi.fn();
+
+      applyDockBadgeCount({
+        count: 2,
+        platform: "linux",
+        app: { setBadgeCount, dock: { setBadge } },
+      });
+
+      expect(setBadgeCount).toHaveBeenCalledWith(2);
+      expect(setBadge).not.toHaveBeenCalled();
     });
   });
 

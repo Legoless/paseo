@@ -25,6 +25,29 @@ export function readBadgeCount(input: unknown): number {
   return input;
 }
 
+export interface DockBadgeHost {
+  setBadgeCount: (count: number) => boolean;
+  dock?: { setBadge: (text: string) => void } | null;
+}
+
+/**
+ * macOS dock badges need both APIs: `setBadgeCount` is the cross-platform
+ * counter, and `dock.setBadge` is the string the Dock actually paints. Electron
+ * documents that notification permission is required for either to show; the
+ * startup probe in `ensureNotificationCenterRegistration` is what registers us.
+ */
+export function applyDockBadgeCount(input: {
+  count: number;
+  app: DockBadgeHost;
+  platform?: NodeJS.Platform;
+}): void {
+  const platform = input.platform ?? process.platform;
+  input.app.setBadgeCount(input.count);
+  if (platform === "darwin") {
+    input.app.dock?.setBadge(input.count > 0 ? String(input.count) : "");
+  }
+}
+
 export type WindowTheme = "light" | "dark";
 export interface WindowChromeUpdate {
   backgroundColor?: string;
@@ -182,7 +205,7 @@ export function registerWindowManager(input: { mode: DesktopWindowChromeMode }):
     if (process.platform === "darwin" || process.platform === "linux") {
       const badgeCount = readBadgeCount(count);
       try {
-        app.setBadgeCount(badgeCount);
+        applyDockBadgeCount({ count: badgeCount, app });
       } catch (error) {
         console.warn("[window-manager] Failed to update badge count", {
           count,
