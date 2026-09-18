@@ -10,7 +10,6 @@ import React, {
 import { measureElement as measureVirtualElement, useVirtualizer } from "@tanstack/react-virtual";
 import { withUnistyles } from "react-native-unistyles";
 import { useRetainedPanelActive } from "@/components/retained-panel";
-import { isSplitResizeActive } from "@/components/split-resize-session";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import type { Theme } from "@/styles/theme";
@@ -908,9 +907,6 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
       evaluateHistoryStart();
     }
     const observer = new ResizeObserver(() => {
-      if (isSplitResizeActive()) {
-        return;
-      }
       const nextGeometry = getObservedViewportGeometry(scrollContainer);
       if (pendingResumeGeometryCheckRef.current) {
         pendingResumeGeometryCheckRef.current = false;
