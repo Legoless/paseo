@@ -446,7 +446,9 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       isAgentArchived: (agentId: string) => {
         const session = useSessionStore.getState().sessions[serverId];
         const agent = session?.agents?.get(agentId) ?? session?.agentDetails.get(agentId);
-        return agent?.archivedAt != null || agent?.status === "closed";
+        // Closed agents stay fetchable: their timeline is static but viewable, and visible
+        // panes holding one must still paint it. Archived agents are the ones gone from view.
+        return agent?.archivedAt != null;
       },
       setSubscription: (agentIds) => client.setAgentTimelineSubscription(agentIds),
       readCursor: (agentId) => {
