@@ -1551,6 +1551,13 @@ function SplitPaneView({
                 onFocusPane={stableOnFocusPane}
                 buildPaneContentModel={buildPaneContentModel}
               />
+              {activeTabDescriptor ? (
+                <WorkspacePaneStatusGlow
+                  tab={activeTabDescriptor}
+                  serverId={normalizedServerId}
+                  workspaceId={normalizedWorkspaceId}
+                />
+              ) : null}
               <SplitDropZone paneId={pane.id} active={showDropZones} preview={dropPreview} />
             </View>
           </View>
@@ -1590,13 +1597,6 @@ function SplitPaneView({
             </>
           ) : null}
         </View>
-        {activeTabDescriptor ? (
-          <WorkspacePaneStatusGlow
-            tab={activeTabDescriptor}
-            serverId={normalizedServerId}
-            workspaceId={normalizedWorkspaceId}
-          />
-        ) : null}
       </View>
     </RenderProfile>
   );
