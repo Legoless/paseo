@@ -51,10 +51,7 @@ import {
 } from "@/components/explorer-sidebar-layout";
 import { paneOffersExplorerToggle } from "@/workspace-tabs/explorer-sidebar";
 import { RetainedPanel } from "@/components/retained-panel";
-import {
-  installSplitResizeWindowListener,
-  PANE_PANEL_CONTENT_DATA_SET,
-} from "@/components/split-resize-session";
+import { installSplitResizeWindowListener } from "@/components/split-resize-session";
 import {
   hasMultipleVisiblePanes,
   resolveSplitContainerRoot,
@@ -1618,7 +1615,7 @@ function SplitPaneView({
               onPress={handleTogglePaneExplorer}
               onSwitchTabProject={onSwitchTabProject}
             />
-            <View style={styles.panePanelContent} dataSet={PANE_PANEL_CONTENT_DATA_SET}>
+            <View style={styles.panePanelContent}>
               <WorkspacePanelHost
                 paneId={pane.id}
                 tabs={paneTabs}

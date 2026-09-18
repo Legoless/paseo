@@ -1,7 +1,6 @@
 import { getIsElectron, isWeb } from "@/constants/platform";
 
 export const SPLIT_RESIZE_ROOT_ATTRIBUTE = "data-split-resizing";
-export const PANE_PANEL_CONTENT_DATA_SET = { panePanelContent: "true" } as const;
 
 const STYLE_ID = "paseo-split-resize-styles";
 const WINDOW_RESIZE_SETTLE_MS = 150;
@@ -20,12 +19,11 @@ function installSplitResizeStyles(): void {
   }
   const style = document.createElement("style");
   style.id = STYLE_ID;
-  // Skip laying out agent streams, glows, and terminals while the mosaic is
-  // still moving. Tab bars stay visible so the user can see the new geometry.
+  // Glow is a pane-sized overlay Chromium re-rasterizes on every resize frame.
+  // Hide only that; pane content has to stay visible for the drag.
   style.textContent = `
-html[${SPLIT_RESIZE_ROOT_ATTRIBUTE}] [data-pane-panel-content] {
-  content-visibility: hidden;
-  pointer-events: none;
+html[${SPLIT_RESIZE_ROOT_ATTRIBUTE}] [data-testid="workspace-pane-status-glow"] {
+  visibility: hidden;
 }
 `;
   document.head.append(style);

@@ -25,12 +25,14 @@ afterEach(() => {
 });
 
 describe("split resize session", () => {
-  it("freezes pane bodies for the duration of a splitter drag", () => {
+  it("marks the document for the duration of a splitter drag without hiding pane bodies", () => {
     beginSplitterDrag();
     expect(isSplitResizeActive()).toBe(true);
     expect(rootHasFreeze()).toBe(true);
     expect(document.documentElement.style.overflowX).toBe("hidden");
-    expect(document.getElementById("paseo-split-resize-styles")).not.toBeNull();
+    const css = document.getElementById("paseo-split-resize-styles")?.textContent ?? "";
+    expect(css).toContain("workspace-pane-status-glow");
+    expect(css).not.toContain("content-visibility");
 
     endSplitterDrag();
     expect(isSplitResizeActive()).toBe(false);
