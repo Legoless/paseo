@@ -15,12 +15,10 @@ const GLOW_DATA_SET = {
 
 export function PaneStatusGlowLayer({
   bucket,
-  hasStarted = false,
 }: {
   bucket: SidebarStateBucket | null;
-  hasStarted?: boolean;
 }): ReactElement | null {
-  const glow = resolvePaneStatusGlowBucket({ bucket, hasStarted });
+  const glow = resolvePaneStatusGlowBucket(bucket);
   if (!glow) {
     return null;
   }

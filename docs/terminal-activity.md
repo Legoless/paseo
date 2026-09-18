@@ -1,6 +1,6 @@
 # Terminal Activity Indicators
 
-Paseo surfaces terminal activity as a tab indicator (the same marks used by agents) and as a matching colored glow on the pane that holds the active tab: blue while working, orange while blocked on input, green when the turn finished and is ready for the next task. Plain idle terminals and file panes stay unadorned. Agent panes use the same overlay: red on error or quota, green after the agent has been given work even once attention is cleared. An agent that was never started has no glow. Settings → Appearance → Pane status glow turns the overlay off.
+Paseo surfaces terminal activity as a tab indicator (the same marks used by agents) and as a matching colored glow on the pane that holds the active tab: blue while working, orange while blocked on input, green when the turn finished and is ready for the next task. Plain idle terminals and file panes stay unadorned. Agent panes use the same overlay, plus red on error or quota. Green follows finished attention on both, so it clears when you focus the pane. Settings → Appearance → Pane status glow turns the overlay off.
 
 ## Current state
 
