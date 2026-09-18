@@ -967,3 +967,29 @@ test("isAgentArchived excludes archived agents from hot agent selection", async 
   await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("agent-active")).toBe("ready"));
   world.expectNoPendingFetch();
 });
+
+test("a membership failure after an agent caught up does not strand it in error", async () => {
+  const world = new TimelineWorld();
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("workspace", ["agent-a"]);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("agent-a")).respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready"));
+
+  world.sync.replaceVisibleAgentIds("workspace", ["agent-a", "agent-b"]);
+  const failed = await world.nextMembership();
+  failed.fail("Request timed out");
+  const retryMembership = await world.nextRetry();
+  expect({
+    a: world.sync.getAgentTimelineStatus("agent-a"),
+    b: world.sync.getAgentTimelineStatus("agent-b"),
+  }).toEqual({ a: "ready", b: "error" });
+
+  retryMembership();
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("agent-b")).respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("agent-b")).toBe("ready"));
+
+  expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready");
+  world.expectNoPendingFetch();
+});

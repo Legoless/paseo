@@ -734,7 +734,12 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       await ports.setSubscription(requested);
     } catch (error) {
       membershipNeedsRetry = true;
-      setVisibilityCatchUpError(requested, error);
+      // Already-acknowledged agents keep their live subscription, and their completed catch-up
+      // is never re-run, so an error here would never clear. Only the new members lack history.
+      setVisibilityCatchUpError(
+        requested.filter((agentId) => !isAcknowledged(agentId)),
+        error,
+      );
       cancelMembershipRetry?.();
       const nextRetryDelayMs = getNextRetryDelayMs(membershipRetryDelayMs);
       cancelMembershipRetry = ports.schedule(() => {
