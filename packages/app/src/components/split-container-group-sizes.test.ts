@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveGroupSizes } from "./split-container-group-sizes";
+import { resolveGroupSizes, resolveSplitGroupChildStyle } from "./split-container-group-sizes";
 
 describe("resolveGroupSizes", () => {
   it("uses the persisted override when it still describes the group", () => {
@@ -36,5 +36,25 @@ describe("resolveGroupSizes", () => {
     expect(
       resolveGroupSizes({ storedSizes: undefined, structuralSizes: [0.6, 0.4], childCount: 2 }),
     ).toEqual([0.6, 0.4]);
+  });
+});
+
+describe("resolveSplitGroupChildStyle", () => {
+  it("puts the committed flex grow on the React style", () => {
+    expect(resolveSplitGroupChildStyle({ hidden: false, flexGrow: 0.2 })).toEqual({
+      flexGrow: 0.2,
+      flexShrink: 1,
+      flexBasis: 0,
+    });
+  });
+
+  it("collapses hidden children instead of leaving a flex hole", () => {
+    expect(resolveSplitGroupChildStyle({ hidden: true, flexGrow: 0.2 })).toEqual({
+      flexGrow: 0,
+      flexShrink: 0,
+      flexBasis: 0,
+      width: 0,
+      height: 0,
+    });
   });
 });

@@ -57,7 +57,10 @@ import {
   splitNodeContainsPane,
 } from "@/components/split-container-focus";
 import { shouldFocusPaneFromEventTarget } from "@/components/split-container-pane-focus";
-import { resolveGroupSizes } from "@/components/split-container-group-sizes";
+import {
+  resolveGroupSizes,
+  resolveSplitGroupChildStyle,
+} from "@/components/split-container-group-sizes";
 import {
   WindowChromeRegion,
   WindowChromeSafeArea,
@@ -938,32 +941,35 @@ function DragOverlayTabChipInner({
 
 function SplitGroupChild({
   resizeFlex,
+  resizeEpoch,
   index,
   hidden,
+  flexGrow,
+  previewing,
   children,
 }: {
   resizeFlex: SharedValue<number[]>;
+  resizeEpoch: SharedValue<number>;
   index: number;
   hidden: boolean;
+  flexGrow: number;
+  previewing: boolean;
   children: ReactNode;
 }) {
-  const resizeStyle = useAnimatedStyle(() => ({
-    flexGrow: resizeFlex.value[index] ?? 0,
-  }));
+  const resizeStyle = useAnimatedStyle(() => {
+    // Reanimated 4 does not reliably flush worklets that only read `sharedArray.value[i]`.
+    const generation = resizeEpoch.value;
+    return {
+      flexGrow: generation >= 0 ? (resizeFlex.value[index] ?? 0) : 0,
+    };
+  });
   const childStyle = useMemo(
-    () => [
-      styles.groupChild,
-      {
-        flexShrink: hidden ? 0 : 1,
-        flexBasis: 0,
-        ...(hidden ? { width: 0, height: 0 } : {}),
-      },
-    ],
-    [hidden],
+    () => [styles.groupChild, resolveSplitGroupChildStyle({ hidden, flexGrow })],
+    [flexGrow, hidden],
   );
   return (
     <Animated.View
-      style={[childStyle, resizeStyle]}
+      style={previewing ? [childStyle, resizeStyle] : childStyle}
       testID={hidden ? "split-group-child-hidden" : "split-group-child"}
     >
       {children}
@@ -1105,14 +1111,31 @@ function SplitNodeView({
     return visibleTotal > 0 ? groupContainerSize / visibleTotal : groupContainerSize;
   }, [groupChildren, groupContainerSize, groupSizes, maximizedPaneId]);
   const resizeFlex = useSharedValue(visibleFlex);
+  const resizeEpoch = useSharedValue(0);
+  const [previewingSplit, setPreviewingSplit] = useState(false);
+  const applyResizeFlex = useCallback(
+    (next: number[]) => {
+      resizeFlex.value = next;
+      resizeEpoch.value = resizeEpoch.value + 1;
+    },
+    [resizeEpoch, resizeFlex],
+  );
   useEffect(() => {
-    resizeFlex.value = visibleFlex;
-  }, [resizeFlex, visibleFlex]);
+    applyResizeFlex(visibleFlex);
+  }, [applyResizeFlex, visibleFlex]);
   const previewResizeSplit = useCallback(
     (_groupId: string, sizes: number[]) => {
-      resizeFlex.value = resolveVisibleGroupFlex(groupChildren, sizes, maximizedPaneId);
+      setPreviewingSplit(true);
+      applyResizeFlex(resolveVisibleGroupFlex(groupChildren, sizes, maximizedPaneId));
     },
-    [groupChildren, maximizedPaneId, resizeFlex],
+    [applyResizeFlex, groupChildren, maximizedPaneId],
+  );
+  const commitResizeSplit = useCallback(
+    (resizedGroupId: string, sizes: number[]) => {
+      setPreviewingSplit(false);
+      onResizeSplit(resizedGroupId, sizes);
+    },
+    [onResizeSplit],
   );
   const handleGroupLayout = useCallback(
     (event: LayoutChangeEvent) => {
@@ -1124,6 +1147,27 @@ function SplitNodeView({
     },
     [groupDirection],
   );
+  const groupRef = useRef<View | null>(null);
+  useEffect(() => {
+    if (isNative || !groupDirection) {
+      return;
+    }
+    const element: unknown = groupRef.current;
+    if (!(element instanceof HTMLElement) || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) {
+        return;
+      }
+      const nextSize =
+        groupDirection === "horizontal" ? entry.contentRect.width : entry.contentRect.height;
+      setGroupContainerSize((current) => (current === nextSize ? current : nextSize));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [groupDirection]);
 
   const groupStyle = useMemo(
     () => [
@@ -1193,13 +1237,16 @@ function SplitNodeView({
   }
 
   return (
-    <View style={groupStyle} onLayout={handleGroupLayout}>
+    <View ref={groupRef} collapsable={false} style={groupStyle} onLayout={handleGroupLayout}>
       {node.group.children.map((child, index) => (
         <Fragment key={getNodeKey(child)}>
           <SplitGroupChild
             resizeFlex={resizeFlex}
+            resizeEpoch={resizeEpoch}
             index={index}
             hidden={isSplitNodeHiddenForPresentation(child, maximizedPaneId)}
+            flexGrow={visibleFlex[index] ?? 0}
+            previewing={previewingSplit}
           >
             <SplitNodeView
               node={child}
@@ -1263,7 +1310,7 @@ function SplitNodeView({
               sizes={groupSizes}
               containerSize={groupSizeUnit}
               onPreviewResizeSplit={previewResizeSplit}
-              onResizeSplit={onResizeSplit}
+              onResizeSplit={commitResizeSplit}
             />
           ) : null}
         </Fragment>
