@@ -16,11 +16,11 @@ interface Mounted {
 
 const mounted: Mounted[] = [];
 
-function mount(bucket: SidebarStateBucket | null, hasStarted = false): HTMLDivElement {
+function mount(bucket: SidebarStateBucket | null): HTMLDivElement {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
-  act(() => root.render(<PaneStatusGlowLayer bucket={bucket} hasStarted={hasStarted} />));
+  act(() => root.render(<PaneStatusGlowLayer bucket={bucket} />));
   mounted.push({ root, container });
   return container;
 }
@@ -41,15 +41,9 @@ function glowLayer(container: HTMLDivElement): HTMLElement {
 }
 
 describe("PaneStatusGlowLayer", () => {
-  it("stays off for never-started idle and missing status", () => {
+  it("stays off once attention is cleared and without a status", () => {
     expect(mount("done").querySelector('[data-testid="workspace-pane-status-glow"]')).toBeNull();
     expect(mount(null).querySelector('[data-testid="workspace-pane-status-glow"]')).toBeNull();
-  });
-
-  it("keeps the finished glow after a started agent goes quiet", () => {
-    const layer = glowLayer(mount("done", true));
-    expect(layer.getAttribute("data-status-glow")).toBe("attention");
-    expect(getComputedStyle(layer).borderTopColor).toBe("rgb(41, 159, 81)");
   });
 
   it.each([
