@@ -52,6 +52,10 @@ import {
 import { paneOffersExplorerToggle } from "@/workspace-tabs/explorer-sidebar";
 import { RetainedPanel } from "@/components/retained-panel";
 import {
+  installSplitResizeWindowListener,
+  PANE_PANEL_CONTENT_DATA_SET,
+} from "@/components/split-resize-session";
+import {
   hasMultipleVisiblePanes,
   resolveSplitContainerRoot,
   splitNodeContainsPane,
@@ -575,6 +579,7 @@ export function SplitContainer({
     [layout.root, explorerSidebarPaneId],
   );
   const workspaceHasMultiplePanes = Boolean(mainRoot && hasMultipleVisiblePanes(mainRoot));
+  useEffect(() => installSplitResizeWindowListener(), []);
   useEffect(() => {
     if (
       maximizedPaneId &&
@@ -1613,7 +1618,7 @@ function SplitPaneView({
               onPress={handleTogglePaneExplorer}
               onSwitchTabProject={onSwitchTabProject}
             />
-            <View style={styles.panePanelContent}>
+            <View style={styles.panePanelContent} dataSet={PANE_PANEL_CONTENT_DATA_SET}>
               <WorkspacePanelHost
                 paneId={pane.id}
                 tabs={paneTabs}
