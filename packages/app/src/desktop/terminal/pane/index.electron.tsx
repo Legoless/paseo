@@ -396,11 +396,15 @@ export function IsolatedTerminalEmulator({
         }
         webview.blur();
         if (webview.executeJavaScript) {
-          void webview
-            .executeJavaScript(
-              "window.__PASEO_TERMINAL_WEBVIEW_BLUR__ && window.__PASEO_TERMINAL_WEBVIEW_BLUR__(); true;",
-            )
-            .catch(() => {});
+          // Throws synchronously before dom-ready, and terminal-pane blurs unfocused panes on
+          // mount. A guest that is not ready has no focused xterm to blur.
+          try {
+            void webview
+              .executeJavaScript(
+                "window.__PASEO_TERMINAL_WEBVIEW_BLUR__ && window.__PASEO_TERMINAL_WEBVIEW_BLUR__(); true;",
+              )
+              .catch(() => {});
+          } catch {}
         }
       },
     }),
