@@ -3,6 +3,7 @@ import { View, type PointerEvent as RNPointerEvent } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { startResizeHandleDrag, type ResizeHandleDrag } from "@/components/resize-handle-drag";
+import { beginSplitterDrag, endSplitterDrag } from "@/components/split-resize-session";
 import { snapResizeDelta } from "@/components/resize-handle-snap";
 import { useHasFinePointer } from "@/hooks/use-fine-pointer";
 import {
@@ -120,7 +121,11 @@ export function ResizeHandle({
         return;
       }
 
+      const isFirstPointer = pointerStatesRef.current.size === 0;
       setDragging(true);
+      if (isFirstPointer) {
+        beginSplitterDrag();
+      }
 
       const axis = direction === "horizontal" ? "x" : "y";
       const handleElement = hitAreaElement.closest(`[${SNAP_AXIS_ATTRIBUTE}]`);
@@ -151,6 +156,9 @@ export function ResizeHandle({
 
       function cleanup() {
         pointerStatesRef.current.delete(pointerId);
+        if (pointerStatesRef.current.size === 0) {
+          endSplitterDrag();
+        }
         setDragging(pointerStatesRef.current.size > 0);
         if (pointerStatesRef.current.size === 0) {
           document.body.style.cursor = cursorBeforeDragRef.current ?? "";
@@ -176,7 +184,6 @@ export function ResizeHandle({
         }
 
         moveEvent.preventDefault();
-        resetWindowHorizontalScroll();
         const pointerCurrent = direction === "horizontal" ? moveEvent.clientX : moveEvent.clientY;
         const rawDelta = pointerCurrent - pointerState.pointerStart;
         // Escape hatch for placing a divider inside a snap zone. Not alt: on web that is the
@@ -209,6 +216,7 @@ export function ResizeHandle({
       .runOnJS(true)
       .onBegin(() => setDragging(true))
       .onStart(() => {
+        beginSplitterDrag();
         touchDragRef.current = startResizeHandleDrag({
           sizes,
           index,
@@ -225,6 +233,7 @@ export function ResizeHandle({
       .onFinalize(() => {
         touchDragRef.current = null;
         setDragging(false);
+        endSplitterDrag();
       });
 
     return direction === "horizontal"
