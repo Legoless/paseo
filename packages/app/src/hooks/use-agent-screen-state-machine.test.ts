@@ -610,4 +610,20 @@ describe("deriveAgentScreenViewState", () => {
     expect(sync.ui).toBe("silent");
     expect(result.memory.hadInitialSyncFailure).toBe(false);
   });
+
+  it("returns idle sync status when isArchivingCurrentAgent is true even with visibility error", () => {
+    const memory = createBaseMemory();
+    const input: AgentScreenMachineInput = {
+      ...createBaseInput(),
+      agent: createAgent("agent-1"),
+      isArchivingCurrentAgent: true,
+      visibilityCatchUpStatus: "error",
+      visibilityCatchUpError: "Connection closed",
+    };
+
+    const result = deriveAgentScreenViewState({ input, memory });
+    const ready = expectReadyState(result.state);
+
+    expect(ready.sync).toEqual({ status: "idle" });
+  });
 });

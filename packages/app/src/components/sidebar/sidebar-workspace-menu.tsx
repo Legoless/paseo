@@ -11,7 +11,7 @@ import * as Clipboard from "expo-clipboard";
 import { type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
-  Archive,
+  Circle,
   CircleCheck,
   Copy,
   FolderPlus,
@@ -21,6 +21,7 @@ import {
   Pin,
   PinOff,
   Tag,
+  X,
 } from "lucide-react-native";
 import { isWeb } from "@/constants/platform";
 import { getForgePresentation, normalizeForge } from "@/git/forge";
@@ -63,8 +64,9 @@ const foregroundMutedColorMapping = (theme: Theme) => ({
 
 const ThemedMoreVertical = withUnistyles(MoreVertical);
 const ThemedCopy = withUnistyles(Copy);
-const ThemedArchive = withUnistyles(Archive);
+const ThemedX = withUnistyles(X);
 const ThemedPencil = withUnistyles(Pencil);
+const ThemedCircle = withUnistyles(Circle);
 const ThemedCircleCheck = withUnistyles(CircleCheck);
 const ThemedPin = withUnistyles(Pin);
 const ThemedPinOff = withUnistyles(PinOff);
@@ -77,7 +79,8 @@ const copyLeadingIcon = <ThemedCopy size={14} uniProps={foregroundMutedColorMapp
 const markAsReadLeadingIcon = (
   <ThemedCircleCheck size={14} uniProps={foregroundMutedColorMapping} />
 );
-const archiveLeadingIcon = <ThemedArchive size={14} uniProps={foregroundMutedColorMapping} />;
+const markAsUnreadLeadingIcon = <ThemedCircle size={14} uniProps={foregroundMutedColorMapping} />;
+const archiveLeadingIcon = <ThemedX size={14} uniProps={foregroundMutedColorMapping} />;
 const pinLeadingIcon = <ThemedPin size={14} uniProps={foregroundMutedColorMapping} />;
 const unpinLeadingIcon = <ThemedPinOff size={14} uniProps={foregroundMutedColorMapping} />;
 const addProjectLeadingIcon = <ThemedFolderPlus size={14} uniProps={foregroundMutedColorMapping} />;
@@ -102,6 +105,7 @@ export interface SidebarWorkspaceMenuProps {
   onCopyBranchName?: () => void;
   onRename?: () => void;
   onMarkAsRead?: () => void;
+  onMarkAsUnread?: () => void;
   onAddProject?: () => void;
   onArchive: () => void;
   archiveLabel?: string;
@@ -157,6 +161,7 @@ export function SidebarWorkspaceMenuItems({
   openInFileManagerPath,
   onRename,
   onMarkAsRead,
+  onMarkAsUnread,
   onAddProject,
   onArchive,
   archiveLabel,
@@ -220,7 +225,17 @@ export function SidebarWorkspaceMenuItems({
           leading={markAsReadLeadingIcon}
           onSelect={onMarkAsRead}
         >
-          Mark as read
+          {t("sidebar.workspace.actions.markAsRead")}
+        </WorkspaceMenuItem>
+      ) : null}
+      {onMarkAsUnread ? (
+        <WorkspaceMenuItem
+          surface={surface}
+          testID={`sidebar-workspace-menu-mark-as-unread-${workspaceKey}`}
+          leading={markAsUnreadLeadingIcon}
+          onSelect={onMarkAsUnread}
+        >
+          {t("sidebar.workspace.actions.markAsUnread")}
         </WorkspaceMenuItem>
       ) : null}
       {onTogglePin ? (
@@ -294,6 +309,7 @@ export function SidebarWorkspaceMenu({
   onCopyBranchName,
   onRename,
   onMarkAsRead,
+  onMarkAsUnread,
   onAddProject,
   onArchive,
   archiveLabel,
@@ -349,6 +365,7 @@ export function SidebarWorkspaceMenu({
           openInFileManagerPath={projectActions.openInFileManagerPath}
           onRename={onRename}
           onMarkAsRead={onMarkAsRead}
+          onMarkAsUnread={onMarkAsUnread}
           onAddProject={onAddProject}
           onArchive={onArchive}
           archiveLabel={archiveLabel}
@@ -379,6 +396,7 @@ export function SidebarWorkspaceContextMenu({
   workspaceKey,
   onRename,
   onMarkAsRead,
+  onMarkAsUnread,
   onAddProject,
   onCopyBranchName,
   onArchive,
@@ -468,6 +486,7 @@ export function SidebarWorkspaceContextMenu({
           openInFileManagerPath={projectActions.openInFileManagerPath}
           onRename={onRename}
           onMarkAsRead={onMarkAsRead}
+          onMarkAsUnread={onMarkAsUnread}
           onAddProject={onAddProject}
           onArchive={onArchive}
           archiveLabel={archiveLabel}

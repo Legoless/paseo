@@ -17,7 +17,7 @@ interface ScreenTitleProps {
 export function ScreenTitle({ children, numberOfLines = 1, testID, style }: ScreenTitleProps) {
   const combinedStyle = useMemo(() => [styles.text, style], [style]);
   return (
-    <Text style={combinedStyle} numberOfLines={numberOfLines} testID={testID}>
+    <Text style={combinedStyle} numberOfLines={numberOfLines} testID={testID} pointerEvents="none">
       {children}
     </Text>
   );
@@ -33,5 +33,6 @@ const styles = StyleSheet.create((theme) => ({
       md: "300",
     },
     color: theme.colors.foreground,
+    userSelect: "none",
   },
 }));

@@ -30,8 +30,18 @@ async function enumerateCandidatesViaSystemWhich(name: string): Promise<string[]
       killSignal: "SIGKILL",
     });
     return Array.from(new Set(stdout.trim().split("\n").filter(Boolean)));
-  } catch {
-    return [];
+  } catch (error) {
+    // Only a real non-zero exit means "not on PATH". Our own SIGKILL timeout or a failure to
+    // spawn says nothing about the binary, so fall back to the in-process scan rather than
+    // reporting it missing — the same distinction classifyProbeError already draws below.
+    if (typeof (error as NodeJS.ErrnoException).code === "number") {
+      return [];
+    }
+    try {
+      return await enumerateCandidatesViaLibrary(name);
+    } catch {
+      return [];
+    }
   }
 }
 

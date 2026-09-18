@@ -120,6 +120,7 @@ import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
 import { WorkspaceSetupRuntime } from "./workspace-setup-runtime.js";
 import { createWorkspaceLabelService } from "./workspace-labels/index.js";
 import { loadPaneLayouts } from "./workspace-layouts.js";
+import { loadCustomCommands } from "./custom-commands.js";
 import { createGitHubService } from "../services/github-service.js";
 import { createPaseoWorktree as createRegisteredPaseoWorktree } from "./paseo-worktree-service.js";
 import { createWorkspaceProvisioningService } from "./session/workspace-provisioning/workspace-provisioning-service.js";
@@ -562,6 +563,7 @@ function createInitialMutableDaemonConfig(config: PaseoDaemonConfig): MutableDae
   }
 
   Object.assign(initialConfig, readPaneLayoutFields(config.paseoHome));
+  Object.assign(initialConfig, readCustomCommandFields(config.paseoHome));
 
   return initialConfig;
 }
@@ -578,6 +580,17 @@ function readPaneLayoutFields(
   return {
     ...(layouts.length > 0 ? { paneLayouts: layouts } : {}),
     ...(errors.length > 0 ? { paneLayoutErrors: errors } : {}),
+  };
+}
+
+/** Same rescan-on-reload contract as readPaneLayoutFields, for `$PASEO_HOME/commands.json`. */
+function readCustomCommandFields(
+  paseoHome: string,
+): Pick<MutableDaemonConfig, "customCommands" | "customCommandErrors"> {
+  const { commands, errors } = loadCustomCommands(paseoHome);
+  return {
+    ...(commands.length > 0 ? { customCommands: commands } : {}),
+    ...(errors.length > 0 ? { customCommandErrors: errors } : {}),
   };
 }
 

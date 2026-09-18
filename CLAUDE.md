@@ -55,6 +55,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/mobile-testing.md](docs/mobile-testing.md)                     | Maestro and mobile test workflows                                                                                              |
 | [docs/mobile-panels.md](docs/mobile-panels.md)                       | Compact left/center/right panel ownership, worklet motion, gesture revisions, and Fabric constraints                           |
 | [docs/pane-layouts.md](docs/pane-layouts.md)                         | Named pane arrangements — the `$PASEO_HOME/layouts/` file format, rows/columns, and what applying one does to open tabs        |
+| [docs/custom-commands.md](docs/custom-commands.md)                   | Custom commands — the `commands.json` file formats, target/submit semantics, shortcut rebinding, and the refresh model         |
 | [docs/explorer-sidebar.md](docs/explorer-sidebar.md)                 | Explorer sidebar and ordinary side-pane host contracts, lifecycle, placement, and routing preferences                          |
 | [docs/sidebar-drag-and-drop.md](docs/sidebar-drag-and-drop.md)       | Global sidebar drag rules — what workspaces, projects and agents may land on, the single DndContext, key and order gotchas     |
 | [docs/ad-hoc-daemon-testing.md](docs/ad-hoc-daemon-testing.md)       | Isolated in-process daemon test harness                                                                                        |

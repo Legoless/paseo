@@ -45,6 +45,7 @@ import {
   filterAndRankModelRows,
   getAllProviderModelRows,
   getProviderModelRows,
+  getProviderSelectionError,
   resolveSelectedModelLabel,
   type ProviderSelectionModelRow,
   type ProviderSelectorProvider,
@@ -1004,6 +1005,7 @@ function GroupProviderButton({
   return (
     <ModelBrowserRow
       label={provider.label}
+      description={getProviderSelectionError(selection) ?? undefined}
       leadingSlot={leadingSlot}
       trailingSlot={trailingSlot}
       tone="drillDown"

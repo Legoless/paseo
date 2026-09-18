@@ -87,6 +87,9 @@ const PersistedWorkspaceRecordSchema = z.preprocess(
       .nullable()
       .optional()
       .transform((value) => value ?? null),
+    // Set once the user types a name. Absent means the title is still automatic, which is the
+    // correct reading of every record written before this field existed — so no migration.
+    titleSetByUser: z.boolean().optional(),
     members: z.array(PersistedWorkspaceMemberSchema),
     createdAt: z.string(),
     updatedAt: z.string(),

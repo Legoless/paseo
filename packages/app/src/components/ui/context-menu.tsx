@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useMemo,
   type ComponentProps,
   type PropsWithChildren,
   type ReactElement,
@@ -94,6 +95,8 @@ function assignRef<T>(ref: Ref<T> | undefined, value: T): void {
   }
   (ref as { current: T }).current = value;
 }
+
+const CONTEXT_MENU_TRIGGER_DATASET = { contextMenuTrigger: "true" };
 
 type TriggerStyleProp = StyleProp<ViewStyle> | ((state: MenuTriggerState) => StyleProp<ViewStyle>);
 
@@ -191,16 +194,25 @@ export function ContextMenuTrigger({
     [style, ctx.open],
   );
 
+  const propsDataSet = (props as { dataSet?: Record<string, string> }).dataSet;
+  const triggerDataSet = useMemo(
+    () =>
+      propsDataSet ? { ...propsDataSet, contextMenuTrigger: "true" } : CONTEXT_MENU_TRIGGER_DATASET,
+    [propsDataSet],
+  );
+
   if (contextOnly) {
     const contextOnlyStyle =
       typeof style === "function"
         ? style({ pressed: false, hovered: false, open: ctx.open })
         : style;
+
     return (
       <View
         {...(props as ViewProps)}
         ref={handleRef}
         collapsable={false}
+        dataSet={triggerDataSet}
         // @ts-ignore - onContextMenu is web-only and not in RN types.
         onContextMenu={handleContextMenu}
         style={contextOnlyStyle}
@@ -218,6 +230,7 @@ export function ContextMenuTrigger({
       disabled={disabled}
       delayLongPress={longPressDelayMs}
       onLongPress={handleLongPress}
+      dataSet={triggerDataSet}
       // @ts-ignore - onContextMenu is web-only and not in RN types.
       onContextMenu={handleContextMenu}
       style={typeof style === "function" ? resolveDynamicStyle : style}

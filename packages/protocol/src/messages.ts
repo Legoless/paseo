@@ -7,6 +7,7 @@ import { AgentProviderSchema } from "./provider-manifest.js";
 import { TOOL_CALL_ICON_NAMES } from "./agent-types.js";
 import { WORKSPACE_LABEL_COLORS } from "./workspace-labels.js";
 import { PaneLayoutSchema } from "./workspace-layouts.js";
+import { CustomCommandWireSchema } from "./custom-commands.js";
 import {
   ChatCreateRequestSchema,
   ChatListRequestSchema,
@@ -249,6 +250,12 @@ export const MutableDaemonConfigSchema = z
     paneLayouts: z.array(PaneLayoutSchema).optional(),
     /** One line per unusable layout file, pre-formatted for display. */
     paneLayoutErrors: z.array(z.string()).optional(),
+    // Sourced from `$PASEO_HOME/commands.json`; edited through commands.global.set,
+    // independently of config.json patches.
+    // COMPAT(customCommands): added in v0.8.0, remove optional parsing after 2028-03-01.
+    customCommands: z.array(CustomCommandWireSchema).optional(),
+    /** One formatted line when the commands file cannot be used. */
+    customCommandErrors: z.array(z.string()).optional(),
     agentProfiles: z.array(AgentProfileSchema).optional(),
     skills: z.object({ selection: AgentSkillSelectionSchema.optional() }).strict().optional(),
     pluginsEnabled: z.boolean().optional(),
@@ -418,6 +425,8 @@ const AgentCapabilityFlagsSchema: z.ZodType<AgentCapabilityFlags> = z
     supportsRewindFiles: z.boolean().optional().default(false),
     // COMPAT(rewind): added in v0.1.X, drop when floor >= v0.1.X.
     supportsRewindBoth: z.boolean().optional().default(false),
+    // COMPAT(providerSubagentStop): added in v0.8.0, remove gate after 2027-03-09.
+    supportsStopProviderSubagent: z.boolean().optional().default(false),
   })
   .catchall(z.boolean());
 
@@ -1416,6 +1425,21 @@ export const DaemonConfigReloadRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const CommandsGlobalSetRequestSchema = z.object({
+  type: z.literal("commands.global.set.request"),
+  requestId: z.string(),
+  commands: z.array(CustomCommandWireSchema),
+  expectedCommands: z.array(CustomCommandWireSchema),
+});
+
+export const CommandsProjectListRequestSchema = z.object({
+  type: z.literal("commands.project.list.request"),
+  requestId: z.string(),
+  /** Pane cwd; the daemon resolves the owning project root from it. */
+  cwd: z.string(),
+});
+export type CommandsProjectListRequest = z.infer<typeof CommandsProjectListRequestSchema>;
+
 export const HubManagementDaemonConnectRequestSchema = z.object({
   type: z.literal("hub.management.daemon.connect.request"),
   requestId: z.string(),
@@ -1805,6 +1829,21 @@ export const ProviderSubagentTimelineRequestMessageSchema = z.object({
   direction: z.enum(["tail", "before", "after"]).optional(),
   cursor: AgentTimelineCursorSchema.optional(),
   limit: z.number().int().nonnegative().optional(),
+});
+
+/**
+ * Stop one running provider subagent.
+ *
+ * This is the consumer side of Claude's `perTaskStopAffordance` bargain: the CLI only spares
+ * background subagents from a turn interrupt while a client can stop them individually, and it
+ * fails closed without one. Removing this RPC therefore un-spares them — see
+ * `docs/agent-lifecycle.md`.
+ */
+export const ProviderSubagentStopRequestMessageSchema = z.object({
+  type: z.literal("agent.provider_subagents.stop.request"),
+  parentAgentId: z.string(),
+  subagentId: z.string(),
+  requestId: z.string(),
 });
 
 export const SetAgentTimelineSubscriptionRequestMessageSchema = z.object({
@@ -2613,6 +2652,12 @@ export const AgentWorkspaceMoveRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const WorkspaceMarkUnreadRequestSchema = z.object({
+  type: z.literal("workspace.mark_unread.request"),
+  workspaceId: z.string(),
+  requestId: z.string(),
+});
+
 // Highlighted diff token schema
 // Note: style can be a compound class name (e.g., "heading meta") from the syntax highlighter
 const HighlightTokenSchema = z.object({
@@ -3101,6 +3146,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   DaemonGetStatusRequestSchema,
   DaemonGetPairingOfferRequestSchema,
   DaemonConfigReloadRequestSchema,
+  CommandsGlobalSetRequestSchema,
+  CommandsProjectListRequestSchema,
   HubManagementDaemonConnectRequestSchema,
   HubManagementDaemonGetStatusRequestSchema,
   HubManagementDaemonDisconnectRequestSchema,
@@ -3152,6 +3199,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   AgentTimelineListPromptsRequestMessageSchema,
   ProviderSubagentListRequestMessageSchema,
   ProviderSubagentTimelineRequestMessageSchema,
+  ProviderSubagentStopRequestMessageSchema,
   SetAgentTimelineSubscriptionRequestMessageSchema,
   AgentForkContextRequestMessageSchema,
   SetAgentModeRequestMessageSchema,
@@ -3210,6 +3258,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   WorkspaceMemberRemoveRequestSchema,
   WorkspaceMemberMoveRequestSchema,
   AgentWorkspaceMoveRequestSchema,
+  WorkspaceMarkUnreadRequestSchema,
   FileExplorerRequestSchema,
   FileSubscribeRequestSchema,
   FileUnsubscribeRequestSchema,
@@ -3449,6 +3498,10 @@ export const ServerInfoStatusPayloadSchema = z
         agentLabels: z.boolean().optional(),
         // COMPAT(paneLayouts): added in v0.8.0, remove gate after 2028-03-01.
         paneLayouts: z.boolean().optional(),
+        // COMPAT(customCommands): added in v0.8.0, remove gate after 2028-03-01.
+        customCommands: z.boolean().optional(),
+        // COMPAT(customCommandsEditing): added in v0.8.0, remove gate after 2028-03-01.
+        customCommandsEditing: z.boolean().optional(),
         // COMPAT(checkoutForgeSetAutoMerge): added in v0.2.0-beta.1. Remove the
         // feature gate and checkoutGithubSetAutoMerge fallback after 2027-01-17
         // once the supported daemon floor is >= v0.2.0.
@@ -3541,8 +3594,14 @@ export const ServerInfoStatusPayloadSchema = z
         agentForkContextCursor: z.boolean().optional(),
         // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
         providerSubagents: z.boolean().optional(),
+        // COMPAT(providerSubagentNesting): added in v0.7, remove gate after 2027-03-04.
+        providerSubagentNesting: z.boolean().optional(),
+        // COMPAT(providerSubagentStop): added in v0.8.0, remove gate after 2027-03-09.
+        providerSubagentStop: z.boolean().optional(),
         // COMPAT(workspacePinning): added in v0.1.107, remove gate after 2027-01-12.
         workspacePinning: z.boolean().optional(),
+        // COMPAT(workspaceMarkUnread): added in v0.5.0, remove after 2027-08-20.
+        workspaceMarkUnread: z.boolean().optional(),
         // COMPAT(hubRelationship): added in v0.1.X, drop the gate when floor >= v0.1.X.
         hubRelationship: z.boolean().optional(),
         // COMPAT(projectGithubClone): added in v0.1.108, remove gate after 2027-01-15.
@@ -4524,6 +4583,8 @@ export const AgentTimelineListPromptsResponseMessageSchema = z.object({
 export const ProviderSubagentDescriptorPayloadSchema = z.object({
   id: z.string(),
   parentAgentId: z.string(),
+  // COMPAT(providerSubagentNesting): added in v0.7, remove optional after 2027-03-04.
+  parentSubagentId: z.string().nullable().optional(),
   provider: AgentProviderSchema,
   title: z.string().nullable(),
   description: z.string().nullable(),
@@ -4577,6 +4638,19 @@ export const ProviderSubagentTimelineResponseMessageSchema = z.object({
         seq: z.number().int().nonnegative(),
       }),
     ),
+    error: z.string().nullable(),
+  }),
+});
+
+export const ProviderSubagentStopResponseMessageSchema = z.object({
+  type: z.literal("agent.provider_subagents.stop.response"),
+  payload: z.object({
+    requestId: z.string(),
+    parentAgentId: z.string(),
+    subagentId: z.string(),
+    // True once the provider accepted the stop. The subagent's terminal status still arrives
+    // over `agent.provider_subagents.update`, so this is an acknowledgement, not the outcome.
+    stopped: z.boolean(),
     error: z.string().nullable(),
   }),
 });
@@ -4747,6 +4821,17 @@ export const AgentWorkspaceMoveResponseSchema = z.object({
   }),
 });
 
+export const WorkspaceMarkUnreadResponseSchema = z.object({
+  type: z.literal("workspace.mark_unread.response"),
+  payload: z.object({
+    requestId: z.string(),
+    workspaceId: z.string(),
+    markedAgentId: z.string().nullable(),
+    success: z.boolean(),
+    error: z.string().nullable(),
+  }),
+});
+
 export const SendAgentMessageResponseMessageSchema = z.object({
   type: z.literal("send_agent_message_response"),
   payload: z.object({
@@ -4869,6 +4954,29 @@ export const DaemonConfigReloadResponseSchema = z.object({
     })
     .passthrough(),
 });
+
+export const CommandsGlobalSetResponseSchema = z.object({
+  type: z.literal("commands.global.set.response"),
+  payload: z.object({
+    requestId: z.string(),
+    config: MutableDaemonConfigSchema,
+  }),
+});
+
+export const CommandsProjectListResponseSchema = z.object({
+  type: z.literal("commands.project.list.response"),
+  payload: z
+    .object({
+      requestId: z.string(),
+      commands: z.array(CustomCommandWireSchema),
+      /** The `.paseo-neo/commands.json` that was read; null when no file applied. */
+      sourcePath: z.string().nullable(),
+      /** Display-ready read/parse error; null on success or when no file applied. */
+      error: z.string().nullable(),
+    })
+    .passthrough(),
+});
+export type CommandsProjectListResponse = z.infer<typeof CommandsProjectListResponseSchema>;
 
 export const DiagnosticsResponseSchema = z.object({
   type: z.literal("diagnostics.response"),
@@ -5967,6 +6075,7 @@ export const GetProvidersSnapshotResponseMessageSchema = z.object({
     entries: z.array(ProviderSnapshotEntrySchema),
     compactSnapshot: CompactProviderSnapshotSchema.optional(),
     snapshotHash: z.string().optional(),
+    fetchedAt: z.record(z.string(), z.string()).optional(),
     notModified: z.boolean().optional(),
     generatedAt: z.string(),
     requestId: z.string(),
@@ -5981,6 +6090,7 @@ export const ProvidersSnapshotUpdateMessageSchema = z.object({
     entries: z.array(ProviderSnapshotEntrySchema),
     compactSnapshot: CompactProviderSnapshotSchema.optional(),
     snapshotHash: z.string().optional(),
+    fetchedAt: z.record(z.string(), z.string()).optional(),
     generatedAt: z.string(),
   }),
 });
@@ -6579,6 +6689,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   AgentTimelineListPromptsResponseMessageSchema,
   ProviderSubagentListResponseMessageSchema,
   ProviderSubagentTimelineResponseMessageSchema,
+  ProviderSubagentStopResponseMessageSchema,
   ProviderSubagentUpdateMessageSchema,
   SetAgentTimelineSubscriptionResponseMessageSchema,
   AgentAttentionRequiredMessageSchema,
@@ -6591,11 +6702,14 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   WorkspaceMemberRemoveResponseSchema,
   WorkspaceMemberMoveResponseSchema,
   AgentWorkspaceMoveResponseSchema,
+  WorkspaceMarkUnreadResponseSchema,
   SendAgentMessageResponseMessageSchema,
   SetVoiceModeResponseMessageSchema,
   DaemonGetStatusResponseSchema,
   DaemonGetPairingOfferResponseSchema,
   DaemonConfigReloadResponseSchema,
+  CommandsGlobalSetResponseSchema,
+  CommandsProjectListResponseSchema,
   HubManagementDaemonConnectResponseSchema,
   HubManagementDaemonGetStatusResponseSchema,
   HubManagementDaemonDisconnectResponseSchema,
@@ -7096,6 +7210,7 @@ export type ProjectGithubCloneRequest = z.infer<typeof ProjectGithubCloneRequest
 export type ProjectGithubCloneProtocol = z.infer<typeof ProjectGithubCloneProtocolSchema>;
 export type ArchiveWorkspaceRequest = z.infer<typeof ArchiveWorkspaceRequestSchema>;
 export type WorkspaceClearAttentionRequest = z.infer<typeof WorkspaceClearAttentionRequestSchema>;
+export type WorkspaceMarkUnreadRequest = z.infer<typeof WorkspaceMarkUnreadRequestSchema>;
 export type FileExplorerRequest = z.infer<typeof FileExplorerRequestSchema>;
 export type FileExplorerResponse = z.infer<typeof FileExplorerResponseSchema>;
 export type FileVersion = z.infer<typeof FileVersionSchema>;
@@ -7197,6 +7312,7 @@ export const WSHelloMessageSchema = z.object({
       [CLIENT_CAPS.providerSubagents]: z.boolean().optional(),
       [CLIENT_CAPS.projectUpdates]: z.boolean().optional(),
       [CLIENT_CAPS.compactProviderSnapshots]: z.boolean().optional(),
+      [CLIENT_CAPS.providerSnapshotReferences]: z.boolean().optional(),
       [CLIENT_CAPS.timelineReplacementInvalidation]: z.boolean().optional(),
       [CLIENT_CAPS.browserHost]: BrowserAutomationHostCapabilitySchema.optional(),
     })

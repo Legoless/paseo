@@ -37,7 +37,10 @@ import {
 import { formatThinkingOptionLabel } from "@/agent-controls/labels";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
 import { CombinedModelSelector } from "@/components/combined-model-selector";
-import type { ProviderSelectorProvider } from "@/provider-selection/provider-selection";
+import {
+  getProviderSelectionError,
+  type ProviderSelectorProvider,
+} from "@/provider-selection/provider-selection";
 import { filterSelectableModels } from "@/provider-selection/model-catalog";
 import { useSessionStore } from "@/stores/session-store";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
@@ -100,6 +103,7 @@ import {
   type AgentProfilePicker,
   type AgentProfileSeed,
   type DraftAgentProfileControls,
+  type MaterializedAgentProfile,
 } from "@/agent-profiles";
 import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
 
@@ -955,6 +959,12 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
     handleCloseSheet,
     modelSelectorServerId,
   } = props;
+  const modelHint = useMemo(() => {
+    const reason = getProviderSelectionError(
+      modelSelectorProviders.find((entry) => entry.id === provider)?.modelSelection,
+    );
+    return reason ?? t(getAgentControlHintKey("model"));
+  }, [modelSelectorProviders, provider, t]);
   const modelToolbar = useMemo(
     () => ({ glyphSize, showCaret: presentation.showCarets }),
     [glyphSize, presentation.showCarets],
@@ -994,6 +1004,7 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
       ) : null}
 
       {canSelectModel ? (
+        // The pill only fits a state word, so the reason a provider has no models rides here.
         <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
           <TooltipTrigger asChild triggerRefProp="ref">
             <View style={styles.modelControl}>
@@ -1021,7 +1032,7 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
             </View>
           </TooltipTrigger>
           <TooltipContent side="top" align="center" offset={8}>
-            <Text style={styles.tooltipText}>{t(getAgentControlHintKey("model"))}</Text>
+            <Text style={styles.tooltipText}>{modelHint}</Text>
           </TooltipContent>
         </Tooltip>
       ) : null}
@@ -1653,6 +1664,48 @@ export const AgentControls = memo(function AgentControls({
     },
     [agentId, agentProvider, client, toast, updatePreferences],
   );
+  // A running agent cannot change the process it is, so every provider switch in
+  // this picker archives it and opens a fresh draft. Model rows and profile rows
+  // both land here; only a profile carries mode, thinking and features.
+  const restartAsDraft = useCallback(
+    (next: {
+      provider: AgentProvider;
+      model: string;
+      modeId?: string;
+      thinkingOptionId?: string;
+      featureValues?: Record<string, unknown>;
+    }) => {
+      if (!agent) {
+        return;
+      }
+      void replaceOpenAgentWithDraft({
+        serverId,
+        agentId,
+        workspaceId,
+        setup: buildProviderSwitchDraftSetup({ cwd: agent.cwd, ...next }),
+        draftId: generateDraftId(),
+        retargetCurrentTab,
+        unpinWorkspaceAgent,
+        hideWorkspaceAgent,
+        archiveAgent,
+      }).catch((error) => {
+        console.warn("[AgentControls] switch provider failed", error);
+        toast.error(toErrorMessage(error));
+      });
+    },
+    [
+      agent,
+      agentId,
+      archiveAgent,
+      hideWorkspaceAgent,
+      retargetCurrentTab,
+      serverId,
+      toast,
+      unpinWorkspaceAgent,
+      workspaceId,
+    ],
+  );
+
   const handleSelectProviderAndModel = useCallback(
     (nextProvider: AgentProvider, modelId: string) => {
       if (!agent) {
@@ -1676,50 +1729,42 @@ export const AgentControls = memo(function AgentControls({
       ).catch((error) => {
         console.warn("[AgentControls] persist provider preference failed", error);
       });
-      void replaceOpenAgentWithDraft({
-        serverId,
-        agentId,
-        workspaceId,
-        setup: buildProviderSwitchDraftSetup({
-          cwd: agent.cwd,
-          provider: pick.provider,
-          model: pick.modelId,
-        }),
-        draftId: generateDraftId(),
-        retargetCurrentTab,
-        unpinWorkspaceAgent,
-        hideWorkspaceAgent,
-        archiveAgent,
-      }).catch((error) => {
-        console.warn("[AgentControls] switch provider failed", error);
-        toast.error(toErrorMessage(error));
-      });
+      restartAsDraft({ provider: pick.provider, model: pick.modelId });
     },
-    [
-      agent,
-      agentId,
-      archiveAgent,
-      handleSelectModel,
-      hideWorkspaceAgent,
-      retargetCurrentTab,
-      serverId,
-      toast,
-      unpinWorkspaceAgent,
-      updatePreferences,
-      workspaceId,
-    ],
+    [agent, handleSelectModel, restartAsDraft, updatePreferences],
   );
 
-  // Profiles still apply to the running provider process. Switching provider
-  // from the model picker archives this agent and opens a fresh draft.
-  const profileProviders = useMemo(() => (agentProvider ? [agentProvider] : []), [agentProvider]);
+  // Every provider the model rows offer, because a profile naming another
+  // provider now restarts the agent exactly as picking its model would.
+  const profileProviders = useMemo(
+    () => agentModelSelectorProviders.map((entry) => entry.id),
+    [agentModelSelectorProviders],
+  );
   const profileModeIds = useMemo(
     () => resolveSnapshotModeIds(snapshotSelectedEntry),
     [snapshotSelectedEntry],
   );
+  const switchProviderFromProfile = useCallback(
+    (profile: MaterializedAgentProfile) => {
+      restartAsDraft({
+        provider: profile.provider,
+        model: profile.modelId,
+        modeId: profile.modeId,
+        thinkingOptionId: profile.thinkingOptionId,
+        featureValues: profile.featureValues,
+      });
+    },
+    [restartAsDraft],
+  );
   const profileTarget = useMemo<AgentProfileApplyTarget>(
-    () => ({ kind: "agent", agentId, availableModeIds: profileModeIds }),
-    [agentId, profileModeIds],
+    () => ({
+      kind: "agent",
+      agentId,
+      provider: agentProvider ?? "",
+      availableModeIds: profileModeIds,
+      switchProvider: switchProviderFromProfile,
+    }),
+    [agentId, agentProvider, profileModeIds, switchProviderFromProfile],
   );
   const agentProfiles = useAgentProfilePicker({
     serverId,

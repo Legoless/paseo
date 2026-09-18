@@ -1,12 +1,12 @@
 import { withUnistyles } from "react-native-unistyles";
 import {
-  Archive,
   ArrowDownUp,
   Download,
   GitCommitHorizontal,
   GitMerge,
   RefreshCcw,
   Upload,
+  X,
 } from "lucide-react-native";
 import type { Theme } from "@/styles/theme";
 
@@ -16,7 +16,7 @@ const ThemedUpload = withUnistyles(Upload);
 const ThemedArrowDownUp = withUnistyles(ArrowDownUp);
 const ThemedGitMerge = withUnistyles(GitMerge);
 const ThemedRefreshCcw = withUnistyles(RefreshCcw);
-const ThemedArchive = withUnistyles(Archive);
+const ThemedX = withUnistyles(X);
 
 const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
@@ -27,5 +27,5 @@ export const GIT_ACTION_ICONS = {
   pullAndPush: <ThemedArrowDownUp size={16} uniProps={mutedColorMapping} />,
   merge: <ThemedGitMerge size={16} uniProps={mutedColorMapping} />,
   mergeFromBase: <ThemedRefreshCcw size={16} uniProps={mutedColorMapping} />,
-  archive: <ThemedArchive size={16} uniProps={mutedColorMapping} />,
+  archive: <ThemedX size={16} uniProps={mutedColorMapping} />,
 };

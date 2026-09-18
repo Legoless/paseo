@@ -41,11 +41,11 @@ import {
   restoreEmptyPanesInLayout,
   reconcileWorkspaceTabs,
   removePaneFromTree,
-  removeTabFromTree,
   reorderFocusedPaneTabsInLayout,
   reorderPaneTabsInLayout,
   setPaneHiddenInLayout,
   setTabStateInLayout,
+  setTabTitleInLayout,
   selectTabInPaneInLayout,
   splitPaneEmptyInLayout,
   splitWorkspaceRootRightInLayout,
@@ -79,7 +79,6 @@ export {
   insertSplit,
   normalizeLayout,
   removePaneFromTree,
-  removeTabFromTree,
   stripEphemeralTabsFromLayout,
 };
 export type {
@@ -132,6 +131,8 @@ interface WorkspaceLayoutStore {
     state?: JsonValue,
   ) => string | null;
   setTabState: (workspaceKey: string, tabId: string, state: JsonValue | undefined) => void;
+  /** Names a tab. Empty clears the name and returns it to its panel's derived label. */
+  setTabTitle: (workspaceKey: string, tabId: string, title: string | null) => void;
   convertDraftToAgent: (workspaceKey: string, tabId: string, agentId: string) => string | null;
   reconcileTabs: (workspaceKey: string, snapshot: WorkspaceTabSnapshot) => void;
   resolvePendingAgent: (workspaceKey: string, agentId: string) => void;
@@ -191,10 +192,17 @@ const WorkspaceDraftTabSetupStorageSchema = z.strictObject({
   modeId: z.string().nullable(),
   model: z.string().nullable(),
   thinkingOptionId: z.string().nullable(),
-  featureValues: z.record(z.string(), z.union([z.boolean(), z.string(), z.null()])),
+  // Opaque provider payloads, and an agent profile's come from hand-edited
+  // config. A value this rejects would delete the whole persisted layout, so
+  // this matches the protocol's `unknown` rather than guessing the value shape.
+  featureValues: z.record(z.string(), z.unknown()),
 });
 const WorkspaceTabTargetStorageSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("new_tab"), labels: z.array(z.string()).optional() }),
+  z.strictObject({
+    kind: z.literal("new_tab"),
+    labels: z.array(z.string()).optional(),
+    cwd: z.string().optional(),
+  }),
   z.strictObject({
     kind: z.literal("draft"),
     draftId: z.string(),
@@ -251,6 +259,7 @@ const WorkspaceTabStorageSchema = z.strictObject({
   target: WorkspaceTabTargetStorageSchema,
   createdAt: z.number(),
   state: z.json().optional(),
+  title: z.string().optional(),
 });
 const SplitNodeStorageSchema: z.ZodType<SplitNode> = z.lazy(() =>
   z.discriminatedUnion("kind", [
@@ -1041,21 +1050,15 @@ export function createWorkspaceLayoutStore(
             let nextLayout: WorkspaceLayout | null;
             let hidesExplorer = false;
 
+            // Dismissing a pane's launcher is how the user dismisses the empty pane itself — the
+            // one tab close that is a pane close. Every other close keeps the pane.
             if (closingPane?.tabIds.length === 1 && closingTab?.target.kind === "new_tab") {
               hidesExplorer = closingPane.id === explorerSidebarPaneId;
               nextLayout = hidesExplorer
                 ? setPaneHiddenInLayout({ layout, paneId: closingPane.id, hidden: true })
                 : closePaneInLayout({ layout, paneId: closingPane.id, explorerSidebarPaneId });
             } else {
-              const preserveEmptyPaneId =
-                closingPane?.id === "main" || closingPane?.id === explorerSidebarPaneId
-                  ? closingPane.id
-                  : null;
-              const closedLayout = closeTabInLayout({
-                layout,
-                tabId: normalizedTabId,
-                preserveEmptyPaneId,
-              });
+              const closedLayout = closeTabInLayout({ layout, tabId: normalizedTabId });
               hidesExplorer =
                 closingPane?.id === explorerSidebarPaneId && closingPane.tabIds.length === 1;
               const normalizedLayout =
@@ -1221,6 +1224,25 @@ export function createWorkspaceLayoutStore(
               layout: getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey),
               tabId: normalizedTabId,
               state: tabState,
+            });
+            if (!layout) return state;
+            return {
+              layoutByWorkspace: {
+                ...state.layoutByWorkspace,
+                [normalizedWorkspaceKey]: layout,
+              },
+            };
+          });
+        },
+        setTabTitle: (workspaceKey, tabId, title) => {
+          const normalizedWorkspaceKey = trimNonEmpty(workspaceKey);
+          const normalizedTabId = trimNonEmpty(tabId);
+          if (!normalizedWorkspaceKey || !normalizedTabId) return;
+          set((state) => {
+            const layout = setTabTitleInLayout({
+              layout: getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey),
+              tabId: normalizedTabId,
+              title,
             });
             if (!layout) return state;
             return {
@@ -1397,6 +1419,7 @@ export function createWorkspaceLayoutStore(
             position: input.position,
             maxTreeDepth: MAX_TREE_DEPTH,
             createNodeId: ids.createNodeId,
+            explorerSidebarPaneId,
           });
           if (!result) {
             return null;

@@ -1,4 +1,8 @@
+import { createElement, type RefCallback } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { useWebOverlayRegistration } from "@/lib/overlay-root";
 import {
   applyInactiveBrowserWebviewViewport,
   type BrowserWebviewProfileHost,
@@ -93,6 +97,32 @@ function expectResidentWebviewParking(webview: HTMLElement): void {
   expect(webview.style.zIndex).toBe("0");
 }
 
+function OverlayHarness({ active }: { active: boolean }) {
+  const setScope = useWebOverlayRegistration({ active, layer: 20, onKeyDown: () => false });
+  return createElement("div", {
+    ref: setScope as RefCallback<HTMLDivElement>,
+    tabIndex: -1,
+  });
+}
+
+function presentTestBrowser(browserId: string): { webview: HTMLElement; surface: HTMLElement } {
+  const webview = ensureTestBrowser({
+    browserId,
+    workspaceId: "workspace-overlay",
+    url: "https://example.com",
+  });
+  if (!webview?.parentElement) {
+    throw new Error("Expected resident browser surface");
+  }
+  const anchor = document.createElement("div");
+  const clip = document.createElement("div");
+  const bounds = { left: 40, top: 60, width: 640, height: 480 };
+  Object.defineProperty(anchor, "getBoundingClientRect", { value: () => bounds });
+  Object.defineProperty(clip, "getBoundingClientRect", { value: () => bounds });
+  presentBrowserWebview(browserId, webview, anchor, clip, { mode: "responsive" });
+  return { webview, surface: webview.parentElement };
+}
+
 describe("resident browser webviews", () => {
   beforeEach(() => {
     attachedBrowsers.length = 0;
@@ -161,6 +191,56 @@ describe("resident browser webviews", () => {
       mode: "responsive",
     });
     expect(webview.parentElement).toBe(permanentParent);
+  });
+
+  it("yields pointer events to a host overlay so menus over the page stay clickable", () => {
+    const { webview, surface } = presentTestBrowser("browser-overlay-hits");
+    expect(surface.style.pointerEvents).toBe("auto");
+    expect(webview.style.pointerEvents).toBe("auto");
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root: Root = createRoot(container);
+    try {
+      flushSync(() => {
+        root.render(createElement(OverlayHarness, { active: true }));
+      });
+      expect(surface.style.pointerEvents).toBe("none");
+      expect(webview.style.pointerEvents).toBe("none");
+
+      flushSync(() => {
+        root.render(createElement(OverlayHarness, { active: false }));
+      });
+      expect(surface.style.pointerEvents).toBe("auto");
+      expect(webview.style.pointerEvents).toBe("auto");
+    } finally {
+      root.unmount();
+      container.remove();
+    }
+  });
+
+  it("presents a browser inert when a host overlay is already open", () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root: Root = createRoot(container);
+    try {
+      flushSync(() => {
+        root.render(createElement(OverlayHarness, { active: true }));
+      });
+
+      const { webview, surface } = presentTestBrowser("browser-overlay-already-open");
+      expect(surface.style.pointerEvents).toBe("none");
+      expect(webview.style.pointerEvents).toBe("none");
+
+      flushSync(() => {
+        root.render(createElement(OverlayHarness, { active: false }));
+      });
+      expect(surface.style.pointerEvents).toBe("auto");
+      expect(webview.style.pointerEvents).toBe("auto");
+    } finally {
+      root.unmount();
+      container.remove();
+    }
   });
 
   it("clips an oversized fixed viewport to its pane without resizing the webview", () => {

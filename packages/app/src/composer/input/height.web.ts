@@ -78,9 +78,9 @@ export function useComposerHeight({
     mirror.readOnly = true;
     mirror.rows = 1;
     Object.assign(mirror.style, {
-      position: "absolute",
-      top: "0",
-      left: "0",
+      position: "fixed",
+      top: "-99999px",
+      left: "-99999px",
       visibility: "hidden",
       pointerEvents: "none",
       overflow: "hidden",

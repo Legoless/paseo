@@ -56,6 +56,10 @@ const STORED_AGENT_SCHEMA = z.object({
   lastActivityAt: z.string().optional(),
   lastUserMessageAt: z.string().nullable().optional(),
   title: z.string().nullable().optional(),
+  // Set once a person renames the agent, never cleared. Daemon-local, so an
+  // agent cannot read or write it. Absent means the title is still automatic,
+  // which is the right reading of every record written before this existed.
+  titleSetByUser: z.boolean().optional(),
   labels: z.record(z.string(), z.string()).default({}),
   lastStatus: AgentStatusSchema.default("closed"),
   lastModeId: z.string().nullable().optional(),
@@ -270,6 +274,7 @@ export class AgentStorage {
     agent: ManagedAgent,
     options?: {
       title?: string | null;
+      titleSetByUser?: boolean;
       internal?: boolean;
       workspaceLabelsAuthoritative?: boolean;
     },
@@ -291,6 +296,13 @@ export class AgentStorage {
       // stale pre-archive record after the archive mutation.
       if (existing && existing.archivedAt !== undefined) {
         record.archivedAt = existing.archivedAt;
+      }
+
+      // Same reason, and the flag is sticky once set: toStoredAgentRecord
+      // rebuilds the record from the live object, which does not carry it, so
+      // without this line the next flush forgets that a person named this agent.
+      if (existing?.titleSetByUser || options?.titleSetByUser) {
+        record.titleSetByUser = true;
       }
       return preserveWorkspaceLabelAssignments(record, existing, options);
     });

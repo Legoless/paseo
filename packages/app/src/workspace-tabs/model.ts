@@ -33,7 +33,16 @@ export type PluginWorkspaceTabTarget =
     };
 
 export type WorkspaceTabTarget =
-  | { kind: "new_tab"; labels?: string[] }
+  | {
+      kind: "new_tab";
+      labels?: string[];
+      /**
+       * Project this launcher opens its tab in. Mirrors `draft.cwd` below — the launcher hands it
+       * straight to the draft it creates. A pane that outlives its last tab inherits it from that
+       * tab, so an emptied pane still points at the project the user left it on.
+       */
+      cwd?: string;
+    }
   | {
       kind: "draft";
       draftId: string;
@@ -64,6 +73,13 @@ export interface WorkspaceTab {
   target: WorkspaceTabTarget;
   createdAt: number;
   state?: JsonValue;
+  /**
+   * A name the user typed for this tab. Authoritative over whatever the panel derives, for every
+   * tab kind, and it survives the tab being retargeted — naming an empty launcher and then
+   * launching into it keeps the name. Kinds backed by a named entity (agent, terminal) write that
+   * entity's title instead, so there is only ever one name per thing.
+   */
+  title?: string;
 }
 
 export function buildWorkspaceTabPersistenceKey(input: {

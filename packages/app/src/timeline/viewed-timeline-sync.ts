@@ -93,11 +93,12 @@ async function prepareCachedTimeline(input: {
 export interface TimelineReplica {
   prepare(agentId: string): Promise<void>;
   readCursor(agentId: string): { epoch: string; endSeq: number } | undefined;
+  readRange(agentId: string): AgentTimelineCursorState | undefined;
   timelineUpdated(agentId: string): void;
 }
 
 class TimelineReplicaOwner implements TimelineReplica {
-  private readonly cachedCursors = new Map<string, { epoch: string; endSeq: number }>();
+  private readonly cachedRanges = new Map<string, AgentTimelineCursorState>();
   private readonly preparations = new Map<string, Promise<void>>();
 
   constructor(
@@ -127,22 +128,24 @@ class TimelineReplicaOwner implements TimelineReplica {
     });
     if (!stored) return;
     if (stored.range) {
-      this.cachedCursors.set(agentId, {
-        epoch: stored.range.epoch,
-        endSeq: stored.range.endSeq,
-      });
+      this.cachedRanges.set(agentId, stored.range);
     }
   }
 
   readCursor(agentId: string): { epoch: string; endSeq: number } | undefined {
-    return this.cachedCursors.get(agentId);
+    const range = this.cachedRanges.get(agentId);
+    return range ? { epoch: range.epoch, endSeq: range.endSeq } : undefined;
+  }
+
+  readRange(agentId: string): AgentTimelineCursorState | undefined {
+    return this.cachedRanges.get(agentId);
   }
 
   timelineUpdated(agentId: string): void {
     const session = useSessionStore.getState().sessions[this.serverId];
     const timeline = selectAgentTimelineState(session, agentId);
     if (timeline.status !== "synced") return;
-    this.cachedCursors.delete(agentId);
+    this.cachedRanges.delete(agentId);
     this.storage.commitTimeline(this.serverId, agentId, {
       agentId,
       items: [...timeline.items, ...(session?.agentStreamHead.get(agentId) ?? [])],
@@ -249,6 +252,7 @@ function finalizeProcessedTimeline(input: {
 function applyAuthoritativeTimelineResponse(input: {
   serverId: string;
   payload: TimelineResponsePayload;
+  cachedCursor?: AgentTimelineCursorState;
   recoverGap: (agentId: string, cursor: { epoch: string; endSeq: number }) => void;
   drainQueuedAgentMessage: (agentId: string) => void;
   transformTimelineItem?: TimelineItemTransform;
@@ -259,7 +263,8 @@ function applyAuthoritativeTimelineResponse(input: {
   const session = useSessionStore.getState().sessions[serverId];
   const timeline = selectAgentTimelineState(session, agentId);
   const activeInitDeferred = getInitDeferred(initKey);
-  const currentCursor = timeline.status === "synced" ? (timeline.range ?? undefined) : undefined;
+  const currentCursor =
+    timeline.status === "synced" ? (timeline.range ?? undefined) : input.cachedCursor;
   const result = processTimelineResponse({
     payload,
     currentTail: timeline.status === "cold" ? [] : timeline.items,
@@ -309,6 +314,7 @@ export interface ViewedTimelineSyncPorts {
   fetchLatestTail(agentId: string): Promise<TimelinePageResult>;
   reportError(error: unknown): void;
   schedule(task: () => void, delayMs: number): () => void;
+  isAgentArchived?: (agentId: string) => boolean;
 }
 
 export type TimelineDeliveryMode = "legacy" | "selective";
@@ -321,6 +327,7 @@ export interface ViewedTimelineUiBridge {
   getAgentTimelineError(agentId: string): string | null;
   retryVisibleAgentTimeline(agentId: string): void;
   reprojectVisibleTimelines(): void;
+  evictAgent(agentId: string): void;
 }
 
 export interface ViewedTimelineSync extends ViewedTimelineUiBridge {
@@ -397,6 +404,7 @@ export function createViewedTimelineOwner(input: {
       const accepted = applyAuthoritativeTimelineResponse({
         serverId: input.serverId,
         payload,
+        cachedCursor: input.replica.readRange(payload.agentId),
         recoverGap: (agentId, cursor) => sync.recoverGap(agentId, cursor),
         drainQueuedAgentMessage: input.drainQueuedAgentMessage,
         transformTimelineItem,
@@ -510,17 +518,23 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
   let cancelMembershipRetry: (() => void) | null = null;
   let recentlyViewedAgentIds: string[] = [];
 
-  const visibleAgentIds = () => normalizeAgentIds([...sources.values()].flat());
+  const isAgentArchived = (agentId: string) => ports.isAgentArchived?.(agentId) ?? false;
+
+  const visibleAgentIds = () =>
+    normalizeAgentIds([...sources.values()].flat()).filter((agentId) => !isAgentArchived(agentId));
 
   const selectHotAgentIds = (visible: string[]) => {
-    const visibleSet = new Set(visible);
+    const nonArchivedVisible = visible.filter((agentId) => !isAgentArchived(agentId));
+    const visibleSet = new Set(nonArchivedVisible);
     recentlyViewedAgentIds = [
-      ...visible,
-      ...recentlyViewedAgentIds.filter((agentId) => !visibleSet.has(agentId)),
+      ...nonArchivedVisible,
+      ...recentlyViewedAgentIds.filter(
+        (agentId) => !visibleSet.has(agentId) && !isAgentArchived(agentId),
+      ),
     ];
-    const hiddenBudget = Math.max(0, VIEWED_TIMELINE_HOT_AGENT_LIMIT - visible.length);
+    const hiddenBudget = Math.max(0, VIEWED_TIMELINE_HOT_AGENT_LIMIT - nonArchivedVisible.length);
     const desiredAgentIds = normalizeAgentIds([
-      ...visible,
+      ...nonArchivedVisible,
       ...recentlyViewedAgentIds
         .filter((agentId) => !visibleSet.has(agentId))
         .slice(0, hiddenBudget),
@@ -608,6 +622,14 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       }
       setVisibilityCatchUpReady(agentId);
     } catch (error) {
+      if (isAgentArchived(agentId)) {
+        cancelCatchUp(agentId);
+        visibilityCatchUpPending.delete(agentId);
+        visibilityCatchUpErrors.delete(agentId);
+        manualRetries.delete(agentId);
+        notifyListeners();
+        return;
+      }
       if (catchUps.get(agentId)?.generation === generation) {
         const nextRetryDelayMs = getNextRetryDelayMs(catchUps.get(agentId)?.retryDelayMs);
         const cancelRetry = ports.schedule(() => {
@@ -649,6 +671,9 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       supersede?: boolean;
     } = {},
   ) => {
+    if (isAgentArchived(agentId)) {
+      return;
+    }
     const { request, supersede = false } = options;
     if (!connected || !isDesired(agentId) || !isAcknowledged(agentId)) {
       if (request) pendingCatchUps.set(agentId, request);
@@ -946,11 +971,30 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       notifyListeners();
       listeners.clear();
     },
+    evictAgent(agentId: string) {
+      for (const [sourceId, agents] of sources.entries()) {
+        if (agents.includes(agentId)) {
+          const remaining = agents.filter((id) => id !== agentId);
+          if (remaining.length === 0) sources.delete(sourceId);
+          else sources.set(sourceId, remaining);
+        }
+      }
+      recentlyViewedAgentIds = recentlyViewedAgentIds.filter((id) => id !== agentId);
+      cancelCatchUp(agentId);
+      visibilityCatchUpPending.delete(agentId);
+      visibilityCatchUpErrors.delete(agentId);
+      manualRetries.delete(agentId);
+      loadedCache.delete(agentId);
+      cacheLoads.delete(agentId);
+      publishVisibleMembership();
+    },
     retryVisibleAgentTimeline,
     reprojectVisibleTimelines() {
       if (!active || !connected) return;
       for (const agentId of visibleAgentIds()) {
-        void ports.fetchLatestTail(agentId).catch(ports.reportError);
+        if (!isAgentArchived(agentId)) {
+          void ports.fetchLatestTail(agentId).catch(ports.reportError);
+        }
       }
     },
   };

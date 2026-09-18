@@ -21,7 +21,7 @@ import { isWeb as platformIsWeb, isNative as platformIsNative } from "@/constant
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { useSessionStore } from "@/stores/session-store";
-import { collectAllTabs, useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
+import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { useArchiveAgent } from "@/hooks/use-archive-agent";
 import { useToast } from "@/contexts/toast-context";
 import { confirmDialog } from "@/utils/confirm-dialog";
@@ -401,7 +401,6 @@ export function WorkspaceNewAgentRow({
                 onCopyPath={handleCopyPath}
                 onCopyBranchName={handleCopyBranchName}
                 onClose={handleClose}
-                onArchive={handleClose}
               />
             </View>
           </ContextMenuTrigger>
@@ -421,7 +420,6 @@ export function WorkspaceNewAgentRow({
               onCopyPath={handleCopyPath}
               onCopyBranchName={handleCopyBranchName}
               onClose={handleClose}
-              onArchive={handleClose}
             />
           </ContextMenuContent>
         </ContextMenu>
@@ -560,20 +558,6 @@ export function WorkspaceAgentRow({
       toast.error(toErrorMessage(error));
     }
   }, [agent.agentId, archiveAgent, serverId, t, toast]);
-  const handleClose = useCallback(() => {
-    const workspaceKey = `${serverId}:${workspaceId}`;
-    const store = useWorkspaceLayoutStore.getState();
-    const layout = store.layoutByWorkspace[workspaceKey];
-    const tab = layout
-      ? collectAllTabs(layout.root).find(
-          (candidate) =>
-            candidate.target.kind === "agent" && candidate.target.agentId === agent.agentId,
-        )
-      : undefined;
-    if (!tab) return;
-    store.hideAgent(workspaceKey, agent.agentId);
-    store.closeTab(workspaceKey, tab.tabId);
-  }, [agent.agentId, serverId, workspaceId]);
 
   return (
     <AgentHoverCard
@@ -645,8 +629,7 @@ export function WorkspaceAgentRow({
                 onOpen={handlePress}
                 onCopyPath={handleCopyPath}
                 onCopyBranchName={handleCopyBranchName}
-                onClose={handleClose}
-                onArchive={handleArchive}
+                onClose={handleArchive}
               />
             </View>
           </ContextMenuTrigger>
@@ -665,8 +648,7 @@ export function WorkspaceAgentRow({
               onOpen={handlePress}
               onCopyPath={handleCopyPath}
               onCopyBranchName={handleCopyBranchName}
-              onClose={handleClose}
-              onArchive={handleArchive}
+              onClose={handleArchive}
             />
           </ContextMenuContent>
         </ContextMenu>

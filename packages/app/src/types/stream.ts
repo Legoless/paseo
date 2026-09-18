@@ -445,7 +445,11 @@ function mergeRetainedLifecycleItem(tail: StreamItem[], retained: StreamItem): S
     return null;
   }
   if (isAgentToolCallItem(retained)) {
-    const tailIndex = findExistingAgentToolCallIndex(tail, retained.payload.data.callId);
+    const identity = agentToolCallIdentity({
+      callId: retained.payload.data.callId,
+      turnId: retained.turnId,
+    });
+    const tailIndex = findExistingTimelineIdentityIndex(tail, identity);
     const existing = tail[tailIndex];
     if (tailIndex < 0 || !existing || !isAgentToolCallItem(existing)) {
       return null;
@@ -1004,13 +1008,29 @@ function finalizeActiveThoughts(state: StreamItem[]): StreamItem[] {
   return mutated ? nextState : state;
 }
 
-function findExistingAgentToolCallIndex(state: StreamItem[], callId: string): number {
-  return state.findIndex(
-    (entry) =>
-      entry.kind === "tool_call" &&
-      entry.payload.source === "agent" &&
-      entry.payload.data.callId === callId,
-  );
+export function streamTimelineItemIdentity(item: StreamItem): string | null {
+  if (isAgentToolCallItem(item)) {
+    return agentToolCallIdentity({
+      callId: item.payload.data.callId,
+      turnId: item.turnId,
+    });
+  }
+  if (item.kind === "plugin") return item.id;
+  return null;
+}
+
+interface AgentToolCallIdentityInput {
+  callId: string;
+  turnId?: string;
+}
+
+function agentToolCallIdentity(input: AgentToolCallIdentityInput): string {
+  if (!input.turnId) return input.callId;
+  return `turn:${encodeURIComponent(input.turnId)}/${encodeURIComponent(input.callId)}`;
+}
+
+function findExistingTimelineIdentityIndex(state: StreamItem[], identity: string): number {
+  return state.findIndex((entry) => streamTimelineItemIdentity(entry) === identity);
 }
 
 function hasNonEmptyObject(value: unknown): boolean {
@@ -1147,13 +1167,18 @@ export function mergeAgentToolCallItem(
   };
 }
 
-function appendAgentToolCall(
-  state: StreamItem[],
-  data: AgentToolCallData,
-  timestamp: Date,
-  timelineCursor?: TimelinePosition,
-): StreamItem[] {
-  const existingIndex = findExistingAgentToolCallIndex(state, data.callId);
+interface AppendAgentToolCallInput {
+  state: StreamItem[];
+  data: AgentToolCallData;
+  timestamp: Date;
+  turnId?: string;
+  timelineCursor?: TimelinePosition;
+}
+
+function appendAgentToolCall(input: AppendAgentToolCallInput): StreamItem[] {
+  const { state, data, timestamp, turnId, timelineCursor } = input;
+  const identity = agentToolCallIdentity({ callId: data.callId, turnId });
+  const existingIndex = findExistingTimelineIdentityIndex(state, identity);
 
   if (existingIndex >= 0) {
     const existing = state[existingIndex];
@@ -1182,8 +1207,9 @@ function appendAgentToolCall(
 
   const item: ToolCallItem = {
     kind: "tool_call",
-    id: `agent_tool_${data.callId}`,
+    id: `agent_tool_${identity}`,
     ...(timelineCursor ? { timelineCursor } : {}),
+    ...(turnId ? { turnId } : {}),
     timestamp,
     payload: {
       source: "agent",
@@ -1369,9 +1395,9 @@ function reduceTimelineToolCall(
     );
   }
 
-  return appendAgentToolCall(
+  return appendAgentToolCall({
     state,
-    {
+    data: {
       provider: event.provider,
       callId: item.callId,
       name: item.name,
@@ -1382,7 +1408,8 @@ function reduceTimelineToolCall(
     },
     timestamp,
     timelineCursor,
-  );
+    turnId: event.turnId,
+  });
 }
 
 function reduceTimelineCompaction(

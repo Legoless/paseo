@@ -6,6 +6,7 @@ function targetCwd(
   terminalCwdById: ReadonlyMap<string, string>,
 ): string | null {
   const { target } = tab;
+  if (target.kind === "new_tab") return target.cwd ?? null;
   if (target.kind === "draft") return target.setup?.cwd ?? target.cwd ?? null;
   if (target.kind === "agent") return agentCwdById.get(target.agentId) ?? null;
   if (target.kind === "provider_subagent") {

@@ -293,13 +293,41 @@ test.describe("Sidebar workspace list", () => {
       await expect(
         page.getByTestId(`sidebar-agent-menu-copy-branch-${secondAgent.id}`),
       ).toBeVisible();
-      await expect(page.getByTestId(`sidebar-agent-menu-archive-${secondAgent.id}`)).toBeVisible();
+      await expect(page.getByTestId(`sidebar-agent-menu-close-${secondAgent.id}`)).toBeVisible();
+      await expect(
+        page
+          .getByTestId(`sidebar-agent-dropdown-${secondAgent.id}`)
+          .getByText(/^Close(?: agent)?$/),
+      ).toHaveCount(1);
       await expect(page.getByTestId("agent-hover-card")).toHaveCount(0);
       await page.keyboard.press("Escape");
 
       await agentRow.click({ button: "right" });
       await expect(page.getByTestId(`sidebar-agent-context-menu-${secondAgent.id}`)).toBeVisible();
       await expect(page.getByTestId("agent-hover-card")).toHaveCount(0);
+      await expect(
+        page
+          .getByTestId(`sidebar-agent-context-menu-${secondAgent.id}`)
+          .getByText(/^Close(?: agent)?$/),
+      ).toHaveCount(1);
+      await page.getByTestId(`sidebar-agent-menu-close-${secondAgent.id}`).click();
+      await page.getByTestId("confirm-dialog-cancel").click();
+      await expect(agentRow).toBeVisible();
+      expect(
+        (await workspace.client.fetchAgent({ agentId: secondAgent.id }))?.agent.archivedAt,
+      ).toBeNull();
+
+      await agentRow.click({ button: "right" });
+      await page.getByTestId(`sidebar-agent-menu-close-${secondAgent.id}`).click();
+      await page.getByTestId("confirm-dialog-confirm").click();
+      await expect(agentRow).toHaveCount(0);
+      await expect
+        .poll(async () =>
+          Boolean(
+            (await workspace.client.fetchAgent({ agentId: secondAgent.id }))?.agent.archivedAt,
+          ),
+        )
+        .toBe(true);
     } finally {
       await workspace.cleanup();
     }

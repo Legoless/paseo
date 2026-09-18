@@ -109,3 +109,14 @@ export function upsertCreatedTerminalPayload(input: {
     requestId: input.current?.requestId ?? `terminal-create-${input.terminal.id}`,
   };
 }
+
+export function buildTerminalCwdById(
+  payload: ListTerminalsResponse["payload"] | undefined,
+): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const terminal of payload?.terminals ?? []) {
+    const cwd = terminal.cwd ?? payload?.cwd;
+    if (cwd) result.set(terminal.id, cwd);
+  }
+  return result;
+}

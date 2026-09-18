@@ -8,10 +8,12 @@ export const en = {
       confirm: "Confirm",
       close: "Close",
       copy: "Copy",
+      copyLine: "Copy line",
       dismiss: "Dismiss",
       retry: "Retry",
       search: "Search",
       select: "Select",
+      selectAll: "Select all",
     },
     placeholders: {
       search: "Search...",
@@ -31,6 +33,7 @@ export const en = {
     errors: {
       error: "Error",
       unableToSave: "Unable to save",
+      unableToCopy: "Unable to copy",
       nameRequired: "Name is required",
       daemonUnavailable: "Daemon unavailable",
       daemonClientUnavailable: "Daemon client unavailable",
@@ -153,8 +156,8 @@ export const en = {
       fileTooLarge: "{{fileName}} is too large (max {{size}})",
     },
     clientCommands: {
-      archiveAgent: "Archive the current agent",
-      freshDraft: "Archive this agent and start a fresh draft",
+      archiveAgent: "Close the current agent",
+      freshDraft: "Close this agent and start a fresh draft",
     },
     github: {
       searching: "Searching...",
@@ -201,6 +204,7 @@ export const en = {
     empty: "Start chatting with this agent...",
     scrollToBottom: "Scroll to bottom",
     historyLoadFailed: "Couldn't load agent history",
+    messageCapped: "This message was capped ({{bytes}} bytes).",
     permission: {
       plan: "Plan",
       required: "Permission Required",
@@ -218,8 +222,8 @@ export const en = {
       reconnecting: "Reconnecting",
       timelineSyncFailed: "Couldn't refresh agent history.",
       timelineSyncRetrying: "Retrying…",
-      archivingTitle: "Archiving agent...",
-      archivingSubtitle: "Please wait while we archive this agent.",
+      archivingTitle: "Closing agent...",
+      archivingSubtitle: "Please wait while we close this agent.",
     },
     unavailable: {
       selectedHost: "Selected host",
@@ -234,8 +238,8 @@ export const en = {
       showAgainWhenReachable: "We will show this agent again as soon as the host is reachable.",
     },
     archived: {
-      callout: "This agent is archived",
-      unarchive: "Unarchive",
+      callout: "This agent is closed",
+      unarchive: "Reopen",
     },
   },
   sessions: {
@@ -268,14 +272,14 @@ export const en = {
       closed: "Closed",
     },
     badges: {
-      archived: "Archived",
+      archived: "Closed",
       pending: "{{count}} pending",
       attention: "Attention",
     },
     archiveSheet: {
       hostOffline: "Host offline",
-      runningAgent: "This agent is still running. Archiving it will stop the agent.",
-      archive: "Archive",
+      runningAgent: "This agent is still running. Closing it will stop the agent.",
+      archive: "Close",
     },
   },
   message: {
@@ -394,12 +398,12 @@ export const en = {
       needsHostUpgrade: "Update your host to restore this workspace",
       manageHost: "Manage host",
       recovery: {
-        archivedTitle: "Workspace archived",
+        archivedTitle: "Workspace closed",
         restoreDescription:
-          "{{workspaceName}} was archived and its worktree was removed. Restore branch {{branch}} to open it again.",
-        unarchiveDescription: "{{workspaceName}} is archived. Unarchive it to open it again.",
+          "{{workspaceName}} was closed and its worktree was removed. Restore branch {{branch}} to open it again.",
+        unarchiveDescription: "{{workspaceName}} is closed. Reopen it to open it again.",
         restoreAction: "Restore",
-        unarchiveAction: "Unarchive",
+        unarchiveAction: "Reopen",
         restoringTitle: "Restoring workspace",
         restoringAction: "Restoring...",
         unavailableTitle: "Workspace unavailable",
@@ -593,6 +597,7 @@ export const en = {
         close: "Close",
         renameTerminal: "Rename terminal",
         renameAgent: "Rename agent",
+        renameTab: "Rename tab",
       },
       actions: {
         newTab: "New tab",
@@ -647,7 +652,7 @@ export const en = {
       confirmations: {
         close: "Close",
         cancel: "Cancel",
-        archive: "Archive",
+        archive: "Close",
         unsavedTitle: "Unsaved changes",
         unsavedMessage:
           "This tab has changes that have not been saved. Closing it will discard the draft.",
@@ -659,24 +664,26 @@ export const en = {
         switchProjectTitle: "Switch project?",
         switchProjectMessage:
           "This agent's conversation will be discarded and a new one started in the project you pick.",
+        switchProjectTerminalMessage:
+          "This terminal is replaced by a new one in the project you pick. Any running process is stopped.",
         switchProject: "Switch",
-        archiveRunningAgentTitle: "Archive running agent?",
+        archiveRunningAgentTitle: "Close running agent?",
         archiveRunningAgentMessage:
-          "This agent is still running. Archiving it will stop the agent and close the tab.",
+          "This agent is still running. Closing it will stop the agent and close the tab.",
         closeTabsLeftTitle: "Close tabs to the left?",
         closeTabsRightTitle: "Close tabs to the right?",
         closeOtherTabsTitle: "Close other tabs?",
         bulk: {
-          all: "This will archive {{agents}} agent(s), close {{terminals}} terminal(s), and close {{tabs}} tab(s). Any running process in a closed terminal will be stopped immediately.",
+          all: "This will close {{agents}} agent(s), close {{terminals}} terminal(s), and close {{tabs}} tab(s). Any running process in a closed terminal will be stopped immediately.",
           agentsAndTerminals:
-            "This will archive {{agents}} agent(s) and close {{terminals}} terminal(s). Any running process in a closed terminal will be stopped immediately.",
+            "This will close {{agents}} agent(s) and close {{terminals}} terminal(s). Any running process in a closed terminal will be stopped immediately.",
           terminalsAndTabs:
             "This will close {{terminals}} terminal(s) and close {{tabs}} tab(s). Any running process in a closed terminal will be stopped immediately.",
-          agentsAndTabs: "This will archive {{agents}} agent(s) and close {{tabs}} tab(s).",
+          agentsAndTabs: "This will close {{agents}} agent(s) and close {{tabs}} tab(s).",
           terminals:
             "This will close {{terminals}} terminal(s). Any running process in a closed terminal will be stopped immediately.",
           tabs: "This will close {{tabs}} tab(s).",
-          agents: "This will archive {{agents}} agent(s).",
+          agents: "This will close {{agents}} agent(s).",
         },
       },
     },
@@ -732,6 +739,22 @@ export const en = {
         stopFailed: "Failed to stop {{scriptName}}",
       },
     },
+    commands: {
+      title: "Commands",
+      groups: {
+        project: "Project",
+        global: "Global",
+      },
+      accessibility: {
+        trigger: "Workspace commands",
+      },
+      shortcutTaken: "Shortcut in use",
+      errors: {
+        noAgentTarget: "No chat tab to run this command in",
+        noTerminalTarget: "No terminal tab to run this command in",
+        sendFailed: "Failed to send command",
+      },
+    },
     tree: {
       showFolderTree: "Show folder tree",
       hideFolderTree: "Hide folder tree",
@@ -781,9 +804,9 @@ export const en = {
           success: "Updated",
         },
         archive: {
-          label: "Archive workspace",
-          pending: "Archiving...",
-          success: "Archived",
+          label: "Close workspace",
+          pending: "Closing...",
+          success: "Closed",
         },
         mergePr: {
           squash: "Merge PR (squash)",
@@ -843,7 +866,7 @@ export const en = {
             "Update isn't available because this branch is already up to date with {{baseRef}}",
           mergePrNoGithub: "Merge PR isn't available right now because GitHub isn't connected",
           archiveNotWorktree:
-            "Archive isn't available here because this workspace was not created as a Paseo worktree",
+            "Close isn't available here because this workspace was not created as a Paseo worktree",
           mergePrNoForge:
             "Merge {{noun}} isn't available right now because {{brand}} isn't connected",
           mergePrMissing: "Merge PR isn't available because there isn't a pull request yet",
@@ -870,8 +893,8 @@ export const en = {
           failedMergeFromBase: "Failed to merge from base",
         },
         archiveWarning: {
-          title: 'Archive "{{workspaceName}}"?',
-          confirm: "Archive",
+          title: 'Close "{{workspaceName}}"?',
+          confirm: "Close",
           cancel: "Cancel",
           uncommittedChanges: "Uncommitted changes",
           uncommittedChangesWithDiff: "Uncommitted changes ({{diffStat}})",
@@ -1156,23 +1179,22 @@ export const en = {
         openNewWindowFailed: "Couldn't open a new window",
         openFolder: "Open in file manager",
         openFolderFailed: "Couldn't open folder",
-        remove: "Remove project",
-        removeFromWorkspace: "Remove from workspace",
+        remove: "Close project",
+        removeFromWorkspace: "Close project",
         moveToWorkspace: "Move to workspace",
         noOtherWorkspaces: "No other workspaces",
-        removing: "Removing...",
+        removing: "Closing...",
       },
       confirmations: {
-        removeTitle: "Remove project?",
-        removeMessage:
-          'Remove "{{projectName}}" from the sidebar?\n\nFiles on disk will not be changed.',
-        removeConfirm: "Remove",
+        removeTitle: "Close project?",
+        removeMessage: 'Close "{{projectName}}"?\n\nFiles on disk will not be changed.',
+        removeConfirm: "Close",
         cancel: "Cancel",
       },
       toasts: {
         hostDisconnected: "Host is not connected",
         removeFailed: "Failed to remove some workspaces",
-        updateHostToRemove: "Update the host to remove projects.",
+        updateHostToRemove: "Update the host to close projects.",
       },
       empty: {
         title: "No projects yet",
@@ -1202,12 +1224,14 @@ export const en = {
         copyPath: "Copy path",
         copyBranchName: "Copy branch name",
         rename: "Rename workspace",
+        markAsRead: "Mark as read",
+        markAsUnread: "Mark as unread",
         pin: "Pin to top",
         unpin: "Unpin",
-        archive: "Archive",
-        archiveWorkspace: "Archive workspace",
+        archive: "Close",
+        archiveWorkspace: "Close workspace",
         hideFromSidebar: "Hide from sidebar",
-        archiving: "Archiving...",
+        archiving: "Closing...",
         hiding: "Hiding...",
       },
       confirmations: {
@@ -1228,7 +1252,7 @@ export const en = {
         branchNameCopied: "Branch name copied",
         hostDisconnected: "Host is not connected",
         hideFailed: "Failed to hide workspace",
-        archiveFailed: "Failed to archive workspace",
+        archiveFailed: "Failed to close workspace",
       },
       uncategorized: "Uncategorized",
     },
@@ -1236,11 +1260,11 @@ export const en = {
       actions: {
         menu: "Agent actions",
         open: "Open agent",
-        archive: "Archive agent",
+        archive: "Close agent",
       },
       confirmations: {
-        archiveTitle: "Archive agent?",
-        archiveMessage: "This agent will be archived.",
+        archiveTitle: "Close agent?",
+        archiveMessage: "This agent will be closed.",
       },
     },
   },
@@ -1805,10 +1829,14 @@ export const en = {
     pillLabelReadyToReview: "{{count}} ready to review",
     detachAction: "Detach {{label}}",
     detachTooltip: "Detach subagent",
-    archiveAction: "Archive {{label}}",
-    archiveTooltip: "Archive subagent",
-    archiveFinishedAction: "Archive finished subagents",
+    archiveAction: "Close {{label}}",
+    archiveTooltip: "Close subagent",
+    archiveFinishedAction: "Close finished subagents",
     archiveFinishedRetry: "Retry ({{failed}}/{{total}})",
+    stopAction: "Stop subagent",
+    stopTooltip: "Stop this subagent, not its parent",
+    stopFailed: "Could not stop subagent: {{reason}}",
+    stopAlreadyFinished: "That subagent had already finished.",
   },
   panels: {
     draft: {
@@ -1932,6 +1960,27 @@ export const en = {
     },
   },
   settings: {
+    commands: {
+      manage: "Manage commands…",
+      add: "Add command",
+      edit: "Edit command",
+      editAction: "Edit",
+      save: "Save",
+      delete: "Delete",
+      name: "Name",
+      text: "Command text",
+      target: "Send to",
+      agent: "Agent",
+      terminal: "Terminal",
+      submit: "Submit immediately",
+      shortcut: "Keyboard shortcut (optional)",
+      invalidShortcut: "Enter a shortcut such as Cmd+Shift+R",
+      deleteTitle: "Delete {{name}}?",
+      deleteMessage: "This command will be removed from this host.",
+      updateHost: "Update this host to edit commands",
+      loadError: "Unable to load commands",
+      empty: "No commands yet. Add a command to use it across this host’s projects.",
+    },
     title: "Settings",
     loading: "Loading settings...",
     groups: {
@@ -2318,12 +2367,13 @@ export const en = {
         tabsPanes: "Tabs & Panes",
         layout: "Layout",
         agentInput: "Agent Input",
+        commands: "Commands",
       },
       help: {
         openProject: "Open project",
         newWorkspace: "New workspace",
         newWorktree: "New worktree",
-        archiveWorkspace: "Archive workspace",
+        archiveWorkspace: "Close workspace",
         newTab: "New tab",
         closeCurrentTab: "Close current tab",
         jumpToWorkspace: "Jump to workspace",

@@ -125,7 +125,7 @@ import {
 import type { ShortcutKey } from "@/utils/format-shortcut";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
-import { useClearWorkspaceAttention } from "@/hooks/use-clear-workspace-attention";
+import { useWorkspaceReadState } from "@/hooks/use-workspace-read-state";
 import type { PrHint } from "@/git/use-pr-status-query";
 import type { SidebarProjectIconTarget } from "@/utils/sidebar-project-row-model";
 import { redirectIfArchivingActiveWorkspace } from "@/utils/sidebar-workspace-archive-redirect";
@@ -210,6 +210,7 @@ interface WorkspaceRowInnerProps {
   onArchive?: () => void;
   onRename?: () => void;
   onMarkAsRead?: () => void;
+  onMarkAsUnread?: () => void;
   onAddProject?: () => void;
   archiveShortcutKeys?: ShortcutKey[][] | null;
   isPinned?: boolean;
@@ -258,6 +259,7 @@ function WorkspaceRowRightGroup({
   archiveShortcutKeys,
   onArchive,
   onMarkAsRead,
+  onMarkAsUnread,
   onRename,
   onAddProject,
   isPinned,
@@ -277,6 +279,7 @@ function WorkspaceRowRightGroup({
   archiveShortcutKeys?: ShortcutKey[][] | null;
   onArchive?: () => void;
   onMarkAsRead?: () => void;
+  onMarkAsUnread?: () => void;
   onRename?: () => void;
   onAddProject?: () => void;
   isPinned?: boolean;
@@ -326,6 +329,7 @@ function WorkspaceRowRightGroup({
                 workspaceLabels={workspace.labels}
                 onRename={onRename}
                 onMarkAsRead={onMarkAsRead}
+                onMarkAsUnread={onMarkAsUnread}
                 onAddProject={onAddProject}
                 onArchive={onArchive}
                 archiveLabel={archiveLabel}
@@ -362,6 +366,8 @@ function WorkspaceRowInner({
   archivePendingLabel,
   onArchive,
   onRename,
+  onMarkAsRead,
+  onMarkAsUnread,
   onAddProject,
   archiveShortcutKeys,
   isPinned,
@@ -438,6 +444,8 @@ function WorkspaceRowInner({
               hostBadgeLabel={hostBadge?.label}
               workspaceKey={workspace.workspaceKey}
               onRename={onRename}
+              onMarkAsRead={onMarkAsRead}
+              onMarkAsUnread={onMarkAsUnread}
               onAddProject={onAddProject}
               onArchive={onArchive}
               archiveLabel={archiveLabel}
@@ -490,6 +498,8 @@ function WorkspaceRowInner({
                   archiveShortcutKeys={archiveShortcutKeys}
                   onArchive={onArchive}
                   onRename={onRename}
+                  onMarkAsRead={onMarkAsRead}
+                  onMarkAsUnread={onMarkAsUnread}
                   onAddProject={onAddProject}
                   isPinned={isPinned}
                   onTogglePin={onTogglePin}
@@ -590,15 +600,21 @@ function WorkspaceRowWithMenu({
   const onTogglePin = canPin ? handleTogglePin : undefined;
 
   const archiveShortcutKeys = useShortcutKeys("archive-workspace");
-  const { hasClearableAttention, clearAttention } = useClearWorkspaceAttention({
-    serverId: workspace.serverId,
-    workspaceId: workspace.workspaceId,
-  });
+  const { hasClearableAttention, canMarkUnread, clearAttention, markUnread } =
+    useWorkspaceReadState({
+      serverId: workspace.serverId,
+      workspaceId: workspace.workspaceId,
+    });
   const handleMarkAsRead = useCallback(() => {
     void clearAttention().catch((error) => {
       toast.error(error instanceof Error ? error.message : "Failed to mark workspace as read");
     });
   }, [clearAttention, toast]);
+  const handleMarkAsUnread = useCallback(() => {
+    void markUnread().catch((error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to mark workspace as unread");
+    });
+  }, [markUnread, toast]);
 
   useKeyboardActionHandler({
     handlerId: `workspace-archive-${workspace.workspaceKey}`,
@@ -632,6 +648,7 @@ function WorkspaceRowWithMenu({
       onArchive={handleArchive}
       onRename={handleOpenRename}
       onMarkAsRead={hasClearableAttention ? handleMarkAsRead : undefined}
+      onMarkAsUnread={canMarkUnread ? handleMarkAsUnread : undefined}
       onAddProject={onAddProject}
       archiveShortcutKeys={selected ? archiveShortcutKeys : null}
       isPinned={isPinned}

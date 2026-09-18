@@ -74,7 +74,7 @@ export function createAgentCommand(): Command {
       .option("--list", "List available modes for this agent"),
   ).action(withOutput(runModeCommand));
 
-  addJsonAndDaemonHostOptions(addArchiveOptions(agent.command("archive"))).action(
+  addJsonAndDaemonHostOptions(addArchiveOptions(agent.command("archive").alias("close"))).action(
     withOutput(runArchiveCommand),
   );
 

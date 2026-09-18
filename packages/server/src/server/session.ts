@@ -151,11 +151,7 @@ import {
 } from "./workspace-registry.js";
 import { wrapSpokenInput } from "./voice-config.js";
 import { isVoicePermissionAllowed } from "./voice-permission-policy.js";
-import {
-  ProjectIconReader,
-  removeProjectCustomIcon,
-  setProjectCustomIcon,
-} from "../utils/project-custom-icon.js";
+import { ProjectIconReader, setProjectCustomIcon } from "../utils/project-custom-icon.js";
 import { VoiceSession } from "./session/voice/voice-session.js";
 import { CheckoutSession } from "./session/checkout/checkout-session.js";
 import {
@@ -171,6 +167,7 @@ import { ProviderCatalogSession } from "./session/provider/provider-catalog-sess
 import { WorkspaceFilesSession } from "./session/files/workspace-files-session.js";
 import { AgentConfigSession } from "./session/agent-config/agent-config-session.js";
 import { ProjectConfigSession } from "./session/project-config/project-config-session.js";
+import { ProjectCommandsSession } from "./session/commands/project-commands-session.js";
 import { DaemonSession, type DaemonRuntimeConfig } from "./session/daemon/daemon-session.js";
 import type { DaemonWebSocketRuntimeDiagnosticSnapshot } from "./session/daemon/diagnostics.js";
 import type { HubRelationshipManagement } from "./hub/relationship-controller.js";
@@ -219,6 +216,7 @@ import {
 import type { ForgeService } from "../services/forge-service.js";
 import type { ProviderUsageService } from "../services/quota-fetcher/service.js";
 import {
+  resolveWorkspaceRootAgent,
   summarizeFetchWorkspacesEntries,
   workspaceIdsOnCheckout,
   WorkspaceDirectory,
@@ -733,6 +731,7 @@ export class Session {
   private readonly workspaceFilesSession: WorkspaceFilesSession;
   private readonly agentConfigSession: AgentConfigSession;
   private readonly projectConfigSession: ProjectConfigSession;
+  private readonly projectCommandsSession: ProjectCommandsSession;
   private readonly daemonSession: DaemonSession;
   private readonly hubExecutionController: HubExecutionController | null;
   private readonly workspaceScripts: WorkspaceScriptsService;
@@ -942,6 +941,14 @@ export class Session {
         emit: (msg) => this.emit(msg),
       },
       projectRegistry: this.projectRegistry,
+      logger: this.sessionLogger,
+    });
+    this.projectCommandsSession = new ProjectCommandsSession({
+      host: {
+        emit: (msg) => this.emit(msg),
+      },
+      projectRegistry: this.projectRegistry,
+      workspaceRegistry: this.workspaceRegistry,
       logger: this.sessionLogger,
     });
     this.daemonSession = new DaemonSession({
@@ -1986,7 +1993,7 @@ export class Session {
       this.dispatchAgentLifecycleMessage(msg) ??
       this.dispatchAgentConfigMessage(msg) ??
       this.dispatchCheckoutMessage(msg) ??
-      this.dispatchWorkspaceRecoveryMessage(msg) ??
+      this.dispatchWorkspaceStateMessage(msg) ??
       this.dispatchWorkspaceLabelMessage(msg) ??
       this.dispatchWorkspaceAndProjectMessage(msg) ??
       this.dispatchWorkspaceFileMessage(msg, source) ??
@@ -2296,6 +2303,8 @@ export class Session {
         return this.handleProviderSubagentListRequest(msg);
       case "agent.provider_subagents.timeline.get.request":
         return this.handleProviderSubagentTimelineRequest(msg);
+      case "agent.provider_subagents.stop.request":
+        return this.handleProviderSubagentStopRequest(msg);
       case "agent.timeline.set_subscription.request": {
         const agentIds = [...new Set(msg.agentIds)].sort();
         if (
@@ -2378,6 +2387,24 @@ export class Session {
     }
   }
 
+  private dispatchCustomCommandsMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "commands.global.set.request":
+        this.emit({
+          type: "commands.global.set.response",
+          payload: {
+            requestId: msg.requestId,
+            config: this.daemonConfigStore.setCustomCommands(msg.commands, msg.expectedCommands),
+          },
+        });
+        return undefined;
+      case "commands.project.list.request":
+        return this.projectCommandsSession.handleCommandsProjectListRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
   private dispatchAgentConfigMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     switch (msg.type) {
       case "set_agent_mode_request":
@@ -2426,7 +2453,7 @@ export class Session {
       case "write_project_config_request":
         return this.projectConfigSession.handleWriteProjectConfigRequest(msg);
       default:
-        return undefined;
+        return this.dispatchCustomCommandsMessage(msg);
     }
   }
 
@@ -2534,8 +2561,6 @@ export class Session {
         return this.handleProjectRemoveRequest(msg);
       case "workspace.create.request":
         return this.handleWorkspaceCreateRequest(msg);
-      case "workspace.clear_attention.request":
-        return this.handleWorkspaceClearAttentionRequest(msg);
       case "workspace.title.set.request":
         return this.handleWorkspaceTitleSetRequest(msg.workspaceId, msg.title, msg.requestId);
       case "workspace.pin.set.request":
@@ -2608,12 +2633,16 @@ export class Session {
     }
   }
 
-  private dispatchWorkspaceRecoveryMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+  private dispatchWorkspaceStateMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     switch (msg.type) {
       case "workspace.recovery.inspect.request":
         return this.handleWorkspaceRecoveryInspectRequest(msg);
       case "workspace.recovery.restore.request":
         return this.handleWorkspaceRecoveryRestoreRequest(msg);
+      case "workspace.clear_attention.request":
+        return this.handleWorkspaceClearAttentionRequest(msg);
+      case "workspace.mark_unread.request":
+        return this.handleWorkspaceMarkUnreadRequest(msg);
       default:
         return undefined;
     }
@@ -3010,7 +3039,12 @@ export class Session {
     try {
       const result = await updateAgentCommand(
         { agentManager: this.agentManager },
-        { agentId, name, labels },
+        // The client RPC is the rename modal and `paseo agent update --name`.
+        // ponytail: route stands in for identity — every socket is admitted as
+        // the owner, so an agent that shells out to the CLI still counts as a
+        // user here. Needs real principal separation to close, which does not
+        // exist yet; this covers the agent naming its own tab, which is the bug.
+        { agentId, name, labels, origin: "user" },
       );
 
       if (!result.accepted) {
@@ -3241,16 +3275,7 @@ export class Session {
           }
         }
       }
-      await this.projectRegistry.remove(resolvedProjectId);
-      await removeProjectCustomIcon({
-        paseoHome: this.paseoHome,
-        projectId: resolvedProjectId,
-      }).catch((error) => {
-        this.sessionLogger.warn(
-          { err: error, projectId: resolvedProjectId },
-          "Failed to clean up removed project icon",
-        );
-      });
+      await this.projectRegistry.archive(resolvedProjectId, new Date().toISOString());
       await this.emitWorkspaceUpdatesForWorkspaceIds(
         affectedWorkspaces.map((workspace) => workspace.workspaceId),
         { removedProjectId: projectId },
@@ -3311,6 +3336,9 @@ export class Session {
       const updated = await this.workspaceRegistry.update(workspaceId, (existing) => ({
         ...existing,
         title: nextTitle,
+        // Clearing the field is the user asking for the derived name back, which hands the
+        // workspace to the auto-namer again.
+        ...(nextTitle ? { titleSetByUser: true } : { titleSetByUser: false }),
         updatedAt,
       }));
       if (!updated) {
@@ -7268,6 +7296,64 @@ export class Session {
     });
   }
 
+  private async handleWorkspaceMarkUnreadRequest(
+    request: Extract<SessionInboundMessage, { type: "workspace.mark_unread.request" }>,
+  ): Promise<void> {
+    const { requestId, workspaceId } = request;
+    let markedAgentId: string | null = null;
+    try {
+      const workspace = await this.workspaceRegistry.get(workspaceId);
+      if (!workspace || workspace.archivedAt) {
+        throw new Error(`Workspace not found: ${workspaceId}`);
+      }
+
+      const agents = (await this.listAgentPayloads()).filter((agent) =>
+        this.isProviderVisibleToClient(agent.provider),
+      );
+      const agentsById = new Map(agents.map((agent) => [agent.id, agent] as const));
+      const candidates = agents
+        .filter((agent) => !agent.archivedAt && agent.workspaceId === workspace.workspaceId)
+        .filter((agent) => resolveWorkspaceRootAgent(agent, agentsById)?.id === agent.id)
+        .filter((agent) => agent.status === "idle" || agent.status === "closed")
+        .filter((agent) => agent.requiresAttention !== true)
+        .filter((agent) => (agent.pendingPermissions?.length ?? 0) === 0)
+        .sort(
+          (left, right) =>
+            right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id),
+        );
+      const candidate = candidates[0];
+      if (!candidate) {
+        throw new Error(`Workspace has no finished agent to mark unread: ${workspaceId}`);
+      }
+
+      await this.agentManager.markAgentUnread(candidate.id);
+      markedAgentId = candidate.id;
+      this.emit({
+        type: "workspace.mark_unread.response",
+        payload: {
+          requestId,
+          workspaceId,
+          markedAgentId,
+          success: true,
+          error: null,
+        },
+      });
+    } catch (error) {
+      const message = getErrorMessage(error);
+      this.sessionLogger.error({ err: error, workspaceId }, "Failed to mark workspace unread");
+      this.emit({
+        type: "workspace.mark_unread.response",
+        payload: {
+          requestId,
+          workspaceId,
+          markedAgentId,
+          success: false,
+          error: message,
+        },
+      });
+    }
+  }
+
   private async handleFetchAgent(agentIdOrIdentifier: string, requestId: string): Promise<void> {
     const resolved = await this.resolveAgentIdentifier(agentIdOrIdentifier);
     if (!resolved.ok) {
@@ -7588,6 +7674,43 @@ export class Session {
           requestId: msg.requestId,
           parentAgentId: msg.parentAgentId,
           subagents: [],
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  private async handleProviderSubagentStopRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.provider_subagents.stop.request" }>,
+  ): Promise<void> {
+    try {
+      await ensureUnarchivedAgentLoaded(msg.parentAgentId, {
+        agentManager: this.agentManager,
+        agentStorage: this.agentStorage,
+        logger: this.sessionLogger,
+      });
+      const stopped = await this.agentManager.stopProviderSubagent(
+        msg.parentAgentId,
+        msg.subagentId,
+      );
+      this.emit({
+        type: "agent.provider_subagents.stop.response",
+        payload: {
+          requestId: msg.requestId,
+          parentAgentId: msg.parentAgentId,
+          subagentId: msg.subagentId,
+          stopped,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "agent.provider_subagents.stop.response",
+        payload: {
+          requestId: msg.requestId,
+          parentAgentId: msg.parentAgentId,
+          subagentId: msg.subagentId,
+          stopped: false,
           error: error instanceof Error ? error.message : String(error),
         },
       });

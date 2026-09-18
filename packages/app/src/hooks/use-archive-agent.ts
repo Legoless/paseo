@@ -438,6 +438,8 @@ export function useArchiveAgent() {
         agentId: input.agentId,
         isArchiving: true,
       });
+      const sync = useSessionStore.getState().sessions[input.serverId]?.viewedTimelineSync;
+      sync?.evictAgent(input.agentId);
       return context;
     },
     onSuccess: (result, input) => {
@@ -446,6 +448,8 @@ export function useArchiveAgent() {
         agentId: input.agentId,
         archivedAt: result.archivedAt,
       });
+      const sync = useSessionStore.getState().sessions[input.serverId]?.viewedTimelineSync;
+      sync?.evictAgent(input.agentId);
     },
     onError: (_error, input, context) => {
       if (!context) {

@@ -162,6 +162,19 @@ export function getProviderModelRows(
   return provider.modelSelection.kind === "models" ? provider.modelSelection.rows : [];
 }
 
+/**
+ * Why a provider cannot offer models: the hard failure, or a refresh that failed over a catalog it
+ * had already discovered. The pill only has room for the state word, so every surface with space
+ * reads the reason through here.
+ */
+export function getProviderSelectionError(
+  selection: ProviderModelSelection | undefined,
+): string | null {
+  if (selection?.kind === "error") return selection.message;
+  if (selection?.kind === "models") return selection.error ?? null;
+  return null;
+}
+
 export function getAllProviderModelRows(
   providers: ProviderSelectorProvider[],
 ): ProviderSelectionModelRow[] {

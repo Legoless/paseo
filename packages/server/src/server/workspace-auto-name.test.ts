@@ -74,3 +74,56 @@ test("auto-name preserves workspace archival that lands during its metadata writ
     archivedAt,
   });
 });
+
+test("auto-name leaves a workspace the user renamed alone", async () => {
+  let workspace = createPersistedWorkspaceRecord({
+    workspaceId: "workspace-user-named",
+    displayName: "workspace",
+    createdAt: "2026-08-08T00:00:00.000Z",
+    updatedAt: "2026-08-08T00:00:00.000Z",
+    members: [
+      {
+        projectId: "project-user-named",
+        cwd: "/workspace",
+        kind: "directory",
+        displayName: "workspace",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
+  });
+  // The user typed this, and it happens to equal the first prompt line — the case the old
+  // value-equality heuristic mistook for a still-automatic title.
+  workspace = { ...workspace, title: "Name this workspace", titleSetByUser: true };
+  const updateEmitted = deferred();
+  const workspaceRegistry = {
+    update: async (_workspaceId, updater) => {
+      workspace = updater(workspace);
+      return workspace;
+    },
+  } satisfies Pick<WorkspaceRegistry, "update">;
+  const autoName = new WorkspaceAutoName({
+    agentManager: {} as AgentManager,
+    workspaceRegistry,
+    workspaceGitService: {} as WorkspaceGitService,
+    providerSnapshotManager: {} as ProviderSnapshotManager,
+    readDaemonConfig: () => ({}),
+    gitMutation: { notifyGitMutation: async () => {} },
+    emitWorkspaceUpdateForCwd: async () => {},
+    emitWorkspaceUpdateForWorkspaceId: async () => updateEmitted.resolve(),
+    logger: pino({ level: "silent" }),
+    generateWorkspaceName: async () => ({ title: "generated", branch: null }),
+  });
+
+  autoName.scheduleForDirectory({
+    workspaceId: workspace.workspaceId,
+    cwd: workspace.members[0]!.cwd,
+    firstAgentContext: { prompt: "Name this workspace" },
+  });
+  await updateEmitted.promise;
+
+  expect(workspace.title).toBe("Name this workspace");
+});
