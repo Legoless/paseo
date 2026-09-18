@@ -13,6 +13,22 @@ import {
 import { createSidebarWorkspaceEntry } from "@/hooks/use-sidebar-workspaces-list";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
 
+type WorkspaceMemberInput = WorkspaceDescriptor["members"][number];
+
+function createWorkspaceMember(input: Partial<WorkspaceMemberInput> = {}): WorkspaceMemberInput {
+  return {
+    projectId: "remote:github.com/getpaseo/paseo",
+    projectDisplayName: "getpaseo/paseo",
+    projectCustomName: null,
+    projectRootPath: "/repo/main",
+    workspaceDirectory: "/repo/main",
+    workspaceKind: "local_checkout",
+    worktreeSlug: null,
+    branch: null,
+    ...input,
+  };
+}
+
 function createWorkspaceDescriptor(input: Partial<WorkspaceDescriptor> = {}): WorkspaceDescriptor {
   return {
     id: "/repo/main",
@@ -30,16 +46,14 @@ function createWorkspaceDescriptor(input: Partial<WorkspaceDescriptor> = {}): Wo
     ...input,
     archivingAt: input.archivingAt ?? null,
     members: input.members ?? [
-      {
+      createWorkspaceMember({
         projectId: input.projectId ?? "remote:github.com/getpaseo/paseo",
         projectDisplayName: input.projectDisplayName ?? "getpaseo/paseo",
         projectCustomName: input.projectCustomName ?? null,
         projectRootPath: input.projectRootPath ?? "/repo/main",
         workspaceDirectory: input.workspaceDirectory ?? "/repo/main",
         workspaceKind: input.workspaceKind ?? "local_checkout",
-        worktreeSlug: input.worktreeSlug ?? null,
-        branch: null,
-      },
+      }),
     ],
   };
 }
@@ -60,16 +74,12 @@ describe("workspace source of truth consumption", () => {
     expect(sidebarWorkspace.statusBucket).toBe("running");
   });
 
-  it("maps the sidebar entry branch from gitRuntime.currentBranch", () => {
+  it("maps the sidebar entry branch from the member branch", () => {
     const entry = createSidebarWorkspaceEntry({
       serverId: "srv",
       workspace: createWorkspaceDescriptor({
         name: "feat/workspace-sot",
-        gitRuntime: {
-          currentBranch: "feat/real-branch",
-          isDirty: false,
-          aheadOfOrigin: 0,
-        },
+        members: [createWorkspaceMember({ branch: "feat/real-branch" })],
       }),
     });
 
@@ -80,13 +90,13 @@ describe("workspace source of truth consumption", () => {
     const detached = createSidebarWorkspaceEntry({
       serverId: "srv",
       workspace: createWorkspaceDescriptor({
-        gitRuntime: { currentBranch: "HEAD", isDirty: false, aheadOfOrigin: 0 },
+        members: [createWorkspaceMember({ branch: "HEAD" })],
       }),
     });
     const blank = createSidebarWorkspaceEntry({
       serverId: "srv",
       workspace: createWorkspaceDescriptor({
-        gitRuntime: { currentBranch: "  ", isDirty: false, aheadOfOrigin: 0 },
+        members: [createWorkspaceMember({ branch: "  " })],
       }),
     });
     const missing = createSidebarWorkspaceEntry({
@@ -100,16 +110,13 @@ describe("workspace source of truth consumption", () => {
   });
 
   it("drops the project subtitle once a workspace holds more than one project", () => {
-    const member = (projectId: string, displayName: string, directory: string) => ({
-      projectId,
-      projectDisplayName: displayName,
-      projectCustomName: null,
-      projectRootPath: directory,
-      workspaceDirectory: directory,
-      workspaceKind: "local_checkout" as const,
-      worktreeSlug: null,
-      branch: null,
-    });
+    const member = (projectId: string, displayName: string, directory: string) =>
+      createWorkspaceMember({
+        projectId,
+        projectDisplayName: displayName,
+        projectRootPath: directory,
+        workspaceDirectory: directory,
+      });
 
     expect(
       resolveWorkspaceHeaderRenderState({

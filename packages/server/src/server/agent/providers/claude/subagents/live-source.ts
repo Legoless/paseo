@@ -39,6 +39,15 @@ interface TaskStartedMessage {
   task_type?: string;
   prompt?: string;
   skip_transcript?: boolean;
+  /**
+   * Whether the task was REGISTERED in the background, i.e. the spawning tool call did not block
+   * on it. `SDKTaskStartedMessage.is_backgrounded`. This is the common case and the one that
+   * matters most: a child launched with `run_in_background` is backgrounded from its first frame
+   * and never emits a `task_updated` patch saying so, and per the SDK "a resumed subagent is
+   * always registered in the background". Reading only the patch classifies those as foreground
+   * and terminalizes them on an interrupt they actually survived.
+   */
+  is_backgrounded?: boolean;
 }
 
 /** Task-tool subagents. Backgrounded shell commands announce as `local_bash`. */
@@ -70,9 +79,9 @@ function isProviderSubagentTask(message: TaskStartedMessage): boolean {
 interface TaskUpdatedMessage {
   task_id: string;
   /**
-   * `is_backgrounded` is declared on `SDKTaskUpdatedMessage["patch"]`: it flips when a foreground
-   * task is backgrounded, which is the only signal that separates a child that dies with its turn
-   * from one that was explicitly told to outlive it.
+   * `is_backgrounded` on the patch reports a LATER move to the background, for a task that
+   * started in the foreground. It is not the only source of that fact — a task can be
+   * backgrounded from birth, which arrives on `task_started` instead.
    */
   patch?: { status?: string; is_backgrounded?: boolean };
 }
@@ -152,8 +161,17 @@ export interface ClaudeTaskProtocolSourceInput {
 export class ClaudeTaskProtocolSource {
   /** task_id -> canonical subagent id (the Task tool_use id). Populated by task_started. */
   private readonly subagentIdByTaskId = new Map<string, string>();
+  /**
+   * The inverse of `subagentIdByTaskId`. `stop_task` addresses a task id, but every id that
+   * crosses the provider boundary is a subagent id, so stopping one requires translating back.
+   */
+  private readonly taskIdBySubagentId = new Map<string, string>();
   /** Every announced tool id -> the first tool id that publicly identifies the child. */
   private readonly canonicalIdByToolUseId = new Map<string, string>();
+  /** Tool calls made inside a sidechain, keyed to the direct child that emitted them. */
+  private readonly ownerSubagentIdByToolUseId = new Map<string, string>();
+  /** Announced tasks inherit the owner recorded for their tool call, including local_bash. */
+  private readonly ownerSubagentIdByTaskId = new Map<string, string>();
   /**
    * Every subagent id this source declared. It is the source's whole vocabulary: an id that is
    * not in here was either filtered at declaration or never announced, and this source has
@@ -229,6 +247,41 @@ export class ClaudeTaskProtocolSource {
     return subagentId !== undefined && this.declaredIds.has(subagentId);
   }
 
+  /** Resolve a non-subagent task (for example local_bash) to its emitting sidechain. */
+  resolveTaskOwner(taskId: string, toolUseId?: string): string | undefined {
+    return (
+      this.ownerSubagentIdByTaskId.get(taskId) ??
+      (toolUseId ? this.ownerSubagentIdByToolUseId.get(toolUseId) : undefined)
+    );
+  }
+
+  /**
+   * Remember whether a subagent outlives the turn that spawned it.
+   *
+   * Absent means "not stated", which must not overwrite a known value: `task_started` omits the
+   * field for task types that do not carry it, and a later `task_updated` patch is the only thing
+   * allowed to change a decision already made.
+   */
+  private recordBackgrounded(id: string, isBackgrounded: boolean | undefined): void {
+    if (isBackgrounded === undefined) return;
+    if (isBackgrounded) this.backgroundedIds.add(id);
+    else this.backgroundedIds.delete(id);
+  }
+
+  /**
+   * The task id to address a running subagent's `stop_task` to.
+   *
+   * Undefined for anything this source cannot vouch for as stoppable: an id it never declared,
+   * or one already terminal. Stopping a settled task is not harmless — task ids are reused
+   * across a session's lifetime only in the sense that a stale id may have been reassigned, and
+   * the CLI would kill whatever holds it now.
+   */
+  runningTaskId(subagentId: string): string | undefined {
+    if (!this.declaredIds.has(subagentId)) return undefined;
+    if (this.lastStatusById.get(subagentId) !== "running") return undefined;
+    return this.taskIdBySubagentId.get(subagentId);
+  }
+
   needsSyntheticParentToolCard(subagentId: string): boolean {
     return !this.idsWithExistingParentToolCard.has(subagentId);
   }
@@ -258,7 +311,10 @@ export class ClaudeTaskProtocolSource {
    */
   reset(): void {
     this.subagentIdByTaskId.clear();
+    this.taskIdBySubagentId.clear();
     this.canonicalIdByToolUseId.clear();
+    this.ownerSubagentIdByToolUseId.clear();
+    this.ownerSubagentIdByTaskId.clear();
     this.declaredIds.clear();
     this.workflowTaskIds.clear();
     this.lastWorkflowResultByTaskId.clear();
@@ -310,33 +366,54 @@ export class ClaudeTaskProtocolSource {
     this.sawAnyTask = true;
 
     const id = readString(message.tool_use_id);
+    const parentSubagentId = id ? this.ownerSubagentIdByToolUseId.get(id) : undefined;
+    if (parentSubagentId) this.ownerSubagentIdByTaskId.set(message.task_id, parentSubagentId);
     // skip_transcript marks ambient housekeeping the transcript should not show.
     if (!id || message.skip_transcript === true || !isProviderSubagentTask(message)) return [];
 
     this.sawTaskStarted = true;
     const existingId = this.subagentIdByTaskId.get(message.task_id);
     if (existingId) {
-      this.canonicalIdByToolUseId.set(id, existingId);
-      const observations: SubagentObservation[] = [];
-      if (this.lastStatusById.get(existingId) !== "running") {
-        this.lastStatusById.set(existingId, "running");
-        observations.push({ kind: "status", id: existingId, status: "running" });
-      }
-      const prompt =
-        message.task_type === CLAUDE_WORKFLOW_TASK_TYPE
-          ? readString(message.description)
-          : readString(message.prompt);
-      if (prompt) {
-        observations.push({
-          kind: "timeline",
-          id: existingId,
-          item: { type: "user_message", text: prompt },
-        });
-      }
-      return observations;
+      this.recordBackgrounded(existingId, message.is_backgrounded);
+      return this.observeExistingTaskStart(message, id, existingId);
     }
 
+    this.recordBackgrounded(id, message.is_backgrounded);
+    return this.observeNewTaskStart(message, id, parentSubagentId);
+  }
+
+  private observeExistingTaskStart(
+    message: TaskStartedMessage,
+    toolUseId: string,
+    existingId: string,
+  ): SubagentObservation[] {
+    this.canonicalIdByToolUseId.set(toolUseId, existingId);
+    const observations: SubagentObservation[] = [];
+    if (this.lastStatusById.get(existingId) !== "running") {
+      this.lastStatusById.set(existingId, "running");
+      observations.push({ kind: "status", id: existingId, status: "running" });
+    }
+    const prompt =
+      message.task_type === CLAUDE_WORKFLOW_TASK_TYPE
+        ? readString(message.description)
+        : readString(message.prompt);
+    if (prompt) {
+      observations.push({
+        kind: "timeline",
+        id: existingId,
+        item: { type: "user_message", text: prompt },
+      });
+    }
+    return observations;
+  }
+
+  private observeNewTaskStart(
+    message: TaskStartedMessage,
+    id: string,
+    parentSubagentId: string | undefined,
+  ): SubagentObservation[] {
     this.subagentIdByTaskId.set(message.task_id, id);
+    this.taskIdBySubagentId.set(id, message.task_id);
     this.canonicalIdByToolUseId.set(id, id);
     this.declaredIds.add(id);
     this.lastStatusById.set(id, "running");
@@ -344,8 +421,10 @@ export class ClaudeTaskProtocolSource {
     // An explicit `name` on the Task call wins over the agent type, matching how replay titles the
     // same subagent. Without it a fan-out of five Explores reads as five identical rows.
     const isWorkflow = message.task_type === CLAUDE_WORKFLOW_TASK_TYPE;
-    if (isWorkflow) {
+    if (isWorkflow || parentSubagentId) {
       this.idsWithExistingParentToolCard.add(id);
+    }
+    if (isWorkflow) {
       this.workflowTaskIds.add(message.task_id);
     }
     const title = isWorkflow
@@ -359,6 +438,7 @@ export class ClaudeTaskProtocolSource {
         toolCallId: id,
         ...(title ? { title } : {}),
         ...(description ? { description } : {}),
+        ...(parentSubagentId ? { parentSubagentId } : {}),
       },
     ];
     const initialPresentation = title ? { title } : {};
@@ -447,13 +527,23 @@ export class ClaudeTaskProtocolSource {
    * The model the child is actually running, read off its own assistant frames.
    *
    * Routed through the declaration for the same reason status is: a frame carrying the tool_use
-   * id of a task this source filtered out — ambient housekeeping, a workflow child, a nested
-   * grandchild announced in someone else's session — would otherwise fold to an upsert with no
+   * id of a task this source filtered out — ambient housekeeping or a workflow child — would
+   * otherwise fold to an upsert with no
    * identity and a defaulted "running" status. That is the nameless, never-finishing row the
    * declaration filter exists to prevent, arriving by a different door.
    */
   observeSidechainFrame(message: SDKMessage, subagentId: string): SubagentObservation[] {
     if (message.type !== "assistant" || !this.declaredIds.has(subagentId)) return [];
+    const content = message.message?.content;
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (!block || typeof block !== "object") continue;
+        const record = block as { type?: unknown; id?: unknown };
+        if (record.type === "tool_use" && typeof record.id === "string") {
+          this.ownerSubagentIdByToolUseId.set(record.id, subagentId);
+        }
+      }
+    }
     const model = resolveObservedClaudeModelId(
       typeof message.message?.model === "string" ? message.message.model : undefined,
     );

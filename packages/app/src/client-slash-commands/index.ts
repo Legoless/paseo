@@ -1,5 +1,5 @@
 import type { AgentProvider } from "@getpaseo/protocol/agent-types";
-import type { Agent } from "@/stores/session-store";
+import { type Agent, useSessionStore } from "@/stores/session-store";
 import {
   buildWorkspaceTabPersistenceKey,
   type WorkspaceDraftTabSetup,
@@ -85,18 +85,26 @@ export function buildDraftAgentSetup(agent: Agent): WorkspaceDraftTabSetup {
   };
 }
 
+/**
+ * Seeds the draft that replaces an agent when its provider changes. A model row
+ * carries only a model; an agent profile also carries mode, thinking and
+ * features, and blank means "leave it to the new provider's defaults".
+ */
 export function buildProviderSwitchDraftSetup(input: {
   cwd: string;
   provider: AgentProvider;
   model: string;
+  modeId?: string;
+  thinkingOptionId?: string;
+  featureValues?: Record<string, unknown>;
 }): WorkspaceDraftTabSetup {
   return {
     provider: input.provider,
     cwd: input.cwd,
-    modeId: null,
-    model: input.model,
-    thinkingOptionId: null,
-    featureValues: {},
+    modeId: input.modeId || null,
+    model: input.model || null,
+    thinkingOptionId: input.thinkingOptionId || null,
+    featureValues: input.featureValues ?? {},
   };
 }
 
@@ -115,6 +123,9 @@ export interface ReplaceOpenAgentWithDraftInput {
 export async function replaceOpenAgentWithDraft(
   input: ReplaceOpenAgentWithDraftInput,
 ): Promise<void> {
+  const sync = useSessionStore.getState().sessions[input.serverId]?.viewedTimelineSync;
+  sync?.evictAgent?.(input.agentId);
+
   const workspaceKey = buildWorkspaceTabPersistenceKey({
     serverId: input.serverId,
     workspaceId: input.workspaceId,
@@ -128,5 +139,9 @@ export async function replaceOpenAgentWithDraft(
     draftId: input.draftId,
     setup: input.setup,
   });
-  await input.archiveAgent({ serverId: input.serverId, agentId: input.agentId });
+  try {
+    await input.archiveAgent({ serverId: input.serverId, agentId: input.agentId });
+  } catch (error) {
+    console.warn("[replaceOpenAgentWithDraft] failed to archive old agent", error);
+  }
 }

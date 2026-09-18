@@ -287,6 +287,11 @@ interface AsyncMessageInput<T> {
   iterable: AsyncIterable<T>;
 }
 
+interface ClaudeReplayOwnership {
+  restoredIds: ReadonlySet<string>;
+  toolOwners: ReadonlyMap<string, string>;
+}
+
 interface PersistedTimelineEntry {
   item: AgentTimelineItem;
   timestamp?: string;
@@ -312,6 +317,7 @@ const CLAUDE_CAPABILITIES: AgentCapabilityFlags = {
   supportsRewindConversation: true,
   supportsRewindFiles: true,
   supportsRewindBoth: true,
+  supportsStopProviderSubagent: true,
 };
 
 const DEFAULT_MODES: AgentMode[] = [
@@ -498,6 +504,13 @@ interface ClaudeOptionsLogSummary {
 }
 
 const MAX_RECENT_STDERR_CHARS = 4000;
+/**
+ * How long to wait for a `stop_task` control request to be acknowledged.
+ *
+ * Longer than the 3 s used for teardown operations: this one is user-initiated and its failure is
+ * reported back to that user, so a slow but successful stop should not be shown as a timeout.
+ */
+const STOP_TASK_TIMEOUT_MS = 10_000;
 const STDERR_FLUSH_WAIT_MS = 150;
 const STDERR_FLUSH_POLL_INTERVAL_MS = 10;
 
@@ -2396,6 +2409,45 @@ class ClaudeAgentSession implements AgentSession {
     await this.interruptActiveTurn();
   }
 
+  /**
+   * Stop one running background subagent, leaving the parent turn and its siblings alone.
+   *
+   * The counterpart of `perTaskStopAffordance`: because Paseo declares that flag, `interrupt()`
+   * no longer reaches background children, and this is the only way to stop one.
+   */
+  async stopProviderSubagent(subagentId: string): Promise<boolean> {
+    const taskId = this.taskProtocolSource.runningTaskId(subagentId);
+    if (!taskId) return false;
+    const activeQuery = this.query;
+    if (!activeQuery || typeof activeQuery.stopTask !== "function") {
+      this.logger.trace(
+        { agentId: this.agentId, provider: "claude", subagentId },
+        "provider.claude.stop_subagent.no_query",
+      );
+      return false;
+    }
+    // NOT awaitWithTimeout: that helper swallows both rejection and timeout and resolves, which
+    // would report a stop the provider never accepted. A failure has to reach the caller.
+    try {
+      await withTimeout(activeQuery.stopTask(taskId), STOP_TASK_TIMEOUT_MS, "timeout");
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        { err: error, agentId: this.agentId, provider: "claude", subagentId, taskId },
+        "provider.claude.stop_subagent.failed",
+      );
+      // A timeout is not a refusal: the control request may still land, and the subagent's own
+      // terminal status is what settles it. Say so rather than claiming either outcome.
+      throw new Error(
+        reason === "timeout"
+          ? `Timed out asking Claude to stop this subagent after ${STOP_TASK_TIMEOUT_MS} ms; it may still stop.`
+          : `Claude refused to stop this subagent: ${reason}`,
+        { cause: error },
+      );
+    }
+    return true;
+  }
+
   async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
     if (
       !this.historyPending ||
@@ -3372,6 +3424,12 @@ class ClaudeAgentSession implements AgentSession {
       ...settingsOptions,
       // Provider subagent panes render the child's nested transcript.
       forwardSubagentText: true,
+      // Paseo renders a per-subagent stop control (agent.provider_subagents.stop.request), so
+      // the CLI may spare running background subagents when a turn is interrupted. The CLI fails
+      // CLOSED on absence: without this, pressing Stop kills every background subagent, because a
+      // spared one would be unstoppable short of ending the session. Do not drop this flag
+      // without also dropping the stop RPC, and vice versa.
+      perTaskStopAffordance: true,
       hooks: this.buildSubagentEffortHooks(),
       ...(this.persistSession === undefined ? {} : { persistSession: this.persistSession }),
       env: sdkEnv,
@@ -4236,6 +4294,9 @@ class ClaudeAgentSession implements AgentSession {
   private buildSubagentToolCallCard(
     declaration: Extract<SubagentObservation, { kind: "declared" }>,
   ): AgentStreamEvent | null {
+    // The launching sidechain already owns and renders this tool call. Mirroring it into the
+    // managed parent's transcript would flatten both the card and the child relationship.
+    if (declaration.parentSubagentId) return null;
     const toolCall = mapClaudeRunningToolCall({
       name: "Task",
       callId: declaration.id,
@@ -4357,11 +4418,6 @@ class ClaudeAgentSession implements AgentSession {
     message: Extract<SDKMessage, { type: "system"; subtype: "task_notification" }>,
     events: AgentStreamEvent[],
   ): void {
-    // TODO: subagent timelines are best-effort. Subagent task_notifications
-    // arrive without parent_tool_use_id but with tool_use_id pointing at the
-    // the parent's subagent tool call, so they slip past the sidechain router and pollute
-    // the parent timeline. Drop them here; eventually thread them into the
-    // parent tool call's sub_agent log instead.
     const taskUseId = message.tool_use_id;
     const cachedTool = taskUseId ? this.toolUseCache.get(taskUseId) : undefined;
     // The task protocol owns provider-subagent identity. Workflow launch results arrive before
@@ -4374,6 +4430,15 @@ class ClaudeAgentSession implements AgentSession {
       return;
     }
     const taskNotificationItem = mapTaskNotificationSystemRecordToToolCall(message);
+    const ownerSubagentId = this.taskProtocolSource.resolveTaskOwner(message.task_id, taskUseId);
+    if (taskNotificationItem && ownerSubagentId) {
+      events.push({
+        type: "provider_subagent",
+        provider: "claude",
+        event: { type: "timeline", id: ownerSubagentId, item: taskNotificationItem },
+      });
+      return;
+    }
     if (taskNotificationItem) {
       events.push({
         type: "timeline",
@@ -4407,11 +4472,7 @@ class ClaudeAgentSession implements AgentSession {
       messageId,
     });
     if (taskNotificationItem) {
-      events.push({
-        type: "timeline",
-        item: taskNotificationItem,
-        provider: "claude",
-      });
+      this.appendUserTaskNotificationEvent(taskNotificationItem, events);
       return;
     }
     if (typeof content === "string" && content.length > 0) {
@@ -4431,6 +4492,28 @@ class ClaudeAgentSession implements AgentSession {
     if (Array.isArray(content)) {
       this.appendUserContentArrayEvents(content, messageId, events);
     }
+  }
+
+  private appendUserTaskNotificationEvent(
+    item: Extract<AgentTimelineItem, { type: "tool_call" }>,
+    events: AgentStreamEvent[],
+  ): void {
+    const taskId = typeof item.metadata?.taskId === "string" ? item.metadata.taskId : undefined;
+    const toolUseId =
+      typeof item.metadata?.toolUseId === "string" ? item.metadata.toolUseId : undefined;
+    if (taskId && this.taskProtocolSource.isDeclaredTask(taskId)) return;
+    const ownerSubagentId = taskId
+      ? this.taskProtocolSource.resolveTaskOwner(taskId, toolUseId)
+      : undefined;
+    if (ownerSubagentId) {
+      events.push({
+        type: "provider_subagent",
+        provider: "claude",
+        event: { type: "timeline", id: ownerSubagentId, item },
+      });
+      return;
+    }
+    events.push({ type: "timeline", item, provider: "claude" });
   }
 
   private appendUserContentArrayEvents(
@@ -4880,27 +4963,24 @@ class ClaudeAgentSession implements AgentSession {
         return;
       }
       const content = fs.readFileSync(historyPath, "utf8");
-      const restoredProviderSubagentIds = this.ingestPersistedSidechains(
+      const replay = this.ingestPersistedSidechains(
         content,
         readClaudeSidechainHistory(historyPath),
       );
-      this.ingestPersistedHistory(content, restoredProviderSubagentIds);
+      this.ingestPersistedHistory(content, replay);
     } catch {
       // ignore history load failures
     }
   }
 
-  private ingestPersistedHistory(
-    content: string,
-    restoredProviderSubagentIds: ReadonlySet<string>,
-  ): void {
+  private ingestPersistedHistory(content: string, replay: ClaudeReplayOwnership): void {
     if (!content) {
       return;
     }
 
     const timeline: PersistedTimelineEntry[] = [];
     for (const line of content.split(/\r?\n/)) {
-      this.ingestPersistedHistoryLine(line, timeline, restoredProviderSubagentIds);
+      this.ingestPersistedHistoryLine(line, timeline, replay);
     }
 
     if (timeline.length > 0) {
@@ -4912,7 +4992,7 @@ class ClaudeAgentSession implements AgentSession {
   private ingestPersistedSidechains(
     parentContent: string,
     sidechains: ClaudeSidechainHistory,
-  ): Set<string> {
+  ): ClaudeReplayOwnership {
     const parentEntries = parseClaudeHistoryRecords(parentContent).filter(
       (entry) => entry.isSidechain !== true,
     );
@@ -4922,16 +5002,18 @@ class ClaudeAgentSession implements AgentSession {
 
     // Replay produces the same observations the live task protocol produces, then folds them
     // with the same function, so identity and status are derived once for both paths.
+    const subagentReplay = observeReplaySubagents({
+      subagents: [...groupClaudeSidechainEntries(sidechainEntries)].map(([agentId, entries]) => ({
+        agentId,
+        meta: sidechains.metaByAgentId.get(agentId) ?? null,
+        entries,
+        parentFacts: readClaudeReplayParentFacts(entries as ClaudeHistoryEntry[]),
+      })),
+      parent: readClaudeReplayParentFacts(parentEntries),
+      convertEntry: (entry) => this.convertHistoryEntry(entry as ClaudeHistoryEntry),
+    });
     const observations = [
-      ...observeReplaySubagents({
-        subagents: [...groupClaudeSidechainEntries(sidechainEntries)].map(([agentId, entries]) => ({
-          agentId,
-          meta: sidechains.metaByAgentId.get(agentId) ?? null,
-          entries,
-        })),
-        parent: readClaudeReplayParentFacts(parentEntries),
-        convertEntry: (entry) => this.convertHistoryEntry(entry as ClaudeHistoryEntry),
-      }),
+      ...subagentReplay.observations,
       ...observeReplayWorkflows({
         workflows: sidechains.workflowContents
           .map(parseClaudeWorkflowRun)
@@ -4953,7 +5035,11 @@ class ClaudeAgentSession implements AgentSession {
         .filter((observation) => observation.kind === "declared")
         .map((observation) => observation.id),
     );
-    if (observations.length === 0) return restoredProviderSubagentIds;
+    const replay = {
+      restoredIds: restoredProviderSubagentIds,
+      toolOwners: subagentReplay.toolOwners,
+    };
+    if (observations.length === 0) return replay;
 
     this.persistedProviderSubagentEvents.push(
       ...foldSubagentObservations(observations).map(
@@ -4965,13 +5051,13 @@ class ClaudeAgentSession implements AgentSession {
       ),
     );
     this.historyPending = true;
-    return restoredProviderSubagentIds;
+    return replay;
   }
 
   private ingestPersistedHistoryLine(
     line: string,
     timeline: PersistedTimelineEntry[],
-    restoredProviderSubagentIds: ReadonlySet<string>,
+    replay: ClaudeReplayOwnership,
   ): void {
     const trimmed = line.trim();
     if (!trimmed) {
@@ -4994,11 +5080,29 @@ class ClaudeAgentSession implements AgentSession {
       return;
     }
     const notificationToolUseId = readTaskNotificationToolUseIdFromHistoryRecord(entry);
-    if (notificationToolUseId && restoredProviderSubagentIds.has(notificationToolUseId)) {
+    if (notificationToolUseId && replay.restoredIds.has(notificationToolUseId)) {
       return;
     }
 
     const historyTimestamp = normalizeProviderReplayTimestamp(entry.timestamp);
+    const notificationOwner = notificationToolUseId
+      ? replay.toolOwners.get(notificationToolUseId)
+      : undefined;
+    if (notificationOwner) {
+      for (const item of this.convertHistoryEntry(entry)) {
+        this.persistedProviderSubagentEvents.push({
+          type: "provider_subagent",
+          provider: "claude",
+          event: {
+            type: "timeline",
+            id: notificationOwner,
+            item,
+            timestamp: historyTimestamp ?? undefined,
+          },
+        });
+      }
+      return;
+    }
     const taskSnapshot = this.taskState.observe(entry);
     const items = [...(taskSnapshot ? [taskSnapshot] : []), ...this.convertHistoryEntry(entry)];
     const isVisibleUserEntry =

@@ -8,7 +8,6 @@ import {
   type SheetHeader,
 } from "@/components/adaptive-modal-sheet";
 import { Button } from "@/components/ui/button";
-import { isWeb } from "@/constants/platform";
 import type { EditingTextInputHandle } from "@/components/ui/text-input";
 
 export interface AdaptiveRenameModalProps {
@@ -56,11 +55,7 @@ export function AdaptiveRenameModal({
       const node = inputRef.current;
       if (!node) return;
       node.focus();
-      if (isWeb && node instanceof HTMLInputElement) {
-        node.setSelectionRange(0, length);
-      } else if (!isWeb && length > 0) {
-        node.replaceText(node.getText(), { start: 0, end: length });
-      }
+      node.replaceText(node.getText(), { start: 0, end: length });
     }, 50);
     return () => clearTimeout(timeout);
   }, [visible, initialValue]);

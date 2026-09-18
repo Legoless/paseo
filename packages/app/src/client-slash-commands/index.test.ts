@@ -157,6 +157,45 @@ describe("buildProviderSwitchDraftSetup", () => {
       featureValues: {},
     });
   });
+
+  it("carries an agent profile's mode, thinking option and features", () => {
+    expect(
+      buildProviderSwitchDraftSetup({
+        cwd: "/repo",
+        provider: "codex",
+        model: "gpt-6-astra",
+        modeId: "full-access",
+        thinkingOptionId: "ultra",
+        featureValues: { auto_accept: true },
+      }),
+    ).toEqual({
+      provider: "codex",
+      cwd: "/repo",
+      modeId: "full-access",
+      model: "gpt-6-astra",
+      thinkingOptionId: "ultra",
+      featureValues: { auto_accept: true },
+    });
+  });
+
+  it("leaves a field the profile does not name to the new provider's default", () => {
+    expect(
+      buildProviderSwitchDraftSetup({
+        cwd: "/repo",
+        provider: "claude",
+        model: "",
+        modeId: "",
+        thinkingOptionId: "",
+      }),
+    ).toEqual({
+      provider: "claude",
+      cwd: "/repo",
+      modeId: null,
+      model: null,
+      thinkingOptionId: null,
+      featureValues: {},
+    });
+  });
 });
 
 describe("replaceOpenAgentWithDraft", () => {
@@ -203,5 +242,34 @@ describe("replaceOpenAgentWithDraft", () => {
     expect(unpinWorkspaceAgent).toHaveBeenCalledWith("server-1:workspace-1", "agent-1");
     expect(hideWorkspaceAgent).toHaveBeenCalledWith("server-1:workspace-1", "agent-1");
     expect(order).toEqual(["unpin", "hide", "retarget", "archive"]);
+  });
+
+  it("does not throw when archiveAgent rejects", async () => {
+    const retargetCurrentTab = vi.fn();
+    const unpinWorkspaceAgent = vi.fn();
+    const hideWorkspaceAgent = vi.fn();
+    const archiveAgent = vi.fn(async () => {
+      throw new Error("archive timeout");
+    });
+
+    await expect(
+      replaceOpenAgentWithDraft({
+        serverId: "server-1",
+        agentId: "agent-1",
+        workspaceId: "workspace-1",
+        setup: buildProviderSwitchDraftSetup({
+          cwd: "/repo",
+          provider: "grok",
+          model: "grok-4",
+        }),
+        draftId: "draft-1",
+        retargetCurrentTab,
+        unpinWorkspaceAgent,
+        hideWorkspaceAgent,
+        archiveAgent,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(retargetCurrentTab).toHaveBeenCalled();
   });
 });

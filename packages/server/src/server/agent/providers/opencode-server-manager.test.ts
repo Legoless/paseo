@@ -108,6 +108,31 @@ describe("OpenCodeServerManager generations", () => {
     expect(runtime.terminatedPorts).toEqual([4102, 4101]);
   });
 
+  test("a rotation does not kill the generation its callers are still waiting on", async () => {
+    const { manager, runtime } = createTestManager([4801, 4802], { autoAnnounce: false });
+
+    // A caller parked on a starting generation holds no reference yet — acquireServer runs after
+    // `await server.ready`. Reaping on refCount === 0 killed it under them, which is how one
+    // rotation rejected a whole per-project catalog fan-out at once.
+    const waiting = manager.acquireCurrent();
+    await runtime.settle();
+    const rotated = manager.acquireNew();
+    await runtime.settle();
+
+    expect(runtime.terminatedPorts).toEqual([]);
+
+    runtime.processForPort(4801).announceListening();
+    const waitingAcquisition = await waiting;
+    expect(waitingAcquisition.server.url).toBe("http://127.0.0.1:4801");
+
+    await runtime.settle();
+    runtime.processForPort(4802).announceListening();
+    const rotatedAcquisition = await rotated;
+
+    await rotatedAcquisition.release();
+    await waitingAcquisition.release();
+  });
+
   test("new acquisitions after rotation use the new server", async () => {
     const { manager, runtime } = createTestManager([4201, 4202]);
 
@@ -220,7 +245,9 @@ describe("OpenCodeServerManager generations", () => {
 
     await manager.shutdown();
 
-    await expect(acquisition).rejects.toThrow("OpenCode server exited with code null");
+    // The message names the port and says the exit was asked for, so a caller whose request died
+    // with the process can tell a shutdown from a crash.
+    await expect(acquisition).rejects.toThrow("OpenCode server on port 4472 exited");
     expect(runtime.terminatedPorts).toEqual([4472]);
     expect(await runtime.managedProcesses.list()).toEqual([]);
   });

@@ -41,6 +41,13 @@ export function usesCompactExplorerSidebar(
   return resolveExplorerSidebarPresentation(input) !== "pane";
 }
 
+/** Explorer belongs on agent and terminal work, not on an empty launcher or a browser. */
+export function paneOffersExplorerToggle(kind: WorkspaceTabTarget["kind"] | undefined): boolean {
+  return (
+    kind === "agent" || kind === "draft" || kind === "terminal" || kind === "provider_subagent"
+  );
+}
+
 function canUseExplorerSidebar(
   input: Pick<ExplorerSidebarQuery, "isCompact" | "supportsPaneSplits">,
 ): boolean {

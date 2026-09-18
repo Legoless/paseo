@@ -21,6 +21,10 @@ the agent runs through `ensureAgentLoaded()`, which resumes the durable provider
 same Paseo agent ID. Provider history is not appended again when the canonical timeline is already
 primed.
 
+Reload releases the old runtime before resuming its durable session: an idle provider process can
+still own an exclusive writer. A close failure retains that runtime for cleanup and blocks the
+replacement. Once closure succeeds, a failed resume leaves the durable agent closed and retryable.
+
 Idle agents remain resident indefinitely. Runtime closure happens only through an explicit lifecycle
 action such as archive, replacement, reload, workspace teardown, or daemon shutdown.
 
@@ -42,7 +46,20 @@ into that contract; lifecycle callers do not interpret provider-specific errors.
 
 After an acknowledged interrupt, the manager settles the captured run even when no terminal event
 arrives or the run was still waiting for its provider turn id. The captured run token prevents an
-older cancellation from settling a newer turn. If interruption is rejected or times out, the agent
+older cancellation from settling a newer turn. A forced settlement leaves the provider session
+suspect: it may still own the foreground turn it never ended, and real sessions guard that slot by
+refusing every later `startTurn`. The manager therefore swaps the session in place after a forced
+settlement — resume a replacement from the persistence handle, close the suspect runtime, and
+re-register under the same agent id with timeline and identity intact. Reload itself stays
+close-first because a persisted thread can have only one writer. The provider-side turn is never
+cleared without replacing the runtime that owns it. If the replacement cannot be completed safely —
+resume, persist, or close — the existing session stays registered: when the provider was actually
+idle it still works, and when it was wedged the agent is no worse off than before the swap attempt.
+Prompt admission waits until foreground and lifecycle mutation tails have
+drained, then starts on the registered runtime. It does not attach a
+follow-up to the suspect runtime.
+
+If interruption is rejected or times out, the agent
 keeps its active foreground turn and replacement, reload, rewind, and Stop report the failure.
 Accepting new work after an ambiguous interruption would create a split-brain session.
 
@@ -121,18 +138,20 @@ Provider session connection owns every process it spawns until the session is re
 `connect()` must dispose that process before rethrowing; the manager cannot clean up a session it never
 received.
 
-## Tabs vs archive
+## Tabs vs archive (Consolidated Close)
 
-These are two distinct concepts that used to be conflated:
+User-facing UI consolidates "archive" and "close" into "Close" everywhere (workspaces, panes, tabs, and projects). The unified mental model is that closing removes items from the active UI everywhere, while cached files and persisted records remain on disk so they can be retrieved or reopened manually.
 
-| Concept                    | Scope      | Triggers                   |
-| -------------------------- | ---------- | -------------------------- |
-| **Tab** (workspace layout) | Per-client | User opens/closes a view   |
-| **Archive** (lifecycle)    | Global     | Explicit lifecycle gesture |
+Internally and on the wire, the lifecycle preserves the distinct behaviors:
 
-Closing a tab on a **root agent** still archives — the tab is the agent's home, so closing it means "I'm done with this agent." A confirm dialog protects against archiving a running agent by accident.
+| Concept                    | Scope      | Triggers               | Wire / Persistence                     |
+| -------------------------- | ---------- | ---------------------- | -------------------------------------- |
+| **Tab** (workspace layout) | Per-client | User closes a view/tab | Tab removed from client state          |
+| **Close** (lifecycle)      | Global     | Explicit close action  | Archived on daemon, files kept on disk |
 
-Closing a tab on a **subagent** (any agent with `parentAgentId`) is **layout-only**. The app clears the current client's open-tab label before removing the tab. Another client's open tab remains protected. The agent stays unarchived and stays in its parent's track, so a later parent archive cascades to it when no client still has it open. The user can re-open the tab from the track at any time. Single and bulk tab close apply the same policy.
+Closing a tab on a **root agent** closes/archives the agent session — the tab is the agent's home, so closing it means "I'm done with this agent." A confirm dialog protects against closing a running agent by accident.
+
+Closing a tab on a **subagent** (any agent with `parentAgentId`) is **layout-only**. The app clears the current client's open-tab label before removing the tab. Another client's open tab remains protected. The agent stays unarchived and stays in its parent's track, so a later parent close cascades to it when no client still has it open. The user can re-open the tab from the track at any time. Single and bulk tab close apply the same policy.
 
 The asymmetry is intentional: a subagent's persistent relationship lives in the parent's track. Same-workspace subagents are not auto-opened as tabs; the user opens one from that track when needed. A cross-workspace subagent is also auto-opened as a tab in its own workspace so opening that workspace does not appear empty. It remains in the parent's track until it is actually detached.
 
@@ -143,6 +162,10 @@ Agent lifecycle status stays literal: a parent agent is `idle` when its own turn
 Workspace status is an aggregate activity signal computed **per `workspaceId`**. Ownership is never derived from `cwd` — many workspaces may share one directory, and same-`cwd` siblings do not clump under one status. Root agents and cross-workspace subagents contribute their normal state bucket to their own workspace. Same-workspace descendants contribute `running` to the nearest ancestor in that workspace; their non-running attention, permission, and error states stay in the parent's subagents track. This makes a cross-workspace subagent behave like a detached agent for workspace visibility and status without removing its parent relationship.
 
 Running provider-native subagents contribute `running` to the workspace owned by their parent agent. Their completed, failed, and canceled states stay in the parent's subagents track.
+
+A finished workspace can be marked unread after it has been reviewed. The daemon restores
+`finished` attention on its newest eligible workspace-root agent without sending a new completion
+notification. Opening the workspace clears that attention through the normal focus flow.
 
 ## The subagents track
 
@@ -156,9 +179,9 @@ The rows combine two kinds of children:
 parentAgentId === thisAgent.id  AND  !archivedAt
 ```
 
-- **Provider subagents** are child executions owned by Claude, Codex, or OpenCode. They are not inserted into `AgentManager` as managed agents. Providers emit a separate descriptor and timeline stream through `agent.provider_subagents.*`; the client keeps that state outside the normal agent store and merges only the presentation rows into the track.
+- **Provider subagents** are child executions owned by Claude, Codex, or OpenCode. They are not inserted into `AgentManager` as managed agents. Providers emit a separate descriptor and timeline stream through `agent.provider_subagents.*`; the client keeps that state outside the normal agent store and merges only the presentation rows into the track. A descriptor's optional `parentSubagentId` identifies its direct provider-subagent parent; an absent value identifies a direct child of the managed agent.
 
-Clicking either kind opens a workspace tab. A Paseo subagent tab is a normal interactive agent pane. A provider subagent tab is a read-only timeline pane with no composer, archive, detach, rewind, or fork actions. Both panes use `AgentStreamView`, so message, reasoning, tool-call, and layout rendering stay identical.
+Clicking either kind opens a workspace tab. A Paseo subagent tab is a normal interactive agent pane. A provider subagent tab is a read-only timeline pane with no composer, archive, detach, rewind, or fork actions. It shows its own direct children in a subagents track. Both panes use `AgentStreamView`, so message, reasoning, tool-call, and layout rendering stay identical.
 
 Provider timelines use the same structural timeline item format but deliberately have a separate lifecycle and transport. A provider thread/session identifier is not a Paseo agent identifier, and closing its tab is always layout-only.
 
@@ -171,10 +194,12 @@ Claude Code announces subagent lifecycle on the SDK stream (`task_started` / `ta
 - **Not every announced task belongs in the track.** Task subagents announce as `local_agent` and workflows as `local_workflow`; a backgrounded shell announces as `local_bash` with the same `tool_use_id` shape, and ambient housekeeping sets `skip_transcript`. The Claude provider normalizes a workflow to a generic provider-subagent descriptor titled `Workflow`, using Claude's summary as its description and timeline opener. Shared storage, protocol, and UI do not distinguish it from another provider subagent.
 - **A task that was never declared gets no descriptor, by any route.** Filtered tasks still emit `task_notification`s carrying a `tool_use_id`, and still emit frames carrying `parent_tool_use_id`. Attributing either produces a descriptor with no identity and a defaulted `running` status — a nameless row that never finishes. Status, presentation updates, and sidechain frames all route through the declaration table.
 - **Task ids are session-scoped, not turn-scoped.** Cancelling a turn must not clear the routing table: a backgrounded child settles after the interrupt and needs its descriptor to still exist. Cancellation instead terminalizes the declared children that were running in the foreground, and a later `task_notification` is free to correct that guess. Backgrounded children are identified by `task_updated.patch.is_backgrounded`.
+- **Stop only spares background subagents while a per-task stop exists.** Claude gates this on the `perTaskStopAffordance` query option, and it fails CLOSED: without the declaration an interrupt kills every running background subagent, because a spared one would be unstoppable short of ending the session. Paseo declares it (`providers/claude/agent.ts`) and pays for it with `agent.provider_subagents.stop.request`, wired to the stop control on the subagent pane. The two halves are one bargain — drop either and pressing Stop silently reaps background children again, with no notification to the parent. `agent.subagent-stop.test.ts` guards both.
 - **A resumed task can be announced again with a new `tool_use_id`.** The first Task tool id remains the canonical descriptor and later ids are routing aliases for the same session-scoped task. The resumed prompt is added to that child timeline.
 - **Effort is only reachable through hooks.** It appears nowhere on the message stream at any depth, and the level Paseo requests is not necessarily the level that runs — a model that does not support it is silently downgraded. A hook firing inside a subagent reports the active post-downgrade level next to its `agent_id`, which is the same id `task_started` calls `task_id`.
 - **Backgrounded subagents emit no frames carrying `parent_tool_use_id` at all.** Everything keyed off that field sees nothing for one; they are visible only because the task protocol announces them.
-- **On replay, `<session>/subagents/` holds every descendant, not just this session's children.** `agent-<id>.meta.json` carries `spawnDepth`: `1` is a direct child, `2+` was spawned by another subagent and its `toolUseId` names a Task call made inside its parent's session, which nothing in this transcript can resolve. Replaying those adds rows the live stream never showed, each with no Task card and no recoverable outcome, so they render as running forever. One recorded session showed 10 subagents live and would have replayed 22.
+- **Nested ownership comes from the launching sidechain, not `spawn_depth` alone.** A sidechain's Agent or Bash tool call records the direct owner of that `tool_use_id`; the following `task_started` inherits it. This routes a grandchild descriptor and child-owned background notifications without relying on labels or flattening them into the managed parent.
+- **On replay, `<session>/subagents/` holds every descendant beside the root.** Resolve the tree one proven generation at a time: the root transcript admits direct children, then each admitted sidechain transcript admits its children by `toolUseId`. `spawnDepth` orders candidates but does not establish ownership. Unresolved sidecars remain excluded as ambient or unrelated work.
 - **Replay `totalTokens` is a context-size reading, not cumulative spend.** Claude Code finalizes a subagent by summing the _last_ assistant message's usage block and shipping that as `usage.total_tokens`. Summing per-entry usage instead multiplies the cached prefix by the turn count and reports a number several times larger than the live path.
 
 Archived Paseo subagents disappear from the track, by design. To remove one from the track without closing its tab, use the **archive button** on the row — it opens a confirm dialog and archives the subagent on confirm. Provider-owned rows have no individual Paseo lifecycle controls.

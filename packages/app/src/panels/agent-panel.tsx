@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { TFunction } from "i18next";
-import { SquarePen } from "lucide-react-native";
+import { SquarePen, X } from "lucide-react-native";
 import React, {
   memo,
   type ReactNode,
@@ -14,7 +14,7 @@ import React, {
   useSyncExternalStore,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { StyleSheet as RNStyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet as RNStyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import invariant from "tiny-invariant";
@@ -26,7 +26,7 @@ import { KeyboardDock } from "@/components/keyboard-dock";
 import { FileDropZone } from "@/components/file-drop/file-drop-zone";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { Composer } from "@/composer";
-import { useWorkspaceHasDiffStat } from "@/composer/workspace-diff-stat";
+import { useMemberHasDiffStat } from "@/composer/workspace-diff-stat";
 import {
   resolveComposerTrackControlClearance,
   resolveComposerTrackTailClearance,
@@ -429,9 +429,28 @@ function DraftPanel() {
       } catch {
         toast.error(t("workspaceLabels.errors.update"));
       }
+      // A name the user typed on this tab before launching graduates to the agent itself, so the
+      // sidebar and every other device read the same name instead of the auto-generated one. The
+      // daemon marks it user-set, which is what keeps the auto-namer off it.
+      const persistenceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId });
+      const layoutStore = useWorkspaceLayoutStore.getState();
+      const tabTitle = persistenceKey
+        ? (layoutStore.getWorkspaceTabs(persistenceKey).find((entry) => entry.tabId === tabId)
+            ?.title ?? null)
+        : null;
+      const sessionClient = useSessionStore.getState().sessions[serverId]?.client;
+      if (persistenceKey && tabTitle && sessionClient) {
+        try {
+          await sessionClient.updateAgent(agentSnapshot.id, { name: tabTitle });
+        } catch (error) {
+          // Keep the name on the tab: the label the user sees stays right even when the write
+          // fails, and it will be retried the next time they rename.
+          console.warn("[DraftPanel] failed to carry the tab name onto the agent", error);
+        }
+      }
       retargetCurrentTab({ kind: "agent", agentId: agentSnapshot.id });
     },
-    [labelDefinitions, retargetCurrentTab, serverId, t, toast],
+    [labelDefinitions, retargetCurrentTab, serverId, t, tabId, toast, workspaceId],
   );
 
   return (
@@ -1228,6 +1247,48 @@ function ChatAgentContent({
   );
 }
 
+interface TimelineSyncCalloutProps {
+  onRetry: () => void;
+  onDismiss: () => void;
+  isRetrying: boolean;
+}
+
+function TimelineSyncCallout({ onRetry, onDismiss, isRetrying }: TimelineSyncCalloutProps) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.timelineSyncCalloutRail}>
+      <View style={styles.timelineSyncCalloutContent}>
+        <View style={styles.timelineSyncCallout} testID="agent-timeline-sync-error">
+          <Text style={styles.timelineSyncCalloutText}>
+            {t("agentPanel.states.timelineSyncFailed")}
+          </Text>
+          <View style={styles.timelineSyncCalloutActions}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onPress={onRetry}
+              disabled={isRetrying}
+              testID="agent-timeline-sync-retry"
+            >
+              {isRetrying ? t("agentPanel.states.timelineSyncRetrying") : t("common.actions.retry")}
+            </Button>
+            <Pressable
+              onPress={onDismiss}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={t("common.actions.dismiss")}
+              testID="agent-timeline-sync-dismiss"
+              style={styles.timelineSyncCalloutDismissButton}
+            >
+              <ThemedX size={14} uniProps={foregroundMutedColorMapping} />
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   serverId,
   workspaceId,
@@ -1297,6 +1358,18 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
     archiveFinishedStatus: archiveFinishedSubagents.status,
     hasPluginComposerPills,
   });
+  const [isHistorySyncErrorDismissed, setIsHistorySyncErrorDismissed] = useState(false);
+  const prevSyncErrorRef = useRef(showHistorySyncError);
+  useEffect(() => {
+    if (showHistorySyncError !== prevSyncErrorRef.current) {
+      prevSyncErrorRef.current = showHistorySyncError;
+      setIsHistorySyncErrorDismissed(false);
+    }
+  }, [showHistorySyncError]);
+  const handleDismissHistorySyncError = useCallback(() => {
+    setIsHistorySyncErrorDismissed(true);
+  }, []);
+
   const rawAgentInputDraft = useAgentInputDraft({
     draftKey: buildDraftStoreKey({
       serverId,
@@ -1369,6 +1442,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
           serverId={serverId}
           workspaceId={workspaceId}
           agentId={agentId}
+          cwd={cwd}
           agent={effectiveAgent}
           routeBottomAnchorRequest={routeBottomAnchorRequest}
           hasAppliedAuthoritativeHistory={hasAppliedAuthoritativeHistory}
@@ -1405,27 +1479,12 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
         <DockedChatSurface disabled={isArchivingCurrentAgent}>
           {contentContainer}
 
-          {showHistorySyncError ? (
-            <View style={styles.timelineSyncCalloutRail}>
-              <View style={styles.timelineSyncCalloutContent}>
-                <View style={styles.timelineSyncCallout} testID="agent-timeline-sync-error">
-                  <Text style={styles.timelineSyncCalloutText}>
-                    {t("agentPanel.states.timelineSyncFailed")}
-                  </Text>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onPress={retryTimelineSync}
-                    disabled={isRetryingHistorySync}
-                    testID="agent-timeline-sync-retry"
-                  >
-                    {isRetryingHistorySync
-                      ? t("agentPanel.states.timelineSyncRetrying")
-                      : t("common.actions.retry")}
-                  </Button>
-                </View>
-              </View>
-            </View>
+          {showHistorySyncError && !isHistorySyncErrorDismissed ? (
+            <TimelineSyncCallout
+              onRetry={retryTimelineSync}
+              onDismiss={handleDismissHistorySyncError}
+              isRetrying={isRetryingHistorySync}
+            />
           ) : null}
 
           {composerSection}
@@ -1466,6 +1525,7 @@ const AgentStreamSection = memo(function AgentStreamSection({
   serverId,
   workspaceId,
   agentId,
+  cwd,
   agent,
   routeBottomAnchorRequest,
   hasAppliedAuthoritativeHistory,
@@ -1478,6 +1538,7 @@ const AgentStreamSection = memo(function AgentStreamSection({
   serverId: string;
   workspaceId: string;
   agentId?: string;
+  cwd: string;
   agent: AgentScreenAgent;
   routeBottomAnchorRequest: RouteBottomAnchorRequest;
   hasAppliedAuthoritativeHistory: boolean;
@@ -1487,7 +1548,7 @@ const AgentStreamSection = memo(function AgentStreamSection({
   onOpenWorkspaceFile?: (request: WorkspaceFileOpenRequest) => void;
 }) {
   const isCompactFormFactor = useIsCompactFormFactor();
-  const hasWorkspaceDiffStat = useWorkspaceHasDiffStat(serverId, workspaceId);
+  const hasWorkspaceDiffStat = useMemberHasDiffStat(serverId, workspaceId, cwd);
   const hasVisibleComposerTracks =
     hasActiveComposer && (hasVisibleAgentTracks || hasWorkspaceDiffStat);
   const bottomOverlayTailClearance = hasVisibleComposerTracks
@@ -1683,6 +1744,13 @@ function ActiveAgentComposer({
 
       const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId });
       if (command.kind === "replace-agent-with-draft") {
+        const layoutStore = useWorkspaceLayoutStore.getState();
+        const currentTab = workspaceKey
+          ? layoutStore.getWorkspaceTabs(workspaceKey).find((entry) => entry.tabId === tabId)
+          : null;
+        if (workspaceKey && !currentTab?.title && agent.title && agent.title !== "Agent") {
+          layoutStore.setTabTitle(workspaceKey, tabId, agent.title);
+        }
         await replaceOpenAgentWithDraft({
           serverId,
           agentId,
@@ -1818,6 +1886,7 @@ function AgentSessionUnavailableState({
 }
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
+const ThemedX = withUnistyles(X);
 
 const foregroundMutedColorMapping = (theme: Theme) => ({
   color: theme.colors.foregroundMuted,
@@ -1875,6 +1944,17 @@ const styles = StyleSheet.create((theme) => ({
   timelineSyncCalloutText: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.base,
+  },
+  timelineSyncCalloutActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  timelineSyncCalloutDismissButton: {
+    padding: theme.spacing[1],
+    borderRadius: theme.borderRadius.full,
+    alignItems: "center",
+    justifyContent: "center",
   },
   historySyncOverlay: {
     position: "absolute",

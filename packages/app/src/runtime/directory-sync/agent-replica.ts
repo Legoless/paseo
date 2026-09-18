@@ -46,12 +46,15 @@ export class AgentDirectoryReplica {
   }
 
   commitCached(agents: Map<string, Agent>): void {
+    const live = useSessionStore.getState().sessions[this.serverId]?.agents ?? new Map();
+    const merged = new Map(agents);
+    for (const [agentId, agent] of live) merged.set(agentId, agent);
     this.members.clear();
-    for (const [agentId, agent] of agents) {
+    for (const [agentId, agent] of merged) {
       this.members.add(agentId);
       useSessionStore.getState().setAgentLastActivity(agentId, agent.lastActivityAt);
     }
-    useSessionStore.getState().setAgents(this.serverId, agents);
+    useSessionStore.getState().setAgents(this.serverId, merged);
   }
 
   commitCachedAgent(token: AgentLifecycleToken, agent: Agent): boolean {

@@ -11,10 +11,12 @@ export const es: TranslationResources = {
       confirm: "Confirmar",
       close: "Cerrar",
       copy: "Copiar",
+      copyLine: "Copiar línea",
       dismiss: "Despedir",
       retry: "Rever",
       search: "Buscar",
       select: "Seleccionar",
+      selectAll: "Seleccionar todo",
     },
     placeholders: {
       search: "Buscar...",
@@ -34,6 +36,7 @@ export const es: TranslationResources = {
     errors: {
       error: "Error",
       unableToSave: "No se puede guardar",
+      unableToCopy: "No se pudo copiar",
       nameRequired: "El nombre es obligatorio",
       daemonUnavailable: "Daemonno disponible",
       daemonClientUnavailable: "ClienteDaemonno disponible",
@@ -156,8 +159,8 @@ export const es: TranslationResources = {
       fileTooLarge: "{{fileName}} is too large (max {{size}})",
     },
     clientCommands: {
-      archiveAgent: "Archivar el agente actual",
-      freshDraft: "Archive este agente y comience un nuevo borrador",
+      archiveAgent: "Cerrar el agente actual",
+      freshDraft: "Cierre este agente y comience un nuevo borrador",
     },
     github: {
       searching: "Búsqueda...",
@@ -204,6 +207,7 @@ export const es: TranslationResources = {
     empty: "Comience a chatear con este agente...",
     scrollToBottom: "Desplazarse hacia abajo",
     historyLoadFailed: "No se pudo cargar el historial del agente",
+    messageCapped: "Este mensaje fue truncado ({{bytes}} bytes).",
     permission: {
       plan: "Plan",
       required: "Permiso requerido",
@@ -221,8 +225,8 @@ export const es: TranslationResources = {
       reconnecting: "Reconectando",
       timelineSyncFailed: "No se pudo actualizar el historial del agente.",
       timelineSyncRetrying: "Reintentando…",
-      archivingTitle: "Agente de archivo...",
-      archivingSubtitle: "Espere mientras archivamos este agente.",
+      archivingTitle: "Cerrando agente...",
+      archivingSubtitle: "Espere mientras cerramos este agente.",
     },
     unavailable: {
       selectedHost: "Anfitrión seleccionado",
@@ -239,8 +243,8 @@ export const es: TranslationResources = {
         "Le mostraremos a este agente nuevamente tan pronto como podamos comunicarnos con el anfitrión.",
     },
     archived: {
-      callout: "Este agente está archivado.",
-      unarchive: "Desarchivar",
+      callout: "Este agente está cerrado.",
+      unarchive: "Reabrir",
     },
   },
   sessions: {
@@ -273,14 +277,14 @@ export const es: TranslationResources = {
       closed: "Cerrado",
     },
     badges: {
-      archived: "Archivado",
+      archived: "Cerrado",
       pending: "{{count}}pendiente",
       attention: "Atención",
     },
     archiveSheet: {
       hostOffline: "Hostfuera de línea",
-      runningAgent: "Este agente todavía está ejecutándose. Archivarlo detendrá al agente.",
-      archive: "Archivo",
+      runningAgent: "Este agente todavía está ejecutándose. Cerrarlo detendrá al agente.",
+      archive: "Cerrar",
     },
   },
   message: {
@@ -399,13 +403,12 @@ export const es: TranslationResources = {
       needsHostUpgrade: "Actualiza tu host para restaurar este espacio de trabajo",
       manageHost: "Administrar host",
       recovery: {
-        archivedTitle: "Espacio de trabajo archivado",
+        archivedTitle: "Espacio de trabajo cerrado",
         restoreDescription:
-          "{{workspaceName}} se archivó y se eliminó su worktree. Restaura la rama {{branch}} para volver a abrirlo.",
-        unarchiveDescription:
-          "{{workspaceName}} está archivado. Desarchívalo para volver a abrirlo.",
+          "{{workspaceName}} se cerró y se eliminó su worktree. Restaura la rama {{branch}} para volver a abrirlo.",
+        unarchiveDescription: "{{workspaceName}} está cerrado. Reábrelo para volver a abrirlo.",
         restoreAction: "Restaurar",
-        unarchiveAction: "Desarchivar",
+        unarchiveAction: "Reabrir",
         restoringTitle: "Restaurando espacio de trabajo",
         restoringAction: "Restaurando...",
         unavailableTitle: "Espacio de trabajo no disponible",
@@ -601,6 +604,7 @@ export const es: TranslationResources = {
         close: "Cerrar",
         renameTerminal: "Cambiar nombre de terminal",
         renameAgent: "Cambiar nombre del agente",
+        renameTab: "Cambiar nombre de pestaña",
       },
       actions: {
         newTab: "Nueva pestaña",
@@ -662,31 +666,33 @@ export const es: TranslationResources = {
           "{{count}} pestaña(s) tienen cambios sin guardar. Al cerrar se descartarán esos borradores.",
         close: "Cerrar",
         cancel: "Cancelar",
-        archive: "Archivo",
+        archive: "Cerrar",
         closeTerminalTitle: "¿Cerrar terminal?",
         closeTerminalMessage:
           "Cualquier proceso en ejecución en esta terminal se detendrá inmediatamente.",
         switchProjectTitle: "¿Cambiar de proyecto?",
         switchProjectMessage:
           "Se descartará la conversación de este agente y comenzará una nueva en el proyecto que elijas.",
+        switchProjectTerminalMessage:
+          "Esta terminal se reemplaza por una nueva en el proyecto que elijas. Se detiene cualquier proceso en ejecución.",
         switchProject: "Cambiar",
-        archiveRunningAgentTitle: "¿Agente de ejecución de archivos?",
+        archiveRunningAgentTitle: "¿Cerrar agente en ejecución?",
         archiveRunningAgentMessage:
-          "Este agente todavía está ejecutándose. Archivarlo detendrá al agente y cerrará la pestaña.",
+          "Este agente todavía está ejecutándose. Cerrarlo detendrá al agente y cerrará la pestaña.",
         closeTabsLeftTitle: "¿Cerrar pestañas a la izquierda?",
         closeTabsRightTitle: "¿Cerrar pestañas a la derecha?",
         closeOtherTabsTitle: "¿Cerrar otras pestañas?",
         bulk: {
-          all: "Esto archivará los agentes{{agents}}, cerrará los terminales{{terminals}}y cerrará las pestañas{{tabs}}. Cualquier proceso en ejecución en una terminal cerrada se detendrá inmediatamente.",
+          all: "Esto cerrará los agentes{{agents}}, cerrará los terminales{{terminals}}y cerrará las pestañas{{tabs}}. Cualquier proceso en ejecución en una terminal cerrada se detendrá inmediatamente.",
           agentsAndTerminals:
-            "Esto archivará los agentes{{agents}}y cerrará los terminales{{terminals}}. Cualquier proceso en ejecución en una terminal cerrada se detendrá inmediatamente.",
+            "Esto cerrará los agentes{{agents}}y cerrará los terminales{{terminals}}. Cualquier proceso en ejecución en una terminal cerrada se detendrá inmediatamente.",
           terminalsAndTabs:
             "Esto cerrará los terminales{{terminals}}y cerrará las pestañas{{tabs}}. Cualquier proceso en ejecución en una terminal cerrada se detendrá inmediatamente.",
-          agentsAndTabs: "Esto archivará los agentes{{agents}}y cerrará las pestañas{{tabs}}.",
+          agentsAndTabs: "Esto cerrará los agentes{{agents}}y cerrará las pestañas{{tabs}}.",
           terminals:
             "Esto cerrará los terminales{{terminals}}. Cualquier proceso en ejecución en una terminal cerrada se detendrá inmediatamente.",
           tabs: "Esto cerrará las pestañas{{tabs}}.",
-          agents: "Esto archivará los agentes{{agents}}.",
+          agents: "Esto cerrará los agentes{{agents}}.",
         },
       },
     },
@@ -743,6 +749,22 @@ export const es: TranslationResources = {
         stopFailed: "No se pudo detener{{scriptName}}",
       },
     },
+    commands: {
+      title: "Comandos",
+      groups: {
+        project: "Proyecto",
+        global: "Global",
+      },
+      accessibility: {
+        trigger: "Comandos del espacio de trabajo",
+      },
+      shortcutTaken: "Atajo en uso",
+      errors: {
+        noAgentTarget: "No hay ninguna pestaña de chat para ejecutar este comando",
+        noTerminalTarget: "No hay ninguna pestaña de terminal para ejecutar este comando",
+        sendFailed: "No se pudo enviar el comando",
+      },
+    },
     tree: {
       showFolderTree: "Mostrar árbol de carpetas",
       hideFolderTree: "Ocultar árbol de carpetas",
@@ -791,9 +813,9 @@ export const es: TranslationResources = {
           success: "Actualizado",
         },
         archive: {
-          label: "Archivar espacio de trabajo",
-          pending: "Archivando...",
-          success: "Archivado",
+          label: "Cerrar espacio de trabajo",
+          pending: "Cerrando...",
+          success: "Cerrado",
         },
         mergePr: {
           squash: "Fusionar PR (squash)",
@@ -859,7 +881,7 @@ export const es: TranslationResources = {
           mergePrNoGithub:
             "FusionarPRno está disponible en este momento porqueGitHubno está conectado",
           archiveNotWorktree:
-            "El archivo no está disponible aquí porque este espacio de trabajo no se creó como un árbol de trabajoPaseo",
+            "Cerrar no está disponible aquí porque este espacio de trabajo no se creó como un árbol de trabajo Paseo",
           mergePrNoForge:
             "Fusionar {{noun}} no está disponible en este momento porque {{brand}} no está conectado",
           mergePrMissing:
@@ -893,8 +915,8 @@ export const es: TranslationResources = {
           failedMergeFromBase: "No se pudo fusionar desde la base",
         },
         archiveWarning: {
-          title: '¿Archivo "{{workspaceName}}"?',
-          confirm: "Archivo",
+          title: '¿Cerrar "{{workspaceName}}"?',
+          confirm: "Cerrar",
           cancel: "Cancelar",
           uncommittedChanges: "Cambios no confirmados",
           uncommittedChangesWithDiff: "Cambios no confirmados ({{diffStat}})",
@@ -1182,23 +1204,22 @@ export const es: TranslationResources = {
         openNewWindowFailed: "Couldn't open a new window",
         openFolder: "Open in file manager",
         openFolderFailed: "Couldn't open folder",
-        remove: "Eliminar proyecto",
-        removeFromWorkspace: "Quitar del espacio de trabajo",
+        remove: "Cerrar proyecto",
+        removeFromWorkspace: "Cerrar proyecto",
         moveToWorkspace: "Mover a otro espacio de trabajo",
         noOtherWorkspaces: "No hay otros espacios de trabajo",
-        removing: "Eliminando...",
+        removing: "Cerrando...",
       },
       confirmations: {
-        removeTitle: "¿Quitar proyecto?",
-        removeMessage:
-          '¿Quitar "{{projectName}}" de la barra lateral?\n\nLos archivos en el disco no se cambiarán.',
-        removeConfirm: "Eliminar",
+        removeTitle: "¿Cerrar proyecto?",
+        removeMessage: '¿Cerrar "{{projectName}}"?\n\nLos archivos en el disco no se cambiarán.',
+        removeConfirm: "Cerrar",
         cancel: "Cancelar",
       },
       toasts: {
         hostDisconnected: "Hostno está conectado",
         removeFailed: "No se pudieron eliminar algunos espacios de trabajo",
-        updateHostToRemove: "Actualiza el host para eliminar proyectos.",
+        updateHostToRemove: "Actualiza el host para cerrar proyectos.",
       },
       empty: {
         title: "Aún no hay proyectos",
@@ -1228,12 +1249,14 @@ export const es: TranslationResources = {
         copyPath: "Copiar ruta",
         copyBranchName: "Copiar nombre de sucursal",
         rename: "Cambiar nombre del espacio de trabajo",
+        markAsRead: "Marcar como leído",
+        markAsUnread: "Marcar como no leído",
         pin: "Anclar arriba",
         unpin: "Desanclar",
-        archive: "Archivo",
-        archiveWorkspace: "Archivar espacio de trabajo",
+        archive: "Cerrar",
+        archiveWorkspace: "Cerrar espacio de trabajo",
         hideFromSidebar: "Ocultar de la barra lateral",
-        archiving: "Archivando...",
+        archiving: "Cerrando...",
         hiding: "Ocultación...",
       },
       confirmations: {
@@ -1254,7 +1277,7 @@ export const es: TranslationResources = {
         branchNameCopied: "Nombre de la sucursal copiado",
         hostDisconnected: "Hostno está conectado",
         hideFailed: "No se pudo ocultar el espacio de trabajo",
-        archiveFailed: "No se pudo archivar el espacio de trabajo",
+        archiveFailed: "No se pudo cerrar el espacio de trabajo",
       },
       uncategorized: "Sin categoría",
     },
@@ -1262,11 +1285,11 @@ export const es: TranslationResources = {
       actions: {
         menu: "Acciones del agente",
         open: "Abrir agente",
-        archive: "Archivar agente",
+        archive: "Cerrar agente",
       },
       confirmations: {
-        archiveTitle: "¿Archivar agente?",
-        archiveMessage: "Este agente será archivado.",
+        archiveTitle: "¿Cerrar agente?",
+        archiveMessage: "Este agente se cerrará.",
       },
     },
   },
@@ -1842,10 +1865,14 @@ export const es: TranslationResources = {
     pillLabelReadyToReview: "{{count}} para revisar",
     detachAction: "Separar {{label}}",
     detachTooltip: "Separar subagente",
-    archiveAction: "Archivo{{label}}",
-    archiveTooltip: "Subagente de archivo",
-    archiveFinishedAction: "Archivar subagentes finalizados",
+    archiveAction: "Cerrar {{label}}",
+    archiveTooltip: "Cerrar subagente",
+    archiveFinishedAction: "Cerrar subagentes finalizados",
     archiveFinishedRetry: "Reintentar ({{failed}}/{{total}})",
+    stopAction: "Detener subagente",
+    stopTooltip: "Detén este subagente, no su agente principal",
+    stopFailed: "No se pudo detener el subagente: {{reason}}",
+    stopAlreadyFinished: "Ese subagente ya había terminado.",
   },
   panels: {
     draft: {
@@ -1969,6 +1996,27 @@ export const es: TranslationResources = {
     },
   },
   settings: {
+    commands: {
+      manage: "Gestionar comandos…",
+      add: "Añadir comando",
+      edit: "Editar comando",
+      editAction: "Editar",
+      save: "Guardar",
+      delete: "Eliminar",
+      name: "Nombre",
+      text: "Texto del comando",
+      target: "Enviar a",
+      agent: "Agente",
+      terminal: "Terminal",
+      submit: "Enviar inmediatamente",
+      shortcut: "Atajo de teclado (opcional)",
+      invalidShortcut: "Introduce un atajo como Cmd+Shift+R",
+      deleteTitle: "¿Eliminar {{name}}?",
+      deleteMessage: "Este comando se eliminará de este host.",
+      updateHost: "Actualiza este host para editar comandos",
+      loadError: "No se pudieron cargar los comandos",
+      empty: "Aún no hay comandos. Añade uno para usarlo en los proyectos de este host.",
+    },
     title: "Ajustes",
     loading: "Cargando configuración...",
     groups: {
@@ -2264,12 +2312,13 @@ export const es: TranslationResources = {
         tabsPanes: "Pestañas y paneles",
         layout: "Diseño",
         agentInput: "EntradaAgent",
+        commands: "Comandos",
       },
       help: {
         openProject: "Abrir proyecto",
         newWorkspace: "Nuevo espacio de trabajo",
         newWorktree: "Nuevo árbol de trabajo",
-        archiveWorkspace: "Archivar espacio de trabajo",
+        archiveWorkspace: "Cerrar espacio de trabajo",
         newTab: "Nueva pestaña",
         closeCurrentTab: "Cerrar pestaña actual",
         jumpToWorkspace: "Saltar al espacio de trabajo",

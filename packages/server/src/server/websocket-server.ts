@@ -1636,6 +1636,9 @@ export class VoiceAssistantWebSocketServer {
         // COMPAT(agentLabels): added in v0.7.0, remove after 2027-02-28.
         ...(this.workspaceLabelService?.agentLabelsEnabled ? { agentLabels: true } : {}),
         paneLayouts: true,
+        // COMPAT(customCommands): added in v0.8.0, remove gate after 2028-03-01.
+        customCommands: true,
+        customCommandsEditing: true,
         // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
         providersSnapshot: true,
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.
@@ -1729,8 +1732,14 @@ export class VoiceAssistantWebSocketServer {
         agentForkContextCursor: true,
         // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
         providerSubagents: true,
+        // COMPAT(providerSubagentNesting): added in v0.7, remove gate after 2027-03-04.
+        providerSubagentNesting: true,
+        // COMPAT(providerSubagentStop): added in v0.8.0, remove gate after 2027-03-09.
+        providerSubagentStop: true,
         // COMPAT(workspacePinning): added in v0.1.107, remove gate after 2027-01-12.
         workspacePinning: true,
+        // COMPAT(workspaceMarkUnread): added in v0.5.0, remove after 2027-08-20.
+        workspaceMarkUnread: true,
         // COMPAT(hubRelationship): added in v0.1.X, drop the gate when floor >= v0.1.X.
         hubRelationship: true,
         // COMPAT(projectGithubClone): added in v0.1.108, remove gate after 2027-01-15.

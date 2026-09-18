@@ -187,10 +187,13 @@ export class WorkspaceAutoName {
     input: { title: string; branch?: string | null; cwd?: string; promptTitle?: string | null },
   ): Promise<void> {
     await this.workspaceRegistry.update(workspaceId, (current) => {
-      let title = current.title;
-      if (!title || (input.promptTitle && title === input.promptTitle)) {
-        title = input.title;
-      }
+      // A name the user typed is the master. Only a workspace still carrying an automatic title
+      // gets renamed here — including one whose provisional title is the first prompt line, which
+      // is what the workspace was created with.
+      const stillAutomatic =
+        !current.titleSetByUser &&
+        (!current.title || (input.promptTitle && current.title === input.promptTitle));
+      const title = stillAutomatic ? input.title : current.title;
       return {
         ...current,
         title,

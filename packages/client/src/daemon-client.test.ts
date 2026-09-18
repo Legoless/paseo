@@ -2896,6 +2896,45 @@ test("sends project.add.request without creating a workspace", async () => {
   });
 });
 
+test("marks a workspace unread through the dotted RPC", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const markPromise = client.markWorkspaceUnread("workspace-1", "req-mark-unread");
+  expect(parseSentFrame(mock.sent[0])).toEqual({
+    type: "workspace.mark_unread.request",
+    workspaceId: "workspace-1",
+    requestId: "req-mark-unread",
+  });
+
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "workspace.mark_unread.response",
+      payload: {
+        requestId: "req-mark-unread",
+        workspaceId: "workspace-1",
+        markedAgentId: "agent-1",
+        success: true,
+        error: null,
+      },
+    }),
+  );
+
+  await expect(markPromise).resolves.toBeUndefined();
+});
+
 test("searches GitHub repositories through the dotted RPC", async () => {
   const logger = createMockLogger();
   const mock = createMockTransport();
@@ -6111,4 +6150,53 @@ test("waitForFinish with timeout=0 omits timeoutMs and has no client deadline", 
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("wire snapshot callers own expansion and receive hash references unchanged", async () => {
+  const transport = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "wire-catalog",
+    providerSnapshots: "wire",
+    reconnect: { enabled: false },
+    transportFactory: () => transport.transport,
+  });
+  clients.push(client);
+  const connected = client.connect();
+  transport.triggerOpen({ preserveSent: true });
+  await connected;
+  expect(JSON.parse(assertStr(transport.sent[0])).capabilities.provider_snapshot_references).toBe(
+    true,
+  );
+  const received: unknown[] = [];
+  client.on("providers_snapshot_update", (message) => received.push(message.payload));
+  const payload = {
+    entries: [],
+    snapshotHash: "content",
+    fetchedAt: { codex: "2026-09-06T12:00:00.000Z" },
+    generatedAt: "2026-09-06T12:00:00.000Z",
+  };
+  transport.triggerMessage(wrapSessionMessage({ type: "providers_snapshot_update", payload }));
+  expect(received).toEqual([payload]);
+  const request = client.getProvidersSnapshot();
+  const sent = parseSentFrame(transport.sent.at(-1)!);
+  const body = {
+    ...payload,
+    compactSnapshot: {
+      entries: [
+        {
+          provider: "codex",
+          enabled: true,
+          status: "ready",
+          models: [{ id: "astra", label: "Astra" }],
+        },
+      ],
+      thinkingSets: [],
+    },
+    requestId: sent.requestId,
+  };
+  transport.triggerMessage(
+    wrapSessionMessage({ type: "get_providers_snapshot_response", payload: body }),
+  );
+  expect(await request).toEqual(body);
 });

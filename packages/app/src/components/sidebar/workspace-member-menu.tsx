@@ -1,14 +1,12 @@
 import { useTranslation } from "react-i18next";
 import React from "react";
 import {
-  Archive,
   Copy,
   ExternalLink,
   GitBranch,
   MoreVertical,
   SquarePen,
   Tag,
-  Trash2,
   X,
 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -36,11 +34,9 @@ import { TerminalProfileIcon } from "@/components/terminal-profile-icon";
 import { useLaunchProjectTab } from "@/hooks/use-launch-project-tab";
 
 const ThemedMoreVertical = withUnistyles(MoreVertical);
-const ThemedTrash2 = withUnistyles(Trash2);
 const ThemedCopy = withUnistyles(Copy);
 const ThemedGitBranch = withUnistyles(GitBranch);
 const ThemedExternalLink = withUnistyles(ExternalLink);
-const ThemedArchive = withUnistyles(Archive);
 const ThemedTag = withUnistyles(Tag);
 const ThemedX = withUnistyles(X);
 const ThemedSquarePen = withUnistyles(SquarePen);
@@ -62,11 +58,9 @@ const styles = StyleSheet.create(() => ({
   },
 }));
 
-const trash2LeadingIcon = <ThemedTrash2 size={14} uniProps={foregroundMutedColorMapping} />;
 const copyLeadingIcon = <ThemedCopy size={14} uniProps={foregroundMutedColorMapping} />;
 const branchLeadingIcon = <ThemedGitBranch size={14} uniProps={foregroundMutedColorMapping} />;
 const openLeadingIcon = <ThemedExternalLink size={14} uniProps={foregroundMutedColorMapping} />;
-const archiveLeadingIcon = <ThemedArchive size={14} uniProps={foregroundMutedColorMapping} />;
 const labelLeadingIcon = <ThemedTag size={14} uniProps={foregroundMutedColorMapping} />;
 const closeLeadingIcon = <ThemedX size={14} uniProps={foregroundMutedColorMapping} />;
 const newAgentLeadingIcon = <ThemedSquarePen size={14} uniProps={foregroundMutedColorMapping} />;
@@ -160,7 +154,7 @@ export function WorkspaceMemberMenuItems({
         <WorkspaceMenuItem
           surface={surface}
           testID={`sidebar-member-menu-remove-${member.memberKey}`}
-          leading={trash2LeadingIcon}
+          leading={closeLeadingIcon}
           onSelect={onRemove}
         >
           {t("sidebar.project.actions.removeFromWorkspace")}
@@ -232,7 +226,6 @@ export interface WorkspaceAgentMenuItemsProps {
   onOpen: () => void;
   onCopyPath: () => void;
   onCopyBranchName: () => void;
-  onArchive?: () => void;
   onClose?: () => void;
   closeDisabled?: boolean;
   showAgentActions?: boolean;
@@ -247,7 +240,6 @@ export function WorkspaceAgentMenuItems({
   onOpen,
   onCopyPath,
   onCopyBranchName,
-  onArchive,
   onClose,
   closeDisabled = false,
   showAgentActions = true,
@@ -298,30 +290,18 @@ export function WorkspaceAgentMenuItems({
           >
             {t("workspaceLabels.title")}
           </DropdownMenuSubTrigger>
-          {onClose || onArchive ? (
+          {onClose ? (
             <>
               <Separator />
-              {onClose ? (
-                <WorkspaceMenuItem
-                  surface={surface}
-                  testID={`sidebar-agent-menu-close-${agent.agentId}`}
-                  leading={closeLeadingIcon}
-                  disabled={closeDisabled}
-                  onSelect={onClose}
-                >
-                  {t("workspace.tabs.menu.close")}
-                </WorkspaceMenuItem>
-              ) : null}
-              {onArchive ? (
-                <WorkspaceMenuItem
-                  surface={surface}
-                  testID={`sidebar-agent-menu-archive-${agent.agentId}`}
-                  leading={archiveLeadingIcon}
-                  onSelect={onArchive}
-                >
-                  {t("sidebar.agent.actions.archive")}
-                </WorkspaceMenuItem>
-              ) : null}
+              <WorkspaceMenuItem
+                surface={surface}
+                testID={`sidebar-agent-menu-close-${agent.agentId}`}
+                leading={closeLeadingIcon}
+                disabled={closeDisabled}
+                onSelect={onClose}
+              >
+                {t("workspace.tabs.menu.close")}
+              </WorkspaceMenuItem>
             </>
           ) : null}
         </>

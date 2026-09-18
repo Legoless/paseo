@@ -276,7 +276,11 @@ export function buildACPClientCapabilities(
 // sign-in URL in the browser) when probing an ACP agent for models/modes.
 // NO_BROWSER is honored by Gemini CLI; other ACP agents ignore it.
 const PROBE_ENV: Record<string, string> = { NO_BROWSER: "true" };
-const ACP_DIAGNOSTIC_PHASE_TIMEOUT_MS = 20_000;
+// Per-phase bound for a throwaway probe process (catalog discovery and diagnostics). The
+// refresh deadline alone is not enough: the ACP SDK never rejects in-flight requests when the
+// child dies, so an initialize or session/new against a CLI that exited mid-handshake stays
+// pending until something else gives up.
+const ACP_PROBE_PHASE_TIMEOUT_MS = 20_000;
 
 function summarizeMalformedACPStdoutError(error: unknown): { type: string; message: string } {
   return {
@@ -962,6 +966,7 @@ export class ACPAgentClient implements AgentClient {
         raceProviderRefreshAbort(
           context?.signal,
           this.spawnProcess(PROBE_ENV, {
+            initializeTimeoutMs: ACP_PROBE_PHASE_TIMEOUT_MS,
             onSpawned: (spawned) => {
               probe = spawned;
               if (context?.signal.aborted) void closeProbe().catch(() => undefined);
@@ -973,11 +978,19 @@ export class ACPAgentClient implements AgentClient {
       const response = await runProviderRefreshActivity(context, "session/new", () =>
         raceProviderRefreshAbort(
           context?.signal,
-          this.runACPRequest(() =>
-            initializedProbe.connection.newSession({
-              cwd,
-              mcpServers: [],
-            }),
+          // ponytail: a bound, not a cure — spawnTransport still races only the child's
+          // "error" event, never "exit", so a CLI that dies mid-handshake burns this timeout
+          // instead of failing immediately. Rejecting the transport's pending requests on
+          // child exit (the way JsonlRpcProcess.failAll does) is the deeper fix.
+          withTimeout(
+            this.runACPRequest(() =>
+              initializedProbe.connection.newSession({
+                cwd,
+                mcpServers: [],
+              }),
+            ),
+            ACP_PROBE_PHASE_TIMEOUT_MS,
+            `ACP session/new timed out after ${ACP_PROBE_PHASE_TIMEOUT_MS}ms`,
           ),
         ),
       );
@@ -1255,7 +1268,7 @@ export class ACPAgentClient implements AgentClient {
     } = {},
   ): Promise<DiagnosticEntry[]> {
     const rows: DiagnosticEntry[] = [];
-    const phaseTimeoutMs = options.phaseTimeoutMs ?? ACP_DIAGNOSTIC_PHASE_TIMEOUT_MS;
+    const phaseTimeoutMs = options.phaseTimeoutMs ?? ACP_PROBE_PHASE_TIMEOUT_MS;
     const cwd = options.cwd ?? homedir();
     let transport: ACPProcessTransport | null = null;
 

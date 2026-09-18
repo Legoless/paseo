@@ -77,6 +77,7 @@ import { AddHostModal } from "@/components/add-host-modal";
 import { AddRemoteSshHostModal } from "@/components/add-remote-ssh-host-modal";
 import { PairLinkModal } from "@/components/pair-link-modal";
 import { KeyboardShortcutsSection } from "@/screens/settings/keyboard-shortcuts-section";
+import { HostCommandsPage } from "@/screens/settings/commands-page";
 import { EditorSection } from "@/screens/settings/editor-section";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -194,6 +195,7 @@ const HOST_SECTION_ITEMS: HostSectionItem[] = [
   { id: "providers", labelKey: "settings.hostSections.providers", icon: Boxes },
   { id: "usage", labelKey: "settings.hostSections.usage", icon: Gauge },
   { id: "terminals", labelKey: "settings.hostSections.terminals", icon: SquareTerminal },
+  { id: "commands", labelKey: "workspace.commands.title", icon: SquareTerminal },
   { id: "plugins", labelKey: "settings.hostSections.plugins", icon: Blocks },
 ];
 
@@ -220,6 +222,8 @@ function renderHostSettingsContent(
       return <HostUsagePage serverId={view.serverId} />;
     case "terminals":
       return <HostTerminalsPage serverId={view.serverId} />;
+    case "commands":
+      return <HostCommandsPage key={view.serverId} serverId={view.serverId} />;
     case "plugins":
       return <HostPluginsPage serverId={view.serverId} />;
     case "host":

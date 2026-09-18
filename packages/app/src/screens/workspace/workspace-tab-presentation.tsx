@@ -82,15 +82,20 @@ function WorkspaceTabPresentationResolverInner({
   });
   const attributes = usePanelInstanceAttributes({ serverId, workspaceId, tabId: tab.tabId });
 
+  // The one place a user-typed tab name outranks the panel's derived label. Every render site --
+  // the desktop tab strip, the tab switcher, the split drag chip and the Explorer rail -- reads
+  // this presentation, so the rule holds in all of them without each having to remember it.
   const presentation = useMemo(
     () => ({
       key: tab.key,
       kind: tab.kind,
-      label: descriptor.label,
+      label: tab.title ?? descriptor.label,
       subtitle: descriptor.subtitle,
-      tooltip: descriptor.tooltip,
+      tooltip: tab.title ?? descriptor.tooltip,
       modified: attributes.modified,
-      titleState: descriptor.titleState,
+      // A named tab is never pending: the shimmer belongs to a title still being derived, and this
+      // one is already known.
+      titleState: tab.title ? "ready" : descriptor.titleState,
       icon: descriptor.icon,
       statusBucket: descriptor.statusBucket,
     }),
@@ -103,6 +108,7 @@ function WorkspaceTabPresentationResolverInner({
       descriptor.titleState,
       tab.key,
       tab.kind,
+      tab.title,
       attributes.modified,
     ],
   );

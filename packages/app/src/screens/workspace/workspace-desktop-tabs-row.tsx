@@ -107,6 +107,7 @@ const TAB_MIN_WIDTH = 96;
 const TAB_MAX_WIDTH = 160;
 const TAB_CLOSE_BUTTON_RESERVED_WIDTH = 0;
 const TAB_LABEL_LAYOUT_ALLOWANCE = 4;
+const WORKSPACE_TAB_CHIP_DATASET = { workspaceTabChip: "true" };
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const ThemedX = withUnistyles(X);
@@ -439,7 +440,7 @@ interface WorkspaceDesktopTabsRowProps {
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
-  onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onRenameTab: (tab: WorkspaceTabDescriptor, currentLabel?: string) => void;
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
@@ -460,6 +461,12 @@ interface WorkspaceDesktopTabsRowProps {
 
 interface ResolvedWorkspaceDesktopTabsRowProps extends Omit<WorkspaceDesktopTabsRowProps, "tabs"> {
   tabs: ResolvedWorkspaceDesktopTabRowItem[];
+  /**
+   * Live tab count before presentation resolution drops unresolved tabs. While a
+   * retargeted tab (e.g. /clear agent -> draft) waits on its first presentation, the
+   * resolved list is short — publishing then would drop the chip for a frame.
+   */
+  expectedTabCount: number;
 }
 
 interface WorkspaceDesktopTabPresentationSlotProps {
@@ -751,6 +758,7 @@ function TabChip({
     <View
       ref={middleClickRef}
       style={styles.tabHoverFrame}
+      dataSet={WORKSPACE_TAB_CHIP_DATASET}
       onPointerEnter={handleTabPointerEnter}
       onPointerLeave={handleTabPointerLeave}
     >
@@ -899,7 +907,11 @@ export function WorkspaceDesktopTabsRow(props: WorkspaceDesktopTabsRowProps) {
 
   return (
     <>
-      <ResolvedWorkspaceDesktopTabsRow {...props} tabs={resolvedTabs} />
+      <ResolvedWorkspaceDesktopTabsRow
+        {...props}
+        tabs={resolvedTabs}
+        expectedTabCount={props.tabs.length}
+      />
       {props.tabs.map(({ tab }) => (
         <WorkspaceDesktopTabPresentationSlot
           key={`${tab.key}:${tab.kind}`}
@@ -917,6 +929,7 @@ function ResolvedWorkspaceDesktopTabsRow({
   paneId,
   isFocused = false,
   tabs,
+  expectedTabCount,
   normalizedServerId,
   normalizedWorkspaceId,
   setHoveredCloseTabKey,
@@ -1046,6 +1059,9 @@ function ResolvedWorkspaceDesktopTabsRow({
     if (tabsContainerWidth <= 0) {
       return;
     }
+    if (tabLabels.length !== expectedTabCount) {
+      return;
+    }
     const labelWidths = completeWorkspaceTabLabelWidths(tabLabels, labelMeasurements);
     if (!labelWidths) {
       return;
@@ -1065,7 +1081,7 @@ function ResolvedWorkspaceDesktopTabsRow({
         labelWidths,
       };
     });
-  }, [labelMeasurements, tabLabelSignature, tabLabels, tabs, tabsContainerWidth]);
+  }, [expectedTabCount, labelMeasurements, tabLabelSignature, tabLabels, tabs, tabsContainerWidth]);
 
   useLayoutEffect(() => {
     publishMeasuredTrack();
@@ -1350,7 +1366,7 @@ function ResolvedDesktopTabChip({
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
-  onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onRenameTab: (tab: WorkspaceTabDescriptor, currentLabel?: string) => void;
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
@@ -1378,7 +1394,7 @@ function ResolvedDesktopTabChip({
         onCopyTerminalId,
         onCopyFilePath,
         onReloadAgent,
-        onRenameTab,
+        onRenameTab: (tabToRename) => onRenameTab(tabToRename, presentation.label),
         onCloseTab,
         onCloseTabsToLeft,
         onCloseTabsToRight,
@@ -1399,6 +1415,7 @@ function ResolvedDesktopTabChip({
       labels,
       onReloadAgent,
       onRenameTab,
+      presentation.label,
       tabCount,
     ],
   );
@@ -1497,6 +1514,9 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[1],
     userSelect: "none",
+    ...(isWeb && {
+      WebkitAppRegion: "no-drag",
+    }),
   },
   tabHovered: {
     backgroundColor: theme.colors.surface1,
@@ -1509,11 +1529,17 @@ const styles = StyleSheet.create((theme) => ({
   },
   tabHoverFrame: {
     position: "relative",
+    ...(isWeb && {
+      WebkitAppRegion: "no-drag",
+    }),
   },
   tabSlot: {
     position: "relative",
     overflow: "visible",
     marginHorizontal: TAB_CHIP_GAP / 2,
+    ...(isWeb && {
+      WebkitAppRegion: "no-drag",
+    }),
   },
   tabHandle: {
     flexDirection: "row",
@@ -1522,6 +1548,9 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minWidth: 0,
     userSelect: "none",
+    ...(isWeb && {
+      WebkitAppRegion: "no-drag",
+    }),
   },
   tabIcon: {
     width: TAB_ICON_WIDTH,
@@ -1555,6 +1584,9 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
     userSelect: "none",
+    ...(isWeb && {
+      WebkitAppRegion: "no-drag",
+    }),
   },
   tabLabelMeasurements: {
     position: "absolute",

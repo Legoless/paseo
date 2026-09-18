@@ -39,13 +39,17 @@ import type { Theme } from "@/styles/theme";
 import { ResizeHandle } from "@/components/resize-handle";
 import { PaneContentToolbar, ToolbarButton } from "@/components/ui/pane-content-toolbar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { ContextMenuTrigger } from "@/components/ui/context-menu";
 import { WorkspaceActions } from "@/git/workspace-actions";
+import { WorkspaceCommandsButton } from "@/commands/workspace-commands-button";
+import { useCustomCommandsSupported } from "@/commands/use-custom-commands-supported";
 import { useCheckoutStatusQuery } from "@/git/use-status-query";
 import { WorkspaceOpenInEditorButton } from "@/workspace/open-in-editor/button";
 import {
   resolveExplorerSidebarDockSizes,
   resolveExplorerSidebarWidth,
 } from "@/components/explorer-sidebar-layout";
+import { paneOffersExplorerToggle } from "@/workspace-tabs/explorer-sidebar";
 import { RetainedPanel } from "@/components/retained-panel";
 import {
   hasMultipleVisiblePanes,
@@ -128,7 +132,7 @@ interface SplitContainerProps {
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onSwitchTabProject: (input: { tabId: string; cwd: string }) => Promise<void> | void;
-  onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onRenameTab: (tab: WorkspaceTabDescriptor, currentLabel?: string) => void;
   onCloseTabsToLeft: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
@@ -241,20 +245,21 @@ function PaneProjectTray({
   const { t } = useTranslation();
   const visibleActions = usePanelStore((state) => state.paneProjectActions);
   const toggleAction = usePanelStore((state) => state.togglePaneProjectAction);
+  const customCommandsSupported = useCustomCommandsSupported(serverId);
   const toggleBranch = useCallback(() => toggleAction("branch"), [toggleAction]);
   const toggleEditor = useCallback(() => toggleAction("editor"), [toggleAction]);
   const toggleGitActions = useCallback(() => toggleAction("gitActions"), [toggleAction]);
+  const toggleCustomCommands = useCallback(() => toggleAction("customCommands"), [toggleAction]);
   const switchTabProject = useCallback(
     (input: { tabId: string; cwd: string }) => {
       void onSwitchTabProject(input);
     },
     [onSwitchTabProject],
   );
-  // Every project action needs a project, and so does the menu that configures them. A pane
-  // holding only the launcher has none, so the tray collapses to the Explorer toggle — or, when
-  // the Explorer is already open, to nothing at all rather than an empty bar.
+  // Every project action needs a project, and so does the menu that configures them. A launcher
+  // or browser without a project has no tray: Explorer is only offered on agent and terminal work.
   const showProjectActions = Boolean(cwd);
-  const showExplorerToggle = !open;
+  const showExplorerToggle = !open && paneOffersExplorerToggle(activeTab?.target.kind);
   if (!showProjectActions && !showExplorerToggle) {
     return null;
   }
@@ -277,16 +282,26 @@ function PaneProjectTray({
         {visibleActions.gitActions && cwd ? (
           <WorkspaceActions serverId={serverId} cwd={cwd} />
         ) : null}
+        {visibleActions.customCommands && customCommandsSupported && cwd ? (
+          <WorkspaceCommandsButton
+            serverId={serverId}
+            workspaceId={workspaceId}
+            cwd={cwd}
+            hideLabels
+          />
+        ) : null}
         {showProjectActions ? (
           <DropdownMenu>
-            <ToolbarButton
-              kind="menu"
-              label={t("workspace.header.actions.workspaceActions")}
-              testID="pane-project-commands-toggle"
-              tooltipSide="left"
-            >
-              <ThemedEllipsis size={14} uniProps={extraMutedIconMapping} />
-            </ToolbarButton>
+            <ContextMenuTrigger contextOnly>
+              <ToolbarButton
+                kind="menu"
+                label={t("workspace.header.actions.workspaceActions")}
+                testID="pane-project-commands-toggle"
+                tooltipSide="left"
+              >
+                <ThemedEllipsis size={14} uniProps={extraMutedIconMapping} />
+              </ToolbarButton>
+            </ContextMenuTrigger>
             <DropdownMenuContent align="end" minWidth={180} testID="pane-project-commands-menu">
               <DropdownMenuItem
                 selected={visibleActions.branch}
@@ -312,6 +327,16 @@ function PaneProjectTray({
               >
                 {t("workspace.git.actions.push.label")}
               </DropdownMenuItem>
+              {customCommandsSupported ? (
+                <DropdownMenuItem
+                  selected={visibleActions.customCommands}
+                  showSelectedCheck
+                  closeOnSelect={false}
+                  onSelect={toggleCustomCommands}
+                >
+                  {t("workspace.commands.title")}
+                </DropdownMenuItem>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
@@ -843,6 +868,8 @@ function DragOverlayTabChip({
             tabId: tab.tabId,
             kind: tab.target.kind,
             target: tab.target,
+            state: tab.state,
+            ...(tab.title ? { title: tab.title } : {}),
           }
         : null,
     [tab],
@@ -1589,6 +1616,7 @@ function SplitPaneView({
                   onCloseTab={onCloseTab}
                   onCreateNewTab={handleCreateExplorerTab}
                   onMoveTabToMain={handleMoveExplorerTabToMain}
+                  onRenameTab={onRenameTab}
                   onReorderTabsInPane={onReorderTabsInPane}
                   buildPaneContentModel={buildPaneContentModel}
                   trailingAccessory={explorerTrailingAccessory}

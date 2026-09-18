@@ -35,7 +35,6 @@ interface AgentInputDraftComposerOptions {
   initialValues?: CreateAgentInitialValues;
   initialFeatureValues?: Record<string, unknown>;
   isVisible?: boolean;
-  onlineServerIds?: string[];
   lockedWorkingDir?: string;
 }
 
@@ -68,12 +67,13 @@ export interface AgentInputDraft {
 
 export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDraft {
   const composerOptions = input.composer ?? null;
+  const workingDir = composerOptions?.lockedWorkingDir?.trim() || "";
   const formState = useAgentFormState({
-    initialServerId: composerOptions?.initialServerId ?? null,
+    workingDir,
+    serverId: composerOptions?.initialServerId ?? null,
     initialValues: composerOptions?.initialValues,
     isVisible: composerOptions?.isVisible ?? false,
     isCreateFlow: true,
-    onlineServerIds: composerOptions?.onlineServerIds ?? [],
   });
   const draftKey = useMemo(
     () =>
@@ -87,6 +87,9 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
   const draft = useMemo(() => toDraftInputIfReady(draftRecord), [draftRecord]);
   const attachmentFocusRequestId = useDraftStore(
     (state) => state.attachmentFocusRequestByDraftKey[draftKey] ?? 0,
+  );
+  const textReplacementRequestId = useDraftStore(
+    (state) => state.textReplacementRequestByDraftKey[draftKey] ?? 0,
   );
   const [hydratedDraftKey, setHydratedDraftKey] = useState<string | null>(null);
   const text = draft?.text ?? "";
@@ -214,16 +217,25 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
     };
   }, [draftKey, publishTextReplacement]);
 
-  const lockedWorkingDir = composerOptions?.lockedWorkingDir?.trim() ?? "";
+  // An out-of-composer replace (custom command) lands in the store and bumps a request id;
+  // re-publish it here so a mounted input actually swaps its text. Skipped until hydration,
+  // which already publishes the store's text.
+  const appliedTextReplacementRequestRef = useRef<{ draftKey: string; requestId: number }>({
+    draftKey: "",
+    requestId: 0,
+  });
   useEffect(() => {
-    if (!composerOptions || !lockedWorkingDir) {
+    if (!isHydrated || textReplacementRequestId === 0) {
       return;
     }
-    if (formState.workingDir.trim() === lockedWorkingDir) {
+    const applied = appliedTextReplacementRequestRef.current;
+    if (applied.draftKey === draftKey && applied.requestId === textReplacementRequestId) {
       return;
     }
-    formState.setWorkingDir(lockedWorkingDir);
-  }, [composerOptions, formState, lockedWorkingDir]);
+    appliedTextReplacementRequestRef.current = { draftKey, requestId: textReplacementRequestId };
+    const nextText = useDraftStore.getState().getDraftInput(draftKey)?.text ?? "";
+    publishTextReplacement(nextText);
+  }, [draftKey, isHydrated, publishTextReplacement, textReplacementRequestId]);
 
   const providerSelection = useMemo<ProviderSelectionState>(
     () => ({
@@ -254,7 +266,6 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
     [effectiveModelId, providerSelection],
   );
 
-  const workingDir = lockedWorkingDir || formState.workingDir;
   const {
     features: draftFeatures,
     featureValues: draftFeatureValues,

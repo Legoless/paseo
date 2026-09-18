@@ -1,3 +1,4 @@
+import type { CustomCommand } from "@getpaseo/protocol/custom-commands";
 import type { z } from "zod";
 import { CLIENT_CAPS, type ClientCapability } from "@getpaseo/protocol/client-capabilities";
 import type { AgentAttentionNotificationPayload } from "@getpaseo/protocol/agent-attention-notification";
@@ -308,6 +309,9 @@ export type BrowserAutomationExecuteRequestMessage = BrowserAutomationExecuteReq
 export type BrowserAutomationExecuteResponseMessage = BrowserAutomationExecuteResponse;
 
 export interface DaemonClientConfig {
+  /** Deliver compact bodies/hash references to a caller-owned snapshot cache.
+   * The default keeps public SDK snapshot entries expanded. */
+  providerSnapshots?: "wire";
   url: string;
   clientId: string;
   clientType?: "mobile" | "browser" | "cli" | "mcp" | "hub";
@@ -484,6 +488,10 @@ type DiagnosticsPayload = DiagnosticsResponse["payload"];
 type ReadProjectConfigPayload = Extract<
   SessionOutboundMessage,
   { type: "read_project_config_response" }
+>["payload"];
+type ListProjectCommandsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "commands.project.list.response" }
 >["payload"];
 type WriteProjectConfigPayload = Extract<
   SessionOutboundMessage,
@@ -1875,6 +1883,20 @@ export class DaemonClient {
     }
   }
 
+  async markWorkspaceUnread(workspaceId: string, requestId?: string): Promise<void> {
+    const response =
+      await this.sendNamespacedCorrelatedSessionRequest<"workspace.mark_unread.response">({
+        requestId,
+        message: {
+          type: "workspace.mark_unread.request",
+          workspaceId,
+        },
+      });
+    if (!response.success) {
+      throw new Error(response.error ?? "Failed to mark workspace unread");
+    }
+  }
+
   sendHeartbeat(params: {
     deviceType: "web" | "mobile";
     focusedAgentId: string | null;
@@ -2981,6 +3003,41 @@ export class DaemonClient {
       throw new Error(payload.error);
     }
     return payload;
+  }
+
+  /**
+   * Stop one running provider subagent, leaving the parent turn running.
+   *
+   * Resolves false when the subagent already settled or the provider cannot address children
+   * individually — a stop racing a completion is ordinary, not an error.
+   */
+  async stopProviderSubagent(
+    parentAgentId: string,
+    subagentId: string,
+    options: { requestId?: string; timeout?: number } = {},
+  ): Promise<boolean> {
+    const requestId = this.createRequestId(options.requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.provider_subagents.stop.request",
+      parentAgentId,
+      subagentId,
+      requestId,
+    });
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      timeout: options.timeout,
+      options: { skipQueue: true },
+      select: (response) =>
+        response.type === "agent.provider_subagents.stop.response" &&
+        response.payload.requestId === requestId
+          ? response.payload
+          : null,
+    });
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
+    return payload.stopped;
   }
 
   async fetchProviderSubagentTimeline(
@@ -4759,7 +4816,7 @@ export class DaemonClient {
       },
       responseType: "get_providers_snapshot_response",
     });
-    return normalizeProvidersSnapshotPayload(payload);
+    return normalizeProvidersSnapshotPayload(payload, this.config.providerSnapshots !== "wire");
   }
 
   async getDaemonConfig(
@@ -4889,6 +4946,22 @@ export class DaemonClient {
         repoRoot,
       },
       responseType: "read_project_config_response",
+    });
+  }
+
+  async setGlobalCommands(commands: CustomCommand[], expectedCommands: CustomCommand[]) {
+    return this.sendNamespacedCorrelatedSessionRequest<"commands.global.set.response">({
+      message: { type: "commands.global.set.request", commands, expectedCommands },
+    });
+  }
+
+  async listProjectCommands(cwd: string, requestId?: string): Promise<ListProjectCommandsPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"commands.project.list.response">({
+      requestId,
+      message: {
+        type: "commands.project.list.request",
+        cwd,
+      },
     });
   }
 
@@ -5748,6 +5821,9 @@ export class DaemonClient {
           [CLIENT_CAPS.providerSubagents]: true,
           [CLIENT_CAPS.projectUpdates]: true,
           [CLIENT_CAPS.compactProviderSnapshots]: true,
+          ...(this.config.providerSnapshots === "wire"
+            ? { [CLIENT_CAPS.providerSnapshotReferences]: true }
+            : {}),
           ...this.config.capabilities,
         },
         ...(this.config.appVersion ? { appVersion: this.config.appVersion } : {}),
@@ -6169,7 +6245,10 @@ export class DaemonClient {
   }
 
   private handleSessionMessage(msg: SessionOutboundMessage): void {
-    const consumerMessage = normalizeProviderSnapshotUpdateMessage(msg);
+    const consumerMessage = normalizeProviderSnapshotUpdateMessage(
+      msg,
+      this.config.providerSnapshots !== "wire",
+    );
 
     if (consumerMessage.type === "status") {
       const serverInfo = parseServerInfoStatusPayload(consumerMessage.payload);

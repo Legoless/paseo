@@ -20,13 +20,14 @@ export interface DesktopSidebarState {
 }
 
 export type SortOption = "name" | "modified" | "size";
-export type PaneProjectAction = "branch" | "editor" | "gitActions";
+export type PaneProjectAction = "branch" | "editor" | "gitActions" | "customCommands";
 export type PaneProjectActionVisibility = Record<PaneProjectAction, boolean>;
 
 export const DEFAULT_PANE_PROJECT_ACTIONS: PaneProjectActionVisibility = {
   branch: true,
   editor: true,
   gitActions: true,
+  customCommands: true,
 };
 
 export const DEFAULT_SIDEBAR_WIDTH = 320;
@@ -129,6 +130,7 @@ const PaneProjectActionsStorageSchema = z.strictObject({
   branch: z.boolean().optional(),
   editor: z.boolean().optional(),
   gitActions: z.boolean().optional(),
+  customCommands: z.boolean().optional(),
 });
 const DesktopSidebarStorageSchema = z.strictObject({
   agentListOpen: z.boolean().optional(),
@@ -177,6 +179,7 @@ function resolvePaneProjectActions(
     branch: current?.branch ?? DEFAULT_PANE_PROJECT_ACTIONS.branch,
     editor: current?.editor ?? DEFAULT_PANE_PROJECT_ACTIONS.editor,
     gitActions: current?.gitActions ?? DEFAULT_PANE_PROJECT_ACTIONS.gitActions,
+    customCommands: current?.customCommands ?? DEFAULT_PANE_PROJECT_ACTIONS.customCommands,
   };
 }
 

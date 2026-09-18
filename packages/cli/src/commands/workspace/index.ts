@@ -48,7 +48,8 @@ export function createWorkspaceCommand(): Command {
   addJsonAndDaemonHostOptions(
     workspace
       .command("archive")
-      .description("Archive a workspace and everything it owns")
+      .alias("close")
+      .description("Close a workspace and everything it owns")
       .argument("<workspace-id>", "Workspace id"),
   ).action(withOutput(runArchiveCommand));
 

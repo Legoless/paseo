@@ -35,8 +35,10 @@ class TimelineWorld {
   readonly errors: string[] = [];
   readonly cursors = new Map<string, { epoch: string; endSeq: number }>();
   readonly cacheRequests: string[] = [];
+  readonly archivedAgentIds = new Set<string>();
   cacheGate: Deferred<void> | null = null;
   readonly sync = createViewedTimelineSync({
+    isAgentArchived: (agentId) => this.archivedAgentIds.has(agentId),
     replaceDemandedAgentIds: () => undefined,
     prepare: async (agentId) => {
       this.cacheRequests.push(agentId);
@@ -933,5 +935,35 @@ test("switching from legacy to selective delivery publishes membership and catch
 
   expect(membership.agentIds).toEqual(["agent-a"]);
   world.expectNoPendingMembership();
+  world.expectNoPendingFetch();
+});
+
+test("evictAgent cancels catch up and clears visibility error state immediately", async () => {
+  const world = new TimelineWorld();
+  world.sync.replaceVisibleAgentIds("workspace", ["agent-a"]);
+  world.sync.setConnected(true);
+  const membership = await world.nextMembership();
+  membership.succeed();
+  const catchUp = await world.nextFetch("agent-a");
+  catchUp.fail("Agent closed");
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("error"));
+  expect(world.sync.getAgentTimelineError("agent-a")).toBe("Agent closed");
+
+  world.sync.evictAgent("agent-a");
+  expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("pending");
+  expect(world.sync.getAgentTimelineError("agent-a")).toBeNull();
+});
+
+test("isAgentArchived excludes archived agents from hot agent selection", async () => {
+  const world = new TimelineWorld();
+  world.archivedAgentIds.add("agent-archived");
+  world.sync.replaceVisibleAgentIds("workspace", ["agent-archived", "agent-active"]);
+  world.sync.setConnected(true);
+  const membership = await world.nextMembership();
+  membership.succeed();
+  expect(membership.agentIds).toEqual(["agent-active"]);
+  const catchUp = await world.nextFetch("agent-active");
+  catchUp.respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("agent-active")).toBe("ready"));
   world.expectNoPendingFetch();
 });

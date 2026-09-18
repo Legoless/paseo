@@ -158,7 +158,7 @@ describe("panel-store migration", () => {
         { paneProjectActions: { branch: false, editor: true, gitActions: false } },
         17,
       ).paneProjectActions,
-    ).toEqual({ branch: false, editor: true, gitActions: false });
+    ).toEqual({ branch: false, editor: true, gitActions: false, customCommands: true });
   });
 
   it("toggles one pane project action without changing the others", () => {
@@ -166,6 +166,7 @@ describe("panel-store migration", () => {
       branch: true,
       editor: false,
       gitActions: true,
+      customCommands: true,
     });
   });
 

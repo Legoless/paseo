@@ -1,7 +1,7 @@
 import { useCallback, useMemo, type ReactElement } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { Archive, Unlink } from "lucide-react-native";
+import { Unlink, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { getProviderIcon } from "@/components/provider-icons";
 import { ComposerTrackActions, ComposerTrackPill, ComposerTrackRow } from "@/composer/tracks";
@@ -21,7 +21,7 @@ import {
   countFinishedSubagents,
 } from "./track-presentation";
 
-const ThemedArchive = withUnistyles(Archive);
+const ThemedX = withUnistyles(X);
 const ThemedUnlink = withUnistyles(Unlink);
 
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
@@ -123,7 +123,7 @@ function ArchiveFinishedRow({
   const renderRow = useCallback(
     ({ active }: { active: boolean }) => (
       <>
-        <ThemedArchive
+        <ThemedX
           size={ROW_ICON_SIZE}
           uniProps={active ? foregroundColorMapping : foregroundMutedColorMapping}
         />
@@ -292,7 +292,7 @@ function renderSubagentActionIcon(icon: SubagentActionIcon, isActive: boolean): 
   if (icon === "detach") {
     return <ThemedUnlink size={ROW_ICON_SIZE} uniProps={uniProps} />;
   }
-  return <ThemedArchive size={ROW_ICON_SIZE} uniProps={uniProps} />;
+  return <ThemedX size={ROW_ICON_SIZE} uniProps={uniProps} />;
 }
 
 function SubagentActionButton({

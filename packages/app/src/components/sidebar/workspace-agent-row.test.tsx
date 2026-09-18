@@ -209,7 +209,7 @@ describe("WorkspaceAgentRow branch and diff", () => {
           onOpen={vi.fn()}
           onCopyPath={vi.fn()}
           onCopyBranchName={vi.fn()}
-          onArchive={vi.fn()}
+          onClose={vi.fn()}
         />
       </QueryClientProvider>,
     );
@@ -226,11 +226,11 @@ describe("WorkspaceAgentRow branch and diff", () => {
     expect(screen.getByText("Fix the sidebar")).toBeTruthy();
   });
 
-  it("renders the agent context menu with Open agent and Archive agent items", () => {
+  it("renders the agent context menu with Open agent and Close items", () => {
     renderRow({});
 
     expect(screen.getByTestId("sidebar-agent-menu-open-agent-1")).toBeTruthy();
     expect(screen.getByTestId("sidebar-agent-menu-labels-agent-1")).toBeTruthy();
-    expect(screen.getByTestId("sidebar-agent-menu-archive-agent-1")).toBeTruthy();
+    expect(screen.getByTestId("sidebar-agent-menu-close-agent-1")).toBeTruthy();
   });
 });

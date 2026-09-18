@@ -118,6 +118,11 @@ import {
 } from "./new-workspace-initial-context";
 import { buildNewWorkspaceProjectIconTargets } from "./new-workspace/project-icon-targets";
 import { useNewWorkspaceProjectPicker } from "./new-workspace/project-picker";
+import {
+  buildTerminalsQueryKey,
+  type ListTerminalsPayload,
+  upsertCreatedTerminalPayload,
+} from "./workspace/terminals/state";
 
 const ThemedFolderPlus = withUnistyles(FolderPlus);
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -900,20 +905,15 @@ function buildWorkspaceDraftSetupForCreatedWorkspace(input: {
 }
 
 function buildComposerInitialValues(input: {
-  workingDir: string | undefined;
   initialSetup?: WorkspaceDraftTabSetup | null;
 }): CreateAgentInitialValues | undefined {
   if (input.initialSetup) {
     return {
-      workingDir: input.workingDir ?? input.initialSetup.cwd,
       provider: input.initialSetup.provider,
       modeId: input.initialSetup.modeId,
       model: input.initialSetup.model,
       thinkingOptionId: input.initialSetup.thinkingOptionId,
     };
-  }
-  if (input.workingDir) {
-    return { workingDir: input.workingDir };
   }
   return undefined;
 }
@@ -964,19 +964,17 @@ async function runCreateChatAgent(input: CreateChatAgentInput): Promise<void> {
 
 function buildComposerConfig(input: {
   serverId: string;
-  isConnected: boolean;
   workspaceDirectory: string | null;
   sourceDirectory: string | null;
   initialSetup?: WorkspaceDraftTabSetup | null;
 }): Parameters<typeof useAgentInputDraft>[0]["composer"] {
-  const { serverId, isConnected, workspaceDirectory, sourceDirectory, initialSetup } = input;
+  const { serverId, workspaceDirectory, sourceDirectory, initialSetup } = input;
   const workingDir = workspaceDirectory || sourceDirectory || undefined;
   return {
     initialServerId: serverId || null,
-    initialValues: buildComposerInitialValues({ workingDir, initialSetup }),
+    initialValues: buildComposerInitialValues({ initialSetup }),
     initialFeatureValues: initialSetup?.featureValues,
     isVisible: true,
-    onlineServerIds: isConnected && serverId ? [serverId] : [],
     lockedWorkingDir: workingDir,
   };
 }
@@ -1669,7 +1667,6 @@ export function NewWorkspaceScreen({
     draftKey,
     composer: buildComposerConfig({
       serverId: selectedServerId,
-      isConnected,
       workspaceDirectory: workspace?.workspaceDirectory ?? null,
       sourceDirectory: selectedSourceDirectory,
       initialSetup: forkDraftSetup?.setup,
@@ -2107,10 +2104,20 @@ export function NewWorkspaceScreen({
             undefined,
             { command: input.command, args: input.args, workspaceId: input.workspaceId },
           );
-          if (!createdTerminal.terminal) {
+          const terminal = createdTerminal.terminal;
+          if (!terminal) {
             throw new Error(createdTerminal.error ?? t("newWorkspace.errors.createWorktreeFailed"));
           }
-          return { terminalId: createdTerminal.terminal.id };
+          queryClient.setQueryData<ListTerminalsPayload>(
+            buildTerminalsQueryKey(selectedServerId, input.workspaceDirectory, input.workspaceId),
+            (current) =>
+              upsertCreatedTerminalPayload({
+                current,
+                terminal,
+                workspaceDirectory: input.workspaceDirectory,
+              }),
+          );
+          return { terminalId: terminal.id };
         },
         sendTerminalInput: (terminalId, data) => {
           withConnectedClient().sendTerminalInput(terminalId, { type: "input", data });
@@ -2128,6 +2135,7 @@ export function NewWorkspaceScreen({
   }, [
     ensureWorkspace,
     launchTarget,
+    queryClient,
     selectedServerId,
     selectedSourceDirectory,
     selectedTerminalProfile,

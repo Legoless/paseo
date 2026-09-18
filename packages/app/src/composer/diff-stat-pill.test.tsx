@@ -5,7 +5,11 @@ import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useSessionStore, type WorkspaceDescriptor } from "@/stores/session-store";
 import { seedSessionWorkspaces } from "@/test/seed-session";
-import { useWorkspaceHasDiffStat } from "./workspace-diff-stat";
+import {
+  useMemberHasDiffStat,
+  useVisibleMemberDiffStat,
+  useWorkspaceHasDiffStat,
+} from "./workspace-diff-stat";
 
 const SERVER_ID = "diff-stat-pill";
 const WORKSPACE_ID = "workspace";
@@ -77,5 +81,102 @@ describe("useWorkspaceHasDiffStat", () => {
     act(() => setDiffStat(null));
     expect(result.current).toBe(false);
     expect(renderCount).toBe(3);
+  });
+});
+
+describe("member-specific diff stat hooks", () => {
+  const multiMemberWorkspace: WorkspaceDescriptor = {
+    ...workspace,
+    diffStat: { additions: 50, deletions: 10 },
+    members: [
+      {
+        projectId: "proj-a",
+        projectDisplayName: "Project A",
+        projectCustomName: null,
+        projectRootPath: "/repo/a",
+        workspaceDirectory: "/repo/a",
+        workspaceKind: "local_checkout",
+        worktreeSlug: null,
+        branch: null,
+        diffStat: { additions: 42, deletions: 2 },
+      },
+      {
+        projectId: "proj-b",
+        projectDisplayName: "Project B",
+        projectCustomName: null,
+        projectRootPath: "/repo/b",
+        workspaceDirectory: "/repo/b",
+        workspaceKind: "local_checkout",
+        worktreeSlug: null,
+        branch: null,
+        diffStat: null,
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    useSessionStore.getState().initializeSession(SERVER_ID, null as unknown as DaemonClient);
+    seedSessionWorkspaces(SERVER_ID, new Map([[WORKSPACE_ID, multiMemberWorkspace]]));
+  });
+
+  afterEach(() => {
+    useSessionStore.getState().clearSession(SERVER_ID);
+  });
+
+  it("resolves member-specific diff stat per agent cwd in a multi-member workspace", () => {
+    const { result: resultA } = renderHook(() =>
+      useVisibleMemberDiffStat(SERVER_ID, WORKSPACE_ID, "/repo/a"),
+    );
+    expect(resultA.current).toEqual({ additions: 42, deletions: 2 });
+
+    const { result: resultB } = renderHook(() =>
+      useVisibleMemberDiffStat(SERVER_ID, WORKSPACE_ID, "/repo/b"),
+    );
+    expect(resultB.current).toBeNull();
+
+    const { result: hasDiffA } = renderHook(() =>
+      useMemberHasDiffStat(SERVER_ID, WORKSPACE_ID, "/repo/a"),
+    );
+    expect(hasDiffA.current).toBe(true);
+
+    const { result: hasDiffB } = renderHook(() =>
+      useMemberHasDiffStat(SERVER_ID, WORKSPACE_ID, "/repo/b"),
+    );
+    expect(hasDiffB.current).toBe(false);
+  });
+
+  it("handles normalized path comparisons with trailing slashes and backslashes", () => {
+    const { result } = renderHook(() =>
+      useVisibleMemberDiffStat(SERVER_ID, WORKSPACE_ID, "/repo/a/"),
+    );
+    expect(result.current).toEqual({ additions: 42, deletions: 2 });
+  });
+
+  it("returns null for uncategorized cwds in a multi-member workspace", () => {
+    const { result } = renderHook(() =>
+      useVisibleMemberDiffStat(SERVER_ID, WORKSPACE_ID, "/other/path"),
+    );
+    expect(result.current).toBeNull();
+  });
+
+  it("falls back to workspace diffStat when workspace has a single member", () => {
+    seedSessionWorkspaces(
+      SERVER_ID,
+      new Map([
+        [
+          WORKSPACE_ID,
+          {
+            ...workspace,
+            diffStat: { additions: 5, deletions: 1 },
+            members: [workspace.members[0]!],
+          },
+        ],
+      ]),
+    );
+
+    const { result } = renderHook(() =>
+      useVisibleMemberDiffStat(SERVER_ID, WORKSPACE_ID, "/some/cwd"),
+    );
+    expect(result.current).toEqual({ additions: 5, deletions: 1 });
   });
 });

@@ -240,7 +240,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
   const setAgentStreamTail = useSessionStore((state) => state.setAgentStreamTail);
   const setAgentStreamHead = useSessionStore((state) => state.setAgentStreamHead);
   const applyAgentTurnLiveness = useSessionStore((state) => state.applyAgentTurnLiveness);
-  const clearAgentTurnLiveness = useSessionStore((state) => state.clearAgentTurnLiveness);
   const clearAgentStreamHead = useSessionStore((state) => state.clearAgentStreamHead);
   const setInitializingAgents = useSessionStore((state) => state.setInitializingAgents);
   const bumpHistorySyncGeneration = useSessionStore((state) => state.bumpHistorySyncGeneration);
@@ -420,15 +419,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     }
   }, [flushAgentLastActivity, serverId, isConnected, setInitializingAgents]);
 
-  useEffect(
-    () =>
-      client.subscribeConnectionStatus((connection) => {
-        if (connection.status === "connected") return;
-        clearAgentTurnLiveness(serverId);
-      }),
-    [clearAgentTurnLiveness, client, serverId],
-  );
-
   const applyWorkspaceSetupProgress = useCallback(
     (payload: WorkspaceSetupProgressPayload) => {
       upsertWorkspaceSetupProgress({ serverId, payload });
@@ -453,6 +443,11 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     );
     const sync = getHostRuntimeStore().createViewedTimelineOwner(serverId, {
       initialDeliveryMode,
+      isAgentArchived: (agentId: string) => {
+        const session = useSessionStore.getState().sessions[serverId];
+        const agent = session?.agents?.get(agentId) ?? session?.agentDetails.get(agentId);
+        return agent?.archivedAt != null || agent?.status === "closed";
+      },
       setSubscription: (agentIds) => client.setAgentTimelineSubscription(agentIds),
       readCursor: (agentId) => {
         const timeline = selectAgentTimelineState(
