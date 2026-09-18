@@ -146,7 +146,7 @@ const styles = StyleSheet.create((theme) => ({
     width: THUMB_WIDTH,
     height: "100%",
     borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.foregroundExtraMuted,
+    backgroundColor: theme.colors.foregroundMuted,
     opacity: WEB_SCROLLBAR_RESTING_OPACITY,
   },
   thumbHovered: {
