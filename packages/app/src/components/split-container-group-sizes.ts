@@ -19,3 +19,22 @@ export function resolveGroupSizes(input: {
   }
   return structuralSizes;
 }
+
+/**
+ * Settled split flex has to live on the React style, not only on a Reanimated
+ * `flexGrow` worklet. The worklet reads a shared array by index, and Reanimated 4
+ * does not always flush that after a window resize or a committed drag — Unistyles
+ * then rewrites the view without `flexGrow`, so the pane keeps its old size.
+ */
+export function resolveSplitGroupChildStyle(input: { hidden: boolean; flexGrow: number }): {
+  flexGrow: number;
+  flexShrink: number;
+  flexBasis: 0;
+  width?: 0;
+  height?: 0;
+} {
+  if (input.hidden) {
+    return { flexGrow: 0, flexShrink: 0, flexBasis: 0, width: 0, height: 0 };
+  }
+  return { flexGrow: input.flexGrow, flexShrink: 1, flexBasis: 0 };
+}
