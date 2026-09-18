@@ -15,7 +15,7 @@ export function installWebScrollbarStyles(): () => void {
   style.id = STYLE_ID;
   style.textContent = `
 * {
-  scrollbar-color: ${webScrollbarColor("var(--colors-foreground-extra-muted)")};
+  scrollbar-color: ${webScrollbarColor("var(--colors-foreground-muted)")};
   scrollbar-width: ${WEB_SCROLLBAR_WIDTH};
 }
 
@@ -37,7 +37,7 @@ export function installWebScrollbarStyles(): () => void {
 *::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 999px;
-  background: ${webScrollbarThumbColor("var(--colors-foreground-extra-muted)")};
+  background: ${webScrollbarThumbColor("var(--colors-foreground-muted)")};
   background-clip: content-box;
 }
 
