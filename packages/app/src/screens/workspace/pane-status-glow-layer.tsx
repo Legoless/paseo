@@ -48,6 +48,25 @@ function glowLayerStyle(bucket: PaneStatusGlowBucket) {
   return styles.attention;
 }
 
+const WEB_GLOW_DEPTH_PX = 24;
+
+// Web draws the inset glow as four edge gradients. Chromium re-rasterizes a blurred inset
+// box-shadow on a pane-sized overlay every resize frame and every repaint of content sharing
+// its layer, on the GPU thread that presents frames. Theme colors are CSS variables on web
+// (Unistyles CSSVars), so alpha goes through color-mix rather than hex math.
+function webGlow(color: string) {
+  const tint = (percent: number) => `color-mix(in srgb, ${color} ${percent}%, transparent)`;
+  const ramp = (direction: string) =>
+    `linear-gradient(${direction}, ${tint(60)}, ${tint(16)} 11px, transparent ${WEB_GLOW_DEPTH_PX}px)`;
+  return {
+    boxShadow: "none",
+    backgroundImage: ["to bottom", "to top", "to right", "to left"].map(ramp).join(", "),
+    backgroundSize: `100% ${WEB_GLOW_DEPTH_PX}px, 100% ${WEB_GLOW_DEPTH_PX}px, ${WEB_GLOW_DEPTH_PX}px 100%, ${WEB_GLOW_DEPTH_PX}px 100%`,
+    backgroundPosition: "top, bottom, left, right",
+    backgroundRepeat: "no-repeat",
+  };
+}
+
 function glowLayer(theme: Theme, bucket: PaneStatusGlowBucket) {
   const color = getStatusDotColor({ theme, bucket });
   return {
@@ -61,6 +80,7 @@ function glowLayer(theme: Theme, bucket: PaneStatusGlowBucket) {
     borderWidth: theme.borderWidth[2],
     borderColor: color ?? "transparent",
     boxShadow: color ? `inset 0 0 18px 2px ${color}` : undefined,
+    _web: color ? webGlow(color) : undefined,
   };
 }
 
