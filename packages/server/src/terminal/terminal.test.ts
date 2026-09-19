@@ -184,6 +184,41 @@ async function waitForScheduledTimers(expectedTimerCount: number): Promise<void>
   throw new Error(`Expected ${expectedTimerCount} scheduled timers, got ${vi.getTimerCount()}`);
 }
 
+describe("buildTerminalEnvironment", () => {
+  it("does not inherit no-color flags from the daemon process", () => {
+    const colorEnvKeys = ["NO_COLOR", "FORCE_COLOR", "CLICOLOR", "TERM", "COLORTERM"] as const;
+    const previous = Object.fromEntries(colorEnvKeys.map((key) => [key, process.env[key]]));
+    process.env.NO_COLOR = "1";
+    process.env.FORCE_COLOR = "0";
+    process.env.CLICOLOR = "0";
+    process.env.TERM = "dumb";
+    delete process.env.COLORTERM;
+
+    try {
+      const env = buildTerminalEnvironment({
+        shell: "/bin/sh",
+        env: { HOME: "/tmp" },
+      });
+
+      expect(env.TERM).toBe("xterm-256color");
+      expect(env.TERM_PROGRAM).toBe("kitty");
+      expect(env.COLORTERM).toBe("truecolor");
+      expect(env.CLICOLOR).toBe("1");
+      expect(env.NO_COLOR).toBeUndefined();
+      expect(env.FORCE_COLOR).toBeUndefined();
+    } finally {
+      for (const key of colorEnvKeys) {
+        const value = previous[key];
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+});
+
 describe("createTerminal", () => {
   it("keeps full process titles while stripping path prefixes", () => {
     expect(normalizeProcessTitle("   /usr/local/bin/npm   run   dev   ")).toBe("npm run dev");

@@ -271,6 +271,10 @@ describe.skipIf(isPlatform("win32"))("terminal POSIX-only", () => {
 
     expect(resolvedEnv.TERM).toBe("xterm-256color");
     expect(resolvedEnv.TERM_PROGRAM).toBe("kitty");
+    expect(resolvedEnv.COLORTERM).toBe("truecolor");
+    expect(resolvedEnv.CLICOLOR).toBe("1");
+    expect(resolvedEnv.NO_COLOR).toBeUndefined();
+    expect(resolvedEnv.FORCE_COLOR).toBeUndefined();
     expect(resolvedEnv.PASEO_ZSH_ZDOTDIR).toBe("/tmp/paseo-zdotdir");
     expect(resolvedEnv.ZDOTDIR).toBe(
       join(tmpdir(), `${userInfo().username || "unknown"}-paseo-zsh-${process.pid}`),

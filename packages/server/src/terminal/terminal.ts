@@ -489,13 +489,26 @@ function prepareZshShellIntegrationRuntimeDir(sourceDir = resolveZshShellIntegra
   return runtimeDir;
 }
 
+function withTerminalColorCapabilities(env: Record<string, string>): Record<string, string> {
+  const next = { ...env };
+  // Hosts like Orca/Grok and some CI wrappers export NO_COLOR / FORCE_COLOR=0 /
+  // CLICOLOR=0 / TERM=dumb. A Paseo PTY is a real 256-color (truecolor) terminal;
+  // inheriting those flags makes ls, git, and every chalk-based CLI emit plain text.
+  delete next.NO_COLOR;
+  delete next.FORCE_COLOR;
+  next.TERM = "xterm-256color";
+  next.TERM_PROGRAM = "kitty";
+  next.COLORTERM = "truecolor";
+  next.CLICOLOR = "1";
+  return next;
+}
+
 export function buildTerminalEnvironment(
   input: BuildTerminalEnvironmentInput,
 ): Record<string, string> {
-  const baseEnv: Record<string, string> = createExternalProcessEnv(process.env, input.env, {
-    TERM: "xterm-256color",
-    TERM_PROGRAM: "kitty",
-  });
+  const baseEnv: Record<string, string> = withTerminalColorCapabilities(
+    createExternalProcessEnv(process.env, input.env),
+  );
   const envWithAgentHooks = prependPaseoCliToPath(
     baseEnv,
     input.paseoCliBinDir === undefined ? resolvePaseoCliBinDir() : input.paseoCliBinDir,
