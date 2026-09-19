@@ -290,12 +290,20 @@ function resolveModelField(input: {
   currentModel: string;
   initialValues: FormInitialValues | undefined;
   providerPrefs: ProviderPrefs | undefined;
+  availableModels: AgentModelDefinition[] | null;
 }): string {
-  const { provider, userModified, currentModel, initialValues, providerPrefs } = input;
+  const { provider, userModified, currentModel, initialValues, providerPrefs, availableModels } =
+    input;
   if (userModified) return currentModel;
   if (!provider) return "";
   const initialModel = normalizeSelectedModelId(initialValues?.model);
   const preferredModel = normalizeSelectedModelId(providerPrefs?.model);
+  // COMPAT(default-model-id): added in v0.7.2, remove after 2026-12-06.
+  // Older drafts used "default" before providers exposed concrete model IDs.
+  if ((initialModel || preferredModel) === "default" && availableModels?.length) {
+    const resolvedDefault = findModelByReference(availableModels, "default")?.id;
+    if (resolvedDefault) return resolvedDefault;
+  }
   // Keep the saved request ID even when native discovery exposes it as an alias of
   // a moving canonical id, and even when the catalogue has not arrived yet.
   if (initialModel) return initialModel;
@@ -374,6 +382,7 @@ export function resolveFormState(
     currentModel: result.model,
     initialValues,
     providerPrefs,
+    availableModels,
   });
 
   result.thinkingOptionId = resolveThinkingOption({

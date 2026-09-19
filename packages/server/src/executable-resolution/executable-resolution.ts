@@ -31,17 +31,9 @@ async function enumerateCandidatesViaSystemWhich(name: string): Promise<string[]
     });
     return Array.from(new Set(stdout.trim().split("\n").filter(Boolean)));
   } catch (error) {
-    // Only a real non-zero exit means "not on PATH". Our own SIGKILL timeout or a failure to
-    // spawn says nothing about the binary, so fall back to the in-process scan rather than
-    // reporting it missing — the same distinction classifyProbeError already draws below.
-    if (typeof (error as NodeJS.ErrnoException).code === "number") {
-      return [];
-    }
-    try {
-      return await enumerateCandidatesViaLibrary(name);
-    } catch {
-      return [];
-    }
+    // which exits 1 for a missing command. A failed lookup is not evidence of absence.
+    if (error instanceof Error && "code" in error && error.code === 1) return [];
+    throw error;
   }
 }
 

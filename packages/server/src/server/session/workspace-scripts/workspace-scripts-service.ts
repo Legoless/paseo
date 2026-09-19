@@ -78,7 +78,9 @@ export function createWorkspaceScriptsService(deps: {
   globalServicePorts?: PaseoServicePortAllocation;
   logger: pino.Logger;
   emit: (message: SessionOutboundMessage) => void;
+  wantsStatusUpdates?: () => boolean;
   spawnWorkspaceScript: (options: SpawnWorkspaceScriptOptions) => Promise<WorktreeScriptResult>;
+  assertAutomationAllowed: (workspaceId: string) => Promise<void>;
 }): WorkspaceScriptsService {
   const {
     serviceProxy,
@@ -95,6 +97,7 @@ export function createWorkspaceScriptsService(deps: {
     logger,
     emit,
     spawnWorkspaceScript,
+    assertAutomationAllowed,
   } = deps;
 
   function resolveGitMetadata(
@@ -150,6 +153,7 @@ export function createWorkspaceScriptsService(deps: {
   }
 
   async function emitStatusUpdate(workspaceId: string, workspaceDirectory: string): Promise<void> {
+    if (deps.wantsStatusUpdates && !deps.wantsStatusUpdates()) return;
     try {
       const workspace = await workspaceRegistry.get(workspaceId);
       if (!workspace) return;
@@ -217,6 +221,7 @@ export function createWorkspaceScriptsService(deps: {
   async function launchProcess(input: { workspaceId: string; scriptName: string; cwd?: string }) {
     const available = requireAvailable();
     const workspace = await getWorkspace(input.workspaceId);
+    await assertAutomationAllowed(workspace.workspaceId);
     const member = selectMember(workspace, input.cwd);
     const project = await projectRegistry.get(member.projectId);
     const runtime = available.runtimeStore.get(input);

@@ -21,6 +21,7 @@ import type {
 } from "./workspace-registry.js";
 import { createRealpathAwarePathMatcher } from "../utils/path.js";
 import { runWithGitCommandPriority } from "../utils/run-git-command.js";
+import { WorkspaceAutomationBlockedError } from "./workspace-automation-gate.js";
 
 export type ActiveWorkspaceMemberRef = Pick<
   PersistedWorkspaceMember,
@@ -33,7 +34,18 @@ export interface ActiveWorkspaceRef {
 }
 
 export function workspaceRefPlacements(workspace: ActiveWorkspaceRef): ActiveWorkspaceMemberRef[] {
-  return workspace.members;
+  if (Array.isArray(workspace.members)) return workspace.members;
+  const scalar = workspace as ActiveWorkspaceRef & Partial<ActiveWorkspaceMemberRef>;
+  if (typeof scalar.cwd !== "string") return [];
+  return [
+    {
+      cwd: scalar.cwd,
+      kind: scalar.kind ?? "directory",
+      worktreeRoot: scalar.worktreeRoot ?? null,
+      isPaseoOwnedWorktree: scalar.isPaseoOwnedWorktree ?? false,
+      mainRepoRoot: scalar.mainRepoRoot ?? null,
+    },
+  ];
 }
 
 export interface ArchiveDependencies {
@@ -60,6 +72,7 @@ export interface ArchiveDependencies {
   clearWorkspaceArchiving: (workspaceIds: Iterable<string>) => void;
   killTerminalsForWorkspace: (workspaceId: string) => Promise<void>;
   stopWorkspaceSetup?: (workspaceId: string) => Promise<void>;
+  assertWorkspaceAutomationAllowed?: (workspaceId: string) => Promise<void>;
   sessionLogger?: Logger;
 }
 
@@ -446,22 +459,22 @@ async function maybeRemoveDirectory(
 
   const archivedWorkspaceIdSet = new Set(archivedWorkspaceIds);
   const matchesBackingPath = createRealpathAwarePathMatcher(backing.path);
-  const teardownCwds = uniqueFilesystemPaths(
-    target.teardownTargets
-      .filter(
-        (teardownTarget) =>
-          (teardownTarget.workspaceId === null ||
-            archivedWorkspaceIdSet.has(teardownTarget.workspaceId)) &&
-          matchesBackingPath(teardownTarget.backingPath),
-      )
-      .map((teardownTarget) => teardownTarget.cwd),
+  const teardownTargets = target.teardownTargets.filter(
+    (teardownTarget) =>
+      (teardownTarget.workspaceId === null ||
+        archivedWorkspaceIdSet.has(teardownTarget.workspaceId)) &&
+      matchesBackingPath(teardownTarget.backingPath),
   );
 
   try {
-    for (const teardownCwd of teardownCwds) {
+    const allowedTeardownTargets = await filterAllowedTeardownTargets(
+      dependencies,
+      teardownTargets,
+    );
+    for (const teardownTarget of uniqueTeardownTargets(allowedTeardownTargets)) {
       await runWorktreeTeardownCommands({
         worktreePath: backing.path,
-        teardownCwd,
+        teardownCwd: teardownTarget.cwd,
         repoRootPath: backing.mainRepoRoot ?? undefined,
       });
     }
@@ -506,6 +519,37 @@ async function maybeRemoveDirectory(
     );
     return false;
   }
+}
+
+async function filterAllowedTeardownTargets(
+  dependencies: ArchiveDependencies,
+  targets: Array<{ workspaceId: string | null; cwd: string }>,
+): Promise<Array<{ workspaceId: string | null; cwd: string }>> {
+  const allowed: Array<{ workspaceId: string | null; cwd: string }> = [];
+  const blockedCwds: string[] = [];
+  for (const target of targets) {
+    try {
+      if (target.workspaceId)
+        await dependencies.assertWorkspaceAutomationAllowed?.(target.workspaceId);
+      allowed.push(target);
+    } catch (error) {
+      if (!(error instanceof WorkspaceAutomationBlockedError)) throw error;
+      blockedCwds.push(target.cwd);
+    }
+  }
+  return allowed.filter(
+    (target) => !blockedCwds.some((cwd) => createRealpathAwarePathMatcher(cwd)(target.cwd)),
+  );
+}
+
+function uniqueTeardownTargets<T extends { cwd: string }>(targets: T[]): T[] {
+  const unique: T[] = [];
+  for (const candidate of targets) {
+    if (!unique.some((existing) => createRealpathAwarePathMatcher(existing.cwd)(candidate.cwd))) {
+      unique.push(candidate);
+    }
+  }
+  return unique;
 }
 
 function uniqueFilesystemPaths(paths: string[]): string[] {

@@ -26,6 +26,19 @@ describe("assistant message render limit", () => {
     });
   });
 
+  it.each(["😀", "é", "👨‍👩‍👧‍👦", "👍🏽", "❤️", "🇺🇸", "가", "कः"])(
+    "does not split %s at the render limit",
+    (cluster) => {
+      for (let offset = 1; offset < cluster.length; offset++) {
+        const prefix = "a".repeat(ASSISTANT_MESSAGE_RENDER_CHARACTER_LIMIT - offset);
+        expect(capAssistantMessageForRender(`${prefix}${cluster}tail`)).toEqual({
+          text: prefix,
+          capped: true,
+        });
+      }
+    },
+  );
+
   it("does not split a grapheme cluster at the boundary", () => {
     const prefix = "a".repeat(ASSISTANT_MESSAGE_RENDER_CHARACTER_LIMIT - 1);
 

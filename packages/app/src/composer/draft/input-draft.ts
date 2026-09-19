@@ -22,8 +22,9 @@ import {
   type ProviderSelectionState,
 } from "@/provider-selection/provider-selection";
 import { useDraftStore } from "@/stores/draft-store";
-import { toDraftInputIfReady } from "@/stores/draft-store/state";
 import { AfterPaintPublication } from "@/composer/after-paint-publication";
+import { useShallow } from "zustand/shallow";
+import type { ComposerTextSource } from "@/composer/text-source";
 import { isWeb } from "@/constants/platform";
 
 type AttachmentUpdater =
@@ -53,7 +54,7 @@ type DraftComposerState = UseAgentFormStateResult & {
 };
 
 export interface AgentInputDraft {
-  text: string;
+  textSource: ComposerTextSource;
   editText: (text: string) => void;
   replaceText: (text: string) => void;
   textReplacement: TextReplacement;
@@ -83,22 +84,39 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
       }),
     [formState.selectedServerId, input.draftKey],
   );
-  const draftRecord = useDraftStore((state) => state.drafts[draftKey]);
-  const draft = useMemo(() => toDraftInputIfReady(draftRecord), [draftRecord]);
+  const attachments = useDraftStore(
+    useShallow((state) =>
+      state.drafts[draftKey]?.lifecycle === "active"
+        ? (state.drafts[draftKey].input.attachments ?? [])
+        : [],
+    ),
+  );
+  const textSource = useMemo<ComposerTextSource>(
+    () => ({
+      getSnapshot: () => {
+        const record = useDraftStore.getState().drafts[draftKey];
+        return record?.lifecycle === "active" ? record.input.text : "";
+      },
+      subscribe: (listener) =>
+        useDraftStore.subscribe((state, previous) => {
+          if (
+            state.drafts[draftKey]?.input.text !== previous.drafts[draftKey]?.input.text ||
+            state.drafts[draftKey]?.lifecycle !== previous.drafts[draftKey]?.lifecycle
+          )
+            listener();
+        }),
+    }),
+    [draftKey],
+  );
   const attachmentFocusRequestId = useDraftStore(
     (state) => state.attachmentFocusRequestByDraftKey[draftKey] ?? 0,
   );
-  const textReplacementRequestId = useDraftStore(
-    (state) => state.textReplacementRequestByDraftKey[draftKey] ?? 0,
-  );
   const [hydratedDraftKey, setHydratedDraftKey] = useState<string | null>(null);
-  const text = draft?.text ?? "";
-  const attachments = draft?.attachments ?? [];
   const isHydrated = hydratedDraftKey === draftKey;
   const textReplacementRevisionRef = useRef(0);
   const [textReplacement, setTextReplacement] = useState<TextReplacement>(() => ({
     key: `${draftKey}:0`,
-    text,
+    text: textSource.getSnapshot(),
   }));
 
   const publishTextReplacement = useCallback(
@@ -134,9 +152,9 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
   const textPublication = useMemo(
     () =>
       new AfterPaintPublication<string>((nextText) => {
-        saveDraft((current) => ({ ...current, text: nextText }));
+        useDraftStore.getState().editDraftText({ draftKey, text: nextText });
       }),
-    [saveDraft],
+    [draftKey],
   );
 
   const editText = useCallback(
@@ -144,19 +162,19 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
       if (isWeb) {
         textPublication.stage(nextText);
       } else {
-        saveDraft((current) => ({ ...current, text: nextText }));
+        useDraftStore.getState().editDraftText({ draftKey, text: nextText });
       }
     },
-    [saveDraft, textPublication],
+    [draftKey, textPublication],
   );
 
   const replaceText = useCallback(
     (nextText: string) => {
       textPublication.cancel();
-      saveDraft((current) => ({ ...current, text: nextText }));
+      useDraftStore.getState().editDraftText({ draftKey, text: nextText });
       publishTextReplacement(nextText);
     },
-    [publishTextReplacement, saveDraft, textPublication],
+    [draftKey, publishTextReplacement, textPublication],
   );
 
   const setAttachments = useCallback(
@@ -216,26 +234,6 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
       cancelled = true;
     };
   }, [draftKey, publishTextReplacement]);
-
-  // An out-of-composer replace (custom command) lands in the store and bumps a request id;
-  // re-publish it here so a mounted input actually swaps its text. Skipped until hydration,
-  // which already publishes the store's text.
-  const appliedTextReplacementRequestRef = useRef<{ draftKey: string; requestId: number }>({
-    draftKey: "",
-    requestId: 0,
-  });
-  useEffect(() => {
-    if (!isHydrated || textReplacementRequestId === 0) {
-      return;
-    }
-    const applied = appliedTextReplacementRequestRef.current;
-    if (applied.draftKey === draftKey && applied.requestId === textReplacementRequestId) {
-      return;
-    }
-    appliedTextReplacementRequestRef.current = { draftKey, requestId: textReplacementRequestId };
-    const nextText = useDraftStore.getState().getDraftInput(draftKey)?.text ?? "";
-    publishTextReplacement(nextText);
-  }, [draftKey, isHydrated, publishTextReplacement, textReplacementRequestId]);
 
   const providerSelection = useMemo<ProviderSelectionState>(
     () => ({
@@ -343,7 +341,7 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
   ]);
 
   return {
-    text,
+    textSource,
     editText,
     replaceText,
     textReplacement,

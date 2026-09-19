@@ -7,17 +7,15 @@ import {
   deriveAgentStateBucket,
   getWorkspaceStateBucketPriority,
 } from "@getpaseo/protocol/agent-state-bucket";
-import type {
-  Agent,
-  DaemonServerInfo,
-  ProjectDescriptor,
-  WorkspaceDescriptor,
-} from "@/stores/session-store";
-import { normalizeWorkspaceMembers, useSessionStore } from "@/stores/session-store";
 import {
-  buildAgentDirectoryState,
-  replaceFetchedAgentDirectory,
-} from "@/utils/agent-directory-sync";
+  normalizeWorkspaceMembers,
+  useSessionStore,
+  type Agent,
+  type DaemonServerInfo,
+  type ProjectDescriptor,
+  type WorkspaceDescriptor,
+} from "@/stores/session-store";
+import { buildAgentDirectoryState } from "@/utils/agent-directory-sync";
 import { normalizeWorkspacePath } from "@/utils/workspace-identity";
 
 export interface LegacyDaemonWorkspaceSnapshot {
@@ -46,10 +44,14 @@ const LEGACY_AGENT_DIRECTORY_SORT: NonNullable<FetchAgentsOptions["sort"]> = [
   { key: "updated_at", direction: "desc" },
 ];
 
-// COMPAT(legacyWorkspaceDaemon): v0.1.97 app talking to <=v0.1.96 daemons.
-// Older daemons expose agents by cwd but may have no workspace registry rows.
-// Keep all cwd -> synthetic workspace behavior in this file so the shim is
-// deleted by removing this module and its call sites once the daemon floor is v0.1.97.
+// COMPAT(legacyWorkspaceDaemon): added in v0.1.97, remove after 2027-03-09.
+// Cached or partial agent records can predate workspace IDs; preserve their placement.
+function shouldBackfillLegacyDaemonWorkspaceDirectory(
+  serverInfo: DaemonServerInfo | null | undefined,
+): boolean {
+  return serverInfo?.features?.workspaceMultiplicity !== true;
+}
+
 export function buildLegacyDaemonWorkspaceSnapshot(input: {
   serverId: string;
   entries: FetchAgentsEntry[];
@@ -74,12 +76,6 @@ export function shouldUseLegacyDaemonWorkspaceDirectory(
     serverInfo !== undefined &&
     serverInfo.features?.workspaceMultiplicity !== true
   );
-}
-
-function shouldBackfillLegacyDaemonWorkspaceDirectory(
-  serverInfo: DaemonServerInfo | null | undefined,
-): boolean {
-  return serverInfo?.features?.workspaceMultiplicity !== true;
 }
 
 export async function fetchLegacyDaemonWorkspaceDirectory(input: {
@@ -182,10 +178,11 @@ export function applyLegacyDaemonWorkspaceOwnership(input: {
   }
 
   const existingAgent =
-    session?.agents.get(input.agent.id) ?? session?.agentDetails.get(input.agent.id) ?? null;
+    session?.agents.get(input.agent.id) ?? session?.agentDetails.get(input.agent.id);
+  const workspaces = session?.workspaces;
   const workspaceId =
     existingAgent?.workspaceId ??
-    resolveLegacyWorkspaceIdFromAgent(input.agent, session?.workspaces) ??
+    resolveLegacyWorkspaceIdFromAgent(input.agent, workspaces) ??
     null;
   if (!workspaceId) {
     return input.agent;
@@ -203,12 +200,13 @@ export function replaceLegacyDaemonWorkspaceDirectory(input: {
   entries: FetchAgentsEntry[];
 }): LegacyDaemonWorkspaceSnapshot {
   const entries = stampLegacyWorkspaceIds(input.entries);
-  const { agents } = replaceFetchedAgentDirectory({
+  const { agents } = buildAgentDirectoryState({
     serverId: input.serverId,
     entries,
   });
   const workspaces = buildLegacyWorkspaces(entries);
   const store = useSessionStore.getState();
+  store.setAgents(input.serverId, agents);
   store.setWorkspaces(input.serverId, workspaces);
   store.setProjects(
     input.serverId,
@@ -373,7 +371,7 @@ function resolveLegacyWorkspaceId(entry: FetchAgentsEntry): string {
 
 function resolveLegacyWorkspaceIdFromAgent(
   agent: Agent,
-  workspaces: Map<string, WorkspaceDescriptor> | undefined,
+  workspaces: ReadonlyMap<string, WorkspaceDescriptor> | undefined,
 ): string | null {
   const cwd = normalizeWorkspacePath(agent.cwd);
   if (!cwd) {

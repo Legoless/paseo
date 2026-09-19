@@ -1,4 +1,25 @@
 export const en = {
+  paneFind: {
+    searchFailed: "Could not search this chat. Check the host connection and retry.",
+    searching: "Searching…",
+    loading: "Loading…",
+    failed: "Failed",
+    retry: "Retry",
+    chatPosition: "{{current}} of {{total}} in message",
+    title: "Find",
+    placeholder: "Find in pane",
+    close: "Close Find",
+    matches: "Find matches",
+    previous: "Previous match",
+    next: "Next match",
+    toggleReplace: "Toggle replace",
+    replaceWith: "Replace with",
+    replace: "Replace",
+    replaceAll: "Replace all",
+    noMatches: "No matches",
+    position: "{{current}} of {{total}}",
+    total: "{{total}} matches",
+  },
   common: {
     back: "Back",
     loading: "Loading...",
@@ -10,6 +31,7 @@ export const en = {
       copy: "Copy",
       copyLine: "Copy line",
       dismiss: "Dismiss",
+      reload: "Reload",
       retry: "Retry",
       search: "Search",
       select: "Select",
@@ -151,7 +173,7 @@ export const en = {
       initialPromptRequired: "Initial prompt is required",
       alreadyLoading: "Already loading",
       uploadFailed: "Failed to upload file",
-      noClipboardImage: "No image in clipboard",
+      noClipboardImage: "No image in the current clipboard. Try pasting from your keyboard.",
       pasteImageFailed: "Failed to paste image",
       fileTooLarge: "{{fileName}} is too large (max {{size}})",
     },
@@ -206,6 +228,10 @@ export const en = {
     historyLoadFailed: "Couldn't load agent history",
     messageCapped: "This message was capped ({{bytes}} bytes).",
     permission: {
+      rejectedPlan: "Rejected plan",
+      approvedPlan: "Approved plan",
+      canceledPlan: "Canceled plan",
+
       plan: "Plan",
       required: "Permission Required",
       deny: "Deny",
@@ -219,7 +245,8 @@ export const en = {
     states: {
       notFound: "Agent not found",
       failedToLoad: "Failed to load agent",
-      reconnecting: "Reconnecting",
+      reconnecting: "Reconnecting to host",
+      updating: "Updating messages",
       timelineSyncFailed: "Couldn't refresh agent history.",
       timelineSyncRetrying: "Retrying…",
       archivingTitle: "Closing agent...",
@@ -288,6 +315,7 @@ export const en = {
       zoomIn: "Zoom in",
       zoomOut: "Zoom out",
       resetZoom: "Reset view",
+      fullscreen: "Fullscreen",
       viewSource: "View source",
       viewDiagram: "View diagram",
     },
@@ -360,6 +388,12 @@ export const en = {
   },
   importSession: {
     title: "Import session",
+    chooseHostTitle: "Import from host",
+    searchPlaceholder: "Search sessions...",
+    scope: {
+      host: "Sessions on {{host}}",
+      workspace: "This workspace",
+    },
     filters: {
       all: "All",
     },
@@ -368,12 +402,13 @@ export const en = {
       updateHost: "Update the host to import sessions.",
       noProviders: "No importable providers are enabled.",
       loading: "Loading recent sessions...",
-      failedAll: "Could not load recent sessions.",
-      failedProviders: "Could not load sessions for {{providers}}.",
+      failedProvider: "Could not load {{provider}} sessions",
       failedImport: "Could not import selected session.",
     },
     actions: {
       refresh: "Refresh sessions",
+      showAll: "Show all",
+      loadMore: "Load more",
     },
     preview: {
       untitledSession: "Untitled session",
@@ -381,6 +416,7 @@ export const en = {
     },
     empty: {
       noRecent: "No recent sessions to import.",
+      noMatches: "No sessions match your search.",
       alreadyImported: "All recent sessions are already imported.",
       noProviderSessions: "No {{provider}} sessions found.",
     },
@@ -495,14 +531,23 @@ export const en = {
         completed: "Setup completed",
         failed: "Setup failed",
         workspace: "Workspace setup",
+        blocked: "Setup blocked",
       },
       status: {
         running: "Running",
         completed: "Completed",
         failed: "Failed",
         waiting: "Waiting for setup output",
+        blocked: "Blocked",
       },
       waiting: "Setting up workspace...",
+      blocked: {
+        title: "Setup was not run",
+        description:
+          "This PR comes from {{repository}}, a different repository. Its setup and scripts could run code you have not reviewed.",
+        run: "Run setup",
+        runFailed: "Failed to run workspace setup",
+      },
       empty: {
         noCommands: "No setup commands ran for this workspace.",
       },
@@ -910,6 +955,9 @@ export const en = {
         openChangesTab: "Open Changes tab",
         openDiffTab: "Open Diff tab",
         closeChangesTab: "Close Changes tab",
+        jumpToFile: {
+          title: "Jump to file",
+        },
         binaryFile: "Binary file",
         tooLarge: "Diff too large to display",
         previewTooLargeTitle: "This diff is too large to preview",
@@ -932,11 +980,8 @@ export const en = {
         refresh: "Refresh",
         refreshState: "Refresh git and {{brand}} state",
         failedRefresh: "Failed to refresh git state.",
-        emptyHiddenWhitespace: "No visible changes after hiding whitespace",
-        emptyUncommitted: "No uncommitted changes",
         seeUncommittedChanges: "See uncommitted changes",
         seeCommittedChanges: "See committed changes",
-        emptyAgainstBase: "No changes vs {{baseRef}}",
         checkingRepository: "Checking repository...",
         notRepository: "Not a git repository",
         diffMode: "Diff mode",
@@ -1088,6 +1133,16 @@ export const en = {
       updateHost: "Update this host to manage labels.",
     },
   },
+  changelog: {
+    title: "What's new",
+    installed: "Installed",
+    showMore: "Show more",
+    openWebsite: "Full changelog",
+    error: {
+      title: "Unable to load the changelog",
+      description: "Check your connection and try again.",
+    },
+  },
   sidebar: {
     display: {
       trigger: "Display preferences",
@@ -1146,7 +1201,6 @@ export const en = {
       addProject: "Add project",
       newWorkspace: "New workspace",
       hosts: "Hosts",
-      home: "Home",
       settings: "Settings",
       closeSidebar: "Close sidebar",
     },
@@ -1163,6 +1217,7 @@ export const en = {
     },
     sections: {
       sessions: "History",
+      search: "Search",
       schedules: "Schedules",
     },
     worktreeSetup: {
@@ -1326,6 +1381,23 @@ export const en = {
     },
     daemon: {
       title: "Daemon",
+      lifecycle: {
+        owned: "Launched by this Desktop session",
+        attached: "Attached to an existing daemon",
+        ownedMessage: "This daemon was launched by this Desktop session.",
+        attachedMessage: "This daemon was not launched by this Desktop session.",
+        stopTitle: "Stop local daemon?",
+        stopMessage:
+          "{{ownership}}\nHome: {{home}}\nSupervisor PID: {{pid}}\nRunning agent work will be interrupted.",
+        stop: "Stop daemon",
+        stopping: "Stopping…",
+        stopFailed: "Unable to stop daemon",
+        pauseAttached: "Pause automatic daemon management? The attached daemon will keep running.",
+        pause: "Pause management",
+        workerUpdated: "Worker updated to {{version}}",
+        supervisorRefresh:
+          "The running supervisor retains its original code. Its launcher must stop and start it to refresh the supervisor.",
+      },
       status: {
         title: "Status",
         builtInOnly: "Only the built-in desktop daemon is shown here",
@@ -1501,7 +1573,7 @@ export const en = {
       },
       importSession: {
         title: "Import session",
-        description: "Bring in recent external CLI sessions",
+        description: "Open a Claude Code, Codex or other session you started in a terminal",
       },
       setupProviders: {
         title: "Setup providers",
@@ -2090,17 +2162,21 @@ export const en = {
     },
     plugins: {
       title: "Plugins",
+      screens: {
+        open: "Open",
+        offline: "Connect to this host to open plugin settings.",
+        update: "Update this host to use plugin settings.",
+        unavailable: "This plugin settings screen is unavailable.",
+      },
       trustedTitle: "Plugins are trusted code",
       trustedDescription:
         "They run on this host and inside the app without sandboxing. Install only code you trust.",
       globalTitle: "Enable plugins",
       globalHint: "Global switch for every configured plugin",
-      directoryLabel: "Plugin directory",
-      directoryPlaceholder: "/absolute/path/on/host",
-      idLabel: "Plugin installation ID",
-      idHint: "Leave blank to use paseo-plugin.json",
-      idPlaceholder: "Manifest default",
-      install: "Install directory",
+      sourceLabel: "Plugin source",
+      sourcePlaceholder: "Directory, Git URL, or npm package",
+      docs: "Docs",
+      install: "Install plugin",
       installing: "Installing…",
       logs: {
         action: "Logs",
@@ -2113,6 +2189,7 @@ export const en = {
       },
       status: { running: "running", disabled: "disabled", failed: "failed" },
       actions: {
+        menu: "Actions for {{id}}",
         reload: "Reload",
         reloading: "Reloading…",
         enable: "Enable",
@@ -2138,6 +2215,7 @@ export const en = {
         offlineTitle: "Plugin host is offline",
         offlineDescription: "Reconnect to this host to manage its plugins.",
         updateTitle: "Update this host to manage plugins",
+        sourceUpdateTitle: "Update this host to install plugins",
         loading: "Loading plugins…",
         errorTitle: "Unable to load plugins",
         retry: "Retry",
@@ -2265,6 +2343,7 @@ export const en = {
     about: {
       title: "About",
       appVersion: "App version",
+      whatsNewHint: "Release notes for every version",
       thisDevice: "This device",
       connectedHosts: "Connected hosts",
       offline: "Offline",
@@ -2315,6 +2394,12 @@ export const en = {
       paneStatusGlow: {
         title: "Pane status glow",
         description: "Show a status-colored glow around agent panes",
+      },
+      sidebar: {
+        title: "Sidebar",
+        description: "Choose which items appear at the top of the sidebar and in what order",
+        moveUp: "Move up",
+        moveDown: "Move down",
       },
       fonts: {
         title: "Fonts",

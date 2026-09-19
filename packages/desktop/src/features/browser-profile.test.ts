@@ -159,6 +159,7 @@ describe("clearPaseoBrowserProfile", () => {
           "localstorage",
           "serviceworkers",
           "cachestorage",
+          "shadercache",
         ],
       },
     ]);

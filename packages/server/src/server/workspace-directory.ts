@@ -5,6 +5,7 @@ import type {
   SessionInboundMessage,
   SessionOutboundMessage,
   WorkspaceDescriptorPayload,
+  WorkspaceMemberPayload,
 } from "./messages.js";
 import {
   deriveAgentStateBucket,
@@ -157,6 +158,25 @@ export function workspaceIdsForProjects(
   return Array.from(workspaceIds);
 }
 
+function activeWorkspaceRecords(
+  workspaces: PersistedWorkspaceRecord[],
+  projects: PersistedProjectRecord[],
+): PersistedWorkspaceRecord[] {
+  const archivedProjects = new Set(
+    projects.filter((project) => project.archivedAt).map((project) => project.projectId),
+  );
+  return workspaces.filter((workspace) => {
+    if (workspace.archivedAt) return false;
+    if (!workspace.members) {
+      const projectId = (workspace as PersistedWorkspaceRecord & { projectId?: string }).projectId;
+      return !projectId || !archivedProjects.has(projectId);
+    }
+    // Projectless workspaces hold no projects; they stay visible until archived.
+    if (workspace.members.length === 0) return true;
+    return workspace.members.some((member) => !archivedProjects.has(member.projectId));
+  });
+}
+
 export class WorkspaceDirectory {
   private readonly archivingByWorkspaceId = new Map<string, string>();
   /**
@@ -208,15 +228,21 @@ export class WorkspaceDirectory {
     includeGitData: boolean;
     workspaceIds?: Iterable<string>;
   }): Promise<Map<string, WorkspaceDescriptorPayload>> {
-    const [agents, providerSubagentActivity, persistedWorkspaces, terminalContributions] =
-      await Promise.all([
-        this.deps.listAgentPayloads(),
-        this.deps.listProviderSubagentActivity(),
-        this.deps.workspaceRegistry.list(),
-        this.deps.listTerminalActivityContributions(),
-      ]);
+    const [
+      agents,
+      providerSubagentActivity,
+      persistedWorkspaces,
+      persistedProjects,
+      terminalContributions,
+    ] = await Promise.all([
+      this.deps.listAgentPayloads(),
+      this.deps.listProviderSubagentActivity(),
+      this.deps.workspaceRegistry.list(),
+      this.deps.projectRegistry.list(),
+      this.deps.listTerminalActivityContributions(),
+    ]);
 
-    const activeRecords = persistedWorkspaces.filter((workspace) => !workspace.archivedAt);
+    const activeRecords = activeWorkspaceRecords(persistedWorkspaces, persistedProjects);
     const descriptorsByWorkspaceId = new Map<string, WorkspaceDescriptorPayload>();
     const workspaceIds = options.workspaceIds ? new Set(options.workspaceIds) : null;
     const activeWorkspaceIds = new Set(activeRecords.map((workspace) => workspace.workspaceId));
@@ -560,6 +586,42 @@ export class WorkspaceDirectory {
         projectRootPath: project.rootPath,
         projectKind: project.kind,
       }));
+  }
+
+  async listObservationTargets(): Promise<
+    Array<
+      Pick<WorkspaceDescriptorPayload, "id" | "workspaceDirectory" | "workspaceKind"> & {
+        members?: Array<Pick<WorkspaceMemberPayload, "workspaceDirectory" | "workspaceKind">>;
+      }
+    >
+  > {
+    const [workspaces, projects] = await Promise.all([
+      this.deps.workspaceRegistry.list(),
+      this.deps.projectRegistry.list(),
+    ]);
+    return activeWorkspaceRecords(workspaces, projects).map((workspace) => {
+      if (workspace.members && workspace.members.length > 0) {
+        return {
+          id: workspace.workspaceId,
+          workspaceDirectory: workspace.members[0].cwd,
+          workspaceKind: workspace.members[0].kind,
+          members: workspace.members.map((member) => ({
+            workspaceDirectory: member.cwd,
+            workspaceKind: member.kind,
+            branch: member.branch,
+          })),
+        };
+      }
+      const scalar = workspace as PersistedWorkspaceRecord & {
+        cwd?: string;
+        kind?: WorkspaceDescriptorPayload["workspaceKind"];
+      };
+      return {
+        id: workspace.workspaceId,
+        workspaceDirectory: scalar.cwd ?? "",
+        workspaceKind: scalar.kind ?? "directory",
+      };
+    });
   }
 
   async listDescriptors(): Promise<WorkspaceDescriptorPayload[]> {

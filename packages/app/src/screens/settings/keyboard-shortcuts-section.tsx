@@ -9,7 +9,7 @@ import equal from "fast-deep-equal";
 import type { CustomCommand } from "@getpaseo/protocol/custom-commands";
 import type { Theme } from "@/styles/theme";
 import { settingsStyles } from "@/styles/settings";
-import { SettingsSection } from "@/screens/settings/settings-section";
+import { SettingsSection } from "@/components/settings/headings/settings-section";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,

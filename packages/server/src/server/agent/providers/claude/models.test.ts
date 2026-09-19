@@ -14,6 +14,7 @@ import {
   getClaudeModelsWithSettings,
   mapClaudeModels,
   normalizeClaudeRuntimeModelId,
+  parseClaudeCodeVersion,
   resolveConfiguredClaudeModel,
   resolveObservedClaudeModelId,
 } from "./models.js";
@@ -365,6 +366,12 @@ it("isolates session capabilities by workspace scope and refreshes only that sco
   expect(one.features?.map((feature) => feature.id)).toEqual(["fast_mode"]);
   await one.close();
   await two.close();
+});
+
+describe("parseClaudeCodeVersion", () => {
+  it("prefers the Claude Code version over a wrapper banner", () => {
+    expect(parseClaudeCodeVersion("wrapper 1.0.0\n2.1.219 (Claude Code)")).toEqual([2, 1, 219]);
+  });
 });
 
 it("does not reuse a native global catalog as a workspace catalog", async () => {
