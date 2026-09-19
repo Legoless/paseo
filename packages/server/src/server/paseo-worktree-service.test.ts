@@ -45,20 +45,10 @@ test("creates a worktree and registers it in the source workspace project withou
   });
   const sourceWorkspace = createPersistedWorkspaceRecordForTest({
     workspaceId: "ws-main-checkout",
+    projectId: sourceProject.projectId,
+    cwd: repoDir,
+    kind: "local_checkout",
     displayName: "main",
-    members: [
-      {
-        projectId: sourceProject.projectId,
-        cwd: repoDir,
-        kind: "local_checkout",
-        displayName: "main",
-        branch: null,
-        worktreeRoot: null,
-        baseBranch: null,
-        isPaseoOwnedWorktree: false,
-        mainRepoRoot: null,
-      },
-    ],
   });
   deps.projects.set(sourceProject.projectId, sourceProject);
   deps.workspaces.set(sourceWorkspace.workspaceId, sourceWorkspace);
@@ -76,12 +66,12 @@ test("creates a worktree and registers it in the source workspace project withou
   );
 
   expect(result.created).toBe(true);
-  expect(result.member.cwd).toBe(result.worktree.worktreePath);
-  expect(result.member.kind).toBe("worktree");
+  expect(result.workspace.cwd).toBe(result.worktree.worktreePath);
+  expect(result.workspace.kind).toBe("worktree");
   expect(result.workspace.workspaceId).toMatch(/^wks_[0-9a-f]{16}$/);
-  expect(result.member.projectId).toBe("remote:github.com/acme/repo");
+  expect(result.workspace.projectId).toBe("remote:github.com/acme/repo");
   expect(result.workspace.displayName).toBe("feature-one");
-  expect(result.member.baseBranch).toBe("main");
+  expect(result.workspace.baseBranch).toBe("refs/heads/main");
   expect(result.workspace.title).toBe("Feature One");
   expect(deps.workspaceGitService.getSnapshot).not.toHaveBeenCalled();
   expect(deps.projects.get(sourceProject.projectId)).toEqual({
@@ -112,20 +102,10 @@ test("refreshes a source project that became Git while creating a worktree", asy
   };
   const sourceWorkspace = createPersistedWorkspaceRecordForTest({
     workspaceId: "ws-main-checkout",
+    projectId: sourceProject.projectId,
+    cwd: repoDir,
+    kind: "local_checkout",
     displayName: "main",
-    members: [
-      {
-        projectId: sourceProject.projectId,
-        cwd: repoDir,
-        kind: "local_checkout",
-        displayName: "main",
-        branch: null,
-        worktreeRoot: null,
-        baseBranch: null,
-        isPaseoOwnedWorktree: false,
-        mainRepoRoot: null,
-      },
-    ],
   });
   deps.projects.set(sourceProject.projectId, sourceProject);
   deps.workspaces.set(sourceWorkspace.workspaceId, sourceWorkspace);
@@ -140,7 +120,7 @@ test("refreshes a source project that became Git while creating a worktree", asy
     deps,
   );
 
-  expect(result.member.projectId).toBe(sourceProject.projectId);
+  expect(result.workspace.projectId).toBe(sourceProject.projectId);
   expect(deps.projects.get(sourceProject.projectId)).toMatchObject({
     projectId: sourceProject.projectId,
     rootPath: repoDir,
@@ -157,20 +137,10 @@ test("repairs a legacy source workspace whose project record is missing", async 
   const deps = createDeps();
   const sourceWorkspace = createPersistedWorkspaceRecordForTest({
     workspaceId: "ws-missing-project",
+    projectId: "project-missing",
+    cwd: repoDir,
+    kind: "local_checkout",
     displayName: "main",
-    members: [
-      {
-        projectId: "project-missing",
-        cwd: repoDir,
-        kind: "local_checkout",
-        displayName: "main",
-        branch: null,
-        worktreeRoot: null,
-        baseBranch: null,
-        isPaseoOwnedWorktree: false,
-        mainRepoRoot: null,
-      },
-    ],
   });
   deps.workspaces.set(sourceWorkspace.workspaceId, sourceWorkspace);
 
@@ -184,11 +154,11 @@ test("repairs a legacy source workspace whose project record is missing", async 
     deps,
   );
 
-  expect(result.member.projectId).toMatch(/^prj_[0-9a-f]{16}$/);
-  expect(result.member.projectId).not.toBe(sourceWorkspace.members[0]!.projectId);
-  const repairedProject = deps.projects.get(result.member.projectId);
+  expect(result.workspace.projectId).toMatch(/^prj_[0-9a-f]{16}$/);
+  expect(result.workspace.projectId).not.toBe(sourceWorkspace.projectId);
+  const repairedProject = deps.projects.get(result.workspace.projectId);
   expect(repairedProject).toMatchObject({
-    projectId: result.member.projectId,
+    projectId: result.workspace.projectId,
     kind: "git",
     archivedAt: null,
   });
@@ -210,20 +180,10 @@ test("uses an equivalent source workspace path when creating a worktree", async 
   });
   const sourceWorkspace = createPersistedWorkspaceRecordForTest({
     workspaceId: "ws-source-folder",
+    projectId: sourceProject.projectId,
+    cwd: `${sourceDir}${path.sep}`,
+    kind: "local_checkout",
     displayName: "app",
-    members: [
-      {
-        projectId: sourceProject.projectId,
-        cwd: `${sourceDir}${path.sep}`,
-        kind: "local_checkout",
-        displayName: "app",
-        branch: null,
-        worktreeRoot: null,
-        baseBranch: null,
-        isPaseoOwnedWorktree: false,
-        mainRepoRoot: null,
-      },
-    ],
   });
   deps.projects.set(sourceProject.projectId, sourceProject);
   deps.workspaces.set(sourceWorkspace.workspaceId, sourceWorkspace);
@@ -238,7 +198,7 @@ test("uses an equivalent source workspace path when creating a worktree", async 
     deps,
   );
 
-  expect(result.member.projectId).toBe(sourceProject.projectId);
+  expect(result.workspace.projectId).toBe(sourceProject.projectId);
 });
 
 test("creates a worktree workspace at the selected project subdirectory", async () => {
@@ -267,7 +227,7 @@ test("creates a worktree workspace at the selected project subdirectory", async 
     deps,
   );
 
-  expect(result.member).toMatchObject({
+  expect(result.workspace).toMatchObject({
     projectId: project.projectId,
     cwd: path.join(result.worktree.worktreePath, "packages", "app"),
     worktreeRoot: result.worktree.worktreePath,
@@ -295,7 +255,7 @@ test("seeds an uncommitted exact-project config into the mapped worktree directo
     createDeps(),
   );
 
-  expect(readFileSync(path.join(result.member.cwd, "paseo.json"), "utf8")).toBe(config);
+  expect(readFileSync(path.join(result.workspace.cwd, "paseo.json"), "utf8")).toBe(config);
   expect(existsSync(path.join(result.worktree.worktreePath, "paseo.json"))).toBe(false);
 });
 
@@ -323,7 +283,7 @@ test("does not overwrite a committed exact-project config with source checkout e
     createDeps(),
   );
 
-  expect(readFileSync(path.join(result.member.cwd, "paseo.json"), "utf8")).toBe(committedConfig);
+  expect(readFileSync(path.join(result.workspace.cwd, "paseo.json"), "utf8")).toBe(committedConfig);
   expect(
     execFileSync("git", ["status", "--porcelain"], {
       cwd: result.worktree.worktreePath,
@@ -430,7 +390,7 @@ test("maps a nested cwd from an existing Paseo worktree into the next worktree",
     deps,
   );
 
-  expect(created.member.cwd).toBe(path.join(created.worktree.worktreePath, "packages", "app"));
+  expect(created.workspace.cwd).toBe(path.join(created.worktree.worktreePath, "packages", "app"));
   expect(deps.workspaces.get(created.workspace.workspaceId)).toEqual(created.workspace);
 });
 
@@ -470,20 +430,10 @@ test("registers a new worktree in the existing root project after the main check
   });
   const existingWorktree = createPersistedWorkspaceRecordForTest({
     workspaceId: "ws-existing-worktree",
+    projectId: sourceProject.projectId,
+    cwd: path.join(tempDir, "existing-worktree"),
+    kind: "worktree",
     displayName: "existing-worktree",
-    members: [
-      {
-        projectId: sourceProject.projectId,
-        cwd: path.join(tempDir, "existing-worktree"),
-        kind: "worktree",
-        displayName: "existing-worktree",
-        branch: null,
-        worktreeRoot: null,
-        baseBranch: null,
-        isPaseoOwnedWorktree: false,
-        mainRepoRoot: null,
-      },
-    ],
   });
   deps.projects.set(sourceProject.projectId, sourceProject);
   deps.workspaces.set(existingWorktree.workspaceId, existingWorktree);
@@ -499,7 +449,7 @@ test("registers a new worktree in the existing root project after the main check
     deps,
   );
 
-  expect(result.member.projectId).toBe("remote:github.com/acme/repo");
+  expect(result.workspace.projectId).toBe("remote:github.com/acme/repo");
   expect(Array.from(deps.projects.keys()).sort()).toEqual(["remote:github.com/acme/repo"]);
 });
 
@@ -528,7 +478,7 @@ test("an explicit project FK remains unchanged when its worktree comes from anot
     deps,
   );
 
-  expect(result.member.projectId).toBe(project.projectId);
+  expect(result.workspace.projectId).toBe(project.projectId);
   expect(deps.projects.get(project.projectId)).toEqual({
     ...project,
     projectKey: deriveProjectKey({
@@ -847,7 +797,7 @@ test("does not mark checkout branch worktrees as eligible for first-agent rename
   });
   // A checkout-branch worktree has no distinct base, so the workspace records a
   // null baseBranch even though worktree.json's baseRefName is the branch itself.
-  expect(created.member.baseBranch).toBe(null);
+  expect(created.workspace.baseBranch).toBe(null);
   await expect(
     attemptFirstAgentBranchAutoName({
       cwd: created.worktree.worktreePath,
@@ -1195,14 +1145,19 @@ function createPersistedProjectRecordForTest(input: {
   };
 }
 
-function createPersistedWorkspaceRecordForTest(
-  input: Pick<PersistedWorkspaceRecord, "workspaceId" | "displayName" | "members">,
-): PersistedWorkspaceRecord {
+function createPersistedWorkspaceRecordForTest(input: {
+  workspaceId: string;
+  projectId: string;
+  cwd: string;
+  kind: PersistedWorkspaceRecord["kind"];
+  displayName: string;
+}): PersistedWorkspaceRecord {
   return {
-    ...input,
-    title: null,
-    pinnedAt: null,
-    autoArchivedChangeRequestUrl: null,
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    cwd: input.cwd,
+    kind: input.kind,
+    displayName: input.displayName,
     createdAt: "2026-04-22T00:00:00.000Z",
     updatedAt: "2026-04-22T00:00:00.000Z",
     archivedAt: null,

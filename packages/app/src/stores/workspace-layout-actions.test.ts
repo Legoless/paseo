@@ -12,7 +12,6 @@ function hydratedEmptySnapshot(): WorkspaceTabSnapshot {
     terminalsHydrated: true,
     activeAgentIds: [],
     autoOpenAgentIds: [],
-    knownAgentIds: [],
     knownTerminalIds: [],
     standaloneTerminalIds: [],
   };

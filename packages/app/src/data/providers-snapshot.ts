@@ -1,4 +1,4 @@
-import type { QueryClient } from "@tanstack/react-query";
+import { CancelledError, type QueryClient } from "@tanstack/react-query";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { GetProvidersSnapshotResponseMessage } from "@getpaseo/protocol/messages";
 import {
@@ -7,6 +7,7 @@ import {
   type ProviderSnapshotCache,
 } from "./provider-snapshot-cache";
 import { queryClient as singletonQueryClient } from "./query-client";
+import { replaceProviderSnapshotIcons } from "@/components/provider-icon-name";
 import { agentCommandsQueryRoot } from "@/hooks/agent-commands-query";
 import type { AgentProvider } from "@getpaseo/protocol/agent-types";
 import { normalizeWorkspacePath } from "@/utils/workspace-identity";
@@ -81,6 +82,7 @@ export async function fetchProvidersSnapshot(input: {
       const body = await queryClient.fetchQuery({
         queryKey: ["providerSnapshotContent", input.serverId, hash],
         gcTime: 0,
+        structuralSharing: false,
         staleTime: 0,
         retry: false,
         queryFn: async () => {
@@ -103,7 +105,7 @@ export async function fetchProvidersSnapshot(input: {
       }
     }
   }
-  input.signal?.throwIfAborted();
+  if (input.signal?.aborted) throw new CancelledError();
   snapshot = await cache.materialize(input.serverId, snapshot);
   if (snapshot.compactSnapshot && snapshot.snapshotHash) {
     await cache.write({
@@ -116,7 +118,8 @@ export async function fetchProvidersSnapshot(input: {
       signal: input.signal,
     });
   }
-  input.signal?.throwIfAborted();
+  if (input.signal?.aborted) throw new CancelledError();
+  replaceProviderSnapshotIcons(input.serverId, snapshot.entries);
   return snapshot;
 }
 
@@ -136,6 +139,7 @@ export async function refreshAndApplyProvidersSnapshot(input: {
   await input.queryClient.fetchQuery({
     queryKey,
     staleTime: 0,
+    structuralSharing: false,
     queryFn: ({ signal }) => fetchProvidersSnapshot({ ...input, signal }),
   });
   void input.queryClient.invalidateQueries({

@@ -15,16 +15,19 @@ export interface BrowserCaptureRect {
   height: number;
 }
 
-// Electron 41 clipboard is async W3C-style (write(ClipboardItem[])); writeImage/write({text,image})
-// no longer exist. MIME-keyed entries carry text and image in one ClipboardItem.
-interface BrowserCaptureClipboard {
-  write(entries: Record<string, string | ArrayBuffer>): Promise<void>;
-  writeText(text: string): Promise<void>;
+interface BrowserCaptureClipboardPayload<TImage extends BrowserCaptureImage> {
+  text: string | null;
+  image: TImage | null;
+}
+
+interface BrowserCaptureClipboard<TImage extends BrowserCaptureImage> {
+  write(input: BrowserCaptureClipboardPayload<TImage>): Promise<void>;
 }
 
 interface BrowserCaptureDependencies<TImage extends BrowserCaptureImage> {
   findGuest(browserId: string, hostWebContentsId: number): BrowserCaptureGuest<TImage> | null;
-  clipboard: BrowserCaptureClipboard;
+  decodeImage(dataUrl: string): TImage;
+  clipboard: BrowserCaptureClipboard<TImage>;
   warn(event: "capture-failed" | "image-decode-failed", details: Record<string, unknown>): void;
 }
 
@@ -70,21 +73,6 @@ function copyPayload(value: unknown): { text: string | null; imageDataUrl: strin
   };
 }
 
-function decodeImageDataUrl(dataUrl: string): { mimeType: string; bytes: ArrayBuffer } | null {
-  const match = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(dataUrl);
-  if (!match) {
-    return null;
-  }
-  const bytes = Buffer.from(match[2], "base64");
-  if (bytes.length === 0) {
-    return null;
-  }
-  return {
-    mimeType: match[1].toLowerCase(),
-    bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-  };
-}
-
 export function createBrowserCaptureService<TImage extends BrowserCaptureImage>(
   dependencies: BrowserCaptureDependencies<TImage>,
 ): BrowserCaptureService {
@@ -105,23 +93,17 @@ export function createBrowserCaptureService<TImage extends BrowserCaptureImage>(
 
     async copy(payload) {
       const { text, imageDataUrl } = copyPayload(payload);
-      let image: { mimeType: string; bytes: ArrayBuffer } | null = null;
+      let image: TImage | null = null;
       if (imageDataUrl) {
         try {
-          image = decodeImageDataUrl(imageDataUrl);
+          const decoded = dependencies.decodeImage(imageDataUrl);
+          if (!decoded.isEmpty()) image = decoded;
         } catch (error) {
           dependencies.warn("image-decode-failed", { error });
         }
       }
-      if (text && image) {
-        await dependencies.clipboard.write({ "text/plain": text, [image.mimeType]: image.bytes });
-      } else if (image) {
-        await dependencies.clipboard.write({ [image.mimeType]: image.bytes });
-      } else if (text) {
-        await dependencies.clipboard.writeText(text);
-      } else {
-        return false;
-      }
+      if (!text && !image) return false;
+      await dependencies.clipboard.write({ text, image });
       return true;
     },
   };

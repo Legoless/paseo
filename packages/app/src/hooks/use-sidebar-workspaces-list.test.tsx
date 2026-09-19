@@ -98,7 +98,7 @@ function agent(input: {
     id: input.id,
     provider: "claude" as Agent["provider"],
     status: input.status ?? "idle",
-    activeTurn: null,
+    turn: { phase: "idle", cancellationRequestId: null },
     createdAt: new Date(0),
     updatedAt: new Date(1_000),
     lastUserMessageAt: null,

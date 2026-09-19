@@ -1,7 +1,30 @@
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
-export const fr: TranslationResources = {
+export const fr = {
+  paneFind: {
+    searchFailed:
+      "Impossible de rechercher dans cette conversation. Vérifiez la connexion à l’hôte et réessayez.",
+    searching: "Recherche…",
+    loading: "Chargement…",
+    failed: "Échec",
+    retry: "Réessayer",
+    chatPosition: "{{current}} sur {{total}} dans le message",
+
+    title: "Rechercher",
+    placeholder: "Rechercher dans le panneau",
+    close: "Fermer la recherche",
+    matches: "Résultats de recherche",
+    previous: "Résultat précédent",
+    next: "Résultat suivant",
+    toggleReplace: "Afficher le remplacement",
+    replaceWith: "Remplacer par",
+    replace: "Remplacer",
+    replaceAll: "Tout remplacer",
+    noMatches: "Aucun résultat",
+    position: "{{current}} sur {{total}}",
+    total: "{{total}} résultats",
+  },
   common: {
     back: "Dos",
     loading: "Chargement...",
@@ -13,6 +36,7 @@ export const fr: TranslationResources = {
       copy: "Copie",
       copyLine: "Copier la ligne",
       dismiss: "Rejeter",
+      reload: "Recharger",
       retry: "Réessayer",
       search: "Recherche",
       select: "Sélectionner",
@@ -156,7 +180,8 @@ export const fr: TranslationResources = {
       initialPromptRequired: "Une invite initiale est requise",
       alreadyLoading: "Déjà en cours de chargement",
       uploadFailed: "Failed to upload file",
-      noClipboardImage: "Aucune image dans le presse-papiers",
+      noClipboardImage:
+        "Aucune image dans le presse-papiers actuel. Essayez de coller depuis votre clavier.",
       pasteImageFailed: "Impossible de coller l’image",
       fileTooLarge: "{{fileName}} is too large (max {{size}})",
     },
@@ -211,6 +236,10 @@ export const fr: TranslationResources = {
     historyLoadFailed: "Impossible de charger l’historique de l’agent",
     messageCapped: "Ce message a été tronqué ({{bytes}} octets).",
     permission: {
+      rejectedPlan: "Plan refusé",
+      approvedPlan: "Plan approuvé",
+      canceledPlan: "Plan annulé",
+
       plan: "Plan",
       required: "Autorisation requise",
       deny: "Refuser",
@@ -224,7 +253,8 @@ export const fr: TranslationResources = {
     states: {
       notFound: "Agentintrouvable",
       failedToLoad: "Échec du chargement de l'agent",
-      reconnecting: "Reconnexion",
+      reconnecting: "Reconnexion à l’hôte",
+      updating: "Mise à jour des messages",
       timelineSyncFailed: "Impossible d’actualiser l’historique de l’agent.",
       timelineSyncRetrying: "Nouvelle tentative…",
       archivingTitle: "Fermeture de l'agent...",
@@ -294,6 +324,7 @@ export const fr: TranslationResources = {
       zoomIn: "Zoomer",
       zoomOut: "Dézoomer",
       resetZoom: "Réinitialiser la vue",
+      fullscreen: "Plein écran",
       viewSource: "Afficher la source",
       viewDiagram: "Afficher le diagramme",
     },
@@ -365,7 +396,13 @@ export const fr: TranslationResources = {
     },
   },
   importSession: {
+    chooseHostTitle: en.importSession.chooseHostTitle,
     title: "Session d'importation",
+    searchPlaceholder: "Rechercher des sessions...",
+    scope: {
+      host: "Sessions sur {{host}}",
+      workspace: "Cet espace de travail",
+    },
     filters: {
       all: "Tous",
     },
@@ -374,12 +411,13 @@ export const fr: TranslationResources = {
       updateHost: "Mettez à jour l'hôte pour importer des sessions.",
       noProviders: "Aucun fournisseur importable n'est activé.",
       loading: "Chargement des sessions récentes...",
-      failedAll: "Impossible de charger les sessions récentes.",
-      failedProviders: "Impossible de charger les sessions pour{{providers}}.",
+      failedProvider: "Impossible de charger les sessions {{provider}}",
       failedImport: "Impossible d'importer la session sélectionnée.",
     },
     actions: {
       refresh: "Sessions de rafraîchissement",
+      showAll: "Tout afficher",
+      loadMore: "Charger plus",
     },
     preview: {
       untitledSession: "Séance sans titre",
@@ -387,6 +425,7 @@ export const fr: TranslationResources = {
     },
     empty: {
       noRecent: "Aucune session récente à importer.",
+      noMatches: "Aucune session ne correspond à votre recherche.",
       alreadyImported: "Toutes les sessions récentes sont déjà importées.",
       noProviderSessions: "Aucune session{{provider}}trouvée.",
     },
@@ -501,14 +540,23 @@ export const fr: TranslationResources = {
         completed: "Configuration terminée",
         failed: "Échec de l'installation",
         workspace: "ConfigurationWorkspace",
+        blocked: "Configuration bloquée",
       },
       status: {
         running: "En cours d'exécution",
         completed: "Complété",
         failed: "Échoué",
         waiting: "En attente de la sortie de configuration",
+        blocked: "Bloqué",
       },
       waiting: "Configuration de l'espace de travail...",
+      blocked: {
+        title: "La configuration n’a pas été exécutée",
+        description:
+          "Cette PR provient de {{repository}}, un dépôt différent. Sa configuration et ses scripts pourraient exécuter du code que vous n’avez pas examiné.",
+        run: "Exécuter la configuration",
+        runFailed: "Échec de la configuration de l’espace de travail",
+      },
       empty: {
         noCommands: "Aucune commande de configuration n'a été exécutée pour cet espace de travail.",
       },
@@ -932,6 +980,9 @@ export const fr: TranslationResources = {
         openChangesTab: "Ouvrir l'onglet Modifications",
         openDiffTab: "Ouvrir l'onglet Diff",
         closeChangesTab: "Fermer l'onglet Modifications",
+        jumpToFile: {
+          title: "Aller au fichier",
+        },
         binaryFile: "Fichier binaire",
         tooLarge: "Diff trop grand pour être affiché",
         previewTooLargeTitle: "Ce diff est trop volumineux pour être prévisualisé",
@@ -954,11 +1005,8 @@ export const fr: TranslationResources = {
         refresh: "Rafraîchir",
         refreshState: "Actualiser l'état de git et de {{brand}}",
         failedRefresh: "Échec de l'actualisation de l'état git.",
-        emptyHiddenWhitespace: "Aucun changement visible après avoir masqué les espaces",
-        emptyUncommitted: "Aucune modification non validée",
         seeUncommittedChanges: "Voir les modifications non validées",
         seeCommittedChanges: "Voir les modifications validées",
-        emptyAgainstBase: "Aucun changement par rapport à{{baseRef}}",
         checkingRepository: "Vérification du référentiel...",
         notRepository: "Pas un dépôt git",
         diffMode: "Mode différentiel",
@@ -1113,6 +1161,16 @@ export const fr: TranslationResources = {
       updateHost: "Mettez à jour cet hôte pour gérer les étiquettes.",
     },
   },
+  changelog: {
+    title: "Nouveautés",
+    installed: "Installée",
+    showMore: "Afficher plus",
+    openWebsite: "Journal des modifications complet",
+    error: {
+      title: "Impossible de charger le journal des modifications",
+      description: "Vérifiez votre connexion et réessayez.",
+    },
+  },
   sidebar: {
     display: {
       trigger: "Préférences d'affichage",
@@ -1172,7 +1230,6 @@ export const fr: TranslationResources = {
       addProject: "Ajouter un projet",
       newWorkspace: "Nouvel espace de travail",
       hosts: "Hôtes",
-      home: "Maison",
       settings: "Paramètres",
       closeSidebar: "Fermer la barre latérale",
     },
@@ -1189,6 +1246,7 @@ export const fr: TranslationResources = {
     },
     sections: {
       sessions: "Historique",
+      search: "Rechercher",
       schedules: "Planifications",
     },
     worktreeSetup: {
@@ -1352,6 +1410,7 @@ export const fr: TranslationResources = {
       detail: "Arrêt du démon local.",
     },
     daemon: {
+      lifecycle: en.desktop.daemon.lifecycle,
       title: "Daemon",
       status: {
         title: "Statut",
@@ -2213,6 +2272,7 @@ export const fr: TranslationResources = {
     about: {
       title: "À propos",
       appVersion: "Version de l'application",
+      whatsNewHint: "Notes de version pour chaque release",
       thisDevice: "Cet appareil",
       connectedHosts: "Hôtes connectés",
       offline: "Hors ligne",
@@ -2264,6 +2324,12 @@ export const fr: TranslationResources = {
       paneStatusGlow: {
         title: "Halo de volet",
         description: "Colorer les volets d’agent selon l’état",
+      },
+      sidebar: {
+        title: "Barre latérale",
+        description: "Choisissez les éléments affichés en haut de la barre latérale et leur ordre",
+        moveUp: "Déplacer vers le haut",
+        moveDown: "Déplacer vers le bas",
       },
       fonts: {
         title: "Polices",
@@ -2814,4 +2880,4 @@ export const fr: TranslationResources = {
       },
     },
   },
-};
+} as TranslationResources;

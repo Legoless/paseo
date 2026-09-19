@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Agent, ProjectDescriptor, WorkspaceDescriptor } from "@/stores/session-store";
 import type { WorkspaceLayout } from "@/stores/workspace-layout-actions";
 import type { WorkspaceTab, WorkspaceTabTarget } from "@/workspace-tabs/model";
+import { TURN_LIVENESS_IDLE } from "@/timeline/turn-liveness";
 import {
   buildSidebarWorkspaceGroupModel,
   preserveSidebarWorkspaceGroupModelIdentity,
@@ -89,7 +90,7 @@ function agent(input: {
     id: input.id,
     provider: "claude" as Agent["provider"],
     status: input.status ?? "idle",
-    activeTurn: null,
+    turn: TURN_LIVENESS_IDLE,
     createdAt: new Date(0),
     updatedAt: new Date(1_000),
     lastUserMessageAt: null,

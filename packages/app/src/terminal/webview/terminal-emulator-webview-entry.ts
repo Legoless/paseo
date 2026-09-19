@@ -1,3 +1,4 @@
+import type { TerminalFindResult } from "../runtime/terminal-emulator-runtime";
 import type { ITheme } from "@xterm/xterm";
 import xtermCss from "@xterm/xterm/css/xterm.css";
 import type { TerminalState } from "@getpaseo/protocol/messages";
@@ -37,6 +38,9 @@ type InboundMessage =
   | { type: "renderSnapshot"; streamKey: string; state: TerminalState | null }
   | { type: "paste"; streamKey: string; text: string }
   | { type: "clear"; streamKey: string }
+  | { type: "find"; streamKey: string; query: string; direction?: "next" | "previous" }
+  | { type: "clearFind"; streamKey: string }
+  | { type: "findWidgetSize"; streamKey: string; size: { width: number; height: number } }
   | { type: "focus"; streamKey: string; forceRefocus?: boolean }
   | { type: "resize"; streamKey: string; forceClaim: boolean; shouldClaim?: boolean }
   | { type: "setTheme"; streamKey: string; theme: ITheme }
@@ -55,6 +59,8 @@ type OutboundMessage =
   | { type: "bridgeReady" }
   | { type: "rendererReady"; streamKey: string; isReady: boolean }
   | { type: "input"; streamKey: string; data: string }
+  | { type: "findRequest"; streamKey: string }
+  | { type: "findResult"; streamKey: string; result: TerminalFindResult }
   | {
       type: "resize";
       streamKey: string;
@@ -238,6 +244,18 @@ class TerminalWebViewBridge {
       this.resolveLocalFileLinkRequest(message.requestId, message.target);
       return;
     }
+    if (message.type === "findWidgetSize") {
+      this.runtime?.find.setWidgetSize(message.size);
+      return;
+    }
+    if (message.type === "find") {
+      this.runtime?.find.search(message.query, message.direction);
+      return;
+    }
+    if (message.type === "clearFind") {
+      this.runtime?.find.clear();
+      return;
+    }
     this.receiveMounted(message);
   }
 
@@ -315,6 +333,9 @@ class TerminalWebViewBridge {
     this.runtime = runtime;
     runtime.setCallbacks({
       callbacks: {
+        onFindRequest: () => sendToNative({ type: "findRequest", streamKey: message.streamKey }),
+        onFindResult: (result) =>
+          sendToNative({ type: "findResult", streamKey: message.streamKey, result }),
         onInput: (data) => sendToNative({ type: "input", streamKey: message.streamKey, data }),
         onResize: ({ rows, cols, shouldClaim, forceClaim }) =>
           sendToNative({

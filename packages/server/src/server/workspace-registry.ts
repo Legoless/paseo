@@ -6,6 +6,14 @@ import { z } from "zod";
 import { writeJsonFileAtomic } from "./atomic-file.js";
 import { areEquivalentPaths } from "../utils/path.js";
 import { generateProjectId, type PersistedProjectKind } from "./workspace-registry-model.js";
+import type { UntrustedWorkspaceSource } from "./workspace-automation-gate.js";
+
+const UntrustedWorkspaceSourceSchema = z.object({
+  kind: z.literal("change_request"),
+  forge: z.string(),
+  number: z.number().int().positive(),
+  headRepository: z.string(),
+});
 
 const PersistedProjectRecordSchema = z.object({
   projectId: z.string(),
@@ -47,6 +55,9 @@ export const PersistedWorkspaceMemberSchema = z.object({
     .optional()
     .transform((value) => value ?? null),
   worktreeRoot: z.string().nullable().default(null),
+  // Comparison base preserved across worktree deletion and restore. New branch-off
+  // workspaces store the resolved ref (e.g. refs/remotes/upstream/main); legacy and
+  // PR checkout records may contain a bare branch name. Ordinary checkouts use null.
   baseBranch: z
     .string()
     .nullable()
@@ -105,6 +116,7 @@ const PersistedWorkspaceRecordSchema = z.preprocess(
       .optional()
       .transform((value) => value ?? null),
     labels: z.array(z.string()).optional(),
+    untrustedSource: UntrustedWorkspaceSourceSchema.optional(),
   }),
 );
 
@@ -681,6 +693,7 @@ export function createPersistedWorkspaceRecord(input: {
   autoArchivedChangeRequestUrl?: string | null;
   pinnedAt?: string | null;
   labels?: string[];
+  untrustedSource?: UntrustedWorkspaceSource;
 }): PersistedWorkspaceRecord {
   return PersistedWorkspaceRecordSchema.parse({
     ...input,

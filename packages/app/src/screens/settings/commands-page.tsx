@@ -19,7 +19,7 @@ import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-
 import { useCustomCommandsStore } from "@/stores/custom-commands-store";
 import { settingsStyles } from "@/styles/settings";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import { SettingsSection } from "./settings-section";
+import { SettingsSection } from "@/components/settings";
 
 const EMPTY_COMMANDS: CustomCommand[] = [];
 

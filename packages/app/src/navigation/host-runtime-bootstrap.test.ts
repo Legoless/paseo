@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  bindHostRuntimeAppState,
   resolveStartupBlocker,
   resolveStartupNavigationReady,
   resolveHostIndexRoute,
   resolveStartupRoute,
   shouldRunStartupGiveUpTimer,
   startHostRuntimeBootstrap,
+  bindHostRuntimeAppState,
 } from "./host-runtime-bootstrap";
 import type { DaemonStartResult, StartDaemonIfEnabledInput } from "@/runtime/daemon-start-service";
 
@@ -406,8 +406,8 @@ describe("host runtime app lifecycle", () => {
         { setAppVisible: (visible) => visibility.push(visible) },
         {
           currentState,
-          addEventListener: (_event, nextListener) => {
-            listener = nextListener;
+          addEventListener: (_event, handler) => {
+            listener = handler;
             return {
               remove: () => {
                 subscribed = false;

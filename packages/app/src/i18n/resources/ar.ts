@@ -1,18 +1,40 @@
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
-export const ar: TranslationResources = {
+export const ar = {
+  paneFind: {
+    searchFailed: "تعذر البحث في هذه المحادثة. تحقق من الاتصال بالمضيف وأعد المحاولة.",
+    searching: "جارٍ البحث…",
+    loading: "جارٍ التحميل…",
+    failed: "فشل",
+    retry: "إعادة المحاولة",
+    chatPosition: "{{current}} من {{total}} في الرسالة",
+
+    title: "بحث",
+    placeholder: "بحث في اللوحة",
+    close: "إغلاق البحث",
+    matches: "نتائج البحث",
+    previous: "التطابق السابق",
+    next: "التطابق التالي",
+    toggleReplace: "إظهار الاستبدال",
+    replaceWith: "استبدال بـ",
+    replace: "استبدال",
+    replaceAll: "استبدال الكل",
+    noMatches: "لا توجد تطابقات",
+    position: "{{current}} من {{total}}",
+    total: "{{total}} تطابقات",
+  },
   common: {
     back: "خلف",
     loading: "تحميل...",
     actions: {
       back: "خلف",
       cancel: "يلغي",
-      confirm: "تأكيد",
       close: "يغلق",
       copy: "ينسخ",
       copyLine: "نسخ السطر",
       dismiss: "رفض",
+      reload: "إعادة التحميل",
       retry: "أعد المحاولة",
       search: "يبحث",
       select: "يختار",
@@ -154,13 +176,13 @@ export const ar: TranslationResources = {
       initialPromptRequired: "مطلوب موجه الأولي",
       alreadyLoading: "جارٍ التحميل بالفعل",
       uploadFailed: "Failed to upload file",
-      noClipboardImage: "لا توجد صورة في الحافظة",
+      noClipboardImage: "لا توجد صورة في الحافظة الحالية. جرّب اللصق من لوحة المفاتيح.",
       pasteImageFailed: "تعذر لصق الصورة",
       fileTooLarge: "{{fileName}} is too large (max {{size}})",
     },
     clientCommands: {
-      archiveAgent: "إغلاق الوكيل الحالي",
-      freshDraft: "إغلاق هذا الوكيل وبدء مسودة جديدة",
+      archiveAgent: "أرشفة الوكيل الحالي",
+      freshDraft: "أرشفة هذا الوكيل وابدأ مسودة جديدة",
     },
     github: {
       searching: "جارٍ البحث...",
@@ -209,6 +231,10 @@ export const ar: TranslationResources = {
     historyLoadFailed: "تعذر تحميل سجل الوكيل",
     messageCapped: "تم اقتطاع هذه الرسالة ({{bytes}} بايت).",
     permission: {
+      rejectedPlan: "خطة مرفوضة",
+      approvedPlan: "خطة معتمدة",
+      canceledPlan: "خطة ملغاة",
+
       plan: "يخطط",
       required: "الإذن مطلوب",
       deny: "ينكر",
@@ -222,11 +248,12 @@ export const ar: TranslationResources = {
     states: {
       notFound: "لم يتم العثور على Agent",
       failedToLoad: "فشل تحميل الوكيل",
-      reconnecting: "جارٍ إعادة الاتصال",
+      reconnecting: "جارٍ إعادة الاتصال بالمضيف",
+      updating: "جارٍ تحديث الرسائل",
       timelineSyncFailed: "تعذر تحديث سجل الوكيل.",
       timelineSyncRetrying: "جارٍ إعادة المحاولة…",
-      archivingTitle: "جارٍ إغلاق الوكيل...",
-      archivingSubtitle: "الرجاء الانتظار بينما نقوم بإغلاق هذا الوكيل.",
+      archivingTitle: "وكيل الارشيف...",
+      archivingSubtitle: "الرجاء الانتظار بينما نقوم بأرشفة هذا الوكيل.",
     },
     unavailable: {
       selectedHost: "المضيف المختار",
@@ -240,17 +267,17 @@ export const ar: TranslationResources = {
       showAgainWhenReachable: "سنعرض هذا الوكيل مرة أخرى بمجرد الوصول إلى المضيف.",
     },
     archived: {
-      callout: "تم إغلاق هذا الوكيل",
-      unarchive: "إعادة الفتح",
+      callout: "تمت أرشفة هذا الوكيل",
+      unarchive: "إلغاء الأرشفة",
     },
   },
   sessions: {
     title: "السجل",
     empty: "لا توجد جلسات بعد",
     noMatches: "لا توجد جلسات مطابقة",
-    tooManyMatches: "تطابقات كثيرة جدًا — ضيّق نطاق البحث",
+    tooManyMatches: "نتائج كثيرة جدًا — ضيّق نطاق البحث",
     hostLoadFailed: "{{host}}: تعذر تحميل السجل",
-    searchPlaceholder: "بحث في الجلسات...",
+    searchPlaceholder: "البحث في السجل",
     actions: {
       loadMore: "تحميل المزيد",
       clearSearch: "مسح البحث",
@@ -259,12 +286,12 @@ export const ar: TranslationResources = {
   agentList: {
     fallbackTitle: "جلسة جديدة",
     dateSections: {
-      recent: "الأخيرة",
+      recent: "مؤخرًا",
       today: "اليوم",
       yesterday: "أمس",
-      thisWeek: "هذا الأسبوع",
+      thisWeek: "هذا الاسبوع",
       thisMonth: "هذا الشهر",
-      older: "الأقدم",
+      older: "أقدم",
     },
     status: {
       initializing: "البدء",
@@ -274,14 +301,14 @@ export const ar: TranslationResources = {
       closed: "مغلق",
     },
     badges: {
-      archived: "مغلق",
+      archived: "مؤرشف",
       pending: "{{count}}معلق",
       attention: "انتباه",
     },
     archiveSheet: {
       hostOffline: "Host غير متصل",
-      runningAgent: "هذا الوكيل لا يزال قيد التشغيل. سيؤدي إغلاقه إلى إيقاف الوكيل.",
-      archive: "إغلاق",
+      runningAgent: "هذا الوكيل لا يزال قيد التشغيل. ستؤدي أرشفته إلى إيقاف الوكيل.",
+      archive: "أرشيف",
     },
   },
   message: {
@@ -290,6 +317,7 @@ export const ar: TranslationResources = {
       zoomIn: "تكبير",
       zoomOut: "تصغير",
       resetZoom: "إعادة تعيين العرض",
+      fullscreen: "ملء الشاشة",
       viewSource: "عرض المصدر",
       viewDiagram: "عرض المخطط",
     },
@@ -361,7 +389,13 @@ export const ar: TranslationResources = {
     },
   },
   importSession: {
+    chooseHostTitle: en.importSession.chooseHostTitle,
     title: "جلسة الاستيراد",
+    searchPlaceholder: "البحث في الجلسات...",
+    scope: {
+      host: "الجلسات على {{host}}",
+      workspace: "مساحة العمل هذه",
+    },
     filters: {
       all: "الجميع",
     },
@@ -370,12 +404,13 @@ export const ar: TranslationResources = {
       updateHost: "قم بتحديث المضيف لاستيراد الجلسات.",
       noProviders: "لم يتم تمكين أي موفري خدمات قابلين للاستيراد.",
       loading: "جارٍ تحميل الجلسات الأخيرة...",
-      failedAll: "تعذر تحميل الجلسات الأخيرة.",
-      failedProviders: "تعذر تحميل جلسات العمل لـ{{providers}}.",
+      failedProvider: "تعذر تحميل جلسات {{provider}}",
       failedImport: "تعذر استيراد الجلسة المحددة.",
     },
     actions: {
       refresh: "تحديث الجلسات",
+      showAll: "عرض الكل",
+      loadMore: "تحميل المزيد",
     },
     preview: {
       untitledSession: "جلسة بلا عنوان",
@@ -383,6 +418,7 @@ export const ar: TranslationResources = {
     },
     empty: {
       noRecent: "لا توجد جلسات حديثة لاستيرادها.",
+      noMatches: "لا توجد جلسات تطابق بحثك.",
       alreadyImported: "تم بالفعل استيراد كافة الجلسات الأخيرة.",
       noProviderSessions: "لم يتم العثور على جلسات{{provider}}.",
     },
@@ -400,12 +436,12 @@ export const ar: TranslationResources = {
       needsHostUpgrade: "قم بتحديث مضيفك لاستعادة مساحة العمل هذه",
       manageHost: "إدارة المضيف",
       recovery: {
-        archivedTitle: "تم إغلاق مساحة العمل",
+        archivedTitle: "مساحة العمل مؤرشفة",
         restoreDescription:
-          "تم إغلاق {{workspaceName}} وإزالة شجرة العمل الخاصة بها. استعد الفرع {{branch}} لفتحها مجددًا.",
-        unarchiveDescription: "{{workspaceName}} مغلقة. أعد فتحها للمتابعة.",
+          "تمت أرشفة {{workspaceName}} وإزالة شجرة العمل الخاصة بها. استعد الفرع {{branch}} لفتحها مجددًا.",
+        unarchiveDescription: "{{workspaceName}} مؤرشفة. ألغِ أرشفتها لفتحها مجددًا.",
         restoreAction: "استعادة",
-        unarchiveAction: "إعادة الفتح",
+        unarchiveAction: "إلغاء الأرشفة",
         restoringTitle: "جارٍ استعادة مساحة العمل",
         restoringAction: "جارٍ الاستعادة...",
         unavailableTitle: "مساحة العمل غير متاحة",
@@ -414,8 +450,6 @@ export const ar: TranslationResources = {
     },
     hoverCard: {
       scriptsAccessibility: "البرامج النصية Workspace",
-      openTabs: "علامات التبويب المفتوحة: {{count}}",
-      projects: "المشاريع: {{count}}",
       copyPath: "نسخ المسار",
       copyBranchName: "نسخ اسم الفرع",
       copied: "تم النسخ",
@@ -497,14 +531,23 @@ export const ar: TranslationResources = {
         completed: "اكتمل الإعداد",
         failed: "فشل الإعداد",
         workspace: "إعداد Workspace",
+        blocked: "تم حظر الإعداد",
       },
       status: {
         running: "جري",
         completed: "مكتمل",
         failed: "فشل",
         waiting: "في انتظار إخراج الإعداد",
+        blocked: "محظور",
       },
       waiting: "جارٍ إعداد مساحة العمل...",
+      blocked: {
+        title: "لم يتم تشغيل الإعداد",
+        description:
+          "يأتي طلب السحب هذا من {{repository}}، وهو مستودع مختلف. قد يشغّل الإعداد والبرامج النصية تعليمات برمجية لم تراجعها.",
+        run: "تشغيل الإعداد",
+        runFailed: "فشل تشغيل إعداد مساحة العمل",
+      },
       empty: {
         noCommands: "لم يتم تشغيل أي أوامر إعداد لمساحة العمل هذه.",
       },
@@ -559,9 +602,6 @@ export const ar: TranslationResources = {
       hostDisconnected: "Host غير متصل",
       updateHost: "حدّث المضيف لاستخدام عارض الطرفية الأصلي.",
       unableToSubscribe: "غير قادر على الاشتراك في المحطة",
-      rendererStopped: "توقف عارض الطرفية",
-      rendererStoppedDescription: "أعد التحميل لاستعادة هذه الطرفية. لن تتأثر علامات التبويب الأخرى.",
-      reload: "إعادة تحميل الطرفية",
     },
     tabs: {
       loading: "تحميل...",
@@ -599,7 +639,6 @@ export const ar: TranslationResources = {
         close: "يغلق",
         renameTerminal: "إعادة تسمية المحطة",
         renameAgent: "إعادة تسمية الوكيل",
-        renameTab: "إعادة تسمية علامة التبويب",
       },
       actions: {
         newTab: "علامة تبويب جديدة",
@@ -627,17 +666,6 @@ export const ar: TranslationResources = {
         changes: "التغييرات",
         files: "ملفات",
       },
-      projectSelector: {
-        label: "المشروع",
-        selectProject: "اختر مشروعًا",
-        searchPlaceholder: "البحث في المشاريع",
-        empty: "لا توجد مشاريع متاحة.",
-        leaveProject: "العمل خارج أي مشروع",
-        noProject: "بدون مشروع",
-      },
-      projectPicker: {
-        selectProject: "اختيار المشروع",
-      },
       toasts: {
         copyFailed: "فشل النسخ",
         agentIdCopiedLabel: "AgentID",
@@ -661,33 +689,27 @@ export const ar: TranslationResources = {
           "تحتوي {{count}} علامة تبويب على تغييرات غير محفوظة. سيؤدي الإغلاق إلى تجاهل المسودات.",
         close: "يغلق",
         cancel: "يلغي",
-        archive: "إغلاق",
+        archive: "أرشيف",
         closeTerminalTitle: "إغلاق المحطة؟",
         closeTerminalMessage: "سيتم إيقاف أي عملية جارية في هذه المحطة على الفور.",
-        switchProjectTitle: "تغيير المشروع؟",
-        switchProjectMessage:
-          "سيتم تجاهل محادثة هذا الوكيل وبدء محادثة جديدة في المشروع الذي تختاره.",
-        switchProjectTerminalMessage:
-          "سيتم استبدال هذه الطرفية بأخرى جديدة في المشروع الذي تختاره. سيتم إيقاف أي عملية قيد التشغيل.",
-        switchProject: "تغيير",
-        archiveRunningAgentTitle: "هل تريد إغلاق الوكيل قيد التشغيل؟",
+        archiveRunningAgentTitle: "وكيل تشغيل الأرشيف؟",
         archiveRunningAgentMessage:
-          "هذا الوكيل لا يزال قيد التشغيل. سيؤدي إغلاقه إلى إيقاف الوكيل وإغلاق علامة التبويب.",
+          "هذا الوكيل لا يزال قيد التشغيل. ستؤدي أرشفته إلى إيقاف الوكيل وإغلاق علامة التبويب.",
         closeTabsLeftTitle: "هل تريد إغلاق علامات التبويب على اليسار؟",
         closeTabsRightTitle: "هل تريد إغلاق علامات التبويب على اليمين؟",
         closeOtherTabsTitle: "هل تريد إغلاق علامات التبويب الأخرى؟",
         bulk: {
-          all: "سيؤدي هذا إلى إغلاق وكيل (وكلاء){{agents}}، وإغلاق محطة (محطات){{terminals}}، وإغلاق علامة (علامات) تبويب{{tabs}}. سيتم إيقاف أي عملية جارية في محطة مغلقة على الفور.",
+          all: "سيؤدي هذا إلى أرشفة وكيل (وكلاء){{agents}}، وإغلاق محطة (محطات){{terminals}}، وإغلاق علامة (علامات) تبويب{{tabs}}. سيتم إيقاف أي عملية جارية في محطة مغلقة على الفور.",
           agentsAndTerminals:
-            "سيؤدي هذا إلى إغلاق وكيل (وكلاء){{agents}}وإغلاق محطة (محطات){{terminals}}. سيتم إيقاف أي عملية جارية في محطة مغلقة على الفور.",
+            "سيؤدي هذا إلى أرشفة وكيل (وكلاء){{agents}}وإغلاق محطة (محطات){{terminals}}. سيتم إيقاف أي عملية جارية في محطة مغلقة على الفور.",
           terminalsAndTabs:
             "سيؤدي هذا إلى إغلاق محطة (محطات){{terminals}}وإغلاق علامة تبويب (علامات تبويب){{tabs}}. سيتم إيقاف أي عملية جارية في محطة مغلقة على الفور.",
           agentsAndTabs:
-            "سيؤدي هذا إلى إغلاق وكيل (وكلاء){{agents}}وإغلاق علامة (علامات) تبويب{{tabs}}.",
+            "سيؤدي هذا إلى أرشفة وكيل (وكلاء){{agents}}وإغلاق علامة (علامات) تبويب{{tabs}}.",
           terminals:
             "سيؤدي هذا إلى إغلاق محطة (محطات){{terminals}}. سيتم إيقاف أي عملية جارية في محطة مغلقة على الفور.",
           tabs: "سيؤدي هذا إلى إغلاق علامة التبويب (علامات التبويب){{tabs}}.",
-          agents: "سيؤدي هذا إلى إغلاق وكيل (وكلاء){{agents}}.",
+          agents: "سيؤدي هذا إلى أرشفة وكيل (وكلاء){{agents}}.",
         },
       },
     },
@@ -743,22 +765,6 @@ export const ar: TranslationResources = {
         stopFailed: "فشل إيقاف{{scriptName}}",
       },
     },
-    commands: {
-      title: "الأوامر",
-      groups: {
-        project: "المشروع",
-        global: "عام",
-      },
-      accessibility: {
-        trigger: "أوامر مساحة العمل",
-      },
-      shortcutTaken: "الاختصار مستخدم",
-      errors: {
-        noAgentTarget: "لا توجد علامة تبويب محادثة لتشغيل هذا الأمر فيها",
-        noTerminalTarget: "لا توجد علامة تبويب طرفية لتشغيل هذا الأمر فيها",
-        sendFailed: "فشل إرسال الأمر",
-      },
-    },
     tree: {
       showFolderTree: "إظهار شجرة المجلدات",
       hideFolderTree: "إخفاء شجرة المجلدات",
@@ -807,9 +813,9 @@ export const ar: TranslationResources = {
           success: "تم التحديث",
         },
         archive: {
-          label: "إغلاق مساحة العمل",
-          pending: "جارٍ الإغلاق...",
-          success: "مغلقة",
+          label: "أرشفة مساحة العمل",
+          pending: "أرشفة...",
+          success: "مؤرشف",
         },
         mergePr: {
           squash: "دمج PR (squash)",
@@ -858,7 +864,8 @@ export const ar: TranslationResources = {
           updateDirty: "التحديث غير متاح أثناء وجود تغييرات محلية، لذا قم بتنفيذها أو تخزينها أولاً",
           updateCurrent: "التحديث غير متاح لأن هذا الفرع محدث بالفعل باستخدام{{baseRef}}",
           mergePrNoGithub: "دمج PR غير متاح الآن لأن GitHub غير متصل",
-          archiveNotWorktree: "الإغلاق غير متاح هنا لأنه لم يتم إنشاء مساحة العمل هذه كشجرة عمل Paseo",
+          archiveNotWorktree:
+            "الأرشيف غير متاح هنا لأنه لم يتم إنشاء مساحة العمل هذه كشجرة عمل Paseo",
           mergePrNoForge: "دمج {{noun}} غير متاح الآن لأن {{brand}} غير متصل",
           mergePrMissing: "دمج PR غير متاح لأنه لا يوجد طلب سحب حتى الآن",
           mergePrDraft: "دمج PR غير متاح لأن طلب السحب لا يزال مسودة",
@@ -883,8 +890,8 @@ export const ar: TranslationResources = {
           failedMergeFromBase: "فشل الدمج من القاعدة",
         },
         archiveWarning: {
-          title: 'هل تريد إغلاق "{{workspaceName}}"؟',
-          confirm: "إغلاق",
+          title: 'الأرشيف "{{workspaceName}}"؟',
+          confirm: "أرشيف",
           cancel: "يلغي",
           uncommittedChanges: "تغييرات غير ملتزم بها",
           uncommittedChangesWithDiff: "التغييرات غير الملتزم بها ({{diffStat}})",
@@ -900,6 +907,9 @@ export const ar: TranslationResources = {
         openChangesTab: "فتح علامة تبويب التغييرات",
         openDiffTab: "فتح علامة تبويب الفرق",
         closeChangesTab: "إغلاق علامة تبويب التغييرات",
+        jumpToFile: {
+          title: "الانتقال إلى ملف",
+        },
         binaryFile: "ملف ثنائي",
         tooLarge: "الفرق كبير جدًا بحيث لا يمكن عرضه",
         previewTooLargeTitle: "هذا الفرق كبير جدًا بحيث لا يمكن معاينته",
@@ -922,11 +932,8 @@ export const ar: TranslationResources = {
         refresh: "ينعش",
         refreshState: "تحديث حالة git و{{brand}}",
         failedRefresh: "فشل تحديث حالة git.",
-        emptyHiddenWhitespace: "لا توجد تغييرات مرئية بعد إخفاء المسافة البيضاء",
-        emptyUncommitted: "لا توجد تغييرات غير ملتزم بها",
         seeUncommittedChanges: "عرض التغييرات غير الملتزم بها",
         seeCommittedChanges: "عرض التغييرات الملتزم بها",
-        emptyAgainstBase: "لا توجد تغييرات مقابل{{baseRef}}",
         checkingRepository: "فحص المستودع...",
         notRepository: "ليس مستودع جيت",
         diffMode: "وضع الفرق",
@@ -1024,16 +1031,6 @@ export const ar: TranslationResources = {
       },
     },
   },
-  paneLayouts: {
-    title: "تخطيط الأجزاء",
-    builtIn: {
-      single: "جزء واحد",
-      twoColumns: "عمودان",
-      twoRows: "صفان",
-      grid: "شبكة {{rows}} × {{columns}}",
-    },
-    updateHost: "حدّث هذا المضيف لاستخدام تخطيطات أجزاء مخصصة",
-  },
   workspaceLabels: {
     title: "التسميات",
     unlabelled: "بلا تسمية",
@@ -1072,10 +1069,18 @@ export const ar: TranslationResources = {
       deleteTitle: "حذف {{name}}؟",
       deleteMessage_one: "سيؤدي هذا إلى إزالة التسمية من {{count}} مساحة عمل على هذا المضيف.",
       deleteMessage_other: "سيؤدي هذا إلى إزالة التسمية من {{count}} مساحات عمل على هذا المضيف.",
-      deleteAgentMessage_one: "سيؤدي أيضًا إلى إزالة التسمية من {{count}} وكيل.",
-      deleteAgentMessage_other: "سيؤدي أيضًا إلى إزالة التسمية من {{count}} وكلاء.",
       offline: "هذا المضيف غير متصل.",
       updateHost: "حدّث هذا المضيف لإدارة التسميات.",
+    },
+  },
+  changelog: {
+    title: "ما الجديد",
+    installed: "مثبّت",
+    showMore: "عرض المزيد",
+    openWebsite: "سجل التغييرات الكامل",
+    error: {
+      title: "تعذّر تحميل سجل التغييرات",
+      description: "تحقق من اتصالك وحاول مرة أخرى.",
     },
   },
   sidebar: {
@@ -1136,7 +1141,6 @@ export const ar: TranslationResources = {
       addProject: "إضافة مشروع",
       newWorkspace: "مساحة عمل جديدة",
       hosts: "المضيفون",
-      home: "بيت",
       settings: "إعدادات",
       closeSidebar: "إغلاق الشريط الجانبي",
     },
@@ -1153,6 +1157,7 @@ export const ar: TranslationResources = {
     },
     sections: {
       sessions: "السجل",
+      search: "بحث",
       schedules: "الجداول",
     },
     worktreeSetup: {
@@ -1169,23 +1174,20 @@ export const ar: TranslationResources = {
         openNewWindowFailed: "Couldn't open a new window",
         openFolder: "Open in file manager",
         openFolderFailed: "Couldn't open folder",
-        remove: "إغلاق المشروع",
-        removeFromWorkspace: "إغلاق المشروع",
-        moveToWorkspace: "نقل إلى مساحة عمل",
-        noOtherWorkspaces: "لا توجد مساحات عمل أخرى",
-        removing: "جارٍ الإغلاق...",
+        remove: "إزالة المشروع",
+        removing: "جارٍ الإزالة...",
       },
       confirmations: {
-        removeTitle: "هل تريد إغلاق المشروع؟",
+        removeTitle: "هل تريد إزالة المشروع؟",
         removeMessage:
-          'هل تريد إغلاق "{{projectName}}"؟\n\nلن يتم تغيير الملفات الموجودة على القرص.',
-        removeConfirm: "إغلاق",
+          'هل تريد إزالة "{{projectName}}" من الشريط الجانبي؟\n\n لن يتم تغيير الملفات الموجودة على القرص.',
+        removeConfirm: "يزيل",
         cancel: "يلغي",
       },
       toasts: {
         hostDisconnected: "Host غير متصل",
         removeFailed: "فشل في إزالة بعض مساحات العمل",
-        updateHostToRemove: "قم بتحديث Host لإغلاق المشاريع.",
+        updateHostToRemove: "قم بتحديث Host لإزالة المشاريع.",
       },
       empty: {
         title: "لا توجد مشاريع حتى الآن",
@@ -1215,14 +1217,12 @@ export const ar: TranslationResources = {
         copyPath: "نسخ المسار",
         copyBranchName: "انسخ اسم الفرع",
         rename: "إعادة تسمية مساحة العمل",
-        markAsRead: "تعيين كمقروء",
-        markAsUnread: "تعيين كغير مقروء",
         pin: "تثبيت في الأعلى",
         unpin: "إلغاء التثبيت",
-        archive: "إغلاق",
-        archiveWorkspace: "إغلاق مساحة العمل",
+        archive: "أرشيف",
+        archiveWorkspace: "أرشفة مساحة العمل",
         hideFromSidebar: "إخفاء من الشريط الجانبي",
-        archiving: "جارٍ الإغلاق...",
+        archiving: "أرشفة...",
         hiding: "إخفاء...",
       },
       confirmations: {
@@ -1243,19 +1243,7 @@ export const ar: TranslationResources = {
         branchNameCopied: "تم نسخ اسم الفرع",
         hostDisconnected: "Host غير متصل",
         hideFailed: "فشل في إخفاء مساحة العمل",
-        archiveFailed: "فشل في إغلاق مساحة العمل",
-      },
-      uncategorized: "غير مصنّف",
-    },
-    agent: {
-      actions: {
-        menu: "إجراءات الوكيل",
-        open: "فتح الوكيل",
-        archive: "إغلاق الوكيل",
-      },
-      confirmations: {
-        archiveTitle: "هل تريد إغلاق الوكيل؟",
-        archiveMessage: "سيتم إغلاق هذا الوكيل.",
+        archiveFailed: "فشل في أرشفة مساحة العمل",
       },
     },
   },
@@ -1316,6 +1304,7 @@ export const ar: TranslationResources = {
       detail: "إيقاف البرنامج الخفي المحلي.",
     },
     daemon: {
+      lifecycle: en.desktop.daemon.lifecycle,
       title: "Daemon",
       status: {
         title: "حالة",
@@ -1478,17 +1467,9 @@ export const ar: TranslationResources = {
   },
   openProject: {
     tiles: {
-      addAgent: {
-        title: "وكيل جديد",
-        description: "صف مهمة واختر مشروعًا",
-      },
       addProject: {
         title: "أضف مشروعًا",
         description: "افتح مجلدًا على جهازك",
-      },
-      newWorkspace: {
-        title: "مساحة عمل جديدة",
-        description: "ابدأ فارغًا وأضف المشاريع لاحقًا",
       },
       importSession: {
         title: "جلسة الاستيراد",
@@ -1819,14 +1800,10 @@ export const ar: TranslationResources = {
     pillLabelReadyToReview: "{{count}} جاهزة للمراجعة",
     detachAction: "فصل {{label}}",
     detachTooltip: "فصل الوكيل الفرعي",
-    archiveAction: "إغلاق {{label}}",
-    archiveTooltip: "إغلاق الوكيل الفرعي",
-    archiveFinishedAction: "إغلاق الوكلاء الفرعيين المكتملين",
+    archiveAction: "أرشيف{{label}}",
+    archiveTooltip: "أرشفة الوكيل الفرعي",
+    archiveFinishedAction: "أرشفة الوكلاء الفرعيين المكتملين",
     archiveFinishedRetry: "إعادة المحاولة ({{failed}}/{{total}})",
-    stopAction: "إيقاف العميل الفرعي",
-    stopTooltip: "أوقف هذا العميل الفرعي وليس العميل الأصلي",
-    stopFailed: "تعذّر إيقاف العميل الفرعي: {{reason}}",
-    stopAlreadyFinished: "كان هذا العميل الفرعي قد انتهى بالفعل.",
   },
   panels: {
     draft: {
@@ -1950,27 +1927,6 @@ export const ar: TranslationResources = {
     },
   },
   settings: {
-    commands: {
-      manage: "إدارة الأوامر…",
-      add: "إضافة أمر",
-      edit: "تعديل الأمر",
-      editAction: "تعديل",
-      save: "حفظ",
-      delete: "حذف",
-      name: "الاسم",
-      text: "نص الأمر",
-      target: "إرسال إلى",
-      agent: "الوكيل",
-      terminal: "الطرفية",
-      submit: "إرسال فورًا",
-      shortcut: "اختصار لوحة المفاتيح (اختياري)",
-      invalidShortcut: "أدخل اختصارًا مثل Cmd+Shift+R",
-      deleteTitle: "حذف {{name}}؟",
-      deleteMessage: "ستتم إزالة هذا الأمر من هذا المضيف.",
-      updateHost: "حدّث هذا المضيف لتعديل الأوامر",
-      loadError: "تعذر تحميل الأوامر",
-      empty: "لا توجد أوامر بعد. أضف أمرًا لاستخدامه في مشاريع هذا المضيف.",
-    },
     title: "إعدادات",
     loading: "جارٍ تحميل الإعدادات...",
     groups: {
@@ -2129,11 +2085,6 @@ export const ar: TranslationResources = {
         description: "استخدام طرفية WebView السابقة بعد إعادة فتح الطرفية",
         accessibilityLabel: "استخدام عارض الطرفية السابق",
       },
-      isolatedTerminalRenderer: {
-        label: "عزل عارض الطرفية",
-        description: "عرض كل طرفية في عملية منفصلة (سطح المكتب فقط)",
-        accessibilityLabel: "عزل عارض الطرفية",
-      },
       testAudio: "اختبار الصوت",
       playTest: "لعب الاختبار",
       playing: "جارٍ اللعب...",
@@ -2158,6 +2109,7 @@ export const ar: TranslationResources = {
     about: {
       title: "عن",
       appVersion: "نسخة التطبيق",
+      whatsNewHint: "ملاحظات الإصدار لكل نسخة",
       thisDevice: "هذا الجهاز",
       connectedHosts: "المضيفين المتصلين",
       offline: "غير متصل",
@@ -2208,6 +2160,12 @@ export const ar: TranslationResources = {
       paneStatusGlow: {
         title: "توهج اللوحة",
         description: "تلوين لوحات الوكيل حسب الحالة",
+      },
+      sidebar: {
+        title: "الشريط الجانبي",
+        description: "اختر العناصر التي تظهر أعلى الشريط الجانبي وترتيبها",
+        moveUp: "نقل لأعلى",
+        moveDown: "نقل لأسفل",
       },
       fonts: {
         title: "الخطوط",
@@ -2261,13 +2219,12 @@ export const ar: TranslationResources = {
         tabsPanes: "علامات التبويب والأجزاء",
         layout: "التخطيط",
         agentInput: "إدخال Agent",
-        commands: "الأوامر",
       },
       help: {
         openProject: "مشروع مفتوح",
         newWorkspace: "مساحة عمل جديدة",
         newWorktree: "شجرة عمل جديدة",
-        archiveWorkspace: "إغلاق مساحة العمل",
+        archiveWorkspace: "أرشفة مساحة العمل",
         newTab: "علامة تبويب جديدة",
         closeCurrentTab: "إغلاق علامة التبويب الحالية",
         jumpToWorkspace: "انتقل إلى مساحة العمل",
@@ -2745,4 +2702,4 @@ export const ar: TranslationResources = {
       },
     },
   },
-};
+} as TranslationResources;

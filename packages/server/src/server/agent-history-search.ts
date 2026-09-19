@@ -186,3 +186,12 @@ export function rankAgentHistoryCandidates<T extends AgentHistorySearchCandidate
   });
   return ranked;
 }
+
+/** True when every query token matches a searchable field, or the query is empty. */
+export function matchesAgentHistoryQuery(
+  query: string,
+  candidate: AgentHistorySearchCandidate,
+): boolean {
+  if (tokenizeQuery(query).length === 0) return true;
+  return scoreAgentHistoryCandidate(query, candidate) !== null;
+}

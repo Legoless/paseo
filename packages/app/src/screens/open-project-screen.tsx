@@ -1,11 +1,12 @@
 import { useEffect } from "react";
-import { View } from "react-native";
+import { View, Text } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { PaseoLogo } from "@/components/icons/paseo-logo";
 import { CommunityLinks } from "@/components/community-links";
 import { HomeTiles } from "@/components/home-tiles";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { usePanelStore } from "@/stores/panel-store";
+import { useHosts, useHostRuntimeLastError } from "@/runtime/host-runtime";
 import {
   useIsCompactFormFactor,
   HEADER_INNER_HEIGHT,
@@ -15,6 +16,7 @@ import {
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 
 export function OpenProjectScreen() {
+  const hosts = useHosts();
   const openDesktopAgentList = usePanelStore((s) => s.openDesktopAgentList);
   const isCompactLayout = useIsCompactFormFactor();
 
@@ -32,6 +34,9 @@ export function OpenProjectScreen() {
         <View style={styles.logo}>
           <PaseoLogo size={52} />
         </View>
+        {hosts.map((host) => (
+          <HostError key={host.serverId} serverId={host.serverId} label={host.label} />
+        ))}
         <HomeTiles />
       </View>
       <View style={styles.communityRow}>
@@ -39,6 +44,15 @@ export function OpenProjectScreen() {
       </View>
     </View>
   );
+}
+
+function HostError({ serverId, label }: { serverId: string; label: string }) {
+  const error = useHostRuntimeLastError(serverId);
+  return error ? (
+    <Text accessibilityRole="alert" style={styles.hostError}>
+      {label}: {error}
+    </Text>
+  ) : null;
 }
 
 const styles = StyleSheet.create((theme) => ({
@@ -62,6 +76,12 @@ const styles = StyleSheet.create((theme) => ({
   },
   logo: {
     marginBottom: theme.spacing[8],
+  },
+  hostError: {
+    color: theme.colors.destructive,
+    fontSize: theme.fontSize.base,
+    maxWidth: 452,
+    textAlign: "center",
   },
   communityRow: {
     position: "absolute",

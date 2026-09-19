@@ -1,3 +1,4 @@
+import { describeHookWorkspace } from "./plugins/lifecycle/index.js";
 import express from "express";
 import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "http";
 import { constants, existsSync, unlinkSync } from "fs";
@@ -79,12 +80,12 @@ export function parseListenString(listen: string): ListenTarget {
   throw new Error(`Invalid listen string: ${listen}`);
 }
 
-function formatListenTarget(listenTarget: ListenTarget | null): string | null {
+export function formatListenTarget(listenTarget: ListenTarget | null): string | null {
   if (!listenTarget) {
     return null;
   }
   if (listenTarget.type === "tcp") {
-    return `${listenTarget.host}:${listenTarget.port}`;
+    return `${formatHostForHttpUrl(listenTarget.host)}:${listenTarget.port}`;
   }
   return listenTarget.path;
 }
@@ -119,8 +120,6 @@ export async function fanOutReconciledWorkspaceUpdates(input: {
 import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
 import { WorkspaceSetupRuntime } from "./workspace-setup-runtime.js";
 import { createWorkspaceLabelService } from "./workspace-labels/index.js";
-import { loadPaneLayouts } from "./workspace-layouts.js";
-import { loadCustomCommands } from "./custom-commands.js";
 import { createGitHubService } from "../services/github-service.js";
 import { createPaseoWorktree as createRegisteredPaseoWorktree } from "./paseo-worktree-service.js";
 import { createWorkspaceProvisioningService } from "./session/workspace-provisioning/workspace-provisioning-service.js";
@@ -142,17 +141,18 @@ import type { PaseoToolRuntimeContext } from "./agent/tools/types.js";
 import { createAgentProviderRuntime } from "./agent/provider-runtime.js";
 import { bootstrapWorkspaceRegistries } from "./workspace-registry-bootstrap.js";
 import { WorkspaceReconciliationService } from "./workspace-reconciliation-service.js";
-import { workspaceMembers } from "./workspace-registry-model.js";
 import {
   FileBackedProjectRegistry,
   FileBackedWorkspaceRegistry,
   type WorkspaceArchiveContext,
 } from "./workspace-registry.js";
+import { workspaceMembers } from "./workspace-registry-model.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { ScheduleService } from "./schedule/service.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { createOrchestrationSkills } from "./orchestration-skills/index.js";
 import { resolveConfigFromPersisted, type CliConfigOverrides } from "./config.js";
+import { resolvePaseoToolPolicy } from "./agent/paseo-tool-policy.js";
 import { BrowserToolsBroker } from "./browser-tools/broker.js";
 import { DaemonConfigBrowserToolsPolicy } from "./browser-tools/policy.js";
 import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
@@ -173,7 +173,7 @@ import { createRelayRuntime, type RelayRuntime } from "./relay-runtime.js";
 import type { PushNotificationSender } from "./push/index.js";
 import { getOrCreateServerId } from "./server-id.js";
 import { resolveDaemonVersion } from "./daemon-version.js";
-import type { AgentClient, AgentProvider, FetchCatalogOptions } from "./agent/agent-sdk-types.js";
+import type { AgentClient, AgentProvider } from "./agent/agent-sdk-types.js";
 import type {
   AgentProfile,
   AgentSkillSelection,
@@ -192,6 +192,7 @@ import { ScriptHealthMonitor } from "./script-health-monitor.js";
 import { createScriptStatusEmitter } from "./script-status-projection.js";
 import { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
 import { createWorkspaceScriptsService } from "./session/workspace-scripts/workspace-scripts-service.js";
+import { assertWorkspaceAutomationAllowedForWorkspace } from "./workspace-automation-gate.js";
 import { spawnWorkspaceScript } from "./worktree-bootstrap.js";
 import {
   createManagedProcessRegistry,
@@ -562,47 +563,7 @@ function createInitialMutableDaemonConfig(config: PaseoDaemonConfig): MutableDae
     initialConfig.agentProfiles = config.agentProfiles;
   }
 
-  Object.assign(initialConfig, readPaneLayoutFields(config.paseoHome));
-  Object.assign(initialConfig, readCustomCommandFields(config.paseoHome));
-
   return initialConfig;
-}
-
-/**
- * Rescanned on every call rather than watched: `paseo daemon reload` re-invokes
- * createInitialMutableDaemonConfig and broadcasts daemon_config_changed, which is the whole
- * refresh path.
- */
-function readPaneLayoutFields(
-  paseoHome: string,
-): Pick<MutableDaemonConfig, "paneLayouts" | "paneLayoutErrors"> {
-  const { layouts, errors } = loadPaneLayouts(paseoHome);
-  return {
-    ...(layouts.length > 0 ? { paneLayouts: layouts } : {}),
-    ...(errors.length > 0 ? { paneLayoutErrors: errors } : {}),
-  };
-}
-
-/** Same rescan-on-reload contract as readPaneLayoutFields, for `$PASEO_HOME/commands.json`. */
-function readCustomCommandFields(
-  paseoHome: string,
-): Pick<MutableDaemonConfig, "customCommands" | "customCommandErrors"> {
-  const { commands, errors } = loadCustomCommands(paseoHome);
-  return {
-    ...(commands.length > 0 ? { customCommands: commands } : {}),
-    ...(errors.length > 0 ? { customCommandErrors: errors } : {}),
-  };
-}
-
-/**
- * The CORS origin a packaged desktop renderer connects from. The custom protocol
- * scheme differs per build variant ("paseo", "paseo-neo"), so the desktop app
- * passes its own when it spawns the daemon; a standalone daemon keeps the
- * default. Without the right one the app cannot reach the daemon it just started.
- */
-export function resolveDesktopAppOrigin(env: NodeJS.ProcessEnv): string {
-  const scheme = env.PASEO_APP_SCHEME?.trim();
-  return `${scheme && scheme.length > 0 ? scheme : "paseo"}://app`;
 }
 
 export async function createPaseoDaemon(
@@ -648,6 +609,7 @@ export async function createPaseoDaemon(
   const browserToolsBroker = new BrowserToolsBroker({});
   const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion, {
     managedSources: new ManagedPluginSources(config.paseoHome),
+    settingsDirectory: path.join(config.paseoHome, "plugin-settings"),
   });
 
   const serverId = getOrCreateServerId(config.paseoHome, { logger });
@@ -754,9 +716,7 @@ export async function createPaseoDaemon(
 
   // CORS - allow same-origin + configured origins
   const fixedAllowedOrigins = [
-    resolveDesktopAppOrigin(process.env),
-    // The official scheme stays allowed regardless, so a variant's daemon can
-    // still serve the official app pointed at it.
+    // Packaged desktop renderers use the custom paseo:// protocol scheme.
     "paseo://app",
     // For TCP, add localhost variants
     ...(listenTarget.type === "tcp"
@@ -906,6 +866,10 @@ export async function createPaseoDaemon(
     path.join(config.paseoHome, "projects", "workspaces.json"),
     logger,
   );
+  const workspaceLabelService = createWorkspaceLabelService({
+    paseoHome: config.paseoHome,
+    workspaceRegistry,
+  });
   const github = createGitHubService();
   const workspaceGitService = new WorkspaceGitServiceImpl({
     logger,
@@ -915,7 +879,15 @@ export async function createPaseoDaemon(
       forgeOverrides: { github },
     },
   });
+  workspaceRegistry.subscribeToMutations((mutation) => {
+    if (mutation.kind === "archive" && mutation.workspace) {
+      pluginRuntime.emit("workspace.archived", {
+        workspace: describeHookWorkspace(mutation.workspace),
+      });
+    }
+  });
   const workspaceProvisioning = createWorkspaceProvisioningService({
+    lifecycle: pluginRuntime,
     serverId,
     projectRegistry,
     workspaceRegistry,
@@ -949,6 +921,7 @@ export async function createPaseoDaemon(
   });
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
   const agentManager = new AgentManager({
+    pluginLifecycle: pluginRuntime,
     clients: initialAgentManagerState.clients,
     providerDefinitions: initialAgentManagerState.providerDefinitions,
     registry: agentStorage,
@@ -957,19 +930,17 @@ export async function createPaseoDaemon(
       workspaceGitService.onWorkspaceStateMayHaveChanged(cwd);
     },
     mcpAuthToken: agentMcpAuthToken,
+    resolvePaseoToolPolicy: (provider) =>
+      resolvePaseoToolPolicy(provider, daemonConfigStore.get().providers),
     logger,
   });
-  const refreshProviderFeatures = (provider: AgentProvider, scope: FetchCatalogOptions) =>
-    agentManager.refreshProviderFeatures(
-      provider,
-      scope.scope === "workspace" ? scope.cwd : undefined,
+  const syncPluginProviders = () => {
+    agentManager.updateProviderRegistry(
+      providerSnapshotManager.replacePluginProviders(pluginRuntime.getProviderRegistrations()),
     );
-  providerSnapshotManager.on("catalog", refreshProviderFeatures);
-  const workspaceLabelService = createWorkspaceLabelService({
-    paseoHome: config.paseoHome,
-    workspaceRegistry,
-    agentStore: agentManager,
-  });
+  };
+  const unsubscribePluginProviders =
+    pluginRuntime.subscribeProviderRegistrations(syncPluginProviders);
 
   const detachAgentStoragePersistence = attachAgentStoragePersistence(
     logger,
@@ -1046,7 +1017,7 @@ export async function createPaseoDaemon(
     if (firstAgentContext) {
       workspaceAutoName.scheduleForDirectory({
         workspaceId: workspace.workspaceId,
-        cwd,
+        cwd: workspaceMembers(workspace)[0]?.cwd ?? cwd,
         firstAgentContext,
       });
     }
@@ -1174,6 +1145,8 @@ export async function createPaseoDaemon(
         cacheWorkspaceSetupSnapshot: () => {},
         startWorkspaceSetup: (workspaceId, operation) =>
           workspaceSetupRuntime.start(workspaceId, operation),
+        assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+          assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
         emit: emitExternalSessionMessage,
         sessionLogger: logger,
         terminalManager,
@@ -1222,6 +1195,8 @@ export async function createPaseoDaemon(
         killTerminalsForWorkspace: (workspaceIdToKill) =>
           killTerminalsForWorkspace({ terminalManager, sessionLogger: logger }, workspaceIdToKill),
         stopWorkspaceSetup: (workspaceIdToStop) => workspaceSetupRuntime.stop(workspaceIdToStop),
+        assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+          assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
         sessionLogger: logger,
       },
       { scope: { kind: "workspace", workspaceId }, requestId },
@@ -1305,7 +1280,7 @@ export async function createPaseoDaemon(
     );
     workspaceAutoName.scheduleForDirectory({
       workspaceId: workspace.workspaceId,
-      cwd: input.cwd,
+      cwd: workspaceMembers(workspace)[0]?.cwd ?? input.cwd,
       firstAgentContext: input.firstAgentContext,
     });
     await emitWorkspaceUpdatesExternal([workspace.workspaceId]);
@@ -1347,6 +1322,8 @@ export async function createPaseoDaemon(
             workspaceIdToKill,
           ),
         stopWorkspaceSetup: (workspaceIdToStop) => workspaceSetupRuntime.stop(workspaceIdToStop),
+        assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+          assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
         sessionLogger: logger,
       },
       {
@@ -1428,6 +1405,8 @@ export async function createPaseoDaemon(
       // status updates fan out to every connected client.
       emit: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
       spawnWorkspaceScript,
+      assertAutomationAllowed: (workspaceId) =>
+        assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, workspaceId),
       globalServicePorts: loadPersistedConfig(config.paseoHome).worktrees?.servicePorts,
     }),
     markWorkspaceArchiving: markWorkspaceArchivingExternal,
@@ -1436,6 +1415,9 @@ export async function createPaseoDaemon(
     createPaseoWorktree: createAgentCommandDependencies.createPaseoWorktree,
     browserToolsEnabled: browserToolsPolicy.isEnabled(),
     browserToolsBroker,
+    paseoToolPolicy:
+      runtime.paseoToolPolicy ??
+      (runtime.callerAgentId ? agentManager.getPaseoToolPolicy(runtime.callerAgentId) : undefined),
     paseoHome: config.paseoHome,
     worktreesRoot: config.worktreesRoot,
     callerAgentId: runtime.callerAgentId,
@@ -1461,7 +1443,12 @@ export async function createPaseoDaemon(
 
     const createAgentMcpSession = async (callerAgentId?: string) => {
       const agentMcpServer = await createAgentMcpServer(
-        createAgentToolHostDependencies({ callerAgentId }),
+        createAgentToolHostDependencies({
+          callerAgentId,
+          paseoToolPolicy: callerAgentId
+            ? agentManager.getPaseoToolPolicy(callerAgentId)
+            : undefined,
+        }),
       );
 
       // Stateless mode: each HTTP request builds a fresh server + transport that is
@@ -1779,6 +1766,7 @@ export async function createPaseoDaemon(
       speechService.start();
       scriptHealthMonitor.start();
     } catch (error) {
+      unsubscribePluginProviders();
       await pluginRuntime.stopAllPlugins().catch(() => undefined);
       await serviceProxy.stopStandalone().catch(() => undefined);
       await agentProviderRuntime.shutdown().catch(() => undefined);
@@ -1791,8 +1779,8 @@ export async function createPaseoDaemon(
   };
 
   const stop = async () => {
-    providerSnapshotManager.off("catalog", refreshProviderFeatures);
     await pluginRuntime.stopAllPlugins();
+    unsubscribePluginProviders();
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();

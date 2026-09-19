@@ -10,16 +10,16 @@ function image(dataUrl = "data:image/png;base64,capture"): BrowserCaptureImage {
 }
 
 function harness(guest: BrowserCaptureGuest | null = null) {
-  const clipboard = {
-    write: vi.fn(async (_entries: Record<string, string | Uint8Array>) => {}),
-    writeText: vi.fn(async (_text: string) => {}),
-  };
+  const clipboard = { write: vi.fn(async () => undefined) };
+  const decodeImage = vi.fn(() => image("data:image/png;base64,clipboard"));
   const warn = vi.fn();
   return {
     clipboard,
+    decodeImage,
     warn,
     service: createBrowserCaptureService({
       findGuest: () => guest,
+      decodeImage,
       clipboard,
       warn,
     }),
@@ -54,35 +54,18 @@ describe("browser capture service", () => {
   it("writes text and a decoded image to the clipboard atomically", async () => {
     const { service, clipboard } = harness();
     await expect(
-      service.copy({ text: "button", imageDataUrl: "data:image/png;base64,aGVsbG8=" }),
+      service.copy({ text: "button", imageDataUrl: "data:image/png;base64,value" }),
     ).resolves.toBe(true);
-    const entries = clipboard.write.mock.calls[0][0];
-    expect(entries["text/plain"]).toBe("button");
-    expect(Buffer.from(entries["image/png"] as ArrayBuffer).toString()).toBe("hello");
-    expect(clipboard.writeText).not.toHaveBeenCalled();
+    expect(clipboard.write).toHaveBeenCalledWith({
+      text: "button",
+      image: expect.any(Object),
+    });
   });
 
-  it("writes image-only and text-only payloads through the matching clipboard path", async () => {
+  it("keeps text-only clipboard writes", async () => {
     const { service, clipboard } = harness();
 
-    await expect(service.copy({ imageDataUrl: "data:image/jpeg;base64,aGVsbG8=" })).resolves.toBe(
-      true,
-    );
-    const imageEntries = clipboard.write.mock.calls[0][0];
-    expect(Object.keys(imageEntries)).toEqual(["image/jpeg"]);
-    expect(Buffer.from(imageEntries["image/jpeg"] as ArrayBuffer).toString()).toBe("hello");
-
-    await expect(service.copy({ text: "just text" })).resolves.toBe(true);
-    expect(clipboard.writeText).toHaveBeenCalledWith("just text");
-  });
-
-  it("refuses empty payloads and drops undecodable images", async () => {
-    const { service, clipboard, warn } = harness();
-
-    await expect(service.copy({})).resolves.toBe(false);
-    await expect(service.copy({ imageDataUrl: "data:image/png;base64," })).resolves.toBe(false);
-    expect(clipboard.write).not.toHaveBeenCalled();
-    expect(clipboard.writeText).not.toHaveBeenCalled();
-    expect(warn).not.toHaveBeenCalled();
+    await expect(service.copy({ text: "button" })).resolves.toBe(true);
+    expect(clipboard.write).toHaveBeenCalledWith({ text: "button", image: null });
   });
 });

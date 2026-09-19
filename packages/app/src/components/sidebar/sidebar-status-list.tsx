@@ -43,6 +43,7 @@ import {
   SidebarWorkspaceRowFrame,
   SidebarWorkspaceRowContent,
   resolveTrailingActionVisibility,
+  type SidebarWorkspaceTrailingPresentation,
   SidebarWorkspaceTrailingActionBase,
   SidebarWorkspaceTrailingActionOverlay,
   SidebarWorkspaceTrailingActionSlot,
@@ -70,6 +71,7 @@ import { DraggableList, type DraggableRenderItemInfo } from "@/components/dragga
 import type { DraggableListDragHandleProps } from "@/components/draggable-list.types";
 import { useLongPressDragInteraction } from "@/components/sidebar/use-long-press-drag-interaction";
 import { requestWorkspaceRename } from "@/stores/workspace-rename-intent-store";
+import { useWorkspaceClipboardActions } from "@/hooks/use-workspace-clipboard-actions";
 
 // Themed icon wrappers
 const foregroundMutedColorMapping = (theme: Theme) => ({
@@ -116,7 +118,7 @@ interface StatusWorkspaceListProps {
   /** Swaps the group list for the label filter's empty state. Never the header above it. */
   sidebarFilterEmpty?: boolean;
   parentGestureRef?: MutableRefObject<GestureType | undefined>;
-  dragGestureHostPresented?: boolean;
+  dragGestureHostActive?: boolean;
 }
 
 export function SidebarStatusWorkspaceList({
@@ -132,7 +134,7 @@ export function SidebarStatusWorkspaceList({
   onPinnedWorkspaceReorder,
   sidebarFilterEmpty = false,
   parentGestureRef,
-  dragGestureHostPresented,
+  dragGestureHostActive,
 }: StatusWorkspaceListProps) {
   const collapsedWorkspaceGroupKeys = useSidebarCollapsedSectionsStore(
     (state) => state.collapsedWorkspaceGroupKeys,
@@ -203,7 +205,7 @@ export function SidebarStatusWorkspaceList({
                 useDragHandle
                 nestable={platformIsNative}
                 simultaneousGestureRef={parentGestureRef}
-                gestureHostPresented={dragGestureHostPresented}
+                gestureHostPresented={dragGestureHostActive}
               />
               {canTogglePinnedWorkspaces ? (
                 <SidebarGroupToggleRow
@@ -618,6 +620,13 @@ function StatusWorkspaceRowWithMenu({
       }),
     [workspace.serverId, workspace.workspaceId],
   );
+  const clipboard = useWorkspaceClipboardActions();
+  const handleCopyPath = useCallback(() => {
+    clipboard.copyPath(workspace);
+  }, [clipboard, workspace]);
+  const handleCopyBranchName = useCallback(() => {
+    clipboard.copyBranchName(workspace);
+  }, [clipboard, workspace]);
   const isPinned = workspace.pinnedAt != null;
   const handleTogglePin = useCallback(() => {
     onToggleWorkspacePin(workspace);
@@ -667,6 +676,8 @@ function StatusWorkspaceRowWithMenu({
       archiveStatus={isArchiving ? "pending" : "idle"}
       archivePendingLabel={t("sidebar.workspace.actions.archiving")}
       onArchive={handleArchive}
+      onCopyBranchName={workspace.projectKind === "git" ? handleCopyBranchName : undefined}
+      onCopyPath={handleCopyPath}
       onRename={handleOpenRename}
       onMarkAsRead={hasClearableAttention ? handleMarkAsRead : undefined}
       onMarkAsUnread={canMarkUnread ? handleMarkAsUnread : undefined}
@@ -696,6 +707,8 @@ interface StatusWorkspaceRowInnerProps {
   archiveStatus?: "idle" | "pending" | "success";
   archivePendingLabel?: string;
   onArchive?: () => void;
+  onCopyBranchName?: () => void;
+  onCopyPath?: () => void;
   onRename?: () => void;
   onMarkAsRead?: () => void;
   onMarkAsUnread?: () => void;
@@ -741,6 +754,8 @@ function StatusWorkspaceRowInnerContent({
   archiveStatus = "idle",
   archivePendingLabel,
   onArchive,
+  onCopyBranchName,
+  onCopyPath,
   onRename,
   onMarkAsRead,
   onMarkAsUnread,
@@ -798,7 +813,7 @@ function StatusWorkspaceRowInnerContent({
       {({ isHovered, contextMenuOpen, onContextMenuOpenChange, hoverHandlers }) => {
         const showShortcut = showShortcutBadge && shortcutNumber !== null;
         const {
-          showTrailing,
+          trailingPresentation,
           showKebab: showKebabInSlot,
           showScrim,
           renderSlot,
@@ -835,6 +850,7 @@ function StatusWorkspaceRowInnerContent({
               hostBadgeLabel={hostBadge?.label}
               serviceSummary={serviceSummary}
               workspaceKey={workspace.workspaceKey}
+              onCopyBranchName={onCopyBranchName}
               onRename={onRename}
               onMarkAsRead={onMarkAsRead}
               onMarkAsUnread={onMarkAsUnread}
@@ -874,12 +890,14 @@ function StatusWorkspaceRowInnerContent({
                     workspace={workspace}
                     backdrop={backdrop}
                     trailing={trailing}
-                    showBase={showTrailing}
+                    trailingPresentation={trailingPresentation}
                     showKebab={showKebabInSlot}
                     showScrim={showScrim}
                     reserveSlotWidth={reserveSlotWidth}
                     isPinned={isPinned}
                     onTogglePin={onTogglePin}
+                    onCopyBranchName={onCopyBranchName}
+                    onCopyPath={onCopyPath}
                     onRename={onRename}
                     onMarkAsRead={onMarkAsRead}
                     onMarkAsUnread={onMarkAsUnread}
@@ -903,12 +921,14 @@ function StatusWorkspaceActionSlot({
   workspace,
   backdrop,
   trailing,
-  showBase,
+  trailingPresentation,
   showKebab,
   showScrim,
   reserveSlotWidth,
   isPinned,
   onTogglePin,
+  onCopyBranchName,
+  onCopyPath,
   onRename,
   onMarkAsRead,
   onMarkAsUnread,
@@ -921,12 +941,14 @@ function StatusWorkspaceActionSlot({
   workspace: SidebarWorkspaceEntry;
   backdrop: SidebarSurfaceBackdrop;
   trailing: SidebarWorkspaceTrailing;
-  showBase: boolean;
+  trailingPresentation: SidebarWorkspaceTrailingPresentation;
   showKebab: boolean;
   showScrim: boolean;
   reserveSlotWidth: boolean;
   isPinned?: boolean;
   onTogglePin?: () => void;
+  onCopyBranchName?: () => void;
+  onCopyPath?: () => void;
   onRename?: () => void;
   onMarkAsRead?: () => void;
   onMarkAsUnread?: () => void;
@@ -939,7 +961,7 @@ function StatusWorkspaceActionSlot({
   const kebab = useOpenKebabMenuVisibility(showKebab);
   return (
     <SidebarWorkspaceTrailingActionSlot reserveWidth={reserveSlotWidth}>
-      <SidebarWorkspaceTrailingActionBase visible={showBase}>
+      <SidebarWorkspaceTrailingActionBase presentation={trailingPresentation}>
         <SidebarWorkspaceTrailingContent workspace={workspace} trailing={trailing} />
       </SidebarWorkspaceTrailingActionBase>
       <SidebarWorkspaceTrailingActionOverlay
@@ -955,6 +977,8 @@ function StatusWorkspaceActionSlot({
             serverId={workspace.serverId}
             workspaceId={workspace.workspaceId}
             workspaceLabels={workspace.labels}
+            onCopyPath={onCopyPath}
+            onCopyBranchName={onCopyBranchName}
             onRename={onRename}
             onMarkAsRead={onMarkAsRead}
             onMarkAsUnread={onMarkAsUnread}
