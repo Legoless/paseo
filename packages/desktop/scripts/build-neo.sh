@@ -26,7 +26,7 @@ if [[ -z "${APPLE_ID:-}" ]]; then
 fi
 
 cd "$DESKTOP_DIR"
-npm run build:neo
+npm --prefix ../.. run build:desktop:neo
 
 APP="release/mac-arm64/Paseo Neo.app"
 if ! spctl -a -vv "$APP" 2>&1 | grep -q "Notarized"; then

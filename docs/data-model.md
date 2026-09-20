@@ -523,6 +523,13 @@ These small files are not validated as full Zod schemas but are persisted under 
 
 These live in React Native `AsyncStorage` or browser `IndexedDB`, not on the daemon filesystem.
 
+Treat a persisted-state validation failure as a possible version incompatibility, not evidence
+that the user's data is disposable. Validated stores keep the latest rejected raw snapshot at
+`<storage-key>:recovery` before allowing defaults to replace it; for layouts, that key is
+`workspace-layout-state:recovery`. A rejected write leaves the saved value untouched. Recovery
+copies are bounded to one per store, so keep a separate profile backup before investigating a
+failed upgrade. Correct the schema before restoring a recovery snapshot.
+
 ### Keying convention: directory-backed vs workspace-owned
 
 Right-sidebar client state splits on whether it is determined by the directory or owned by the workspace (two workspaces can share one `cwd`). The split is enforced by the cache key, so changing a key changes the sharing semantics — see [architecture.md](architecture.md#right-sidebar-boundary-directory-backed-vs-workspace-owned) for the full table.

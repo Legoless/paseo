@@ -7,14 +7,21 @@ const WorkspaceDraftTabSetupStorageSchema = z.strictObject({
   modeId: z.string().nullable(),
   model: z.string().nullable(),
   thinkingOptionId: z.string().nullable(),
-  featureValues: z.record(z.string(), z.union([z.boolean(), z.string(), z.null()])),
+  // Provider payloads are opaque; rejecting one here discards the entire saved layout.
+  featureValues: z.record(z.string(), z.unknown()),
 });
 const WorkspaceTabTargetStorageSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("new_tab") }),
+  z.strictObject({
+    kind: z.literal("new_tab"),
+    labels: z.array(z.string()).optional(),
+    cwd: z.string().optional(),
+  }),
   z.strictObject({
     kind: z.literal("draft"),
     draftId: z.string(),
     setup: WorkspaceDraftTabSetupStorageSchema.optional(),
+    labels: z.array(z.string()).optional(),
+    cwd: z.string().optional(),
   }),
   z.strictObject({ kind: z.literal("agent"), agentId: z.string() }),
   z.strictObject({
@@ -65,6 +72,7 @@ const WorkspaceTabStorageSchema = z.strictObject({
   target: WorkspaceTabTargetStorageSchema,
   createdAt: z.number(),
   state: z.json().optional(),
+  title: z.string().optional(),
 });
 const SplitNodeStorageSchema: z.ZodType<SplitNode> = z.lazy(() =>
   z.discriminatedUnion("kind", [

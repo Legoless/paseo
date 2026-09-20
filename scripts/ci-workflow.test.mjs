@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { relative as relativePath } from "node:path";
+import { matchesGlob, relative as relativePath } from "node:path";
 import test from "node:test";
 
 const repoRoot = new URL("../", import.meta.url);
@@ -77,6 +77,63 @@ function filesUnder(relativeDirectory, predicate) {
     .filter(predicate)
     .sort();
 }
+
+test("CI checks main and integration branches on pushes and pull requests", () => {
+  const source = readFileSync(ciWorkflowPath, "utf8");
+  for (const event of ["push", "pull_request"]) {
+    const match = new RegExp(`^  ${event}:\\s*\\n    branches: \\[([^\\]]+)\\]`, "m").exec(source);
+    assert.ok(match, `missing ${event} branch filters`);
+    const patterns = match[1].split(",").map((branch) => branch.trim().replaceAll('"', ""));
+    for (const [branch, expected] of [
+      ["main", true],
+      ["feature/integration-main", true],
+      ["feature/integration-future", true],
+      ["feature/unrelated", false],
+    ]) {
+      assert.equal(
+        patterns.some((pattern) => matchesGlob(branch, pattern)),
+        expected,
+        `${event} coverage for ${branch}`,
+      );
+    }
+  }
+});
+
+test("Neo packaging requires merged-tree regressions after dependency builds", () => {
+  const rootPackage = JSON.parse(readFileSync(new URL("package.json", repoRoot), "utf8"));
+  const checkMerge = rootPackage.scripts["check:merge"];
+  assert.equal(typeof checkMerge, "string");
+  assert.ok(checkMerge.startsWith("node --test scripts/ci-workflow.test.mjs &&"));
+  for (const suite of [
+    "src/stores/workspace-layout-store.test.ts",
+    "src/stores/workspace-layout-actions.test.ts",
+    "src/storage/validated-persist-storage.test.ts",
+    "src/server/agent/agent-manager.test.ts",
+    "src/server/desktop-app-origin.test.ts",
+    "src/server/websocket-server.origin.test.ts",
+  ]) {
+    assert.ok(checkMerge.includes(suite), `merge check omits ${suite}`);
+  }
+
+  const desktopPackage = JSON.parse(readFileSync(desktopPackagePath, "utf8"));
+  const steps = desktopPackage.scripts["build:neo"].split("&&").map((step) => step.trim());
+  const dependencies = steps.indexOf("npm --prefix ../.. run build:server:clean");
+  const checks = steps.indexOf("npm --prefix ../.. run check:merge");
+  const packaging = steps.findIndex((step) => step.startsWith("electron-builder "));
+  assert.ok(dependencies >= 0, "Neo must rebuild dependencies");
+  assert.ok(checks > dependencies, "merge checks must wait for dependency builds");
+  assert.ok(packaging > checks, "merge checks must pass before packaging");
+
+  const hooks = readFileSync(new URL("lefthook.yml", repoRoot), "utf8");
+  const [commitHook, mergeHook] = hooks.split("\npre-merge-commit:");
+  assert.ok(mergeHook, "automatic merges need their own hook");
+  assert.match(commitHook, /files: git ls-files/);
+  assert.match(commitHook, /verify MERGE_HEAD[\s\S]+npm run check:merge/);
+  for (const hook of [commitHook, mergeHook]) {
+    assert.match(hook, /set -e/);
+    assert.match(hook, /git diff --exit-code[\s\S]+npm run check:merge[\s\S]+git diff --exit-code/);
+  }
+});
 
 test("gated checks are statically named jobs with real job-level gating", () => {
   const workflowSource = readFileSync(ciWorkflowPath, "utf8");

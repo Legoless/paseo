@@ -1473,7 +1473,8 @@ export class AgentManager {
       currentResumeOptions,
     );
     await this.requireExternalMcpSupport(session, storedConfig);
-    return this.registerSession(session, storedConfig, resolvedAgentId, {
+    // Resume already owns this agent's lifecycle queue.
+    return this.registerSessionUnlocked(session, storedConfig, resolvedAgentId, {
       ...options,
       persistence: handle,
       restoring: true,

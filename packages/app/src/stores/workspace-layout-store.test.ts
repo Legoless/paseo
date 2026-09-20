@@ -1167,6 +1167,7 @@ describe("workspace-layout-store actions", () => {
         position: "right",
       }) as string;
       store.moveTabToPane(workspaceKey, tabId, splitPaneId);
+      store.closePane(workspaceKey, "main");
       expect(
         findPaneById(workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey].root, "main"),
       ).toBeNull();
@@ -1363,6 +1364,56 @@ describe("workspace-layout-store actions", () => {
       "pull_request",
     ]);
     expect(state.explorerSidebarPaneIdByWorkspace[workspaceKey]).toBe(explorerSidebarPaneId);
+  });
+
+  it("preserves split panes, named tabs, project launchers, and draft setup across reload", async () => {
+    await AsyncStorage.removeItem("workspace-layout-state");
+    const workspaceKey = createWorkspaceKey();
+    const source = createWorkspaceLayoutStore(createDeterministicWorkspaceLayoutIds());
+    await source.persist.rehydrate();
+    const draftId = source.getState().openTab({
+      workspaceKey,
+      intent: "new",
+      target: {
+        kind: "draft",
+        draftId: "saved-draft",
+        cwd: "/repo/draft",
+        labels: ["draft-label"],
+        setup: {
+          provider: "codex",
+          cwd: "/repo/draft",
+          modeId: null,
+          model: null,
+          thinkingOptionId: null,
+          featureValues: { budget: 42, options: { enabled: true }, tools: ["shell"] },
+        },
+      },
+    })!;
+    const paneId = source.getState().splitPaneEmpty(workspaceKey, {
+      targetPaneId: "main",
+      position: "right",
+    })!;
+    const launcherId = findPaneById(
+      source.getState().layoutByWorkspace[workspaceKey].root,
+      paneId,
+    )!.focusedTabId!;
+    source.getState().replaceTab(workspaceKey, launcherId, {
+      kind: "new_tab",
+      cwd: "/repo/launcher",
+      labels: ["launcher-label"],
+    });
+    source.getState().setTabTitle(workspaceKey, draftId, "Saved draft");
+    source.getState().setTabTitle(workspaceKey, launcherId, "Saved launcher");
+    const layout = source.getState().layoutByWorkspace[workspaceKey];
+
+    await vi.waitFor(async () => {
+      const persisted = JSON.parse((await AsyncStorage.getItem("workspace-layout-state")) ?? "{}");
+      expect(persisted.state?.layoutByWorkspace[workspaceKey]).toEqual(layout);
+    });
+
+    const restored = createWorkspaceLayoutStore(createDeterministicWorkspaceLayoutIds());
+    await restored.persist.rehydrate();
+    expect(restored.getState().layoutByWorkspace[workspaceKey]).toEqual(layout);
   });
 
   it("persists and rehydrates independent Changes state through validated storage", async () => {
@@ -3151,7 +3202,7 @@ describe("workspace-layout-store actions", () => {
     ]);
   });
 
-  it("closeTab cascades group unwrapping when an inner split collapses to a single pane", () => {
+  it("closePane cascades group unwrapping when an inner split collapses to a single pane", () => {
     useWorkspaceLayoutIds(
       "78787878-7878-7878-7878-787878787878",
       "89898989-8989-8989-8989-898989898989",
@@ -3193,7 +3244,7 @@ describe("workspace-layout-store actions", () => {
       position: "bottom",
     });
 
-    store.closeTab(workspaceKey, secondTabId!);
+    store.closePane(workspaceKey, paneBId!);
     const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(paneBId).toBe("pane_78787878-7878-7878-7878-787878787878");
@@ -4178,6 +4229,13 @@ describe("workspace-layout-store actions", () => {
       intent: "reveal",
       pin: true,
     });
+    const savedLayout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+    await vi.waitFor(async () => {
+      const persisted = JSON.parse((await AsyncStorage.getItem("workspace-layout-state")) ?? "{}");
+      expect(persisted.state?.layoutByWorkspace[workspaceKey]).toEqual(
+        stripEphemeralTabsFromLayout(savedLayout),
+      );
+    });
     const restored = createWorkspaceLayoutStore(createDeterministicWorkspaceLayoutIds());
     await restored.persist.rehydrate();
     restored.getState().reconcileTabs(workspaceKey, {
@@ -4956,6 +5014,74 @@ describe("applyPaneLayout", () => {
     expect(panes[3]?.tabIds).toHaveLength(1);
   });
 
+  it("keeps all 21 panes through entity reconciliation and reload", async () => {
+    await AsyncStorage.removeItem("workspace-layout-state");
+    const workspaceKey = createWorkspaceKey();
+    const source = createWorkspaceLayoutStore(createDeterministicWorkspaceLayoutIds());
+    await source.persist.rehydrate();
+    source.getState().openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "archived-agent" },
+      intent: "reveal",
+    });
+    const columns = Array.from({ length: 7 }, () => ({}));
+    source.getState().applyPaneLayout(workspaceKey, {
+      direction: "column",
+      children: Array.from({ length: 3 }, () => ({
+        direction: "row",
+        children: columns,
+      })),
+    });
+    const paneIds = collectAllPanes(source.getState().layoutByWorkspace[workspaceKey].root).map(
+      (pane) => pane.id,
+    );
+    expect(paneIds).toHaveLength(21);
+    source.getState().openTab({
+      workspaceKey,
+      target: { kind: "terminal", terminalId: "missing-terminal" },
+      intent: "reveal",
+      placement: { mode: "pane", paneId: paneIds[1]! },
+    });
+    source.getState().reconcileTabs(workspaceKey, {
+      agentsHydrated: true,
+      terminalsHydrated: true,
+      activeAgentIds: [],
+      autoOpenAgentIds: [],
+      standaloneTerminalIds: [],
+    });
+    const layout = source.getState().layoutByWorkspace[workspaceKey];
+    const panes = collectAllPanes(layout.root);
+    expect(panes.map((pane) => pane.id)).toEqual(paneIds);
+    for (const pane of panes) {
+      const tabs = collectAllTabs({ kind: "pane", pane });
+      expect(tabs.map((tab) => tab.target)).toEqual([{ kind: "new_tab" }]);
+    }
+    await vi.waitFor(async () => {
+      const persisted = JSON.parse((await AsyncStorage.getItem("workspace-layout-state")) ?? "{}");
+      const persistedPanes = collectAllPanes(persisted.state.layoutByWorkspace[workspaceKey].root);
+      expect(persistedPanes).toHaveLength(21);
+      for (const [index, pane] of persistedPanes.entries()) {
+        expect(pane.id).toBe(paneIds[index]);
+        expect(pane.tabIds).toEqual([]);
+      }
+    });
+
+    const restored = createWorkspaceLayoutStore(createDeterministicWorkspaceLayoutIds());
+    await restored.persist.rehydrate();
+    const restoredLayout = restored.getState().layoutByWorkspace[workspaceKey];
+    expect(collectAllPanes(restoredLayout.root).map((pane) => pane.id)).toEqual(paneIds);
+    const grid = expectGroup(expectGroup(restoredLayout.root).group.children[0]!).group;
+    expect(grid.direction).toBe("vertical");
+    expect(grid.children).toHaveLength(3);
+    for (const row of grid.children) {
+      expect(expectGroup(row).group.direction).toBe("horizontal");
+      expect(expectGroup(row).group.children).toHaveLength(7);
+      expect(expectGroup(row).group.sizes).toEqual(
+        Array.from({ length: 7 }, () => expect.closeTo(1 / 7, 10)),
+      );
+    }
+  });
+
   it("folds overflowing panes back round-robin when the layout has fewer", () => {
     const workspaceKey = seedLayout(
       {
@@ -5148,6 +5274,14 @@ it("persists the once-only PR add after closing, and clears it when purging the 
   const placement = () => ({ placement: { mode: "prefer" as const, paneId: "explorer" } });
   source.getState().autoOpenPullRequestTab(workspaceKey, placement);
   source.getState().closeTab(workspaceKey, "pull_request");
+  const savedLayout = source.getState().layoutByWorkspace[workspaceKey];
+  await vi.waitFor(async () => {
+    const persisted = JSON.parse((await AsyncStorage.getItem("workspace-layout-state")) ?? "{}");
+    expect(persisted.state?.pullRequestTabAutoOpenedByWorkspace[workspaceKey]).toBe(true);
+    expect(persisted.state?.layoutByWorkspace[workspaceKey]).toEqual(
+      stripEphemeralTabsFromLayout(savedLayout),
+    );
+  });
   const restored = createWorkspaceLayoutStore(workspaceLayoutIds);
   await restored.persist.rehydrate();
   expect(restored.getState().pullRequestTabAutoOpenedByWorkspace[workspaceKey]).toBe(true);

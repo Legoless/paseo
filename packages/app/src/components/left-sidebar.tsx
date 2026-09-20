@@ -813,7 +813,7 @@ function DesktopSidebar({
 
 function WorkspacesSectionHeader() {
   return (
-    <View style={styles.workspacesSectionHeader}>
+    <View style={[styles.workspacesSectionHeader, styles.workspacesSectionHeaderRow]}>
       <Text style={styles.workspacesSectionTitle}>Workspaces</Text>
       <View style={styles.workspacesSectionActions}>
         <Tooltip delayDuration={300}>

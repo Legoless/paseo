@@ -68,6 +68,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "typecheck:server": "npm run typecheck --workspace=@getpaseo/relay && npm run typecheck --workspace=@getpaseo/protocol && npm run typecheck --workspace=@getpaseo/client && npm run typecheck --workspace=@getpaseo/server && npm run typecheck --workspace=@getpaseo/cli",
     "test": "npm run test --workspaces --if-present",
+    "check:merge": "node --test scripts/ci-workflow.test.mjs && npm run build:server && npm run format:check && npm run lint && npm run typecheck && npm run test --workspace=@getpaseo/app -- src/stores/workspace-layout-store.test.ts src/stores/workspace-layout-actions.test.ts src/storage/validated-persist-storage.test.ts --project=unit --bail=1 --maxWorkers=1 && npm run test:unit --workspace=@getpaseo/server -- src/server/agent/agent-manager.test.ts src/server/desktop-app-origin.test.ts src/server/websocket-server.origin.test.ts --bail=1 --maxWorkers=1",
     "format": "oxfmt .",
     "format:files": "oxfmt",
     "format:check": "oxfmt --check .",

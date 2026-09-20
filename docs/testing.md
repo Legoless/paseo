@@ -4,6 +4,21 @@
 
 Tests prove behavior, not structure. Every test should answer: "what user-visible or API-visible behavior does this verify?"
 
+## Integration merges
+
+Run `npm run check:merge` against the complete merged tree. It rebuilds workspace declarations,
+runs formatting, lint, and typecheck, then runs the existing focused suites for saved layouts,
+pane retention, agent resume, and desktop connection origins. A clean conflict resolution and
+successful typecheck do not prove that these behaviors still work together.
+
+The Git hooks run this check before automatic merge commits and before committing resolved
+conflicts. The index and working tree must agree before and after the check, so unstaged fixes
+cannot hide a broken merge. Install the hooks with `npm run prepare` in each checkout.
+
+Fast-forward merges do not create a commit or invoke these hooks. Integration branches
+(`feature/integration*`) run the existing CI jobs, and Neo packaging independently runs the
+same local check before producing an app. Full suites stay in CI; the local check is bounded.
+
 ## Test-driven development
 
 Work in vertical slices: one test, one implementation, repeat. Each test responds to what you learned from the previous cycle.

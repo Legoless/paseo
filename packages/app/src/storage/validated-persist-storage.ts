@@ -10,32 +10,32 @@ export function createValidatedPersistStorage<State>(
     version: z.number().int().nonnegative().optional(),
   });
 
+  const getItem: PersistStorage<State>["getItem"] = async (name) => {
+    const raw = await backingStorage.getItem(name);
+    if (raw === null) return null;
+
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(raw);
+    } catch {
+      decoded = null;
+    }
+
+    const result = envelopeSchema.safeParse(decoded);
+    if (result.success) return result.data;
+
+    // ponytail: one rejected snapshot per key; use a journal if recovery needs history.
+    await backingStorage.setItem(`${name}:recovery`, raw);
+    return null;
+  };
+
   return {
-    getItem: async (name) => {
-      const raw = await backingStorage.getItem(name);
-      if (raw === null) return null;
-
-      let decoded: unknown;
-      try {
-        decoded = JSON.parse(raw);
-      } catch {
-        await backingStorage.removeItem(name);
-        return null;
-      }
-
-      const result = envelopeSchema.safeParse(decoded);
-      if (!result.success) {
-        await backingStorage.removeItem(name);
-        return null;
-      }
-      return result.data;
-    },
+    getItem,
     setItem: async (name, value) => {
       const result = envelopeSchema.safeParse(value);
-      if (!result.success) {
-        await backingStorage.removeItem(name);
-        return;
-      }
+      if (!result.success) return;
+      // Hydration can fail while the store keeps running with defaults. Back up first.
+      await getItem(name);
       await backingStorage.setItem(name, JSON.stringify(result.data));
     },
     removeItem: (name) => backingStorage.removeItem(name),

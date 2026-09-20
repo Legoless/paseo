@@ -566,6 +566,11 @@ function createInitialMutableDaemonConfig(config: PaseoDaemonConfig): MutableDae
   return initialConfig;
 }
 
+// Packaged variants pass their protocol scheme when launching the daemon.
+export function resolveDesktopAppOrigin(env: NodeJS.ProcessEnv): string {
+  return `${env.PASEO_APP_SCHEME?.trim() || "paseo"}://app`;
+}
+
 export async function createPaseoDaemon(
   config: PaseoDaemonConfig,
   rootLogger: Logger,
@@ -716,7 +721,8 @@ export async function createPaseoDaemon(
 
   // CORS - allow same-origin + configured origins
   const fixedAllowedOrigins = [
-    // Packaged desktop renderers use the custom paseo:// protocol scheme.
+    resolveDesktopAppOrigin(process.env),
+    // Keep the official app able to connect to a variant's daemon.
     "paseo://app",
     // For TCP, add localhost variants
     ...(listenTarget.type === "tcp"
