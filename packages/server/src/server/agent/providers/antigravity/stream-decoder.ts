@@ -1,5 +1,16 @@
-import type { AgentStreamEvent, AgentUsage } from "../../agent-sdk-types.js";
-import type { AgyResultPayload, AgyStepUpdatePayload, AgyStreamEvent, AgyUsage } from "./types.js";
+import type {
+  AgentStreamEvent,
+  AgentUsage,
+  ToolCallDetail,
+  ToolCallTimelineItem,
+} from "../../agent-sdk-types.js";
+import type {
+  AgyResultPayload,
+  AgyStepUpdatePayload,
+  AgyStreamEvent,
+  AgyToolInfo,
+  AgyUsage,
+} from "./types.js";
 
 export function mapAgyUsage(usage?: AgyUsage): AgentUsage | undefined {
   if (!usage) return undefined;
@@ -27,6 +38,107 @@ export function extractStepText(content: unknown): string {
       .join("\n");
   }
   return "";
+}
+
+function extractReasoningDelta(rawStep: Record<string, unknown>): string {
+  if (typeof rawStep.thinking_delta === "string") return rawStep.thinking_delta;
+  if (typeof rawStep.thought === "string") return rawStep.thought;
+  if (typeof rawStep.reasoning === "string") return rawStep.reasoning;
+  return "";
+}
+
+function extractToolError(toolInfo?: AgyToolInfo, rawStep?: Record<string, unknown>): unknown {
+  const errObj = toolInfo?.error ?? rawStep?.error;
+  if (typeof errObj === "object" && errObj !== null && "message" in errObj) {
+    return String((errObj as { message: unknown }).message);
+  }
+  if (typeof errObj === "string") {
+    return errObj;
+  }
+  return "Tool execution failed";
+}
+
+function extractPlainTextDetail(toolInfo?: AgyToolInfo, content?: unknown): string | undefined {
+  if (toolInfo?.parameters !== undefined) {
+    return JSON.stringify(toolInfo.parameters);
+  }
+  if (
+    content !== undefined &&
+    typeof content === "object" &&
+    content !== null &&
+    Object.keys(content).length > 0
+  ) {
+    return JSON.stringify(content);
+  }
+  return undefined;
+}
+
+function mapShellDetail(params: Record<string, unknown>, output?: string): ToolCallDetail {
+  const command = String(params.CommandLine ?? params.command ?? params.cmd ?? "");
+  return {
+    type: "shell",
+    command,
+    output,
+  };
+}
+
+function mapReadDetail(params: Record<string, unknown>, output?: string): ToolCallDetail {
+  const filePath = String(params.AbsolutePath ?? params.path ?? params.filePath ?? "");
+  return {
+    type: "read",
+    filePath,
+    content: output,
+  };
+}
+
+function mapWriteDetail(params: Record<string, unknown>): ToolCallDetail {
+  const filePath = String(params.TargetFile ?? params.path ?? params.filePath ?? "");
+  const content = typeof params.CodeContent === "string" ? params.CodeContent : undefined;
+  return {
+    type: "write",
+    filePath,
+    content,
+  };
+}
+
+function mapEditDetail(params: Record<string, unknown>): ToolCallDetail {
+  const filePath = String(params.TargetFile ?? params.path ?? params.filePath ?? "");
+  return {
+    type: "edit",
+    filePath,
+    oldString: typeof params.TargetContent === "string" ? params.TargetContent : undefined,
+    newString:
+      typeof params.ReplacementContent === "string" ? params.ReplacementContent : undefined,
+  };
+}
+
+export function mapAgyToolDetail(
+  toolName: string,
+  toolInfo?: AgyToolInfo,
+  content?: unknown,
+): ToolCallDetail {
+  const params = (toolInfo?.parameters ?? content ?? {}) as Record<string, unknown>;
+  const output = typeof toolInfo?.output === "string" ? toolInfo.output : undefined;
+
+  switch (toolName) {
+    case "run_command":
+    case "bash":
+    case "execute_command":
+      return mapShellDetail(params, output);
+    case "view_file":
+    case "read_file":
+      return mapReadDetail(params, output);
+    case "write_to_file":
+      return mapWriteDetail(params);
+    case "replace_file_content":
+      return mapEditDetail(params);
+    default:
+      return {
+        type: "plain_text",
+        label: toolName,
+        text: extractPlainTextDetail(toolInfo, content),
+      };
+  }
 }
 
 export class AntigravityStreamDecoder {
@@ -98,48 +210,88 @@ export class AntigravityStreamDecoder {
     }
   }
 
+  private handleAssistantStep(
+    step: AgyStepUpdatePayload,
+    rawStep: Record<string, unknown>,
+    turnId?: string,
+  ): void {
+    const textDelta = typeof rawStep.text_delta === "string" ? rawStep.text_delta : "";
+    const text = textDelta.length > 0 ? textDelta : extractStepText(step.content);
+    if (text.length === 0) return;
+
+    this.emittedAssistantText += text;
+    const messageId = turnId ? `${turnId}-${step.step_index}` : `agy-${step.step_index}`;
+    this.onEvent({
+      type: "timeline",
+      item: {
+        type: "assistant_message",
+        text,
+        messageId,
+      },
+      provider: this.provider,
+      turnId,
+    });
+  }
+
+  private handleToolStep(
+    step: AgyStepUpdatePayload,
+    rawStep: Record<string, unknown>,
+    turnId?: string,
+  ): void {
+    const callId = String(step.step_index);
+    const toolInfo = (rawStep.tool_info ?? {}) as AgyToolInfo;
+    const toolName = String(step.tool_name || toolInfo.name || rawStep.name || "tool");
+
+    let status: "running" | "completed" | "failed" = "running";
+    let error: unknown = null;
+    if (step.state === "DONE") {
+      status = "completed";
+    } else if (step.state === "ERROR") {
+      status = "failed";
+      error = extractToolError(toolInfo, rawStep);
+    }
+
+    const detail = mapAgyToolDetail(toolName, toolInfo, step.content);
+
+    this.onEvent({
+      type: "timeline",
+      item: {
+        type: "tool_call",
+        callId,
+        name: toolName,
+        status,
+        error,
+        detail,
+      } as ToolCallTimelineItem,
+      provider: this.provider,
+      turnId,
+    });
+  }
+
   private handleStepUpdate(step: AgyStepUpdatePayload, turnId?: string): void {
     const rawStep = step as Record<string, unknown>;
-    const textDelta = typeof rawStep.text_delta === "string" ? rawStep.text_delta : "";
+    const reasoningDelta = extractReasoningDelta(rawStep);
 
-    if (step.step_type === "agent_response" || step.step_type === "planner_response") {
-      const text = textDelta.length > 0 ? textDelta : extractStepText(step.content);
-      if (text.length > 0) {
-        this.emittedAssistantText += text;
-        this.onEvent({
-          type: "timeline",
-          item: {
-            type: "assistant_message",
-            text,
-          },
-          provider: this.provider,
-          turnId,
-        });
-      }
-    } else if (step.step_type === "tool_call" || step.step_type === "call") {
-      const callId = String(step.step_index);
-      const toolName = String(
-        (step as Record<string, unknown>).tool_name ||
-          (step as Record<string, unknown>).name ||
-          "tool",
-      );
+    if (reasoningDelta.length > 0) {
       this.onEvent({
         type: "timeline",
         item: {
-          type: "tool_call",
-          callId,
-          name: toolName,
-          status: step.state === "DONE" ? "completed" : "running",
-          error: null,
-          detail: {
-            type: "plain_text",
-            label: toolName,
-            text: JSON.stringify(step.content || {}),
-          },
+          type: "reasoning",
+          text: reasoningDelta,
         },
         provider: this.provider,
         turnId,
       });
+    }
+
+    if (step.step_type === "agent_response" || step.step_type === "planner_response") {
+      this.handleAssistantStep(step, rawStep, turnId);
+    } else if (
+      step.step_type === "tool" ||
+      step.step_type === "tool_call" ||
+      step.step_type === "call"
+    ) {
+      this.handleToolStep(step, rawStep, turnId);
     }
 
     if (step.usage) {
@@ -159,16 +311,25 @@ export class AntigravityStreamDecoder {
     const usage = mapAgyUsage(result.usage);
 
     if (result.response && result.response !== this.emittedAssistantText) {
-      this.emittedAssistantText = result.response;
-      this.onEvent({
-        type: "timeline",
-        item: {
-          type: "assistant_message",
-          text: result.response,
-        },
-        provider: this.provider,
-        turnId,
-      });
+      let missingText = "";
+      if (result.response.startsWith(this.emittedAssistantText)) {
+        missingText = result.response.slice(this.emittedAssistantText.length);
+      } else if (this.emittedAssistantText.length === 0) {
+        missingText = result.response;
+      }
+
+      if (missingText.length > 0) {
+        this.emittedAssistantText += missingText;
+        this.onEvent({
+          type: "timeline",
+          item: {
+            type: "assistant_message",
+            text: missingText,
+          },
+          provider: this.provider,
+          turnId,
+        });
+      }
     }
 
     if (usage) {
@@ -187,7 +348,7 @@ export class AntigravityStreamDecoder {
         usage,
         turnId,
       });
-    } else {
+    } else if (turnId) {
       this.onEvent({
         type: "turn_failed",
         provider: this.provider,

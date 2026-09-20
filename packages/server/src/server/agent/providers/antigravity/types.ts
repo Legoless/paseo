@@ -18,11 +18,31 @@ export interface AgyUsage {
   total_tokens: number;
 }
 
+export interface AgyToolInfo {
+  name?: string;
+  parameters?: Record<string, unknown>;
+  output?: string;
+  error?:
+    | {
+        type?: string;
+        message?: string;
+        [key: string]: unknown;
+      }
+    | string;
+  [key: string]: unknown;
+}
+
 export interface AgyStepUpdatePayload {
   conversation_id: string;
   step_index: number;
-  state: "RUNNING" | "DONE" | "ERROR";
+  state: "RUNNING" | "ACTIVE" | "DONE" | "ERROR";
   step_type: string;
+  text_delta?: string;
+  thinking_delta?: string;
+  thought?: string;
+  reasoning?: string;
+  tool_name?: string;
+  tool_info?: AgyToolInfo;
   content?: unknown;
   usage?: AgyUsage;
   [key: string]: unknown;
@@ -41,6 +61,7 @@ export interface AgyResultPayload {
   duration_seconds?: number;
   num_turns?: number;
   usage?: AgyUsage;
+  denied_actions?: Array<{ action: string; display_name: string }>;
 }
 
 export interface AgyResultEvent {

@@ -31,7 +31,7 @@ import {
   resolveProviderLaunch,
   type ProviderRuntimeSettings,
 } from "../../provider-launch-config.js";
-import { runProviderTurn } from "../provider-runner.js";
+import { appendOrReplaceGrowingAssistantMessage, runProviderTurn } from "../provider-runner.js";
 import {
   buildBinaryDiagnosticRows,
   buildCommandResolutionDiagnosticRows,
@@ -68,15 +68,21 @@ function getPromptText(prompt: AgentPromptInput): string {
   return "";
 }
 
+const ESC = String.fromCharCode(0x1b);
+const ANSI_PATTERN = new RegExp(`${ESC}\\[[0-?]*[ -/]*[@-~]`, "g");
+
 export function parseAgyModelsOutput(
   output: string,
   provider = "antigravity",
 ): AgentModelDefinition[] {
-  const lines = output.split("\n");
+  // Strip ANSI escape sequences
+  const cleanOutput = output.replace(ANSI_PATTERN, "");
+  const lines = cleanOutput.split(/[\r\n]+/);
   const models: AgentModelDefinition[] = [];
-  for (const line of lines) {
+  for (const rawLine of lines) {
+    const line = rawLine.includes("\r") ? rawLine.split("\r").pop()! : rawLine;
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("Fetching")) continue;
+    if (!trimmed || trimmed.startsWith("Fetching") || /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(trimmed)) continue;
     const parts = line.split("\t");
     let id = "";
     let label = "";
@@ -201,6 +207,7 @@ export class AntigravityAgentSession implements AgentSession {
 
     this.child = child;
 
+    let stderrBuffer = "";
     child.stdout?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
       this.decoder.write(chunk, this.activeTurnId ?? undefined);
@@ -208,6 +215,7 @@ export class AntigravityAgentSession implements AgentSession {
 
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => {
+      stderrBuffer += chunk;
       this.options.logger.debug({ chunk }, "Antigravity stderr output");
     });
 
@@ -227,15 +235,20 @@ export class AntigravityAgentSession implements AgentSession {
     child.on("close", (code, signal) => {
       this.decoder.flush(this.activeTurnId ?? undefined);
       if (this.activeTurnId && code !== 0 && !this.isClosed) {
+        const errorMsg =
+          stderrBuffer.trim() ||
+          `Antigravity process exited with ${signal ? `signal ${signal}` : `code ${code}`}`;
         this.emit({
           type: "turn_failed",
           provider: this.provider,
-          error: `Antigravity process exited with ${signal ? `signal ${signal}` : `code ${code}`}`,
+          error: errorMsg,
           turnId: this.activeTurnId,
         });
         this.activeTurnId = null;
       }
-      this.child = null;
+      if (this.child === child) {
+        this.child = null;
+      }
     });
 
     return child;
@@ -248,6 +261,7 @@ export class AntigravityAgentSession implements AgentSession {
       startTurn: (p, opt) => this.startTurn(p, opt),
       subscribe: (cb) => this.subscribe(cb),
       getSessionId: () => this.id || "",
+      reduceFinalText: appendOrReplaceGrowingAssistantMessage,
     });
   }
 
@@ -309,12 +323,32 @@ export class AntigravityAgentSession implements AgentSession {
     }));
   }
 
+  private terminateCurrentProcess(): void {
+    if (!this.child) return;
+    const oldChild = this.child;
+    this.child = null;
+    oldChild.removeAllListeners();
+    oldChild.stdout?.removeAllListeners();
+    oldChild.stderr?.removeAllListeners();
+    try {
+      oldChild.stdin?.end();
+    } catch {}
+    if (oldChild.exitCode === null) {
+      oldChild.kill("SIGTERM");
+    }
+  }
+
   async getCurrentMode(): Promise<string | null> {
     return this.currentModeId;
   }
 
   async setMode(modeId: string): Promise<void | AgentProviderNotice> {
-    this.currentModeId = modeId;
+    if (this.currentModeId !== modeId) {
+      this.currentModeId = modeId;
+      if (!this.activeTurnId) {
+        this.terminateCurrentProcess();
+      }
+    }
     this.emit({
       type: "mode_changed",
       provider: this.provider,
@@ -324,7 +358,12 @@ export class AntigravityAgentSession implements AgentSession {
   }
 
   async setModel(modelId: string | null): Promise<void> {
-    this.currentModelId = modelId;
+    if (this.currentModelId !== modelId) {
+      this.currentModelId = modelId;
+      if (!this.activeTurnId) {
+        this.terminateCurrentProcess();
+      }
+    }
     this.emit({
       type: "model_changed",
       provider: this.provider,
@@ -370,18 +409,15 @@ export class AntigravityAgentSession implements AgentSession {
     if (this.spawnPromise) {
       try {
         const child = await this.spawnPromise;
-        child?.kill("SIGTERM");
+        if (child) {
+          child.removeAllListeners();
+          child.stdout?.removeAllListeners();
+          child.stderr?.removeAllListeners();
+          child.kill("SIGTERM");
+        }
       } catch {}
     }
-    if (this.child) {
-      try {
-        this.child.stdin?.end();
-      } catch {}
-      if (this.child.exitCode === null) {
-        this.child.kill("SIGTERM");
-      }
-    }
-    this.child = null;
+    this.terminateCurrentProcess();
   }
 
   private emit(event: AgentStreamEvent): void {
