@@ -20,6 +20,14 @@ export interface AgentTestConfig {
 }
 
 export const agentConfigs = {
+  antigravity: {
+    provider: "antigravity",
+    model: "gemini-3.8-flash-high",
+    modes: {
+      full: "bypass",
+      ask: "default",
+    },
+  },
   claude: {
     provider: "claude",
     model: "haiku",
@@ -101,4 +109,11 @@ export function getAskModeConfig(provider: AgentProvider) {
 /**
  * Helper to run a test for each provider.
  */
-export const allProviders: AgentProvider[] = ["claude", "codex", "opencode", "pi", "omp"];
+export const allProviders: AgentProvider[] = [
+  "antigravity",
+  "claude",
+  "codex",
+  "opencode",
+  "pi",
+  "omp",
+];
