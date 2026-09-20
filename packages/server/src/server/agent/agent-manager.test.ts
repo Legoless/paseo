@@ -4052,6 +4052,7 @@ test("resumeAgentFromPersistence keeps metadata config, applies overrides, and p
     },
   });
 
+  expect(manager.getAgent(resumed.id)).toEqual(resumed);
   expect(resumed.config.systemPrompt).toBe("new prompt");
   expect(resumed.config.mcpServers).toEqual({
     paseo: {

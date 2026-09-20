@@ -11,4 +11,23 @@ pre-commit:
       glob: "*.{js,jsx,ts,tsx}"
       run: npm run lint -- {staged_files}
     - name: typecheck
-      run: npm run typecheck
+      # Merge commits can have no staged diff; still validate the merged tree.
+      files: git ls-files
+      run: |
+        set -e
+        if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+          git diff --exit-code
+          npm run check:merge
+          git diff --exit-code
+        else
+          npm run typecheck
+        fi
+
+pre-merge-commit:
+  jobs:
+    - name: merge-check
+      run: |
+        set -e
+        git diff --exit-code
+        npm run check:merge
+        git diff --exit-code

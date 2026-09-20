@@ -24,25 +24,27 @@ describe("workspace service route preferences", () => {
     const first = createWorkspaceServiceRoutePreferencesStore(storage);
     await first.persist.rehydrate();
 
-    first.getState().setPreferredRoute("desktop", "direct");
-    first.getState().setPreferredRoute("devbox", "public");
+    await first.getState().setPreferredRoute("desktop", "direct");
+    await first.getState().setPreferredRoute("devbox", "public");
 
     const restored = createWorkspaceServiceRoutePreferencesStore(storage);
     await restored.persist.rehydrate();
     expect(restored.getState().byServerId).toEqual({ desktop: "direct", devbox: "public" });
   });
 
-  it("clears the complete persisted value when one route kind is invalid", async () => {
+  it("backs up the complete persisted value when one route kind is invalid", async () => {
+    const rejected = JSON.stringify({
+      state: { byServerId: { desktop: "direct", broken: "unknown" } },
+      version: 1,
+    });
     const storage = createMemoryStorage({
-      "workspace-service-route-preferences": JSON.stringify({
-        state: { byServerId: { desktop: "direct", broken: "unknown" } },
-        version: 1,
-      }),
+      "workspace-service-route-preferences": rejected,
     });
     const store = createWorkspaceServiceRoutePreferencesStore(storage);
     await store.persist.rehydrate();
 
     expect(store.getState().byServerId).toEqual({});
-    expect(storage.values.has("workspace-service-route-preferences")).toBe(false);
+    expect(storage.values.get("workspace-service-route-preferences")).toBe(rejected);
+    expect(storage.values.get("workspace-service-route-preferences:recovery")).toBe(rejected);
   });
 });

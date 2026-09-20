@@ -78,7 +78,6 @@ interface InsertChildIntoGroupInput {
 
 interface DetachTabFromTreeInput {
   tabId: string;
-  preserveEmptyPaneId?: string | null;
 }
 
 interface DetachTabFromTreeResult {
@@ -827,23 +826,12 @@ function detachTabFromTree(
     tabs: paneNode.pane.tabs.filter((entry) => entry.tabId !== input.tabId),
   });
 
-  const nextRoot = replaceNodeAtPath(root, panePath, () => ({ kind: "pane", pane: nextPane }));
-  if (nextPane.tabs.length > 0 || nextPane.id === input.preserveEmptyPaneId) {
-    return {
-      root:
-        nextPane.tabs.length > 0
-          ? nextRoot
-          : replaceNodeAtPath(nextRoot, panePath, () => ({
-              kind: "pane",
-              pane: ensureRetainedPaneHasTab(nextPane, tab),
-            })),
-      tab,
-      sourcePaneId: paneNode.pane.id,
-    };
-  }
-
+  // Panes outlive their last tab and retain its project. Only an explicit pane close removes one.
   return {
-    root: removePaneByPath(nextRoot, panePath),
+    root: replaceNodeAtPath(root, panePath, () => ({
+      kind: "pane",
+      pane: ensureRetainedPaneHasTab(nextPane, tab),
+    })),
     tab,
     sourcePaneId: paneNode.pane.id,
   };
@@ -982,7 +970,6 @@ function insertSplitInternal(input: InsertSplitInternalInput): InsertSplitIntern
 
   const detached = detachTabFromTree(input.root, {
     tabId: input.tabId,
-    preserveEmptyPaneId: input.targetPaneId,
   });
   invariant(detached.tab, `Tab not found: ${input.tabId}`);
 
@@ -1673,13 +1660,6 @@ export function closeTabInLayout(input: CloseTabInLayoutInput): WorkspaceLayout 
   if (!pane) {
     return null;
   }
-  const preserveEmptyPaneId =
-    pane.id === DEFAULT_PANE_ID ||
-    pane.id === input.explorerSidebarPaneId ||
-    isLastVisibleOrdinaryPane(input.layout, pane.id, input.explorerSidebarPaneId)
-      ? pane.id
-      : null;
-
   const closeSuccessorTabId = getCloseSuccessorTabId({
     pane,
     tabId: input.tabId,
@@ -1689,7 +1669,6 @@ export function closeTabInLayout(input: CloseTabInLayoutInput): WorkspaceLayout 
   const fallbackPaneId = findNearestSiblingPaneId(internalLayout.root, pane.id);
   const nextRoot = detachTabFromTree(internalLayout.root, {
     tabId: input.tabId,
-    preserveEmptyPaneId,
   }).root;
   const parentTabIdByTabId = normalizeParentTabMap({
     raw: input.layout.parentTabIdByTabId,
@@ -2265,13 +2244,6 @@ export function moveTabToPaneInLayout(input: MoveTabToPaneInLayoutInput): Worksp
 
   const detached = detachTabFromTree(layout.root, {
     tabId: input.tabId,
-    // Crossing into or out of Explorer cannot remove either host shell.
-    preserveEmptyPaneId:
-      sourcePane.id === input.toPaneId ||
-      sourcePane.id === input.explorerSidebarPaneId ||
-      input.toPaneId === input.explorerSidebarPaneId
-        ? sourcePane.id
-        : null,
   });
   if (!detached.tab) {
     return null;
