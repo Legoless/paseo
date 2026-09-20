@@ -49,6 +49,26 @@ describe("parseAgyModelsOutput", () => {
       isDefault: false,
     });
   });
+
+  it("handles spinner frames and carriage returns in model output", () => {
+    const output =
+      "⠋ Fetching available models...\r⠙ Fetching available models...\rgemini-3.8-flash-high\tGemini 3.8 Flash (High)\n" +
+      "gemini-3.7-flash-high\tGemini 3.7 Flash (High)\n";
+    const models = parseAgyModelsOutput(output);
+    expect(models).toHaveLength(2);
+    expect(models[0]).toEqual({
+      provider: "antigravity",
+      id: "gemini-3.8-flash-high",
+      label: "Gemini 3.8 Flash (High)",
+      isDefault: true,
+    });
+    expect(models[1]).toEqual({
+      provider: "antigravity",
+      id: "gemini-3.7-flash-high",
+      label: "Gemini 3.7 Flash (High)",
+      isDefault: false,
+    });
+  });
 });
 
 describe("AntigravityStreamDecoder", () => {
@@ -81,7 +101,7 @@ describe("AntigravityStreamDecoder", () => {
     ]);
   });
 
-  it("decodes step updates and streams assistant text deltas", () => {
+  it("decodes step updates and streams assistant text deltas with stable messageId", () => {
     const events: AgentStreamEvent[] = [];
     const decoder = new AntigravityStreamDecoder("antigravity", (event) => events.push(event));
 
@@ -105,11 +125,166 @@ describe("AntigravityStreamDecoder", () => {
         item: {
           type: "assistant_message",
           text: "Hello there!",
+          messageId: "turn-1-1",
         },
         provider: "antigravity",
         turnId: "turn-1",
       },
     ]);
+  });
+
+  it("decodes thinking and reasoning deltas", () => {
+    const events: AgentStreamEvent[] = [];
+    const decoder = new AntigravityStreamDecoder("antigravity", (event) => events.push(event));
+
+    decoder.write(
+      JSON.stringify({
+        event: "step_update",
+        step_update: {
+          conversation_id: "conv-1",
+          step_index: 1,
+          state: "RUNNING",
+          step_type: "agent_response",
+          thinking_delta: "Analyzing the codebase architecture...",
+        },
+      }) + "\n",
+      "turn-1",
+    );
+
+    expect(events).toEqual([
+      {
+        type: "timeline",
+        item: {
+          type: "reasoning",
+          text: "Analyzing the codebase architecture...",
+        },
+        provider: "antigravity",
+        turnId: "turn-1",
+      },
+    ]);
+  });
+
+  it("decodes tool execution lifecycle: active and completed with command detail", () => {
+    const events: AgentStreamEvent[] = [];
+    const decoder = new AntigravityStreamDecoder("antigravity", (event) => events.push(event));
+
+    decoder.write(
+      JSON.stringify({
+        event: "step_update",
+        step_update: {
+          conversation_id: "conv-1",
+          step_index: 2,
+          state: "ACTIVE",
+          step_type: "tool",
+          tool_name: "run_command",
+          tool_info: {
+            name: "run_command",
+            parameters: { CommandLine: "pwd" },
+          },
+        },
+      }) + "\n",
+      "turn-1",
+    );
+
+    expect(events[0]).toEqual({
+      type: "timeline",
+      item: {
+        type: "tool_call",
+        callId: "2",
+        name: "run_command",
+        status: "running",
+        error: null,
+        detail: {
+          type: "shell",
+          command: "pwd",
+          output: undefined,
+        },
+      },
+      provider: "antigravity",
+      turnId: "turn-1",
+    });
+
+    decoder.write(
+      JSON.stringify({
+        event: "step_update",
+        step_update: {
+          conversation_id: "conv-1",
+          step_index: 2,
+          state: "DONE",
+          step_type: "tool",
+          tool_name: "run_command",
+          tool_info: {
+            name: "run_command",
+            parameters: { CommandLine: "pwd" },
+            output: "/Users/test/workspace\n",
+          },
+        },
+      }) + "\n",
+      "turn-1",
+    );
+
+    expect(events[1]).toEqual({
+      type: "timeline",
+      item: {
+        type: "tool_call",
+        callId: "2",
+        name: "run_command",
+        status: "completed",
+        error: null,
+        detail: {
+          type: "shell",
+          command: "pwd",
+          output: "/Users/test/workspace\n",
+        },
+      },
+      provider: "antigravity",
+      turnId: "turn-1",
+    });
+  });
+
+  it("decodes tool execution failure with error message", () => {
+    const events: AgentStreamEvent[] = [];
+    const decoder = new AntigravityStreamDecoder("antigravity", (event) => events.push(event));
+
+    decoder.write(
+      JSON.stringify({
+        event: "step_update",
+        step_update: {
+          conversation_id: "conv-1",
+          step_index: 2,
+          state: "ERROR",
+          step_type: "tool",
+          tool_name: "run_command",
+          tool_info: {
+            name: "run_command",
+            parameters: { CommandLine: "rm -rf /" },
+            error: {
+              type: "TOOL_ERROR",
+              message: "permission denied for dangerous command",
+            },
+          },
+        },
+      }) + "\n",
+      "turn-1",
+    );
+
+    expect(events[0]).toEqual({
+      type: "timeline",
+      item: {
+        type: "tool_call",
+        callId: "2",
+        name: "run_command",
+        status: "failed",
+        error: "permission denied for dangerous command",
+        detail: {
+          type: "shell",
+          command: "rm -rf /",
+          output: undefined,
+        },
+      },
+      provider: "antigravity",
+      turnId: "turn-1",
+    });
   });
 
   it("decodes result success event with usage", () => {
