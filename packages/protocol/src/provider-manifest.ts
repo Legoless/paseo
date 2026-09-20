@@ -194,7 +194,51 @@ const MOCK_SLOW_MODES: AgentProviderModeDefinition[] = [
   },
 ];
 
+export const ANTIGRAVITY_MODES: AgentProviderModeDefinition[] = [
+  {
+    id: "plan",
+    label: "Plan Mode",
+    description: "Analyze the codebase without executing tools or edits",
+    icon: "ShieldEllipsis",
+    colorTier: "planning",
+  },
+  {
+    id: "default",
+    label: "Always Ask",
+    description: "Prompts for permission before executing tools",
+    icon: "Shield",
+    colorTier: "safe",
+  },
+  {
+    id: "accept-edits",
+    label: "Accept Edits",
+    description: "Automatically approves edit-focused tools without prompting",
+    icon: "ShieldPlus",
+    colorTier: "moderate",
+  },
+  {
+    id: "bypass",
+    label: "Bypass",
+    description: "Skip all permission prompts (use with caution)",
+    icon: "ShieldOff",
+    colorTier: "dangerous",
+    isUnattended: true,
+  },
+];
+
 export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
+  {
+    id: "antigravity",
+    label: "Antigravity",
+    description: "Google's autonomous coding assistant with Gemini 3.8 and Claude models",
+    defaultModeId: "accept-edits",
+    modes: ANTIGRAVITY_MODES,
+    voice: {
+      enabled: true,
+      defaultModeId: "accept-edits",
+      defaultModel: "gemini-3.8-flash-high",
+    },
+  },
   {
     id: "claude",
     label: "Claude",
