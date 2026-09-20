@@ -1,4 +1,4 @@
-import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { execFile, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import pino, { type Logger } from "pino";
@@ -38,6 +38,7 @@ import {
   formatProviderDiagnostic,
   formatProviderDiagnosticError,
 } from "../diagnostic-utils.js";
+import { spawnProcess } from "../../../../utils/spawn.js";
 import { AntigravityStreamDecoder } from "./stream-decoder.js";
 import type { AgyStreamInputMessage } from "./types.js";
 
@@ -114,10 +115,11 @@ export class AntigravityAgentSession implements AgentSession {
   readonly provider: AgentProvider = "antigravity";
   readonly capabilities: AgentCapabilityFlags;
 
-  private conversationId: string | null = null;
-  private currentModeId: string | null;
+  private conversationId: string | null;
+  private currentModeId: string;
   private currentModelId: string | null;
   private child: ChildProcess | null = null;
+  private spawnPromise: Promise<ChildProcess | null> | null = null;
   private decoder: AntigravityStreamDecoder;
   private readonly listeners = new Set<(event: AgentStreamEvent) => void>();
   private activeTurnId: string | null = null;
@@ -135,15 +137,27 @@ export class AntigravityAgentSession implements AgentSession {
         this.conversationId = id;
       },
     );
-    void this.spawnProcess();
+    void this.ensureProcess();
   }
 
   get id(): string | null {
     return this.conversationId;
   }
 
-  private async spawnProcess(): Promise<void> {
-    if (this.isClosed) return;
+  private async ensureProcess(): Promise<ChildProcess | null> {
+    if (this.child && this.child.exitCode === null) {
+      return this.child;
+    }
+    if (!this.spawnPromise) {
+      this.spawnPromise = this.spawnProcess().finally(() => {
+        this.spawnPromise = null;
+      });
+    }
+    return this.spawnPromise;
+  }
+
+  private async spawnProcess(): Promise<ChildProcess | null> {
+    if (this.isClosed) return null;
     const launch = await resolveProviderLaunch({
       defaultBinary: "agy",
       commandConfig: this.options.runtimeSettings?.command,
@@ -169,7 +183,7 @@ export class AntigravityAgentSession implements AgentSession {
       args.push("--conversation", this.conversationId);
     }
 
-    const child = spawn(launch.command, args, {
+    const child = spawnProcess(launch.command, args, {
       cwd: this.options.config.cwd,
       env: {
         ...process.env,
@@ -179,6 +193,11 @@ export class AntigravityAgentSession implements AgentSession {
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
+
+    if (this.isClosed) {
+      child.kill("SIGTERM");
+      return null;
+    }
 
     this.child = child;
 
@@ -218,6 +237,8 @@ export class AntigravityAgentSession implements AgentSession {
       }
       this.child = null;
     });
+
+    return child;
   }
 
   async run(prompt: AgentPromptInput, runOptions?: AgentRunOptions): Promise<AgentRunResult> {
@@ -238,7 +259,7 @@ export class AntigravityAgentSession implements AgentSession {
       throw new Error("Cannot start turn on closed Antigravity session");
     }
     if (!this.child || this.child.exitCode !== null) {
-      await this.spawnProcess();
+      await this.ensureProcess();
     }
     const turnId = randomUUID();
     this.activeTurnId = turnId;
@@ -346,6 +367,12 @@ export class AntigravityAgentSession implements AgentSession {
 
   async close(): Promise<void> {
     this.isClosed = true;
+    if (this.spawnPromise) {
+      try {
+        const child = await this.spawnPromise;
+        child?.kill("SIGTERM");
+      } catch {}
+    }
     if (this.child) {
       try {
         this.child.stdin?.end();

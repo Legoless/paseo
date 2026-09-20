@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import pino from "pino";
 import { describe, expect, it } from "vitest";
 import type { AgentStreamEvent } from "../../agent-sdk-types.js";
@@ -210,5 +213,149 @@ describe("AntigravityAgentClient", () => {
     expect(catalog.models.some((m) => m.id === "gemini-3.8-flash-high" && m.isDefault)).toBe(true);
     expect(catalog.modes.some((m) => m.id === "accept-edits")).toBe(true);
     expect(catalog.modes.some((m) => m.id === "bypass")).toBe(true);
+  });
+
+  it("creates a session and manages modes and models", async () => {
+    const logger = pino({ level: "silent" });
+    const client = new AntigravityAgentClient({ logger });
+    const session = await client.createSession({
+      cwd: "/tmp",
+      provider: "antigravity",
+      modeId: "accept-edits",
+      model: "gemini-3.8-flash-high",
+    });
+
+    expect(session.provider).toBe("antigravity");
+    expect(await session.getCurrentMode()).toBe("accept-edits");
+    const modes = await session.getAvailableModes();
+    expect(modes.map((m) => m.id)).toEqual(["plan", "default", "accept-edits", "bypass"]);
+
+    await session.setMode("plan");
+    expect(await session.getCurrentMode()).toBe("plan");
+
+    await session.setModel("gemini-3.7-flash-high");
+    const info = await session.getRuntimeInfo();
+    expect(info.model).toBe("gemini-3.7-flash-high");
+
+    await session.close();
+  });
+
+  it("handles persistence description and session resumption", async () => {
+    const logger = pino({ level: "silent" });
+    const client = new AntigravityAgentClient({ logger });
+    const session = await client.resumeSession(
+      {
+        provider: "antigravity",
+        sessionId: "conv-saved-456",
+        nativeHandle: "conv-saved-456",
+      },
+      {
+        cwd: "/tmp",
+        provider: "antigravity",
+      },
+    );
+
+    expect(session.id).toBe("conv-saved-456");
+    expect(session.describePersistence()).toEqual({
+      provider: "antigravity",
+      sessionId: "conv-saved-456",
+      nativeHandle: "conv-saved-456",
+    });
+
+    await session.close();
+  });
+
+  it("produces provider diagnostics report", async () => {
+    const logger = pino({ level: "silent" });
+    const client = new AntigravityAgentClient({ logger });
+    const diagnostic = await client.getDiagnostic();
+    expect(diagnostic.diagnostic).toContain("Antigravity");
+    expect(diagnostic.diagnostic).toContain("Configured command: agy");
+  });
+
+  it("executes a turn end-to-end through a mock agy CLI process", async () => {
+    const tmpDir = mkdtempSync(path.join(tmpdir(), "agy-mock-"));
+    const mockScript = path.join(tmpDir, "mock-agy.cjs");
+    writeFileSync(
+      mockScript,
+      `
+      process.stdin.setEncoding("utf8");
+      process.stdout.write(JSON.stringify({
+        event: "init",
+        conversation_id: "conv-test-999",
+        init: { cwd: process.cwd(), tools: [] }
+      }) + "\\n");
+
+      let buffer = "";
+      process.stdin.on("data", (chunk) => {
+        buffer += chunk;
+        if (buffer.includes("\\n")) {
+          process.stdout.write(JSON.stringify({
+            event: "step_update",
+            step_update: {
+              conversation_id: "conv-test-999",
+              step_index: 1,
+              state: "DONE",
+              step_type: "agent_response",
+              text_delta: "Mock response from Antigravity"
+            }
+          }) + "\\n");
+          process.stdout.write(JSON.stringify({
+            event: "result",
+            result: {
+              conversation_id: "conv-test-999",
+              status: "SUCCESS",
+              response: "Mock response from Antigravity",
+              usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 }
+            }
+          }) + "\\n");
+        }
+      });
+      `,
+    );
+
+    try {
+      const logger = pino({ level: "silent" });
+      const client = new AntigravityAgentClient({
+        logger,
+        runtimeSettings: {
+          command: {
+            mode: "replace",
+            argv: [process.execPath, mockScript],
+          },
+        },
+      });
+
+      const session = await client.createSession({
+        cwd: tmpDir,
+        provider: "antigravity",
+        modeId: "accept-edits",
+        model: "gemini-3.8-flash-high",
+      });
+
+      const events: AgentStreamEvent[] = [];
+      session.subscribe((event) => events.push(event));
+
+      const result = await session.run("Hello test");
+      expect(result.sessionId).toBe("conv-test-999");
+      expect(result.finalText).toBe("Mock response from Antigravity");
+      expect(session.id).toBe("conv-test-999");
+
+      const timelineEvent = events.find((e) => e.type === "timeline");
+      expect(timelineEvent).toMatchObject({
+        type: "timeline",
+        item: {
+          type: "assistant_message",
+          text: "Mock response from Antigravity",
+        },
+      });
+
+      const completedEvent = events.find((e) => e.type === "turn_completed");
+      expect(completedEvent).toBeDefined();
+
+      await session.close();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
