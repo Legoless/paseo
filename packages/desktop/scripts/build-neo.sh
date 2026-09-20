@@ -35,7 +35,13 @@ if ! spctl -a -vv "$APP" 2>&1 | grep -q "Notarized"; then
   exit 1
 fi
 
-DMG=$(ls release/Paseo-Neo-*-arm64.dmg | head -1)
+VERSION="$(node -p "require('./package.json').version")"
+DMG="release/Paseo-Neo-${VERSION}-arm64.dmg"
+if [[ ! -f "$DMG" ]]; then
+  echo "error: expected $DMG after the Neo build" >&2
+  ls -lh release/Paseo-Neo-*-arm64.dmg >&2 || true
+  exit 1
+fi
 DEST="$HOME/Downloads/$(basename "${DMG%.dmg}")-$(date +%Y%m%d).dmg"
 cp "$DMG" "$DEST"
 echo "notarized: $APP"
