@@ -125,7 +125,7 @@ export function buildToggleFileExplorerPatch(
   return { mobilePanel: setMobilePanelTarget(state.mobilePanel, "agent") };
 }
 
-const ExplorerTabSchema = z.enum(["changes", "files", "pr"]);
+const ExplorerTabSchema = z.enum(["changes", "files", "artifacts", "pr"]);
 const PaneProjectActionsStorageSchema = z.strictObject({
   branch: z.boolean().optional(),
   editor: z.boolean().optional(),

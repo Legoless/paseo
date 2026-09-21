@@ -670,6 +670,7 @@ export const fr = {
         splitDown: "Diviser le volet vers le bas",
         changes: "Modifications",
         files: "Fichiers",
+        artifacts: "Artefacts",
         pullRequest: "Demande de fusion",
         terminalProfilesMenu: "Terminal profiles",
         editTerminalProfiles: "Edit profiles",
@@ -680,6 +681,7 @@ export const fr = {
         toggle: "Basculer le panneau latéral",
         changes: "Changements",
         files: "Fichiers",
+        artifacts: "Artefacts",
       },
       projectSelector: {
         label: "Projet",
@@ -1979,6 +1981,12 @@ export const fr = {
       subtitle: "Fichiers de l’espace de travail",
       tooltip: "Parcourir les fichiers de l’espace de travail",
       chooseFile: "Choisissez un fichier",
+    },
+    artifacts: {
+      label: "Artefacts",
+      subtitle: "Captures des agents",
+      tooltip: "Captures d’écran émises par les agents de l’espace de travail",
+      empty: "Les captures d’écran des agents de cet espace de travail apparaissent ici.",
     },
     pullRequest: {
       label: "Demande de fusion",

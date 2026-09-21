@@ -670,6 +670,7 @@ export const ru = {
         splitDown: "Разделить панель снизу",
         changes: "Изменения",
         files: "Файлы",
+        artifacts: "Артефакты",
         pullRequest: "PR",
         terminalProfilesMenu: "Профили терминала",
         editTerminalProfiles: "Изменить профили",
@@ -680,6 +681,7 @@ export const ru = {
         toggle: "Переключить боковую панель",
         changes: "Изменения",
         files: "Файлы",
+        artifacts: "Артефакты",
       },
       projectSelector: {
         label: "Проект",
@@ -1959,6 +1961,12 @@ export const ru = {
       subtitle: "Файлы рабочего пространства",
       tooltip: "Просмотр файлов рабочего пространства",
       chooseFile: "Выберите файл",
+    },
+    artifacts: {
+      label: "Артефакты",
+      subtitle: "Снимки агентов",
+      tooltip: "Снимки экрана от агентов рабочей области",
+      empty: "Здесь появляются снимки экрана агентов этой рабочей области.",
     },
     pullRequest: {
       label: "PR",
