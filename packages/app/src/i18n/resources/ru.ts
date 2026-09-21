@@ -2306,6 +2306,10 @@ export const ru = {
         title: "Свечение панели",
         description: "Подсвечивать панели агентов по статусу",
       },
+      terminalStatusGlow: {
+        title: "Свечение агентов в терминале",
+        description: "Показывать подсветку состояния для CLI-агентов в панелях терминала",
+      },
       sidebar: {
         title: "Боковая панель",
         description:

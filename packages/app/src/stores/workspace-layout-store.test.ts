@@ -549,6 +549,7 @@ describe("workspace-layout-store version 2 migration", () => {
       expect(Object.keys(persisted.state).sort()).toEqual([
         "explorerPaneIdByWorkspace",
         "explorerSidebarWidthByWorkspace",
+        "hiddenAgentIdsByWorkspace",
         "layoutByWorkspace",
         "pinnedAgentIdsByWorkspace",
         "pullRequestTabAutoOpenedByWorkspace",
@@ -1143,10 +1144,10 @@ describe("workspace-layout-store actions", () => {
     expect(findPaneById(layout.root, splitPaneId)).toBeNull();
     store.closeTab(workspaceKey, findPaneById(layout.root, "main")?.focusedTabId as string);
     layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
-    const finalNewTabId = findPaneById(layout.root, "main")?.focusedTabId as string;
+    expect(findPaneById(layout.root, "main")?.tabIds).toEqual([]);
     const before = layout;
 
-    store.closeTab(workspaceKey, finalNewTabId);
+    store.closeTab(workspaceKey, "missing-tab");
 
     expect(workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey]).toBe(before);
   });
@@ -1180,7 +1181,7 @@ describe("workspace-layout-store actions", () => {
           .filter((pane) => pane.id !== "explorer")
           .map((pane) => pane.id),
       ).toEqual([splitPaneId]);
-      expect(findPaneById(layout.root, splitPaneId)?.tabIds).toHaveLength(1);
+      expect(findPaneById(layout.root, splitPaneId)?.tabIds).toEqual([]);
       expect(layout.focusedPaneId).toBe(splitPaneId);
     },
   );
@@ -2882,7 +2883,7 @@ describe("workspace-layout-store actions", () => {
     expect(findPaneById(layout.root, paneId)?.hidden).toBe(true);
   });
 
-  it("closeTab preserves an emptied pane with a new_tab launcher until explicitly closed", () => {
+  it("closeTab closes a pane when its last tab closes", () => {
     useWorkspaceLayoutIds("cccccccc-cccc-cccc-cccc-cccccccccccc");
     const workspaceKey = createWorkspaceKey();
     const store = workspaceLayoutStore.getState();
@@ -2907,18 +2908,13 @@ describe("workspace-layout-store actions", () => {
     });
 
     store.closeTab(workspaceKey, secondTabId!);
-    let layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
     expect(splitPaneId).toBe("pane_cccccccc-cccc-cccc-cccc-cccccccccccc");
-    expect(layout.focusedPaneId).toBe(splitPaneId);
-    expect(collectAllPanes(layout.root).map((pane) => pane.id)).toEqual(["main", splitPaneId]);
-    const splitPane = findPaneById(layout.root, splitPaneId as string);
-    expect(splitPane?.tabIds).toHaveLength(1);
-    const emptiedLauncherTabId = splitPane?.focusedTabId as string;
-
-    store.closeTab(workspaceKey, emptiedLauncherTabId);
-    layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+    expect(findPaneById(layout.root, splitPaneId as string)).toBeNull();
     expect(collectAllPanes(layout.root).map((pane) => pane.id)).toEqual(["main"]);
+    expect(layout.focusedPaneId).toBe("main");
+    expect(collectAllTabs(layout.root).some((tab) => tab.target.kind === "new_tab")).toBe(false);
   });
 
   it("splitPane keeps the source pane when its last tab is dragged onto another pane's edge", () => {
@@ -2960,7 +2956,7 @@ describe("workspace-layout-store actions", () => {
     expect(collectAllTabs(layout.root).some((tab) => tab.tabId === firstTabId)).toBe(true);
   });
 
-  it("closeTab leaves the emptied pane pointed at the project its tab was in", () => {
+  it("closeTab does not replace the last tab with a New tab", () => {
     useWorkspaceLayoutIds("ffffffff-ffff-ffff-ffff-ffffffffffff");
     const workspaceKey = createWorkspaceKey();
     const store = workspaceLayoutStore.getState();
@@ -2984,12 +2980,9 @@ describe("workspace-layout-store actions", () => {
     store.closeTab(workspaceKey, draftTabId!);
 
     const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
-    const retained = findPaneById(layout.root, splitPaneId as string);
-    expect(retained?.tabIds).toHaveLength(1);
-    const launcher = collectAllTabs(layout.root).find(
-      (tab) => tab.tabId === retained?.focusedTabId,
-    );
-    expect(launcher?.target).toEqual({ kind: "new_tab", cwd: "/project-b" });
+    expect(findPaneById(layout.root, splitPaneId as string)).toBeNull();
+    expect(collectAllPanes(layout.root).map((pane) => pane.id)).toEqual(["main"]);
+    expect(collectAllTabs(layout.root).some((tab) => tab.target.kind === "new_tab")).toBe(false);
   });
 
   it("setTabTitle names a tab of any kind and clearing hands it back to the derived label", () => {
@@ -3329,6 +3322,7 @@ describe("workspace-layout-store actions", () => {
     expect(persisted).toEqual({
       layoutByWorkspace: { [workspaceKey]: layout },
       pinnedAgentIdsByWorkspace: {},
+      hiddenAgentIdsByWorkspace: {},
       splitSizesByWorkspace: currentState.splitSizesByWorkspace,
       explorerSidebarWidthByWorkspace: currentState.explorerSidebarWidthByWorkspace,
       explorerPaneIdByWorkspace: {},
@@ -3459,7 +3453,7 @@ describe("workspace-layout-store actions", () => {
     expect(total).toBeCloseTo(1, 10);
   });
 
-  it("closing the last content tab creates a fresh New tab in the retained pane", () => {
+  it("closing the last tab in the last ordinary pane leaves that pane empty", () => {
     const workspaceKey = createWorkspaceKey();
     const store = workspaceLayoutStore.getState();
 
@@ -3478,11 +3472,13 @@ describe("workspace-layout-store actions", () => {
     });
     const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
-    const mainTab = collectAllTabs(layout.root).find(
-      (tab) => findPaneContainingTab(layout.root, tab.tabId)?.id === "main",
-    );
-    expect(mainTab?.target).toEqual({ kind: "new_tab" });
-    expect(findPaneById(layout.root, "main")?.focusedTabId).toBe(mainTab?.tabId);
+    expect(findPaneById(layout.root, "main")?.tabIds).toEqual([]);
+    expect(findPaneById(layout.root, "main")?.focusedTabId).toBeNull();
+    expect(
+      collectAllTabs(layout.root).some(
+        (tab) => findPaneContainingTab(layout.root, tab.tabId)?.id === "main",
+      ),
+    ).toBe(false);
     expect(findPaneById(layout.root, "explorer")?.hidden).toBe(true);
   });
 
@@ -3530,7 +3526,7 @@ describe("workspace-layout-store actions", () => {
     });
   });
 
-  it("keeps hidden agent intents in memory per workspace without persisting them", () => {
+  it("persists hidden agent intents per workspace so dismissed tabs stay closed", () => {
     const workspaceKey = createWorkspaceKey();
     const otherWorkspaceKey = buildWorkspaceTabPersistenceKey({
       serverId: SERVER_ID,
@@ -3564,6 +3560,9 @@ describe("workspace-layout-store actions", () => {
       pullRequestTabAutoOpenedByWorkspace: {},
       layoutByWorkspace: {},
       pinnedAgentIdsByWorkspace: {},
+      hiddenAgentIdsByWorkspace: {
+        [otherWorkspaceKey as string]: ["agent-2"],
+      },
       splitSizesByWorkspace: {},
       explorerSidebarWidthByWorkspace: {},
       explorerPaneIdByWorkspace: {},
@@ -3744,11 +3743,8 @@ describe("workspace-layout-store actions", () => {
     const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
     expect(collectAllPanes(layout.root).map((pane) => pane.id)).toEqual(["main", splitPaneId]);
     const splitPane = findPaneById(layout.root, splitPaneId);
-    expect(splitPane?.tabIds).toHaveLength(1);
-    const retainedTab = collectAllTabs(layout.root).find(
-      (tab) => tab.tabId === splitPane?.focusedTabId,
-    );
-    expect(retainedTab?.target.kind).toBe("new_tab");
+    expect(splitPane?.tabIds).toEqual([]);
+    expect(splitPane?.focusedTabId).toBeNull();
   });
 
   it("reconcileTabs preserves a draft-origin agent tab id when there is no duplicate", () => {
@@ -3955,10 +3951,11 @@ describe("workspace-layout-store actions", () => {
       const afterThirdReconcile = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
 
       expect(afterThirdReconcile).toBe(afterSecondReconcile);
+      expect(findPaneById(afterThirdReconcile.root, ordinaryPaneId)?.tabIds).toEqual([]);
       const mainTabs = collectAllTabs(afterThirdReconcile.root).filter(
         (tab) => findPaneContainingTab(afterThirdReconcile.root, tab.tabId)?.id === ordinaryPaneId,
       );
-      expect(mainTabs).toEqual([expect.objectContaining({ target: { kind: "new_tab" } })]);
+      expect(mainTabs).toEqual([]);
     },
   );
 
@@ -4336,7 +4333,7 @@ describe("workspace-layout-store actions", () => {
     expect(state.hiddenAgentIdsByWorkspace[workspaceKey]).toBeUndefined();
   });
 
-  it("closePane removes an emptied main pane and moves focus to the surviving pane", () => {
+  it("closeTab on a pane's last tab closes that pane and moves focus to the surviving pane", () => {
     const workspaceKey = createWorkspaceKey();
     const store = workspaceLayoutStore.getState();
     const keptTabId = store.openTab({
@@ -4360,13 +4357,9 @@ describe("workspace-layout-store actions", () => {
     });
     store.moveTabToPane(workspaceKey, strandedTabId as string, "main");
     store.closeTab(workspaceKey, strandedTabId as string);
-    expect(
-      findPaneById(workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey].root, "main"),
-    ).toBeTruthy();
-
-    store.closePane(workspaceKey, "main");
 
     const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+    expect(findPaneById(layout.root, "main")).toBeNull();
     expect(collectAllPanes(layout.root).map((pane) => pane.id)).toEqual([splitPaneId]);
     expect(layout.focusedPaneId).toBe(splitPaneId);
   });
@@ -5052,9 +5045,9 @@ describe("applyPaneLayout", () => {
     const layout = source.getState().layoutByWorkspace[workspaceKey];
     const panes = collectAllPanes(layout.root);
     expect(panes.map((pane) => pane.id)).toEqual(paneIds);
-    for (const pane of panes) {
+    for (const [index, pane] of panes.entries()) {
       const tabs = collectAllTabs({ kind: "pane", pane });
-      expect(tabs.map((tab) => tab.target)).toEqual([{ kind: "new_tab" }]);
+      expect(tabs.map((tab) => tab.target)).toEqual(index < 2 ? [] : [{ kind: "new_tab" }]);
     }
     await vi.waitFor(async () => {
       const persisted = JSON.parse((await AsyncStorage.getItem("workspace-layout-state")) ?? "{}");
@@ -5264,6 +5257,37 @@ describe("applyPaneLayout", () => {
     workspaceLayoutStore.getState().applyPaneLayout("  ", { direction: "row", children: [{}, {}] });
     expect(workspaceLayoutStore.getState().layoutByWorkspace).toBe(before);
   });
+});
+
+it("keeps a closed agent hidden after reload instead of auto-opening it", async () => {
+  await AsyncStorage.removeItem("workspace-layout-state");
+  const source = createWorkspaceLayoutStore(workspaceLayoutIds);
+  await source.persist.rehydrate();
+  const workspaceKey = "server-1:hidden-reopen";
+  source.getState().hideAgent(workspaceKey, "closed-agent");
+  await vi.waitFor(async () => {
+    const persisted = JSON.parse((await AsyncStorage.getItem("workspace-layout-state")) ?? "{}");
+    expect(persisted.state?.hiddenAgentIdsByWorkspace[workspaceKey]).toEqual(["closed-agent"]);
+  });
+
+  const restored = createWorkspaceLayoutStore(workspaceLayoutIds);
+  await restored.persist.rehydrate();
+  expect(Array.from(restored.getState().hiddenAgentIdsByWorkspace[workspaceKey] ?? [])).toEqual([
+    "closed-agent",
+  ]);
+
+  restored.getState().reconcileTabs(workspaceKey, {
+    agentsHydrated: true,
+    terminalsHydrated: true,
+    activeAgentIds: ["closed-agent"],
+    autoOpenAgentIds: ["closed-agent"],
+    standaloneTerminalIds: [],
+    hasActivePendingDraftCreate: false,
+  });
+
+  expect(
+    contentTabs(restored.getState().getWorkspaceTabs(workspaceKey)).map((tab) => tab.target),
+  ).toEqual([]);
 });
 
 it("persists the once-only PR add after closing, and clears it when purging the workspace", async () => {

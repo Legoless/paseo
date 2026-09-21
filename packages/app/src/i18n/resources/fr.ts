@@ -2325,6 +2325,10 @@ export const fr = {
         title: "Halo de volet",
         description: "Colorer les volets d’agent selon l’état",
       },
+      terminalStatusGlow: {
+        title: "Halo d'agent dans le terminal",
+        description: "Afficher le halo d'état pour les CLI d'agents dans les volets de terminal",
+      },
       sidebar: {
         title: "Barre latérale",
         description: "Choisissez les éléments affichés en haut de la barre latérale et leur ordre",

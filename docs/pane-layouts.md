@@ -9,15 +9,14 @@ Layouts describe geometry only. Applying one never starts or stops an agent, ter
 
 ## Pane lifecycle
 
-Panes are user-controlled. A pane outlives its last tab: closing, moving or splitting away the final
-tab leaves the pane in place holding a New tab launcher, and the launcher inherits the project the
-departing tab was in, so an emptied pane still points where the user left it. **Close pane** is the
-only thing that removes one — plus dismissing an empty pane's launcher, which is the same gesture by
-another affordance. `detachTabFromTree` in `packages/app/src/stores/workspace-layout-actions.ts`
-enforces this: tab removal has no way to reach `removePaneByPath`.
+Panes are user-controlled. Closing the last tab in a pane closes that pane — same as **Close pane**.
+The last visible ordinary pane cannot go, because the workspace still needs a canvas; that close
+only removes the tab and leaves the pane empty. The + control opens a tab there. Moving or
+splitting the last tab away still leaves a launcher so the source pane stays usable, and that
+launcher inherits the departing tab's project.
 
-Reconciliation obeys the same rule. An archived agent or a terminal the daemon no longer has leaves
-its pane standing rather than collapsing the split under whatever the user was reading next to it.
+Reconciliation does not collapse splits. An archived agent or a terminal the daemon no longer has
+leaves its pane standing rather than taking down whatever the user was reading next to it.
 
 ## Where the files live
 

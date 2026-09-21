@@ -38,8 +38,8 @@ export type WorkspaceTabTarget =
       labels?: string[];
       /**
        * Project this launcher opens its tab in. Mirrors `draft.cwd` below — the launcher hands it
-       * straight to the draft it creates. A pane that outlives its last tab inherits it from that
-       * tab, so an emptied pane still points at the project the user left it on.
+       * straight to the draft it creates. Moving or splitting away a pane's last tab inherits it
+       * onto the leftover launcher. Closing the last tab closes the pane.
        */
       cwd?: string;
     }

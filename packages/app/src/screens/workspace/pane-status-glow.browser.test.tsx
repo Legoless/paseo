@@ -6,6 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PaneStatusGlowLayer } from "./pane-status-glow-layer";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
+import { shouldShowPaneStatusGlow } from "@/utils/pane-status-glow";
 
 beforeEach(() => vi.stubGlobal("React", React));
 
@@ -56,4 +57,25 @@ describe("PaneStatusGlowLayer", () => {
     expect(layer.getAttribute("data-status-glow")).toBe(bucket);
     expect(getComputedStyle(layer).borderTopColor).toBe(expectedColor);
   });
+});
+
+describe("shouldShowPaneStatusGlow", () => {
+  it.each([
+    [true, true, true, true],
+    [true, true, false, false],
+    [true, false, true, false],
+    [false, true, false, true],
+    [false, false, true, false],
+  ] as const)(
+    "returns %s/%s/%s visibility as %s",
+    (isTerminalTab, paneStatusGlowEnabled, terminalStatusGlowEnabled, expected) => {
+      expect(
+        shouldShowPaneStatusGlow({
+          isTerminalTab,
+          paneStatusGlowEnabled,
+          terminalStatusGlowEnabled,
+        }),
+      ).toBe(expected);
+    },
+  );
 });

@@ -50,6 +50,7 @@ import { PiRpcAgentClient } from "./providers/pi/agent.js";
 import { TraeACPAgentClient } from "./providers/trae-acp-agent.js";
 import { MockLoadTestAgentClient } from "./providers/mock-load-test-agent.js";
 import { MockSlowProviderClient } from "./providers/mock-slow-provider.js";
+import { AntigravityProviderOptionsSchema } from "./providers/antigravity/options.js";
 import { ClaudeProviderOptionsSchema } from "./providers/claude/options.js";
 import { CodexProviderOptionsSchema } from "./providers/codex/options.js";
 import { OpenCodeProviderOptionsSchema } from "./providers/opencode/options.js";
@@ -157,6 +158,10 @@ interface ProviderContract {
 const EmptyProviderOptionsSchema: z.ZodType<ProviderOptions> = z.object({}).strict();
 
 const PROVIDER_CONTRACTS: Record<string, ProviderContract> = {
+  antigravity: {
+    optionsSchema: AntigravityProviderOptionsSchema,
+    supportsExactMcpPreapproval: false,
+  },
   claude: { optionsSchema: ClaudeProviderOptionsSchema, supportsExactMcpPreapproval: true },
   codex: { optionsSchema: CodexProviderOptionsSchema, supportsExactMcpPreapproval: true },
   opencode: { optionsSchema: OpenCodeProviderOptionsSchema, supportsExactMcpPreapproval: true },

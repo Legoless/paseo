@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import pino from "pino";
 import { describe, expect, it } from "vitest";
 import type { AgentStreamEvent } from "../../agent-sdk-types.js";
-import { AntigravityAgentClient, parseAgyModelsOutput } from "./agent.js";
+import { AntigravityAgentClient, buildAgySpawnArgs, parseAgyModelsOutput } from "./agent.js";
 import { AntigravityStreamDecoder } from "./stream-decoder.js";
 
 describe("parseAgyModelsOutput", () => {
@@ -358,6 +358,50 @@ describe("AntigravityStreamDecoder", () => {
       },
     ]);
   });
+
+  it("surfaces denied_actions as permission cards and cancels interrupted turns", () => {
+    const events: AgentStreamEvent[] = [];
+    const decoder = new AntigravityStreamDecoder("antigravity", (event) => events.push(event));
+
+    decoder.write(
+      JSON.stringify({
+        event: "result",
+        result: {
+          conversation_id: "conv-1",
+          status: "INTERRUPTED",
+          response: "",
+          error: "Interrupted by user",
+          denied_actions: [{ action: "command(ls)", display_name: "Run ls" }],
+        },
+      }) + "\n",
+      "turn-1",
+    );
+
+    expect(events).toContainEqual({
+      type: "permission_requested",
+      provider: "antigravity",
+      turnId: "turn-1",
+      request: {
+        id: "agy-denied-turn-1-0",
+        provider: "antigravity",
+        name: "command(ls)",
+        kind: "tool",
+        title: "Run ls",
+        description:
+          "Antigravity denied this tool in headless mode. Allow switches this session to Bypass so the next turn can run it.",
+        actions: [
+          { id: "bypass", label: "Bypass", behavior: "allow", variant: "danger" },
+          { id: "dismiss", label: "Dismiss", behavior: "deny", variant: "secondary" },
+        ],
+      },
+    });
+    expect(events).toContainEqual({
+      type: "turn_canceled",
+      provider: "antigravity",
+      reason: "Interrupted by user",
+      turnId: "turn-1",
+    });
+  });
 });
 
 describe("AntigravityAgentClient", () => {
@@ -368,7 +412,41 @@ describe("AntigravityAgentClient", () => {
     expect(client.provider).toBe("antigravity");
     expect(client.capabilities.supportsStreaming).toBe(true);
     expect(client.capabilities.supportsSessionPersistence).toBe(true);
+    expect(client.capabilities.supportsSessionListing).toBe(true);
     expect(client.capabilities.supportsDynamicModes).toBe(true);
+    expect(client.capabilities.supportsMcpServers).toBe(true);
+  });
+
+  it("builds spawn args for effort, sandbox, extra dirs, and bypass", () => {
+    expect(
+      buildAgySpawnArgs({
+        launchArgs: [],
+        modelId: "gemini-3.8-flash-high",
+        modeId: "bypass",
+        conversationId: "conv-1",
+        effort: "high",
+        sandbox: true,
+        agent: "reviewer",
+        addDir: ["/tmp/extra"],
+      }),
+    ).toEqual([
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--model",
+      "gemini-3.8-flash-high",
+      "--dangerously-skip-permissions",
+      "--effort",
+      "high",
+      "--sandbox",
+      "--agent",
+      "reviewer",
+      "--add-dir",
+      "/tmp/extra",
+      "--conversation",
+      "conv-1",
+    ]);
   });
 
   it("returns fallback catalog models when agy models cannot be executed", async () => {
@@ -386,6 +464,11 @@ describe("AntigravityAgentClient", () => {
     const catalog = await client.fetchCatalog({ scope: "global" });
     expect(catalog.models.length).toBeGreaterThan(0);
     expect(catalog.models.some((m) => m.id === "gemini-3.8-flash-high" && m.isDefault)).toBe(true);
+    expect(catalog.models[0]?.thinkingOptions?.map((option) => option.id)).toEqual([
+      "low",
+      "medium",
+      "high",
+    ]);
     expect(catalog.modes.some((m) => m.id === "accept-edits")).toBe(true);
     expect(catalog.modes.some((m) => m.id === "bypass")).toBe(true);
   });
@@ -529,6 +612,143 @@ describe("AntigravityAgentClient", () => {
       expect(completedEvent).toBeDefined();
 
       await session.close();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("tracks denied_actions and switches to Bypass when the user allows", async () => {
+    const tmpDir = mkdtempSync(path.join(tmpdir(), "agy-denied-"));
+    const mockScript = path.join(tmpDir, "mock-agy.cjs");
+    writeFileSync(
+      mockScript,
+      `
+      process.stdin.setEncoding("utf8");
+      process.stdout.write(JSON.stringify({
+        event: "init",
+        conversation_id: "conv-denied",
+        init: { cwd: process.cwd(), tools: [], permission_mode: "request-review" }
+      }) + "\\n");
+      let buffer = "";
+      process.stdin.on("data", (chunk) => {
+        buffer += chunk;
+        if (buffer.includes("\\n")) {
+          process.stdout.write(JSON.stringify({
+            event: "result",
+            result: {
+              conversation_id: "conv-denied",
+              status: "SUCCESS",
+              response: "I could not run that command.",
+              denied_actions: [{ action: "command(ls)", display_name: "Run ls" }]
+            }
+          }) + "\\n");
+        }
+      });
+      `,
+    );
+
+    try {
+      const client = new AntigravityAgentClient({
+        logger: pino({ level: "silent" }),
+        runtimeSettings: {
+          command: { mode: "replace", argv: [process.execPath, mockScript] },
+        },
+      });
+      const session = await client.createSession({
+        cwd: tmpDir,
+        provider: "antigravity",
+        modeId: "default",
+      });
+      await session.run("list files");
+      const pending = session.getPendingPermissions();
+      expect(pending).toHaveLength(1);
+      expect(pending[0]?.name).toBe("command(ls)");
+      await session.respondToPermission(pending[0]!.id, { behavior: "allow" });
+      expect(await session.getCurrentMode()).toBe("bypass");
+      expect(session.getPendingPermissions()).toEqual([]);
+      await session.close();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("replays transcript history for a resumed conversation", async () => {
+    const homeDir = mkdtempSync(path.join(tmpdir(), "agy-home-"));
+    const conversationId = "conv-history";
+    const transcriptDir = path.join(
+      homeDir,
+      ".gemini",
+      "antigravity-cli",
+      "brain",
+      conversationId,
+      ".system_generated",
+      "logs",
+    );
+    mkdirSync(transcriptDir, { recursive: true });
+    writeFileSync(
+      path.join(transcriptDir, "transcript.jsonl"),
+      `${JSON.stringify({
+        step_index: 0,
+        type: "USER_INPUT",
+        content: "<USER_REQUEST>\nHello history\n</USER_REQUEST>",
+      })}\n${JSON.stringify({
+        step_index: 1,
+        type: "PLANNER_RESPONSE",
+        content: "Hello back",
+      })}\n`,
+    );
+    const mockScript = path.join(homeDir, "mock-agy.cjs");
+    writeFileSync(mockScript, "process.stdin.resume();\n");
+
+    try {
+      const client = new AntigravityAgentClient({
+        logger: pino({ level: "silent" }),
+        homeDir,
+        runtimeSettings: {
+          command: { mode: "replace", argv: [process.execPath, mockScript] },
+        },
+      });
+      const session = await client.resumeSession({
+        provider: "antigravity",
+        sessionId: conversationId,
+        nativeHandle: conversationId,
+      });
+      const events: AgentStreamEvent[] = [];
+      for await (const event of session.streamHistory()) {
+        events.push(event);
+      }
+      expect(events).toMatchObject([
+        { type: "timeline", item: { type: "user_message", text: "Hello history" } },
+        { type: "timeline", item: { type: "assistant_message", text: "Hello back" } },
+      ]);
+      await session.close();
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes injected MCP servers into the workspace overlay for the session", async () => {
+    const tmpDir = mkdtempSync(path.join(tmpdir(), "agy-mcp-session-"));
+    const mockScript = path.join(tmpDir, "mock-agy.cjs");
+    writeFileSync(mockScript, "process.stdin.resume();\n");
+    try {
+      const client = new AntigravityAgentClient({
+        logger: pino({ level: "silent" }),
+        runtimeSettings: {
+          command: { mode: "replace", argv: [process.execPath, mockScript] },
+        },
+      });
+      const session = await client.createSession({
+        cwd: tmpDir,
+        provider: "antigravity",
+        mcpServers: { paseo: { type: "http", url: "http://127.0.0.1:9/mcp" } },
+      });
+      const written = JSON.parse(
+        readFileSync(path.join(tmpDir, ".agents", "mcp_config.json"), "utf8"),
+      );
+      expect(written.mcpServers.paseo).toEqual({ serverUrl: "http://127.0.0.1:9/mcp" });
+      await session.close();
+      expect(() => readFileSync(path.join(tmpDir, ".agents", "mcp_config.json"))).toThrow();
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }

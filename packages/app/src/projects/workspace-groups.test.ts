@@ -18,6 +18,20 @@ function tab(input: {
 }
 
 /** `collectAllTabs` reads the pane's internal `tabs` array, which `SplitPane` does not declare. */
+function agentTabs(...agentIds: string[]): WorkspaceTab[] {
+  return agentIds.map((agentId, index) =>
+    tab({
+      tabId: `agent_${agentId}`,
+      target: { kind: "agent", agentId },
+      createdAt: index + 1,
+    }),
+  );
+}
+
+function layoutsFor(workspaceId: string, tabs: WorkspaceTab[]): Record<string, WorkspaceLayout> {
+  return { [`srv:${workspaceId}`]: layout(tabs) };
+}
+
 function layout(tabs: WorkspaceTab[]): WorkspaceLayout {
   const pane = { id: "main", tabIds: tabs.map((entry) => entry.tabId), focusedTabId: null, tabs };
   return {
@@ -249,6 +263,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
           ],
         }),
       ],
+      layoutsByWorkspace: layoutsFor("ws-1", agentTabs("agent-a", "agent-b")),
     });
 
     const section = model.sectionsByWorkspaceKey.get("srv:ws-1");
@@ -296,6 +311,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
           ],
         }),
       ],
+      layoutsByWorkspace: layoutsFor("ws-1", agentTabs("stray")),
     });
 
     const section = model.sectionsByWorkspaceKey.get("srv:ws-1");
@@ -398,6 +414,60 @@ describe("buildSidebarWorkspaceGroupModel", () => {
     expect(section?.uncategorized.newAgents?.[0]?.cwdLabel).toBe("~");
   });
 
+  it("keeps sidebar agent rows 1:1 with open agent tabs once the workspace has a layout", () => {
+    const agents = [
+      agent({
+        id: "open-agent",
+        workspaceId: "ws-1",
+        cwd: "/repo/project-a/ws-1",
+        title: "Open",
+      }),
+      agent({
+        id: "closed-agent",
+        workspaceId: "ws-1",
+        cwd: "/repo/project-a/ws-1",
+        title: "Closed",
+      }),
+      agent({
+        id: "closed-subagent",
+        workspaceId: "ws-1",
+        cwd: "/repo/project-a/ws-1",
+        parentAgentId: "open-agent",
+      }),
+    ];
+
+    const withClosedTab = buildSidebarWorkspaceGroupModel({
+      sessions: [session({ workspaces: [TWO_PROJECT_WORKSPACE], agents })],
+      layoutsByWorkspace: {
+        "srv:ws-1": layout([
+          tab({
+            tabId: "agent_open-agent",
+            target: { kind: "agent", agentId: "open-agent" },
+            createdAt: 1,
+          }),
+        ]),
+      },
+    });
+    const memberA = withClosedTab.sectionsByWorkspaceKey
+      .get("srv:ws-1")
+      ?.members.find((entry) => entry.projectId === "project-a");
+    expect(memberA?.agents.map((entry) => entry.agentId)).toEqual(["open-agent"]);
+
+    const afterClose = buildSidebarWorkspaceGroupModel({
+      sessions: [session({ workspaces: [TWO_PROJECT_WORKSPACE], agents })],
+      layoutsByWorkspace: {
+        "srv:ws-1": layout([
+          tab({ tabId: "tab_launcher", target: { kind: "new_tab" }, createdAt: 2 }),
+        ]),
+      },
+    });
+    expect(
+      afterClose.sectionsByWorkspaceKey
+        .get("srv:ws-1")
+        ?.members.find((entry) => entry.projectId === "project-a")?.agents,
+    ).toEqual([]);
+  });
+
   it("excludes archived agents and agents of other workspaces, keeps subagents", () => {
     const model = buildSidebarWorkspaceGroupModel({
       sessions: [
@@ -424,6 +494,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
           ],
         }),
       ],
+      layoutsByWorkspace: layoutsFor("ws-1", agentTabs("subagent")),
     });
 
     const section = model.sectionsByWorkspaceKey.get("srv:ws-1");
@@ -452,6 +523,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
           ],
         }),
       ],
+      layoutsByWorkspace: layoutsFor("ws-1", agentTabs("older", "newer")),
     });
 
     const memberA = model.sectionsByWorkspaceKey
@@ -489,6 +561,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
           ],
         }),
       ],
+      layoutsByWorkspace: layoutsFor("ws-1", agentTabs("needs-input", "running", "review")),
     });
 
     const memberA = model.sectionsByWorkspaceKey
@@ -508,6 +581,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
           agents: [agent({ id: "untitled", workspaceId: "ws-1", cwd: "/repo/project-a/ws-1" })],
         }),
       ],
+      layoutsByWorkspace: layoutsFor("ws-1", agentTabs("untitled")),
     });
 
     const memberA = model.sectionsByWorkspaceKey
@@ -626,6 +700,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
           ],
         }),
       ],
+      layoutsByWorkspace: layoutsFor("ws-orphan", agentTabs("agent-a")),
     });
 
     const section = model.sectionsByWorkspaceKey.get("srv:ws-orphan");
@@ -639,6 +714,12 @@ describe("preserveSidebarWorkspaceGroupModelIdentity", () => {
   function buildModel(agents: Agent[] = []) {
     return buildSidebarWorkspaceGroupModel({
       sessions: [session({ workspaces: [TWO_PROJECT_WORKSPACE], agents })],
+      layoutsByWorkspace: layoutsFor(
+        "ws-1",
+        agentTabs(
+          ...agents.filter((entry) => entry.workspaceId === "ws-1").map((entry) => entry.id),
+        ),
+      ),
     });
   }
 
@@ -665,6 +746,7 @@ describe("preserveSidebarWorkspaceGroupModelIdentity", () => {
     const build = (agents: Agent[]) =>
       buildSidebarWorkspaceGroupModel({
         sessions: [session({ workspaces: [TWO_PROJECT_WORKSPACE, other], agents })],
+        layoutsByWorkspace: layoutsFor("ws-1", agentTabs("agent-a")),
       });
     const previous = build([
       agent({ id: "agent-a", workspaceId: "ws-1", cwd: "/repo/project-a/ws-1" }),

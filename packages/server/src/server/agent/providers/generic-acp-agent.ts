@@ -1,3 +1,4 @@
+import type { ClientSideConnection } from "@agentclientprotocol/sdk";
 import type { Logger } from "pino";
 import { z } from "zod";
 
@@ -51,6 +52,11 @@ interface GenericACPAgentClientOptions {
   configFeatureOptions?: ACPConfigFeatureOption[];
   extensionCommandsParser?: ACPExtensionCommandsParser;
   catalogModelResolver?: ACPCatalogModelResolver;
+  thinkingOptionWriter?: (
+    connection: ClientSideConnection,
+    sessionId: string,
+    thinkingOptionId: string,
+  ) => Promise<void>;
   now?: () => number;
 }
 
@@ -77,6 +83,7 @@ export class GenericACPAgentClient extends ACPAgentClient {
       configFeatureOptions: options.configFeatureOptions,
       extensionCommandsParser: options.extensionCommandsParser,
       catalogModelResolver: options.catalogModelResolver,
+      thinkingOptionWriter: options.thinkingOptionWriter,
       now: options.now,
     });
 

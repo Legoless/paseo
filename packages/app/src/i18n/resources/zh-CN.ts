@@ -2243,6 +2243,10 @@ export const zhCN = {
         title: "窗格状态光晕",
         description: "按状态为智能体窗格着色",
       },
+      terminalStatusGlow: {
+        title: "终端智能体发光",
+        description: "在终端窗格中为智能体命令行显示状态光晕",
+      },
       sidebar: {
         title: "侧边栏",
         description: "选择侧边栏顶部显示的项目及其顺序",

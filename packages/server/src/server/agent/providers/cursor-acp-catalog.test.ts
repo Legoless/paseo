@@ -96,11 +96,12 @@ test("lists each model's thinking options without changing Cursor preferences", 
   expect(connection.selectedModel).toBe("claude-haiku-4-5");
   expect(connection.selectionHistory).toEqual(["claude-haiku-4-5"]);
   expect(
-    models.map(({ id, isDefault, thinkingOptions, defaultThinkingOptionId }) => ({
+    models.map(({ id, isDefault, thinkingOptions, defaultThinkingOptionId, metadata }) => ({
       id,
       isDefault,
       thinking: thinkingOptions?.map((option) => option.id),
       defaultThinkingOptionId,
+      thoughtLevelConfigId: metadata?.thoughtLevelConfigId,
     })),
   ).toEqual([
     {
@@ -108,12 +109,14 @@ test("lists each model's thinking options without changing Cursor preferences", 
       isDefault: true,
       thinking: ["false", "true"],
       defaultThinkingOptionId: "true",
+      thoughtLevelConfigId: "thinking",
     },
     {
       id: "grok-4.6",
       isDefault: false,
       thinking: ["low", "medium", "high", "xhigh"],
       defaultThinkingOptionId: "xhigh",
+      thoughtLevelConfigId: "effort",
     },
   ]);
 });

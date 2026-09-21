@@ -2286,6 +2286,10 @@ export const ja = {
         title: "ペインのステータスグロー",
         description: "エージェントのペインを状態色で縁取ります",
       },
+      terminalStatusGlow: {
+        title: "ターミナルエージェントのグロー",
+        description: "ターミナルペイン内のエージェントCLIにステータスグローを表示する",
+      },
       sidebar: {
         title: "サイドバー",
         description: "サイドバー上部に表示する項目とその順序を選択します",

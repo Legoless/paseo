@@ -2395,6 +2395,10 @@ export const en = {
         title: "Pane status glow",
         description: "Show a status-colored glow around agent panes",
       },
+      terminalStatusGlow: {
+        title: "Terminal agent glow",
+        description: "Show status glow for agent CLIs in terminal panes",
+      },
       sidebar: {
         title: "Sidebar",
         description: "Choose which items appear at the top of the sidebar and in what order",

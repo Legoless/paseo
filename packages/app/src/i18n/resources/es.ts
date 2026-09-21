@@ -2319,6 +2319,10 @@ export const es = {
         title: "Resplandor del panel",
         description: "Colorear los paneles de agente según el estado",
       },
+      terminalStatusGlow: {
+        title: "Brillo de agentes de terminal",
+        description: "Mostrar brillo de estado para agentes CLI en paneles de terminal",
+      },
       sidebar: {
         title: "Barra lateral",
         description:
