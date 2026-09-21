@@ -197,6 +197,24 @@ describe("loadAppSettingsFromStorage", () => {
     expect(result.chatOutlineEnabled).toBe(false);
   });
 
+  it("enables terminal status glow by default", async () => {
+    const result = await loadAppSettingsFromStorage(makeDeps());
+
+    expect(result.terminalStatusGlowEnabled).toBe(true);
+  });
+
+  it("loads a disabled terminal status glow preference", async () => {
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ terminalStatusGlowEnabled: false }),
+      }),
+    });
+
+    const result = await loadAppSettingsFromStorage(deps);
+
+    expect(result.terminalStatusGlowEnabled).toBe(false);
+  });
+
   it("defaults sidebar navigation items to an empty preference list", async () => {
     const deps = makeDeps();
 

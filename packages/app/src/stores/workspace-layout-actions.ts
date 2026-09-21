@@ -78,6 +78,8 @@ interface InsertChildIntoGroupInput {
 
 interface DetachTabFromTreeInput {
   tabId: string;
+  /** Close leaves the pane empty. Move/split still mint a launcher so the source pane stays usable. */
+  keepEmpty?: boolean;
 }
 
 interface DetachTabFromTreeResult {
@@ -826,11 +828,13 @@ function detachTabFromTree(
     tabs: paneNode.pane.tabs.filter((entry) => entry.tabId !== input.tabId),
   });
 
-  // Panes outlive their last tab and retain its project. Only an explicit pane close removes one.
+  // Move/split mint a launcher so the source pane stays usable. User close of the last
+  // tab closes the pane in `closeTab`; this path only empties it when the last ordinary
+  // pane must stay, or when reconcile prunes a tab without collapsing the split.
   return {
     root: replaceNodeAtPath(root, panePath, () => ({
       kind: "pane",
-      pane: ensureRetainedPaneHasTab(nextPane, tab),
+      pane: input.keepEmpty ? nextPane : ensureRetainedPaneHasTab(nextPane, tab),
     })),
     tab,
     sourcePaneId: paneNode.pane.id,
@@ -1669,6 +1673,7 @@ export function closeTabInLayout(input: CloseTabInLayoutInput): WorkspaceLayout 
   const fallbackPaneId = findNearestSiblingPaneId(internalLayout.root, pane.id);
   const nextRoot = detachTabFromTree(internalLayout.root, {
     tabId: input.tabId,
+    keepEmpty: true,
   }).root;
   const parentTabIdByTabId = normalizeParentTabMap({
     raw: input.layout.parentTabIdByTabId,

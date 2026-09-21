@@ -22,6 +22,33 @@ export class WorktreeRequestError extends Error {
   }
 }
 
+function readThrownMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "string" && error) {
+    return error;
+  }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string" &&
+    error.message.trim()
+  ) {
+    return error.message;
+  }
+  try {
+    const encoded = JSON.stringify(error);
+    if (encoded && encoded !== "null") {
+      return encoded;
+    }
+  } catch {
+    /* circular throw bodies still need a string */
+  }
+  return "Unknown error";
+}
+
 export function toWorktreeWireError(error: unknown): WorktreeWireError {
   if (error instanceof BranchAlreadyCheckedOutError) {
     return { code: "branch_already_checked_out", message: error.message };
@@ -32,10 +59,7 @@ export function toWorktreeWireError(error: unknown): WorktreeWireError {
   if (error instanceof UnknownBranchError) {
     return { code: "unknown_branch", message: error.message };
   }
-  if (error instanceof Error) {
-    return { code: "unknown", message: error.message };
-  }
-  return { code: "unknown", message: String(error) };
+  return { code: "unknown", message: readThrownMessage(error) };
 }
 
 export function toWorktreeRequestError(error: unknown): WorktreeRequestError {

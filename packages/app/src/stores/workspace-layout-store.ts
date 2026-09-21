@@ -953,38 +953,62 @@ export function createWorkspaceLayoutStore(
               state.explorerSidebarPaneIdByWorkspace[normalizedWorkspaceKey],
             );
             const closingPane = findPaneContainingTab(layout.root, normalizedTabId);
-            const closingTab = collectAllTabs(layout.root).find(
-              (tab) => tab.tabId === normalizedTabId,
-            );
             let nextLayout: WorkspaceLayout | null;
             let hidesExplorer = false;
 
-            // Dismissing a pane's launcher is how the user dismisses the empty pane itself — the
-            // one tab close that is a pane close.
-            if (closingPane?.tabIds.length === 1 && closingTab?.target.kind === "new_tab") {
+            // Closing the last tab is a pane close. Explorer hides. The last ordinary
+            // pane cannot go, so that close only removes the tab.
+            if (closingPane?.tabIds.length === 1) {
               hidesExplorer = closingPane.id === explorerSidebarPaneId;
-              nextLayout = hidesExplorer
-                ? setPaneHiddenInLayout({ layout, paneId: closingPane.id, hidden: true })
-                : closePaneInLayout({ layout, paneId: closingPane.id, explorerSidebarPaneId });
+              if (hidesExplorer) {
+                const closedLayout =
+                  closeTabInLayout({
+                    layout,
+                    tabId: normalizedTabId,
+                    explorerSidebarPaneId,
+                  }) ?? layout;
+                nextLayout =
+                  setPaneHiddenInLayout({
+                    layout: closedLayout,
+                    paneId: closingPane.id,
+                    hidden: true,
+                  }) ?? closedLayout;
+              } else if (canDismissPaneInLayout(layout, closingPane.id, explorerSidebarPaneId)) {
+                nextLayout = closePaneInLayout({
+                  layout,
+                  paneId: closingPane.id,
+                  explorerSidebarPaneId,
+                });
+                nextLayout = nextLayout
+                  ? keepWorkspaceFocusOutOfExplorerSidebar(
+                      nextLayout,
+                      explorerSidebarPaneId,
+                      layout.focusedPaneId,
+                    )
+                  : null;
+              } else {
+                const closedLayout = closeTabInLayout({
+                  layout,
+                  tabId: normalizedTabId,
+                  explorerSidebarPaneId,
+                });
+                nextLayout = closedLayout
+                  ? keepWorkspaceFocusOutOfExplorerSidebar(
+                      closedLayout,
+                      explorerSidebarPaneId,
+                      layout.focusedPaneId,
+                    )
+                  : null;
+              }
             } else {
               const closedLayout = closeTabInLayout({
                 layout,
                 tabId: normalizedTabId,
                 explorerSidebarPaneId,
               });
-              hidesExplorer =
-                closingPane?.id === explorerSidebarPaneId && closingPane.tabIds.length === 1;
-              const normalizedLayout =
-                closedLayout && hidesExplorer && explorerSidebarPaneId !== null
-                  ? (setPaneHiddenInLayout({
-                      layout: closedLayout,
-                      paneId: explorerSidebarPaneId,
-                      hidden: true,
-                    }) ?? closedLayout)
-                  : closedLayout;
-              nextLayout = normalizedLayout
+              nextLayout = closedLayout
                 ? keepWorkspaceFocusOutOfExplorerSidebar(
-                    normalizedLayout,
+                    closedLayout,
                     explorerSidebarPaneId,
                     layout.focusedPaneId,
                   )
@@ -1891,6 +1915,12 @@ export function createWorkspaceLayoutStore(
                 Array.from(agentIds),
               ]),
             ),
+            hiddenAgentIdsByWorkspace: Object.fromEntries(
+              Object.entries(state.hiddenAgentIdsByWorkspace).map(([key, agentIds]) => [
+                key,
+                Array.from(agentIds),
+              ]),
+            ),
             splitSizesByWorkspace: state.splitSizesByWorkspace,
             explorerSidebarWidthByWorkspace: state.explorerSidebarWidthByWorkspace,
             explorerPaneIdByWorkspace: state.explorerSidebarPaneIdByWorkspace,
@@ -1937,6 +1967,12 @@ export function createWorkspaceLayoutStore(
             layoutByWorkspace,
             pinnedAgentIdsByWorkspace: Object.fromEntries(
               Object.entries(result.data.pinnedAgentIdsByWorkspace ?? {}).map(([key, agentIds]) => [
+                key,
+                new Set(agentIds),
+              ]),
+            ),
+            hiddenAgentIdsByWorkspace: Object.fromEntries(
+              Object.entries(result.data.hiddenAgentIdsByWorkspace ?? {}).map(([key, agentIds]) => [
                 key,
                 new Set(agentIds),
               ]),

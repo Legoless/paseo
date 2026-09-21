@@ -1294,6 +1294,57 @@ describe("terminal activity interruption", () => {
   });
 });
 
+describe("terminal pty activity scanning", () => {
+  it("tracks activity without launching a real provider", async () => {
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: [
+          "-e",
+          'process.stdout.write("Welcome to the Antigravity CLI\\r\\n> "); process.stdin.setRawMode(true); process.stdin.resume();',
+        ],
+      }),
+    );
+
+    await waitForState(session, (state) =>
+      getLines(state).join("\n").includes("Welcome to the Antigravity CLI"),
+    );
+    expect(session.getActivity()).toBeNull();
+
+    session.send({ type: "input", data: "hello" });
+    session.send({ type: "input", data: "\r" });
+    expect(session.getActivity()).toMatchObject({ state: "working" });
+
+    session.send({ type: "input", data: "\x03" });
+    expect(session.getActivity()).toBeNull();
+  });
+
+  it("clears working activity when a scanned agent screen stays still", async () => {
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: [
+          "-e",
+          'process.stdout.write("Welcome to the Antigravity CLI\\r\\nworking...\\n"); process.stdin.setRawMode(true); process.stdin.resume();',
+        ],
+      }),
+    );
+
+    await waitForState(session, (state) =>
+      getLines(state).join("\n").includes("Welcome to the Antigravity CLI"),
+    );
+    session.send({ type: "input", data: "\r" });
+    expect(session.getActivity()).toMatchObject({ state: "working" });
+
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    expect(session.getActivity()).toBeNull();
+  });
+});
+
 // The escaping tests above assert the command line we generate. This one runs
 // it: a real cmd.exe launches a real .cmd shim, which echoes the argv it was
 // handed. It is the only check that proves cmd.exe's tokenizer reconstructs

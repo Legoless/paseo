@@ -27,6 +27,8 @@ import {
   mapACPUsage,
   resolveACPModeSelection,
   resolveACPModelSelection,
+  describeACPSettingsGate,
+  isACPSettingsGateText,
   summarizeACPRequestError,
 } from "./acp-agent.js";
 import type { ProcessTerminator, TreeKillTarget } from "../../../utils/tree-kill.js";
@@ -2469,6 +2471,34 @@ describe("ACPAgentSession", () => {
     expect(summary.diagnostic).toContain("Droid process exited unexpectedly");
   });
 
+  test("summarizes JSON-RPC objects that use a string error code", () => {
+    const summary = summarizeACPRequestError({
+      code: "-32603",
+      message: "Internal error",
+      data: { details: "ACP session/new failed" },
+    });
+
+    expect(summary).toEqual({
+      message: "Internal error: ACP session/new failed",
+      code: "-32603",
+      diagnostic:
+        'Internal error: ACP session/new failed | code=-32603 | data={"details":"ACP session/new failed"}',
+    });
+  });
+
+  test("keeps a plain object's message instead of [object Object]", () => {
+    expect(summarizeACPRequestError({ message: "folder trust required" })).toEqual({
+      message: "folder trust required",
+    });
+  });
+
+  test("names the Cursor Fable restricted-model gate", () => {
+    expect(isACPSettingsGateText("\n\nCheck your settings to continue")).toBe(true);
+    expect(describeACPSettingsGate("claude-fable-5-1")).toBe(
+      "Cursor blocked Fable until you approve its data-retention policy in the Cursor dashboard restricted-models page.",
+    );
+  });
+
   test("accepts ACP extension notifications without failing the JSON-RPC connection", async () => {
     const logger = createTestLogger();
     const trace = vi.spyOn(logger, "trace");
@@ -2797,6 +2827,62 @@ describe("ACPAgentSession", () => {
       turnId,
     });
     expect(asInternals<ACPSessionInternals>(session).activeForegroundTurnId).toBeNull();
+  });
+
+  test("turns Cursor settings-gate text into a failed Fable turn", async () => {
+    const session = createSessionWithConfig({
+      provider: "cursor",
+      model: "claude-fable-5-1",
+    });
+    const events: AgentStreamEvent[] = [];
+    let resolvePrompt!: (value: PromptResponse) => void;
+    const prompt = vi.fn(
+      () =>
+        new Promise<PromptResponse>((resolve) => {
+          resolvePrompt = resolve;
+        }),
+    );
+
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+    asInternals<ACPSessionInternals>(session).connection = { prompt };
+
+    session.subscribe((event) => {
+      events.push(event);
+    });
+
+    const { turnId } = await session.startTurn("are you kidding?");
+    await session.sessionUpdate({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-1",
+        content: { type: "text", text: "\n\nCheck your settings to continue" },
+      } as SessionUpdate,
+    });
+    resolvePrompt({ stopReason: "end_turn", usage: { outputTokens: 20 } });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      events.filter((event) => event.type === "timeline" && event.item.type === "error"),
+    ).toEqual([
+      {
+        type: "timeline",
+        provider: "cursor",
+        turnId,
+        item: {
+          type: "error",
+          message: describeACPSettingsGate("claude-fable-5-1"),
+        },
+      },
+    ]);
+    expect(events.find((event) => event.type === "turn_failed")).toMatchObject({
+      type: "turn_failed",
+      turnId,
+      code: "settings_gate",
+      error: describeACPSettingsGate("claude-fable-5-1"),
+    });
+    expect(events.some((event) => event.type === "turn_completed")).toBe(false);
   });
 
   test("startTurn emits the submitted user message even when ACP does not echo it", async () => {

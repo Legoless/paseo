@@ -2302,6 +2302,10 @@ export const ptBR = {
         title: "Brilho do painel",
         description: "Colorir painéis de agente conforme o status",
       },
+      terminalStatusGlow: {
+        title: "Brilho de agentes do terminal",
+        description: "Mostrar brilho de status para CLIs de agentes em painéis de terminal",
+      },
       sidebar: {
         title: "Barra lateral",
         description: "Escolha quais itens aparecem no topo da barra lateral e em que ordem",

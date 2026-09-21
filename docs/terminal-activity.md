@@ -1,12 +1,12 @@
 # Terminal Activity Indicators
 
-Paseo surfaces terminal activity as a tab indicator (the same marks used by agents) and as a matching colored glow on the pane that holds the active tab: blue while working, orange while blocked on input, green when the turn finished and is ready for the next task. Plain idle terminals and file panes stay unadorned. Agent panes use the same overlay, plus red on error or quota. Green follows finished attention on both, so it clears when you focus the pane. Settings → Appearance → Pane status glow turns the overlay off.
+Paseo surfaces terminal activity as a tab indicator (the same marks used by agents) and as a matching colored glow on the pane that holds the active tab: blue while working, orange while blocked on input, green when the turn finished and is ready for the next task. Plain idle terminals and file panes stay unadorned. Agent panes use the same overlay, plus red on error or quota. Green follows finished attention on both, so it clears when you focus the pane. Settings → Appearance → Pane status glow turns every overlay off; Terminal agent glow turns off only terminal overlays.
 
 ## Current state
 
 Terminal activity is source-agnostic plumbing. `TerminalActivityTracker` holds the current per-terminal state and emits transitions to the manager, worker protocol, websocket subscription, app buckets, dots, and notifications.
 
-The tracker defaults to unknown (`null`). Activity production lives outside terminal stream parsing: agent hook commands report coarse activity to the daemon's local `/api/terminal-activity` endpoint.
+Activity is driven automatically by `PtyActivityScanner`, which monitors the terminal PTY stream, keystrokes, and titles for supported agent CLIs (`claude`, `codex`, `grok`, `agy`/`antigravity`, `opencode`, `pi`, `copilot`, `cursor-agent`, etc.). The scanner marks turns working on prompt submission or when the spawn command already includes a print/exec prompt (`claude -p`, `codex exec`). It flags interactive approval pauses as `needs_input`, and concludes completed turns as finished attention once the screen settles at the agent's prompt. A working screen that stays still across three samples with no prompt or question clears without finished attention, so a hung TUI does not stay blue. The stillness clock starts when the turn becomes working, including Enter or print/exec with no further output. Terminal spend and quota banners use the same orange `needs_input` attention as an approval; red stays an agent-pane status because terminal activity has no quota reason. Optional hook commands can also report coarse activity to the daemon's `/api/terminal-activity` endpoint.
 
 ## Architecture
 

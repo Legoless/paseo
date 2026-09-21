@@ -1,5 +1,8 @@
 import { execFile, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import pino, { type Logger } from "pino";
 
@@ -24,8 +27,13 @@ import type {
   AgentSessionConfig,
   AgentStreamEvent,
   FetchCatalogOptions,
+  ImportableProviderSession,
+  ImportProviderSessionContext,
+  ImportProviderSessionInput,
+  ListImportableSessionsOptions,
   ProviderCatalog,
 } from "../../agent-sdk-types.js";
+import { importSessionFromPersistence } from "../../provider-session-import.js";
 import {
   checkProviderLaunchAvailable,
   resolveProviderLaunch,
@@ -39,7 +47,18 @@ import {
   formatProviderDiagnosticError,
 } from "../diagnostic-utils.js";
 import { spawnProcess } from "../../../../utils/spawn.js";
+import { applyAgyWorkspaceMcpOverlay, type AgyMcpOverlay } from "./mcp.js";
+import {
+  ANTIGRAVITY_EFFORT_OPTIONS,
+  normalizeAntigravityEffort,
+  readAntigravityProviderOptions,
+  type AntigravityEffort,
+  type AntigravityProviderOptions,
+} from "./options.js";
+import { buildAgyUserPrompt } from "./prompt.js";
+import { listAgyImportableSessions, resolveAgyTranscriptPath } from "./sessions.js";
 import { AntigravityStreamDecoder } from "./stream-decoder.js";
+import { streamAgyTranscriptHistory } from "./transcript.js";
 import type { AgyStreamInputMessage } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -47,7 +66,7 @@ const execFileAsync = promisify(execFile);
 export const ANTIGRAVITY_CAPABILITIES: AgentCapabilityFlags = {
   supportsStreaming: true,
   supportsSessionPersistence: true,
-  supportsSessionListing: false,
+  supportsSessionListing: true,
   supportsDynamicModes: true,
   supportsMcpServers: true,
   supportsReasoningStream: true,
@@ -57,15 +76,44 @@ export const ANTIGRAVITY_CAPABILITIES: AgentCapabilityFlags = {
   supportsRewindBoth: false,
 };
 
-function getPromptText(prompt: AgentPromptInput): string {
-  if (typeof prompt === "string") return prompt;
-  if (Array.isArray(prompt)) {
-    return prompt
-      .map((block) => (block.type === "text" ? block.text : ""))
-      .filter(Boolean)
-      .join("\n\n");
+export function withAgyEffortOptions(model: AgentModelDefinition): AgentModelDefinition {
+  return {
+    ...model,
+    thinkingOptions: ANTIGRAVITY_EFFORT_OPTIONS,
+  };
+}
+
+export function buildAgySpawnArgs(input: {
+  launchArgs: string[];
+  modelId: string | null;
+  modeId: string;
+  conversationId: string | null;
+  effort: AntigravityEffort | null;
+  sandbox: boolean;
+  agent: string | null;
+  addDir: string[];
+}): string[] {
+  const args = [
+    ...input.launchArgs,
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+  ];
+  if (input.modelId) args.push("--model", input.modelId);
+  if (input.modeId === "accept-edits" || input.modeId === "plan") {
+    args.push("--mode", input.modeId);
+  } else if (input.modeId === "bypass") {
+    args.push("--dangerously-skip-permissions");
   }
-  return "";
+  if (input.effort) args.push("--effort", input.effort);
+  if (input.sandbox) args.push("--sandbox");
+  if (input.agent) args.push("--agent", input.agent);
+  for (const dir of input.addDir) {
+    args.push("--add-dir", dir);
+  }
+  if (input.conversationId) args.push("--conversation", input.conversationId);
+  return args;
 }
 
 const ESC = String.fromCharCode(0x1b);
@@ -115,6 +163,7 @@ interface AntigravitySessionOptions {
   runtimeSettings?: ProviderRuntimeSettings;
   launchContext?: AgentLaunchContext;
   logger: Logger;
+  homeDir?: string;
 }
 
 export class AntigravityAgentSession implements AgentSession {
@@ -124,10 +173,15 @@ export class AntigravityAgentSession implements AgentSession {
   private conversationId: string | null;
   private currentModeId: string;
   private currentModelId: string | null;
+  private currentEffort: AntigravityEffort | null;
+  private readonly providerOptions: AntigravityProviderOptions;
   private child: ChildProcess | null = null;
   private spawnPromise: Promise<ChildProcess | null> | null = null;
   private decoder: AntigravityStreamDecoder;
   private readonly listeners = new Set<(event: AgentStreamEvent) => void>();
+  private readonly pendingPermissions = new Map<string, AgentPermissionRequest>();
+  private readonly mcpOverlay: AgyMcpOverlay | null;
+  private imageDir: string | null = null;
   private activeTurnId: string | null = null;
   private isClosed = false;
 
@@ -136,6 +190,14 @@ export class AntigravityAgentSession implements AgentSession {
     this.conversationId = options.conversationId ?? null;
     this.currentModeId = options.config.modeId ?? "accept-edits";
     this.currentModelId = options.config.model ?? "gemini-3.8-flash-high";
+    this.providerOptions = readAntigravityProviderOptions(options.config.providerOptions);
+    this.currentEffort =
+      normalizeAntigravityEffort(options.config.thinkingOptionId) ??
+      this.providerOptions.effort ??
+      null;
+    this.mcpOverlay = options.config.mcpServers
+      ? applyAgyWorkspaceMcpOverlay(options.config.cwd, options.config.mcpServers)
+      : null;
     this.decoder = new AntigravityStreamDecoder(
       this.provider,
       (event) => this.emit(event),
@@ -168,26 +230,16 @@ export class AntigravityAgentSession implements AgentSession {
       defaultBinary: "agy",
       commandConfig: this.options.runtimeSettings?.command,
     });
-    const args = [
-      ...launch.args,
-      "--input-format",
-      "stream-json",
-      "--output-format",
-      "stream-json",
-    ];
-
-    if (this.currentModelId) {
-      args.push("--model", this.currentModelId);
-    }
-    if (this.currentModeId === "accept-edits" || this.currentModeId === "plan") {
-      args.push("--mode", this.currentModeId);
-    } else if (this.currentModeId === "bypass") {
-      args.push("--dangerously-skip-permissions");
-    }
-
-    if (this.conversationId) {
-      args.push("--conversation", this.conversationId);
-    }
+    const args = buildAgySpawnArgs({
+      launchArgs: launch.args,
+      modelId: this.currentModelId,
+      modeId: this.currentModeId,
+      conversationId: this.conversationId,
+      effort: this.currentEffort,
+      sandbox: this.providerOptions.sandbox === true,
+      agent: this.providerOptions.agent ?? null,
+      addDir: this.providerOptions.addDir ?? [],
+    });
 
     const child = spawnProcess(launch.command, args, {
       cwd: this.options.config.cwd,
@@ -280,11 +332,16 @@ export class AntigravityAgentSession implements AgentSession {
     this.decoder.resetTurn();
     this.emit({ type: "turn_started", provider: this.provider, turnId });
 
-    const text = getPromptText(prompt);
+    const prepared = buildAgyUserPrompt(
+      prompt,
+      Array.isArray(prompt) && prompt.some((block) => block.type === "image")
+        ? this.ensureImageDir()
+        : undefined,
+    );
     const inputMessage: AgyStreamInputMessage = {
       event: "user",
       message: {
-        content: [{ type: "text", text }],
+        content: prepared.text,
       },
     };
 
@@ -302,9 +359,12 @@ export class AntigravityAgentSession implements AgentSession {
     };
   }
 
-  // biome-ignore lint/correctness/useYield: Generator required by interface contract
   async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
-    // Process starts with clean wire state; history is managed in Paseo store
+    if (!this.conversationId) return;
+    yield* streamAgyTranscriptHistory(
+      this.provider,
+      resolveAgyTranscriptPath(this.conversationId, this.options.homeDir),
+    );
   }
 
   async getRuntimeInfo(): Promise<AgentRuntimeInfo> {
@@ -312,6 +372,8 @@ export class AntigravityAgentSession implements AgentSession {
       provider: this.provider,
       sessionId: this.conversationId ?? "",
       model: this.currentModelId,
+      thinkingOptionId: this.currentEffort,
+      modeId: this.currentModeId,
     };
   }
 
@@ -371,14 +433,48 @@ export class AntigravityAgentSession implements AgentSession {
     });
   }
 
+  async setThinkingOption(thinkingOptionId: string | null): Promise<void | AgentProviderNotice> {
+    const effort = normalizeAntigravityEffort(thinkingOptionId);
+    if (thinkingOptionId !== null && effort === null) {
+      throw new Error(`Antigravity thinking option '${thinkingOptionId}' is not available`);
+    }
+    if (this.currentEffort !== effort) {
+      this.currentEffort = effort;
+      if (!this.activeTurnId) {
+        this.terminateCurrentProcess();
+      }
+    }
+    this.emit({
+      type: "thinking_option_changed",
+      provider: this.provider,
+      thinkingOptionId: effort,
+    });
+  }
+
   getPendingPermissions(): AgentPermissionRequest[] {
-    return [];
+    return [...this.pendingPermissions.values()];
   }
 
   async respondToPermission(
-    _requestId: string,
-    _response: AgentPermissionResponse,
-  ): Promise<AgentPermissionResult | void> {}
+    requestId: string,
+    response: AgentPermissionResponse,
+  ): Promise<AgentPermissionResult | void> {
+    const pending = this.pendingPermissions.get(requestId);
+    if (!pending) {
+      throw new Error(`No pending Antigravity permission request with id '${requestId}'`);
+    }
+    this.pendingPermissions.delete(requestId);
+    if (response.behavior === "allow") {
+      await this.setMode("bypass");
+    }
+    this.emit({
+      type: "permission_resolved",
+      provider: this.provider,
+      requestId,
+      resolution: response,
+      turnId: this.activeTurnId ?? undefined,
+    });
+  }
 
   describePersistence(): AgentPersistenceHandle | null {
     if (!this.conversationId) return null;
@@ -418,9 +514,24 @@ export class AntigravityAgentSession implements AgentSession {
       } catch {}
     }
     this.terminateCurrentProcess();
+    this.mcpOverlay?.restore();
+    if (this.imageDir) {
+      rmSync(this.imageDir, { recursive: true, force: true });
+      this.imageDir = null;
+    }
+  }
+
+  private ensureImageDir(): string {
+    if (!this.imageDir) {
+      this.imageDir = mkdtempSync(join(tmpdir(), "paseo-agy-images-"));
+    }
+    return this.imageDir;
   }
 
   private emit(event: AgentStreamEvent): void {
+    if (event.type === "permission_requested") {
+      this.pendingPermissions.set(event.request.id, event.request);
+    }
     for (const listener of this.listeners) {
       try {
         listener(event);
@@ -446,11 +557,17 @@ export class AntigravityAgentClient implements AgentClient {
 
   private readonly logger: Logger;
   private readonly runtimeSettings?: ProviderRuntimeSettings;
+  private readonly homeDir?: string;
 
-  constructor(options?: { logger?: Logger; runtimeSettings?: ProviderRuntimeSettings }) {
+  constructor(options?: {
+    logger?: Logger;
+    runtimeSettings?: ProviderRuntimeSettings;
+    homeDir?: string;
+  }) {
     this.logger =
       options?.logger?.child?.({ provider: "antigravity" }) ?? pino({ level: "silent" });
     this.runtimeSettings = options?.runtimeSettings;
+    this.homeDir = options?.homeDir;
   }
 
   async isAvailable(): Promise<boolean> {
@@ -482,7 +599,7 @@ export class AntigravityAgentClient implements AgentClient {
         },
         timeout: 10_000,
       });
-      models = parseAgyModelsOutput(stdout, this.provider);
+      models = parseAgyModelsOutput(stdout, this.provider).map(withAgyEffortOptions);
     } catch (error) {
       this.logger.warn(
         { error },
@@ -523,7 +640,7 @@ export class AntigravityAgentClient implements AgentClient {
           id: "gpt-oss-120b-medium",
           label: "GPT-OSS 120B (Medium)",
         },
-      ];
+      ].map(withAgyEffortOptions);
     }
 
     return {
@@ -547,6 +664,7 @@ export class AntigravityAgentClient implements AgentClient {
       runtimeSettings: this.runtimeSettings,
       launchContext,
       logger: this.logger,
+      homeDir: this.homeDir,
     });
   }
 
@@ -570,6 +688,22 @@ export class AntigravityAgentClient implements AgentClient {
       runtimeSettings: this.runtimeSettings,
       launchContext,
       logger: this.logger,
+      homeDir: this.homeDir,
+    });
+  }
+
+  async listImportableSessions(
+    options?: ListImportableSessionsOptions,
+  ): Promise<ImportableProviderSession[]> {
+    return listAgyImportableSessions({ ...options, homeDir: this.homeDir });
+  }
+
+  async importSession(input: ImportProviderSessionInput, context: ImportProviderSessionContext) {
+    return importSessionFromPersistence({
+      provider: this.provider,
+      request: input,
+      context,
+      resumeSession: this.resumeSession.bind(this),
     });
   }
 

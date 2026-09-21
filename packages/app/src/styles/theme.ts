@@ -611,13 +611,21 @@ export const OPACITY = {
   100: 1,
 } as const;
 
-// Platform default font stacks — copied verbatim from constants/theme.ts `Fonts`
-// (sans -> ui, mono -> mono). These seed the dynamic `fontFamily` theme token and
+// Platform default font stacks. These seed the dynamic `fontFamily` theme token and
 // are the fallback an empty user-supplied family resolves to at apply time.
+//
+// Do not use Android's typeface name `normal` as a web `font-family` — CSS treats
+// it as a family named "normal", and some installed fonts use that name without a
+// usable space glyph. The web apply path also rejects stacks whose space advance
+// is ~0 so a hijacked `system-ui` cannot collapse "Worked for" into "Workedfor".
+export const DEFAULT_WEB_UI_FONT_STACK =
+  "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+
 export const DEFAULT_UI_FONT_STACK: string = Platform.select({
   ios: "system-ui",
-  default: "normal",
-  web: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+  android: "sans-serif",
+  default: "sans-serif",
+  web: `system-ui, ${DEFAULT_WEB_UI_FONT_STACK}`,
 });
 
 export const DEFAULT_MONO_FONT_STACK: string = Platform.select({

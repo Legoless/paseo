@@ -76,8 +76,8 @@ export interface SidebarWorkspaceGroupSession {
 
 /**
  * The sidebar's workspace-grouped hierarchy below the workspace row: each workspace's project
- * members with their agents bucketed underneath. Pure — the hook layer owns subscriptions and
- * identity preservation.
+ * members with their agents bucketed underneath. Agent rows match open agent tabs — closing
+ * a tab removes the row. Pure — the hook layer owns subscriptions and identity preservation.
  */
 export function buildSidebarWorkspaceGroupModel(input: {
   sessions: readonly SidebarWorkspaceGroupSession[];
@@ -157,10 +157,12 @@ function buildWorkspaceSection(input: {
   };
 
   addNewAgentRows({ layout: input.layout, memberByDirectory, uncategorized });
+  const openAgentIds = collectOpenAgentTabIds(input.layout);
 
   for (const agent of input.agents.values()) {
     if (agent.archivedAt) continue;
     if (normalizeWorkspaceOpaqueId(agent.workspaceId) !== workspaceId) continue;
+    if (!openAgentIds.has(agent.id)) continue;
     const directory = normalizeWorkspacePath(agent.cwd);
     const matchedMember = directory ? memberByDirectory.get(directory) : undefined;
     (matchedMember ?? uncategorized).agents.push(
@@ -181,6 +183,19 @@ function buildWorkspaceSection(input: {
     section: { workspaceKey, serverId: input.serverId, workspaceId, uncategorized, members },
     iconTargets,
   };
+}
+
+function collectOpenAgentTabIds(layout: WorkspaceLayout | undefined): Set<string> {
+  const agentIds = new Set<string>();
+  if (!layout) {
+    return agentIds;
+  }
+  for (const tab of collectAllTabs(layout.root)) {
+    if (tab.target.kind === "agent") {
+      agentIds.add(tab.target.agentId);
+    }
+  }
+  return agentIds;
 }
 
 type SidebarAgentBucket = Pick<SidebarWorkspaceMemberRow, "newAgents" | "agents">;

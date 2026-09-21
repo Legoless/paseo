@@ -15,7 +15,6 @@ import {
   ClientSideConnection,
   PROTOCOL_VERSION,
   type AgentCapabilities as ACPAgentCapabilities,
-  type Error as ACPError,
   type AnyMessage,
   type Client as ACPClient,
   type ClientCapabilities as ACPClientCapabilities,
@@ -140,8 +139,42 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isACPError(value: unknown): value is ACPError {
-  return isRecord(value) && typeof value.message === "string" && typeof value.code === "number";
+function readACPError(value: unknown): { message: string; code: number; data?: unknown } | null {
+  if (!isRecord(value) || typeof value.message !== "string") {
+    return null;
+  }
+  const rawCode = value.code;
+  let code = Number.NaN;
+  if (typeof rawCode === "number") {
+    code = rawCode;
+  } else if (typeof rawCode === "string" && /^-?\d+$/.test(rawCode)) {
+    code = Number(rawCode);
+  }
+  if (!Number.isSafeInteger(code)) {
+    return null;
+  }
+  return { message: value.message, code, data: value.data };
+}
+
+function readThrownMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "string" && error) {
+    return error;
+  }
+  if (isRecord(error) && typeof error.message === "string" && error.message.trim()) {
+    return error.message;
+  }
+  try {
+    const encoded = JSON.stringify(error);
+    if (encoded && encoded !== "null") {
+      return encoded;
+    }
+  } catch {
+    /* circular or non-JSON throw bodies still need a string */
+  }
+  return "Unknown error";
 }
 
 function extractACPErrorDataMessage(data: unknown): string | null {
@@ -165,12 +198,13 @@ export function summarizeACPRequestError(error: unknown): {
   diagnostic?: string;
 } {
   // Promise rejections are untyped, but the ACP SDK rejects JSON-RPC failures as response.error.
-  if (isACPError(error)) {
-    const code = String(error.code);
-    const detail = extractACPErrorDataMessage(error.data);
+  const acpError = readACPError(error);
+  if (acpError) {
+    const code = String(acpError.code);
+    const detail = extractACPErrorDataMessage(acpError.data);
     const message =
-      detail && detail !== error.message ? `${error.message}: ${detail}` : error.message;
-    const data = error.data === undefined ? "" : ` | data=${JSON.stringify(error.data)}`;
+      detail && detail !== acpError.message ? `${acpError.message}: ${detail}` : acpError.message;
+    const data = acpError.data === undefined ? "" : ` | data=${JSON.stringify(acpError.data)}`;
     return {
       message,
       code,
@@ -178,22 +212,32 @@ export function summarizeACPRequestError(error: unknown): {
     };
   }
 
-  if (error instanceof Error) {
-    return { message: error.message };
-  }
+  return { message: readThrownMessage(error) };
+}
 
-  return { message: String(error) };
+export const ACP_SETTINGS_GATE_TEXT = "Check your settings to continue";
+
+export function isACPSettingsGateText(text: string): boolean {
+  return text.trim() === ACP_SETTINGS_GATE_TEXT;
+}
+
+export function describeACPSettingsGate(model: string | null | undefined): string {
+  if (typeof model === "string" && model.toLowerCase().includes("fable")) {
+    return "Cursor blocked Fable until you approve its data-retention policy in the Cursor dashboard restricted-models page.";
+  }
+  return "Cursor blocked this model until you approve it in the Cursor dashboard restricted-models page.";
 }
 
 function toACPRequestError(error: unknown): Error {
-  if (!isACPError(error)) {
-    return error instanceof Error ? error : new Error(String(error));
+  if (readACPError(error)) {
+    const next = new Error(summarizeACPRequestError(error).message);
+    next.name = "ACPRequestError";
+    return next;
   }
-
-  const summary = summarizeACPRequestError(error);
-  const next = new Error(summary.message);
-  next.name = "ACPRequestError";
-  return next;
+  if (error instanceof Error) {
+    return error;
+  }
+  return new Error(readThrownMessage(error));
 }
 
 function resolveTerminalCommand(
@@ -823,7 +867,7 @@ function isACPAutoAcceptEnabled(config: AgentSessionConfig): boolean {
   return config.featureValues?.[ACP_AUTO_ACCEPT_FEATURE_ID] === true;
 }
 
-function buildACPAutoAcceptFeature(config: AgentSessionConfig): AgentFeature {
+export function buildACPAutoAcceptFeature(config: AgentSessionConfig): AgentFeature {
   return {
     type: "toggle",
     id: ACP_AUTO_ACCEPT_FEATURE_ID,
@@ -1700,6 +1744,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   private currentTurnUsage: AgentUsage | undefined;
   private activeForegroundTurnId: string | null = null;
   private fallbackAssistantMessageId: string | null = null;
+  private turnAssistantText = "";
   private closed = false;
   private historyPending = false;
   private replayingHistory = false;
@@ -1868,6 +1913,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     this.activeForegroundTurnId = turnId;
     this.fallbackAssistantMessageId = null;
     this.submittedUserMessageTurnId = null;
+    this.turnAssistantText = "";
     this.emitBootstrapThreadEvent();
     this.pushEvent({ type: "turn_started", provider: this.provider, turnId });
     this.emitSubmittedUserMessage(prompt, messageId, turnId, options?.clientMessageId);
@@ -2882,7 +2928,20 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     switch (update.sessionUpdate) {
       case "agent_message_chunk": {
         const item = this.createMessageTimelineItem("assistant_message", update);
-        return item ? [...pendingUserEvents, this.wrapTimeline(item)] : pendingUserEvents;
+        if (!item) {
+          return pendingUserEvents;
+        }
+        this.turnAssistantText += item.text;
+        if (isACPSettingsGateText(this.turnAssistantText)) {
+          return [
+            ...pendingUserEvents,
+            this.wrapTimeline({
+              type: "error",
+              message: describeACPSettingsGate(this.currentModel),
+            }),
+          ];
+        }
+        return [...pendingUserEvents, this.wrapTimeline(item)];
       }
       case "agent_thought_chunk": {
         this.fallbackAssistantMessageId = null;
@@ -3107,6 +3166,16 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       case "max_turn_requests":
       case "refusal":
       default:
+        if (isACPSettingsGateText(this.turnAssistantText)) {
+          this.finishTurn({
+            type: "turn_failed",
+            provider: this.provider,
+            error: describeACPSettingsGate(this.currentModel),
+            code: "settings_gate",
+            turnId,
+          });
+          break;
+        }
         this.finishTurn({
           type: "turn_completed",
           provider: this.provider,
@@ -3186,6 +3255,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     this.deliverTranslatedEvents(this.flushPendingUserMessage());
     this.activeForegroundTurnId = null;
     this.fallbackAssistantMessageId = null;
+    this.turnAssistantText = "";
     if (this.submittedUserMessageTurnId === event.turnId) {
       this.submittedUserMessageTurnId = null;
     }

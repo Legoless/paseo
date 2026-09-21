@@ -12,6 +12,7 @@ import { findExecutable } from "../executable-resolution/executable-resolution.j
 import type { TerminalCell, TerminalState } from "@getpaseo/protocol/messages";
 import { TerminalInputModeTracker } from "@getpaseo/protocol/terminal-input-mode";
 import { TerminalActivityTracker } from "./activity/terminal-activity-tracker.js";
+import { PtyActivityScanner } from "./activity/pty-activity-scanner.js";
 import type { TerminalActivity, TerminalActivityState } from "@getpaseo/protocol/terminal-activity";
 
 const { Terminal } = xterm;
@@ -846,30 +847,46 @@ export function humanizeProcessTitle(processTitle: string): string | undefined {
 function extractLastOutputLines(terminal: TerminalType, limit: number): string[] {
   const buffer = terminal.buffer.active;
   const mergedLines: string[] = [];
+  let current = "";
+  let skippingTrailingEmpty = true;
 
-  for (let row = 0; row < buffer.length; row++) {
+  for (let row = buffer.length - 1; row >= 0; row -= 1) {
     const line = buffer.getLine(row);
     if (!line) {
       continue;
     }
 
-    const text = line.translateToString(true);
-    const isWrapped = (line as { isWrapped?: boolean }).isWrapped === true;
-    if (isWrapped && mergedLines.length > 0) {
-      mergedLines[mergedLines.length - 1] += text;
+    current = line.translateToString(true) + current;
+    if (line.isWrapped) {
       continue;
     }
-    mergedLines.push(text);
+
+    const logical = current;
+    current = "";
+    if (skippingTrailingEmpty && logical.trim().length === 0) {
+      continue;
+    }
+    skippingTrailingEmpty = false;
+    mergedLines.push(logical);
+    if (mergedLines.length >= limit) {
+      break;
+    }
   }
 
-  while (mergedLines.length > 0 && mergedLines[0]?.trim().length === 0) {
-    mergedLines.shift();
-  }
-  while (mergedLines.length > 0 && mergedLines[mergedLines.length - 1]?.trim().length === 0) {
-    mergedLines.pop();
+  if (current && mergedLines.length < limit) {
+    const includePartial = !(skippingTrailingEmpty && current.trim().length === 0);
+    if (includePartial) {
+      mergedLines.push(current);
+    }
   }
 
-  return mergedLines.slice(-limit);
+  mergedLines.reverse();
+  return mergedLines;
+}
+
+function extractCursorLine(terminal: TerminalType): string {
+  const buffer = terminal.buffer.active;
+  return buffer.getLine(buffer.baseY + buffer.cursorY)?.translateToString(true) ?? "";
 }
 
 const ESC = String.fromCharCode(0x1b);
@@ -948,6 +965,15 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     allowProposedApi: true,
   });
 
+  const activityScanner = new PtyActivityScanner({
+    setActivity: (state) => activityTracker.set(state),
+    clearActivity: () => activityTracker.clear(),
+    getActivity: () => activityTracker.getSnapshot(),
+    readLastLines: (limit) => extractLastOutputLines(terminal, limit),
+    readCursorLine: () => extractCursorLine(terminal),
+  });
+  activityScanner.handleInitialCommand(command ? [command, ...args].join(" ") : undefined);
+
   ensureNodePtySpawnHelperExecutableForCurrentPlatform();
 
   // Create PTY
@@ -974,6 +1000,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
       return;
     }
     title = nextTitle;
+    activityScanner.handleTitleChange(title);
     for (const listener of Array.from(titleChangeListeners)) {
       try {
         listener(title);
@@ -1082,10 +1109,16 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   }
 
   const disposeCommandLifecycleSubscription = terminal.parser.registerOscHandler(633, (data) => {
+    if (data === "B") {
+      activityScanner.handleCommandStarted();
+      return true;
+    }
     const commandFinished = parseCommandFinishedOsc(data);
     if (!commandFinished) {
       return true;
     }
+
+    activityScanner.handleCommandFinished();
 
     for (const listener of Array.from(commandFinishedListeners)) {
       try {
@@ -1153,6 +1186,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
       return;
     }
     disposed = true;
+    activityScanner.dispose();
     activityTracker.clear();
     pendingInput = "";
     recentOutputChunks.length = 0;
@@ -1189,6 +1223,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   // Pipe PTY output to terminal emulator
   ptyProcess.onData((data) => {
     if (killed) return;
+    activityScanner.feedOutput(data);
     const inputModeUpdate = inputModeTracker.feed(data);
     for (const response of inputModeUpdate.responses) {
       ptyProcess.write(response);
@@ -1217,6 +1252,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   ptyProcess.onExit((event) => {
     killed = true;
     processExited = true;
+    activityScanner.handleCommandFinished();
     for (const waiter of Array.from(processExitWaiters)) {
       try {
         waiter();
@@ -1323,6 +1359,9 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
       case "input": {
         if (isTerminalActivityInterruptInput(msg.data)) {
           activityTracker.interrupt();
+          activityScanner.handleInterrupt();
+        } else {
+          activityScanner.feedInput(msg.data);
         }
         pendingInput += msg.data;
         scheduleInputFlush();

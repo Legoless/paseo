@@ -53,15 +53,29 @@ export interface AgyStepUpdateEvent {
   step_update: AgyStepUpdatePayload;
 }
 
+export type AgyResultStatus =
+  | "SUCCESS"
+  | "ERROR"
+  | "CANCELED"
+  | "INTERRUPTED"
+  | "INVALID"
+  | "WAITING"
+  | "RUNNING";
+
+export interface AgyDeniedAction {
+  action: string;
+  display_name: string;
+}
+
 export interface AgyResultPayload {
   conversation_id: string;
-  status: "SUCCESS" | "ERROR";
+  status: AgyResultStatus;
   response: string;
   error?: string;
   duration_seconds?: number;
   num_turns?: number;
   usage?: AgyUsage;
-  denied_actions?: Array<{ action: string; display_name: string }>;
+  denied_actions?: AgyDeniedAction[];
 }
 
 export interface AgyResultEvent {
@@ -86,7 +100,7 @@ export interface AgyStreamInputContentBlock {
 }
 
 export interface AgyStreamInputUserMessage {
-  content: AgyStreamInputContentBlock[];
+  content: string | AgyStreamInputContentBlock[];
 }
 
 export interface AgyStreamInputMessage {

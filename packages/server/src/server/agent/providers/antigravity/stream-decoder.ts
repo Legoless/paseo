@@ -1,10 +1,12 @@
 import type {
+  AgentPermissionRequest,
   AgentStreamEvent,
   AgentUsage,
   ToolCallDetail,
   ToolCallTimelineItem,
 } from "../../agent-sdk-types.js";
 import type {
+  AgyDeniedAction,
   AgyResultPayload,
   AgyStepUpdatePayload,
   AgyStreamEvent,
@@ -109,6 +111,27 @@ function mapEditDetail(params: Record<string, unknown>): ToolCallDetail {
     oldString: typeof params.TargetContent === "string" ? params.TargetContent : undefined,
     newString:
       typeof params.ReplacementContent === "string" ? params.ReplacementContent : undefined,
+  };
+}
+
+export function mapAgyDeniedAction(
+  provider: string,
+  action: AgyDeniedAction,
+  index: number,
+  turnId?: string,
+): AgentPermissionRequest {
+  return {
+    id: `agy-denied-${turnId ?? "result"}-${index}`,
+    provider,
+    name: action.action,
+    kind: "tool",
+    title: action.display_name,
+    description:
+      "Antigravity denied this tool in headless mode. Allow switches this session to Bypass so the next turn can run it.",
+    actions: [
+      { id: "bypass", label: "Bypass", behavior: "allow", variant: "danger" },
+      { id: "dismiss", label: "Dismiss", behavior: "deny", variant: "secondary" },
+    ],
   };
 }
 
@@ -341,6 +364,17 @@ export class AntigravityStreamDecoder {
       });
     }
 
+    if (result.denied_actions) {
+      for (const [index, action] of result.denied_actions.entries()) {
+        this.onEvent({
+          type: "permission_requested",
+          provider: this.provider,
+          request: mapAgyDeniedAction(this.provider, action, index, turnId),
+          turnId,
+        });
+      }
+    }
+
     if (result.status === "SUCCESS") {
       this.onEvent({
         type: "turn_completed",
@@ -348,7 +382,20 @@ export class AntigravityStreamDecoder {
         usage,
         turnId,
       });
-    } else if (turnId) {
+      return;
+    }
+
+    if (result.status === "CANCELED" || result.status === "INTERRUPTED") {
+      this.onEvent({
+        type: "turn_canceled",
+        provider: this.provider,
+        reason: result.error || "Interrupted by user",
+        turnId,
+      });
+      return;
+    }
+
+    if (turnId) {
       this.onEvent({
         type: "turn_failed",
         provider: this.provider,

@@ -277,6 +277,25 @@ function PaneStatusGlowRow({ value, onChange }: PaneStatusGlowRowProps) {
   );
 }
 
+interface TerminalStatusGlowRowProps {
+  value: boolean;
+  disabled?: boolean;
+  onChange: (value: boolean) => void;
+}
+
+function TerminalStatusGlowRow({ value, disabled, onChange }: TerminalStatusGlowRowProps) {
+  const { t } = useTranslation();
+  return (
+    <SettingsSwitch
+      label={t("settings.appearance.terminalStatusGlow.title")}
+      hint={t("settings.appearance.terminalStatusGlow.description")}
+      value={value}
+      disabled={disabled}
+      onValueChange={onChange}
+    />
+  );
+}
+
 const TOOL_CALL_DETAIL_LEVELS: readonly AppSettings["toolCallDetailLevel"][] = [
   "detailed",
   "overview",
@@ -601,6 +620,13 @@ export function AppearanceSection() {
     [updateSettings],
   );
 
+  const handleTerminalStatusGlowChange = useCallback(
+    (terminalStatusGlowEnabled: boolean) => {
+      void updateSettings({ terminalStatusGlowEnabled });
+    },
+    [updateSettings],
+  );
+
   const commitUiFontFamily = useCallback(
     (value: string) => {
       const sanitized = sanitizeFontFamily(value);
@@ -723,6 +749,11 @@ export function AppearanceSection() {
           <PaneStatusGlowRow
             value={settings.paneStatusGlowEnabled}
             onChange={handlePaneStatusGlowChange}
+          />
+          <TerminalStatusGlowRow
+            value={settings.terminalStatusGlowEnabled}
+            disabled={!settings.paneStatusGlowEnabled}
+            onChange={handleTerminalStatusGlowChange}
           />
         </SettingsCard>
       </SettingsSection>

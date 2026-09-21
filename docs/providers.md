@@ -12,6 +12,7 @@ prompt, environment, session identity, MCP transport, callbacks, and hooks canno
 
 This Paseo version accepts these keys:
 
+- **Antigravity:** `effort` (`low`/`medium`/`high`), `sandbox`, `agent`, and `addDir`. These map to `agy --effort`, `--sandbox`, `--agent`, and repeatable `--add-dir`. Headless `agy` cannot prompt; tools it cannot auto-approve are soft-denied and reported as `denied_actions`. Allow on that card switches the session to Bypass. Injected MCP servers are merged into the workspace `.agents/mcp_config.json` for the session and restored on close — `agy` has no per-process MCP flag. Stream-json input accepts only text; images are written to a temp file and the path is sent as text. See the [Antigravity headless docs](https://www.antigravity.google/docs/cli/headless/).
 - **Codex:** `approval_policy`, `sandbox_mode`,
   `sandbox_workspace_write.{writable_roots,network_access,exclude_slash_tmp,exclude_tmpdir_env_var}`,
   `web_search`, `features.multi_agent_v2`, and `features.network_proxy`. A network proxy object may
@@ -52,15 +53,23 @@ ACP permission options are rendered as ordered actions and Paseo returns the sel
 ACP shims can own model discovery through `catalogModelResolver`; the shared client owns the probe
 process and refresh deadline. Keep vendor RPCs in the shim. Cursor uses
 `cursor/list_available_models` because switching models during discovery writes its saved CLI
-preferences and selection history. Cursor versions without that extension must be updated. Kimi
-still probes model selections in its own shim. The initial session supplies modes and the current
-model; it does not override the model list returned by a resolver.
+preferences and selection history. That catalog is host-scoped, so one probe is shared across
+workspaces. Fast is advertised from the static feature option; drafts must not spawn a second
+cursor-agent just to read it. Cursor versions without that extension must be updated.
+`session/new` may still advertise a `reasoning` thought-level option. Writes must use the current
+model's native catalog id — `thinking` (on/off) or `effort` (low/medium/high/xhigh) — because
+Cursor rejects `reasoning` with `Unknown model config option`. Fable is a Cursor restricted
+model: Privacy Mode and every Enterprise team must approve its data-retention policy in the
+Cursor dashboard before `cursor-agent` will run it. ACP otherwise ends the turn with
+`Check your settings to continue`. Kimi still probes model selections in its own shim. The
+initial session supplies modes and the current model; it does not override the model list
+returned by a resolver.
 
 ### Direct
 
 Implement the `AgentClient` and `AgentSession` interfaces from `agent-sdk-types.ts` yourself. This gives full control but requires you to handle process management, streaming, permissions, and session persistence from scratch.
 
-Existing direct providers: `claude` (in `providers/claude/agent.ts`), `codex` (`codex-app-server-agent.ts`), `opencode` (`opencode-agent.ts`), `pi` (`providers/pi/agent.ts`), and `omp` (`providers/omp/agent.ts`). The dev-only `mock` provider (`mock-load-test-agent.ts`) is also direct.
+Existing direct providers: `antigravity` (`providers/antigravity/agent.ts`), `claude` (in `providers/claude/agent.ts`), `codex` (`codex-app-server-agent.ts`), `opencode` (`opencode-agent.ts`), `pi` (`providers/pi/agent.ts`), and `omp` (`providers/omp/agent.ts`). The dev-only `mock` provider (`mock-load-test-agent.ts`) is also direct.
 
 ### Model catalogs
 
@@ -435,7 +444,7 @@ case "my-provider":
   );
 ```
 
-Add to the `allProviders` array (current built-ins are `claude`, `codex`, `copilot`, `opencode`, `pi`, `omp`):
+Add to the `allProviders` array (current built-ins are `antigravity`, `claude`, `codex`, `copilot`, `opencode`, `pi`, `omp`):
 
 ```ts
 export const allProviders: AgentProvider[] = [

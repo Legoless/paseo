@@ -2279,6 +2279,10 @@ export const ko = {
         title: "창 상태 글로우",
         description: "에이전트 창에 상태 색 테두리를 표시합니다",
       },
+      terminalStatusGlow: {
+        title: "터미널 에이전트 글로우",
+        description: "터미널 창의 에이전트 CLI에 상태 글로우를 표시합니다",
+      },
       sidebar: {
         title: "사이드바",
         description: "사이드바 상단에 표시할 항목과 순서를 선택하세요",

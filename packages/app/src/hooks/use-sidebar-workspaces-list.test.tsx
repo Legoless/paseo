@@ -17,6 +17,7 @@ import type { HostProfile } from "@/types/host-connection";
 import { useSessionStore } from "@/stores/session-store";
 import { seedSessionWorkspaces } from "@/test/seed-session";
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
+import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { defaultHostAppearance } from "@/hosts/appearance";
 
 vi.hoisted(() => {
@@ -225,6 +226,7 @@ describe("useSidebarWorkspaceGroupSections", () => {
         workspaceOrderByProject: {},
         workspaceOrder: [],
       });
+      useWorkspaceLayoutStore.setState({ layoutByWorkspace: {} });
     });
   });
 
@@ -242,7 +244,7 @@ describe("useSidebarWorkspaceGroupSections", () => {
     ]);
   });
 
-  it("buckets workspace agents under their member and sends strays to uncategorized", () => {
+  it("does not list workspace agents that have no open tab", () => {
     act(() => {
       seedAgents([
         agent({
@@ -258,22 +260,13 @@ describe("useSidebarWorkspaceGroupSections", () => {
           status: "running",
         }),
         agent({ id: "agent-stray", workspaceId: "ws-multi", cwd: "/elsewhere" }),
-        agent({
-          id: "agent-archived",
-          workspaceId: "ws-multi",
-          cwd: "/repo/project-a/ws-multi",
-          archivedAt: new Date(2_000),
-        }),
       ]);
     });
 
     const section = latestGroupModel?.sectionsByWorkspaceKey.get(`${SERVER_ID}:ws-multi`);
-    const memberA = section?.members.find((entry) => entry.projectId === "project-a");
-    const memberB = section?.members.find((entry) => entry.projectId === "project-b");
-    expect(memberA?.agents.map((entry) => entry.agentId)).toEqual(["agent-a"]);
-    expect(memberB?.agents.map((entry) => entry.agentId)).toEqual(["agent-b"]);
-    expect(memberB?.agents[0]?.statusBucket).toBe("running");
-    expect(section?.uncategorized.agents.map((entry) => entry.agentId)).toEqual(["agent-stray"]);
+    expect(section?.members.find((entry) => entry.projectId === "project-a")?.agents).toEqual([]);
+    expect(section?.members.find((entry) => entry.projectId === "project-b")?.agents).toEqual([]);
+    expect(section?.uncategorized.agents).toEqual([]);
   });
 
   it("creates no section for an orphan project with no workspace", () => {

@@ -2,6 +2,20 @@ import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
 
 export type PaneStatusGlowBucket = Exclude<SidebarStateBucket, "done">;
 
+interface PaneStatusGlowVisibilityInput {
+  isTerminalTab: boolean;
+  paneStatusGlowEnabled: boolean;
+  terminalStatusGlowEnabled: boolean;
+}
+
+export function shouldShowPaneStatusGlow({
+  isTerminalTab,
+  paneStatusGlowEnabled,
+  terminalStatusGlowEnabled,
+}: PaneStatusGlowVisibilityInput): boolean {
+  return paneStatusGlowEnabled && (!isTerminalTab || terminalStatusGlowEnabled);
+}
+
 /**
  * Pane glow uses the tab/sidebar status colors. Green is unseen finished attention, so it goes
  * dark once the user focuses the pane and attention clears.

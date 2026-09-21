@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createTestLogger } from "../../test-utils/test-logger.js";
 
 import { validateProviderOptions } from "./provider-options.js";
+import { AntigravityProviderOptionsSchema } from "./providers/antigravity/options.js";
 import { applyClaudeToolPolicy, ClaudeProviderOptionsSchema } from "./providers/claude/options.js";
 import { applyCodexToolPolicy, CodexProviderOptionsSchema } from "./providers/codex/options.js";
 import {
@@ -85,6 +86,30 @@ describe("provider-owned option schemas", () => {
     ).toMatchObject({ permission: { bash: { "*": "ask" } } });
   });
 
+  test("accepts Antigravity native effort, sandbox, agent, and addDir", () => {
+    expect(
+      AntigravityProviderOptionsSchema.parse({
+        effort: "high",
+        sandbox: true,
+        agent: "reviewer",
+        addDir: ["/tmp/extra"],
+      }),
+    ).toEqual({
+      effort: "high",
+      sandbox: true,
+      agent: "reviewer",
+      addDir: ["/tmp/extra"],
+    });
+  });
+
+  test("reports the exact invalid Antigravity option path", () => {
+    expect(() =>
+      validateProviderOptions("antigravity", AntigravityProviderOptionsSchema, {
+        effort: "extreme",
+      }),
+    ).toThrow("providerOptions.effort");
+  });
+
   test("reports the exact invalid OpenCode option path", () => {
     expect(() =>
       validateProviderOptions("opencode", OpenCodeProviderOptionsSchema, {
@@ -97,6 +122,7 @@ describe("provider-owned option schemas", () => {
     ["codex", CodexProviderOptionsSchema, { cwd: "/tmp" }],
     ["claude", ClaudeProviderOptionsSchema, { hooks: {} }],
     ["opencode", OpenCodeProviderOptionsSchema, { mcp: {} }],
+    ["antigravity", AntigravityProviderOptionsSchema, { cwd: "/tmp" }],
   ])("rejects Paseo-owned or executable %s keys", (provider, schema, options) => {
     expect(() => validateProviderOptions(provider, schema, options)).toThrow(
       `Invalid providerOptions for '${provider}'`,
@@ -113,6 +139,16 @@ describe("provider-owned option schemas", () => {
 describe("exact MCP preapproval mappings", () => {
   test("unsupported providers fail closed with an unattended-execution error", () => {
     const registry = buildProviderRegistry(createTestLogger());
+    expect(() =>
+      registry.antigravity.applyToolPolicy(
+        {
+          provider: "antigravity",
+          cwd: "/tmp",
+          mcpServers: { hub: { type: "http", url: "http://127.0.0.1/hub" } },
+        },
+        hubPolicy,
+      ),
+    ).toThrow("cannot preapprove exact MCP tools for unattended execution");
     expect(() =>
       registry.pi.applyToolPolicy(
         {
