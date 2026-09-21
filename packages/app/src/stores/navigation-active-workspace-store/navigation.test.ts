@@ -15,6 +15,7 @@ interface RecordedTab {
   workspaceKey: string;
   target: WorkspaceTabTarget;
   pin: boolean;
+  intent: "reveal" | "background";
 }
 
 function createFakeDeps(overrides: Partial<NavigateToWorkspaceDeps> = {}) {
@@ -25,8 +26,8 @@ function createFakeDeps(overrides: Partial<NavigateToWorkspaceDeps> = {}) {
     getSessionWorkspaces: () => null,
     getSessionAgents: () => [] as Agent[],
     isWorkspaceLayoutHydrated: () => true,
-    openTab: ({ workspaceKey, target, pin = false }) => {
-      openedTabs.push({ workspaceKey, target, pin });
+    openTab: ({ workspaceKey, target, pin = false, intent = "reveal" }) => {
+      openedTabs.push({ workspaceKey, target, pin, intent });
       return target.kind === "agent" ? target.agentId : null;
     },
     rememberLastWorkspace: (selection) => remembered.push(selection),
@@ -75,7 +76,7 @@ describe("workspace navigation", () => {
     expect(remembered).toEqual([{ serverId: "server-1", workspaceId: "workspace-a" }]);
   });
 
-  it("focuses the attention agent's tab when a workspace has one", () => {
+  it("does not steal pane focus for an attention agent when switching workspaces", () => {
     const workspace = {
       id: "workspace-a",
       workspaceDirectory: "/repo/workspace-a",
@@ -99,6 +100,7 @@ describe("workspace navigation", () => {
         workspaceKey: "server-1:workspace-a",
         target: { kind: "agent", agentId: "agent-1" },
         pin: false,
+        intent: "background",
       },
     ]);
   });
@@ -134,6 +136,7 @@ describe("workspace navigation", () => {
         workspaceKey: "server-1:workspace-a",
         target: { kind: "draft", draftId: "draft-1" },
         pin: false,
+        intent: "reveal",
       },
     ]);
   });

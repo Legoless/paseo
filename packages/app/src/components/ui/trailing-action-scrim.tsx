@@ -2,22 +2,41 @@ import { useId } from "react";
 import { View } from "react-native";
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { isWeb } from "@/constants/platform";
 import type { SurfaceBackdrop } from "@/styles/surface-backdrop";
 import type { Theme } from "@/styles/theme";
 
 export const SCRIM_WIDTH = 48;
 const SCRIM_SOLID_OFFSET = "55%";
 
-function TrailingActionScrimSvg({ gradientId, color }: { gradientId: string; color: string }) {
+const BACKDROP_CSS_COLOR: Record<SurfaceBackdrop, string> = {
+  surface0: "var(--colors-surface0)",
+  surface1: "var(--colors-surface1)",
+  surface2: "var(--colors-surface2)",
+  surfaceSidebar: "var(--colors-surface-sidebar)",
+  surfaceSidebarHover: "var(--colors-surface-sidebar-hover)",
+  surfaceSidebarSelected: "var(--colors-surface-sidebar-selected)",
+};
+
+function TrailingActionScrimSvg({
+  gradientId,
+  color,
+  backdrop,
+}: {
+  gradientId: string;
+  color: string;
+  backdrop: SurfaceBackdrop;
+}) {
+  const stopColor = isWeb ? BACKDROP_CSS_COLOR[backdrop] : color;
   return (
     <Svg width="100%" height="100%" preserveAspectRatio="none">
       <Defs>
         <SvgLinearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
           {/* Vary opacity rather than interpolating toward `transparent`, which crosses black in
               some engines and leaves a grey fringe. */}
-          <Stop offset="0%" stopColor={color} stopOpacity={0} />
-          <Stop offset={SCRIM_SOLID_OFFSET} stopColor={color} stopOpacity={1} />
-          <Stop offset="100%" stopColor={color} stopOpacity={1} />
+          <Stop offset="0%" stopColor={stopColor} stopOpacity={0} />
+          <Stop offset={SCRIM_SOLID_OFFSET} stopColor={stopColor} stopOpacity={1} />
+          <Stop offset="100%" stopColor={stopColor} stopOpacity={1} />
         </SvgLinearGradient>
       </Defs>
       <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${gradientId})`} />
@@ -50,6 +69,7 @@ export function TrailingActionScrim({
     <View style={styles.scrim} pointerEvents="none" testID={testID}>
       <ThemedTrailingActionScrimSvg
         gradientId={gradientId}
+        backdrop={backdrop}
         uniProps={backdropColorMappings[backdrop]}
       />
     </View>

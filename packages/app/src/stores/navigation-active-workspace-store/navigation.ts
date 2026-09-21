@@ -106,10 +106,12 @@ export function navigateToWorkspace(
       : [];
     const attentionAgentId = pickAttentionAgent(workspaceAgents);
     if (attentionAgentId && resolvedWorkspaceId) {
+      // Keep each pane on the tab the user left focused. Reveal would jump to
+      // the oldest attention agent, which is usually the first tab in the pane.
       deps.openTab({
         workspaceKey: `${input.serverId}:${resolvedWorkspaceId}`,
         target: { kind: "agent", agentId: attentionAgentId },
-        intent: "reveal",
+        intent: "background",
       });
     }
   }

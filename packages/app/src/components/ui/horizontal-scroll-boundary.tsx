@@ -8,13 +8,29 @@ import Animated, {
 } from "react-native-reanimated";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
 
 const EDGE_EPSILON = 1;
 const SHADE_WIDTH = 24;
 
-function ScrollBoundaryShadeSvg({ side, color }: { side: "left" | "right"; color: string }) {
+function scrollBoundaryCssColor(backdrop: "surface" | "sidebar"): string {
+  return backdrop === "sidebar" ? "var(--colors-surface-sidebar)" : "var(--colors-surface0)";
+}
+
+function ScrollBoundaryShadeSvg({
+  side,
+  color,
+  backdrop,
+}: {
+  side: "left" | "right";
+  color: string;
+  backdrop: "surface" | "sidebar";
+}) {
   const gradientId = `horizontal-scroll-boundary-${side}-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  // withUnistyles bakes a hex into the SVG. After the startup theme settles that
+  // hex can stay light on a dark tab bar. CSS variables update with the theme.
+  const stopColor = isWeb ? scrollBoundaryCssColor(backdrop) : color;
   return (
     <Svg width="100%" height="100%" preserveAspectRatio="none">
       <Defs>
@@ -25,8 +41,8 @@ function ScrollBoundaryShadeSvg({ side, color }: { side: "left" | "right"; color
           x2={side === "left" ? "0%" : "100%"}
           y2="0%"
         >
-          <Stop offset="0%" stopColor={color} stopOpacity={0} />
-          <Stop offset="100%" stopColor={color} stopOpacity={1} />
+          <Stop offset="0%" stopColor={stopColor} stopOpacity={0} />
+          <Stop offset="100%" stopColor={stopColor} stopOpacity={1} />
         </LinearGradient>
       </Defs>
       <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${gradientId})`} />
@@ -90,14 +106,14 @@ export function HorizontalScrollBoundaryShades({
         testID={`${testIDPrefix}-left`}
         style={[styles.shade, styles.left, leftStyle]}
       >
-        <ThemedScrollBoundaryShadeSvg side="left" uniProps={colorMapping} />
+        <ThemedScrollBoundaryShadeSvg side="left" backdrop={backdrop} uniProps={colorMapping} />
       </Animated.View>
       <Animated.View
         pointerEvents="none"
         testID={`${testIDPrefix}-right`}
         style={[styles.shade, styles.right, rightStyle]}
       >
-        <ThemedScrollBoundaryShadeSvg side="right" uniProps={colorMapping} />
+        <ThemedScrollBoundaryShadeSvg side="right" backdrop={backdrop} uniProps={colorMapping} />
       </Animated.View>
     </>
   );
