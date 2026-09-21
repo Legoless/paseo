@@ -14,7 +14,7 @@ export interface PrepareWorkspaceTabDeps {
   openTab: (input: {
     workspaceKey: string;
     target: WorkspaceTabTarget;
-    intent: "reveal";
+    intent: "reveal" | "background";
     pin?: boolean;
     placement?: WorkspaceTabPlacement;
   }) => string | null;

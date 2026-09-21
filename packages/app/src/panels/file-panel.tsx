@@ -7,6 +7,7 @@ import { usePaneContext } from "@/panels/pane-context";
 import { definePanel } from "@/panels/panel-registry";
 import { useWorkspaceDirectory } from "@/stores/session-store-hooks";
 import { createMaterialFileIcon } from "@/components/material-file-icon";
+import { isAbsolutePath } from "@/utils/path";
 
 const CENTERED_PADDED_STYLE = {
   flex: 1,
@@ -30,10 +31,17 @@ function useFilePanelDescriptor(target: { kind: "file"; path: string }) {
 
 function FilePanel() {
   const { t } = useTranslation();
-  const { serverId, workspaceId, target, fileNavigationRevision } = usePaneContext();
-  const workspaceDirectory = useWorkspaceDirectory(serverId, workspaceId);
+  const {
+    serverId,
+    workspaceId,
+    workspaceRoot: paneWorkspaceRoot,
+    target,
+    fileNavigationRevision,
+  } = usePaneContext();
+  const primaryWorkspaceRoot = useWorkspaceDirectory(serverId, workspaceId);
+  const workspaceRoot = paneWorkspaceRoot ?? primaryWorkspaceRoot ?? "";
   invariant(target.kind === "file", "FilePanel requires file target");
-  if (!workspaceDirectory) {
+  if (!workspaceRoot && !isAbsolutePath(target.path)) {
     return (
       <View style={CENTERED_PADDED_STYLE}>
         <Text>{t("panels.file.directoryMissing")}</Text>
@@ -43,7 +51,7 @@ function FilePanel() {
   return (
     <FilePane
       serverId={serverId}
-      workspaceRoot={workspaceDirectory}
+      workspaceRoot={workspaceRoot}
       location={target}
       navigationRevision={fileNavigationRevision ?? 0}
     />

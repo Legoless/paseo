@@ -18,9 +18,11 @@ import { AttachmentLightbox, type ImageLightboxSource } from "@/components/attac
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useAssistantImage } from "@/assistant-image/use-assistant-image";
 import { createAssistantImageOccurrenceKey } from "@/assistant-image/acquisition-cache";
+import { usePaneContext } from "@/panels/pane-context";
 import { useSessionStore } from "@/stores/session-store";
 import { formatTimeAgo } from "@/utils/time";
 import type { Theme } from "@/styles/theme";
+import { createWorkspaceFileTabTarget } from "@/workspace/file-open";
 import { useWorkspaceArtifacts } from "./use-workspace-artifacts";
 import type { ArtifactEntry } from "./select";
 import {
@@ -28,6 +30,7 @@ import {
   distanceFromBottom,
   resolveArtifactFollowOutput,
 } from "./follow-output";
+import { resolveArtifactFileLocation } from "./open";
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -187,9 +190,20 @@ function ArtifactImage({
   serverId: string;
 }) {
   const { t } = useTranslation();
+  const { openPreferredTarget } = usePaneContext();
   const [viewerOpen, setViewerOpen] = useState(false);
-  const openViewer = useCallback(() => setViewerOpen(true), []);
   const closeViewer = useCallback(() => setViewerOpen(false), []);
+  const fileLocation = useMemo(
+    () => resolveArtifactFileLocation({ source, workspaceRoot }),
+    [source, workspaceRoot],
+  );
+  const openImage = useCallback(() => {
+    if (fileLocation) {
+      openPreferredTarget(createWorkspaceFileTabTarget(fileLocation), "explorerFiles");
+      return;
+    }
+    setViewerOpen(true);
+  }, [fileLocation, openPreferredTarget]);
   const image = useAssistantImage({
     source,
     occurrenceKey,
@@ -222,19 +236,27 @@ function ArtifactImage({
     };
   }, [aspectRatio, imageUri, viewerOpen]);
 
-  if (image.status === "failed") {
-    return (
+  if (image.status === "failed" || !binding) {
+    const placeholder = (
       <View style={[styles.imageSurface, styles.imageState, { height: ARTIFACT_IMAGE_MIN_HEIGHT }]}>
-        <Text style={styles.imageError}>{image.message}</Text>
+        {image.status === "failed" ? (
+          <Text style={styles.imageError}>{image.message}</Text>
+        ) : (
+          <ThemedLoadingSpinner size="small" uniProps={foregroundMutedColorMapping} />
+        )}
       </View>
     );
-  }
-
-  if (!binding) {
+    if (!fileLocation) {
+      return placeholder;
+    }
     return (
-      <View style={[styles.imageSurface, styles.imageState, { height: ARTIFACT_IMAGE_MIN_HEIGHT }]}>
-        <ThemedLoadingSpinner size="small" uniProps={foregroundMutedColorMapping} />
-      </View>
+      <Pressable
+        accessibilityLabel={t("composer.attachments.openImage")}
+        accessibilityRole="button"
+        onPress={openImage}
+      >
+        {placeholder}
+      </Pressable>
     );
   }
 
@@ -243,11 +265,16 @@ function ArtifactImage({
       <Pressable
         accessibilityLabel={t("composer.attachments.openImage")}
         accessibilityRole="button"
-        disabled={image.status !== "loaded"}
-        onPress={openViewer}
+        disabled={!fileLocation && image.status !== "loaded"}
+        onPress={openImage}
         style={surfaceStyle}
       >
-        <View style={styles.image} accessibilityRole="image" accessibilityLabel={alt ?? undefined}>
+        <View
+          pointerEvents="none"
+          style={styles.image}
+          accessibilityRole="image"
+          accessibilityLabel={alt ?? undefined}
+        >
           <Image
             ref={binding.onRef}
             source={imageSource}

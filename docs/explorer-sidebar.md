@@ -17,7 +17,7 @@ a compatible pane.
 
 Files, Changes, and Artifacts are the Explorer defaults and its singleton navigation views. Other
 compatible tabs, including agents, terminals, files, and diffs, can move between Explorer and main
-panes.
+panes. Clicking an Artifacts screenshot opens a file tab the same way Files does.
 Keep panel implementations independent of either shell. `WorkspacePanelHost` owns mounting and
 retention, while each shell owns its tabs, focus, dragging, resizing, and shortcuts.
 
@@ -121,8 +121,11 @@ Placement intent still controls existing tabs:
 | `focused` | opens in the focused pane   | focuses it where it already lives |
 | `ambient` | opens in a compatible pane  | focuses it where it already lives |
 
-Explicit **Open to Side** uses `pane`. Implicit opens use `prefer`, so a preference affects only a
-new target and never yanks an existing tab out of a user-selected pane.
+Explicit **Open to Side** uses `pane`. Implicit opens use `prefer`, so a side-pane preference
+affects only a new target and never yanks an existing tab. A Files or Artifacts click in Explorer
+is an exception: if that file is already open in another pane, it moves to the pane whose Explorer
+you used. Explorer is docked on the focused pane, so focusing the other pane would only hide the
+dock.
 
 ## Routing preferences
 

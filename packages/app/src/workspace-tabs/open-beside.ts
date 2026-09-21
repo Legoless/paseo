@@ -4,6 +4,7 @@ import {
   collectAllPanes,
   DEFAULT_PANE_ID,
   findPaneById,
+  findPaneContainingTab,
   useWorkspaceLayoutStore,
   type WorkspaceTabPlacement,
 } from "@/stores/workspace-layout-store";
@@ -119,30 +120,68 @@ export function openWorkspaceTargetAtLocation(
   });
 }
 
+function resolvePreviewDestinationPaneId(
+  input: OpenPreferredWorkspacePreviewInput & { workspaceKey: string },
+): string | null {
+  const store = useWorkspaceLayoutStore.getState();
+  const wantsSide = !input.isCompact && input.preferences[input.source];
+  if (wantsSide) {
+    return store.ensureSidePane(input.workspaceKey);
+  }
+  return (
+    resolveMainPane({
+      workspaceKey: input.workspaceKey,
+      explorerSidebarPaneId: input.explorerSidebarPaneId,
+      lastMainPaneId: input.lastMainPaneId,
+    })?.id ?? null
+  );
+}
+
+function bringExistingTabToPane(input: {
+  workspaceKey: string;
+  tabId: string;
+  destinationPaneId: string;
+}): void {
+  const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[input.workspaceKey];
+  if (!layout) {
+    return;
+  }
+  const currentPane = findPaneContainingTab(layout.root, input.tabId);
+  if (!currentPane || currentPane.id === input.destinationPaneId) {
+    return;
+  }
+  useWorkspaceLayoutStore
+    .getState()
+    .moveTabToPane(input.workspaceKey, input.tabId, input.destinationPaneId);
+}
+
 /** Opens a tree selection while reusing an unmodified preview in its destination pane. */
 export function openPreferredWorkspacePreview(
   input: OpenPreferredWorkspacePreviewInput,
 ): string | null {
-  if (!input.workspaceKey) return null;
+  const workspaceKey = input.workspaceKey;
+  if (!workspaceKey) return null;
   const store = useWorkspaceLayoutStore.getState();
-  const layout = store.layoutByWorkspace[input.workspaceKey];
+  const layout = store.layoutByWorkspace[workspaceKey];
   if (!layout) return null;
-  const existing = collectAllTabs(layout.root).some((tab) =>
+  const existingTab = collectAllTabs(layout.root).find((tab) =>
     workspaceTabTargetsEqual(tab.target, input.target),
   );
-  if (existing) return openPreferredWorkspaceTarget(input);
+  const wantsSide = !input.isCompact && input.preferences[input.source];
+  const destinationPaneId = resolvePreviewDestinationPaneId({ ...input, workspaceKey });
+  if (existingTab) {
+    if (destinationPaneId && !wantsSide) {
+      bringExistingTabToPane({
+        workspaceKey,
+        tabId: existingTab.tabId,
+        destinationPaneId,
+      });
+    }
+    return openPreferredWorkspaceTarget(input);
+  }
 
-  const mainPane = resolveMainPane({
-    workspaceKey: input.workspaceKey,
-    explorerSidebarPaneId: input.explorerSidebarPaneId,
-    lastMainPaneId: input.lastMainPaneId,
-  });
-  const destinationPaneId =
-    !input.isCompact && input.preferences[input.source]
-      ? store.ensureSidePane(input.workspaceKey)
-      : mainPane?.id;
   if (!destinationPaneId) return null;
-  const nextLayout = useWorkspaceLayoutStore.getState().layoutByWorkspace[input.workspaceKey];
+  const nextLayout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
   const destinationPane = nextLayout ? findPaneById(nextLayout.root, destinationPaneId) : null;
   const activeTab = nextLayout
     ? collectAllTabs(nextLayout.root).find((tab) => tab.tabId === destinationPane?.focusedTabId)
@@ -157,10 +196,10 @@ export function openPreferredWorkspacePreview(
       nextTarget: input.target,
     })
   ) {
-    return store.replaceTab(input.workspaceKey, activeTab.tabId, input.target);
+    return store.replaceTab(workspaceKey, activeTab.tabId, input.target);
   }
   return store.openTab({
-    workspaceKey: input.workspaceKey,
+    workspaceKey,
     target: input.target,
     intent: "reveal",
     placement: { mode: "pane", paneId: destinationPaneId },
