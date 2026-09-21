@@ -3,10 +3,10 @@
 The Explorer sidebar and the side pane share panel implementations, but they have different shell
 contracts.
 
-| Surface          | Purpose                      | Lifecycle                                                |
-| ---------------- | ---------------------------- | -------------------------------------------------------- |
-| Explorer sidebar | Files and Changes navigation | Cmd+E toggles Explorer for the focused pane's active tab |
-| Side pane        | Ordinary workspace content   | Created and closed like any workspace pane               |
+| Surface          | Purpose                                  | Lifecycle                                                |
+| ---------------- | ---------------------------------------- | -------------------------------------------------------- |
+| Explorer sidebar | Files, Changes, and Artifacts navigation | Cmd+E toggles Explorer for the focused pane's active tab |
+| Side pane        | Ordinary workspace content               | Created and closed like any workspace pane               |
 
 ## Panel host contract
 
@@ -15,8 +15,9 @@ fixed-target labels and icons from that registration, filter by host, and never 
 panel type for another. Tab moves reject unsupported destinations, and placement resolves only to
 a compatible pane.
 
-Files and Changes are the Explorer defaults and its singleton navigation views. Other compatible
-tabs, including agents, terminals, files, and diffs, can move between Explorer and main panes.
+Files, Changes, and Artifacts are the Explorer defaults and its singleton navigation views. Other
+compatible tabs, including agents, terminals, files, and diffs, can move between Explorer and main
+panes.
 Keep panel implementations independent of either shell. `WorkspacePanelHost` owns mounting and
 retention, while each shell owns its tabs, focus, dragging, resizing, and shortcuts.
 
@@ -82,8 +83,8 @@ identifiers retain the literal `"explorer"` pane id and `explorerPaneIdByWorkspa
 compatibility.
 
 The tab rail has no inline add or close controls. Its context menu opens a New Tab launcher and
-toggles Files, Changes, and Explorer-compatible workspace-scoped plugin panels from the shared
-launch catalog. Individual tab menus close instances or move compatible tabs to main. Explorer tabs
+toggles Files, Changes, Artifacts, and Explorer-compatible workspace-scoped plugin panels from the
+shared launch catalog. Individual tab menus close instances or move compatible tabs to main. Explorer tabs
 can be reordered, but the dock cannot be split. Selecting an Explorer tab does not change workspace
 focus.
 

@@ -659,6 +659,7 @@ export const en = {
         splitDown: "Split pane down",
         changes: "Changes",
         files: "Files",
+        artifacts: "Artifacts",
         pullRequest: "Pull request",
         terminalProfilesMenu: "Terminal profiles",
         editTerminalProfiles: "Edit profiles",
@@ -669,6 +670,7 @@ export const en = {
         toggle: "Toggle Explorer sidebar",
         changes: "Changes",
         files: "Files",
+        artifacts: "Artifacts",
       },
       projectSelector: {
         label: "Project",
@@ -1950,6 +1952,12 @@ export const en = {
       subtitle: "Workspace files",
       tooltip: "Browse workspace files",
       chooseFile: "Choose a file",
+    },
+    artifacts: {
+      label: "Artifacts",
+      subtitle: "Agent screenshots",
+      tooltip: "Screenshots from workspace agents",
+      empty: "Screenshots from this workspace's agents appear here.",
     },
     pullRequest: {
       label: "Pull request",

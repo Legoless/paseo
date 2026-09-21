@@ -665,6 +665,7 @@ export const ko = {
         splitDown: "창을 아래로 분할",
         changes: "변경 사항",
         files: "파일",
+        artifacts: "아티팩트",
         pullRequest: "풀 리퀘스트",
         terminalProfilesMenu: "터미널 프로필",
         editTerminalProfiles: "프로필 편집",
@@ -675,6 +676,7 @@ export const ko = {
         toggle: "사이드 패널 토글",
         changes: "변경 사항",
         files: "파일",
+        artifacts: "아티팩트",
       },
       projectSelector: {
         label: "프로젝트",
@@ -1936,6 +1938,12 @@ export const ko = {
       subtitle: "워크스페이스 파일",
       tooltip: "워크스페이스 파일 탐색",
       chooseFile: "파일 선택",
+    },
+    artifacts: {
+      label: "아티팩트",
+      subtitle: "에이전트 스크린샷",
+      tooltip: "워크스페이스 에이전트가 남긴 스크린샷",
+      empty: "이 워크스페이스 에이전트가 남긴 스크린샷이 여기에 나타납니다.",
     },
     pullRequest: {
       label: "풀 리퀘스트",

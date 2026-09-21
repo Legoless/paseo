@@ -662,6 +662,7 @@ export const zhCN = {
         splitDown: "向下拆分窗格",
         changes: "更改",
         files: "文件",
+        artifacts: "产物",
         pullRequest: "拉取请求",
         terminalProfilesMenu: "Terminal profiles",
         editTerminalProfiles: "Edit profiles",
@@ -672,6 +673,7 @@ export const zhCN = {
         toggle: "切换侧边面板",
         changes: "变更",
         files: "文件",
+        artifacts: "产物",
       },
       projectSelector: {
         label: "项目",
@@ -1904,6 +1906,12 @@ export const zhCN = {
       subtitle: "工作区文件",
       tooltip: "浏览工作区文件",
       chooseFile: "选择文件",
+    },
+    artifacts: {
+      label: "产物",
+      subtitle: "代理截图",
+      tooltip: "工作区代理发出的截图",
+      empty: "此工作区代理发出的截图会显示在这里。",
     },
     pullRequest: {
       label: "拉取请求",

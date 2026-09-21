@@ -669,6 +669,7 @@ export const es = {
         splitDown: "Dividir panel hacia abajo",
         changes: "Cambios",
         files: "Archivos",
+        artifacts: "Artefactos",
         pullRequest: "Solicitud de extracción",
         terminalProfilesMenu: "Terminal profiles",
         editTerminalProfiles: "Edit profiles",
@@ -679,6 +680,7 @@ export const es = {
         toggle: "Alternar panel lateral",
         changes: "Cambios",
         files: "Archivos",
+        artifacts: "Artefactos",
       },
       projectSelector: {
         label: "Proyecto",
@@ -1973,6 +1975,12 @@ export const es = {
       subtitle: "Archivos del espacio de trabajo",
       tooltip: "Explorar archivos del espacio de trabajo",
       chooseFile: "Elige un archivo",
+    },
+    artifacts: {
+      label: "Artefactos",
+      subtitle: "Capturas de agentes",
+      tooltip: "Capturas de pantalla emitidas por los agentes del espacio de trabajo",
+      empty: "Las capturas de los agentes de este espacio de trabajo aparecen aquí.",
     },
     pullRequest: {
       label: "Solicitud de extracción",

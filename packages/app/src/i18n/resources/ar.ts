@@ -655,6 +655,7 @@ export const ar = {
         splitDown: "تقسيم الجزء لأسفل",
         changes: "التغييرات",
         files: "الملفات",
+        artifacts: "القطع",
         pullRequest: "طلب السحب",
         terminalProfilesMenu: "Terminal profiles",
         editTerminalProfiles: "Edit profiles",
@@ -665,6 +666,7 @@ export const ar = {
         toggle: "تبديل اللوحة الجانبية",
         changes: "التغييرات",
         files: "ملفات",
+        artifacts: "القطع",
       },
       toasts: {
         copyFailed: "فشل النسخ",
@@ -1845,6 +1847,12 @@ export const ar = {
       subtitle: "ملفات مساحة العمل",
       tooltip: "تصفح ملفات مساحة العمل",
       chooseFile: "اختر ملفًا",
+    },
+    artifacts: {
+      label: "القطع",
+      subtitle: "لقطات الوكلاء",
+      tooltip: "لقطات الشاشة الصادرة عن وكلاء مساحة العمل",
+      empty: "تظهر هنا لقطات الشاشة الصادرة عن وكلاء مساحة العمل هذه.",
     },
     pullRequest: {
       label: "طلب السحب",

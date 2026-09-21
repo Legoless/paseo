@@ -24,6 +24,7 @@ import {
 } from "@/constants/layout";
 import { ChangesSurface } from "@/git/diff-pane";
 import { changesStateSchema, defaultChangesState, type ChangesState } from "@/panels/changes/state";
+import { ArtifactsTimeline } from "@/panels/artifacts/timeline";
 import { FileExplorerPane } from "./file-explorer-pane";
 import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { shouldUseCompactExplorerKeyboardPadding } from "@/keyboard/shift";
@@ -353,7 +354,7 @@ function ExplorerSidebarContent({
   const resolvedTab: ExplorerTab = requestedTab === "pr" && !showPrTab ? "changes" : requestedTab;
   const prTabLabel = formatPrTabLabel(prPane.prNumber);
   const availableTabs = useMemo<ExplorerTab[]>(() => {
-    const tabs: ExplorerTab[] = isGit ? ["changes", "files"] : ["files"];
+    const tabs: ExplorerTab[] = isGit ? ["changes", "files", "artifacts"] : ["files", "artifacts"];
     if (isGit && showPrTab) tabs.push("pr");
     return tabs;
   }, [isGit, showPrTab]);
@@ -385,6 +386,13 @@ function ExplorerSidebarContent({
             label={t("workspace.tabs.explorerSidebar.files")}
             onTabPress={onTabPress}
             testID="explorer-tab-files"
+          />
+          <ExplorerTabButton
+            tab="artifacts"
+            active={resolvedTab === "artifacts"}
+            label={t("workspace.tabs.explorerSidebar.artifacts")}
+            onTabPress={onTabPress}
+            testID="explorer-tab-artifacts"
           />
           {isGit && showPrTab && (
             <ExplorerTabButton
@@ -439,6 +447,15 @@ function ExplorerSidebarContent({
               workspaceId={workspaceId}
               workspaceRoot={workspaceRoot}
               onOpenFile={onOpenFile}
+            />
+          </RetainedPanel>
+        ) : null}
+        {mountedTabIds.has("artifacts") ? (
+          <RetainedPanel active={resolvedTab === "artifacts"}>
+            <ArtifactsTimeline
+              serverId={serverId}
+              workspaceId={workspaceId ?? ""}
+              active={isOpen && resolvedTab === "artifacts"}
             />
           </RetainedPanel>
         ) : null}

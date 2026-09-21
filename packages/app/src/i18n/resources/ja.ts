@@ -669,6 +669,7 @@ export const ja = {
         splitDown: "下にペインを分割",
         changes: "変更",
         files: "ファイル",
+        artifacts: "成果物",
         pullRequest: "プルリクエスト",
         terminalProfilesMenu: "ターミナルプロファイル",
         editTerminalProfiles: "プロファイルを編集",
@@ -679,6 +680,7 @@ export const ja = {
         toggle: "サイドパネルを切り替え",
         changes: "変更",
         files: "ファイル",
+        artifacts: "成果物",
       },
       projectSelector: {
         label: "プロジェクト",
@@ -1944,6 +1946,12 @@ export const ja = {
       subtitle: "ワークスペースのファイル",
       tooltip: "ワークスペースのファイルを参照",
       chooseFile: "ファイルを選択",
+    },
+    artifacts: {
+      label: "成果物",
+      subtitle: "エージェントのスクリーンショット",
+      tooltip: "ワークスペースのエージェントが出力したスクリーンショット",
+      empty: "このワークスペースのエージェントが出力したスクリーンショットがここに表示されます。",
     },
     pullRequest: {
       label: "プルリクエスト",

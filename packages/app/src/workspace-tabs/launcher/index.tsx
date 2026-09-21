@@ -92,6 +92,7 @@ const BUILT_IN_SELECTIONS = {
   changes: { kind: "target", target: { kind: "changes_tree" } },
   diff: { kind: "target", target: { kind: "working_diff" } },
   files: { kind: "target", target: { kind: "files" } },
+  artifacts: { kind: "target", target: { kind: "artifacts" } },
   browser: { kind: "browser" },
   pullRequest: { kind: "target", target: { kind: "pull_request" } },
 } satisfies Record<BuiltInLaunchItemId, NewTabSelection>;
@@ -131,6 +132,7 @@ export function useWorkspaceTabLaunchCatalog(input: {
     const changesPresentation = getLaunchPresentation("changes_tree");
     const diffPresentation = getLaunchPresentation("working_diff");
     const filesPresentation = getLaunchPresentation("files");
+    const artifactsPresentation = getLaunchPresentation("artifacts");
     const pullRequestPresentation = getLaunchPresentation("pull_request");
     const builtIns: Record<BuiltInLaunchItemId, WorkspaceTabLaunchItem & { hidden?: boolean }> = {
       agent: {
@@ -183,6 +185,15 @@ export function useWorkspaceTabLaunchCatalog(input: {
         panelKind: "files",
         toggleTarget: BUILT_IN_SELECTIONS.files.target,
         launch: launchSelection(BUILT_IN_SELECTIONS.files),
+      },
+      artifacts: {
+        id: "artifacts",
+        label: artifactsPresentation.label(t),
+        Icon: artifactsPresentation.icon,
+        disabled: false,
+        panelKind: "artifacts",
+        toggleTarget: BUILT_IN_SELECTIONS.artifacts.target,
+        launch: launchSelection(BUILT_IN_SELECTIONS.artifacts),
       },
       browser: {
         id: "browser",

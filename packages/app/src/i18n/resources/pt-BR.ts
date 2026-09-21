@@ -667,6 +667,7 @@ export const ptBR = {
         splitDown: "Dividir painel abaixo",
         changes: "Alterações",
         files: "Arquivos",
+        artifacts: "Artefatos",
         pullRequest: "Pull request",
         terminalProfilesMenu: "Perfis de terminal",
         editTerminalProfiles: "Editar perfis",
@@ -677,6 +678,7 @@ export const ptBR = {
         toggle: "Alternar painel lateral",
         changes: "Alterações",
         files: "Arquivos",
+        artifacts: "Artefatos",
       },
       projectSelector: {
         label: "Projeto",
@@ -1958,6 +1960,12 @@ export const ptBR = {
       subtitle: "Arquivos do espaço de trabalho",
       tooltip: "Explorar arquivos do espaço de trabalho",
       chooseFile: "Escolha um arquivo",
+    },
+    artifacts: {
+      label: "Artefatos",
+      subtitle: "Capturas dos agentes",
+      tooltip: "Capturas de tela emitidas pelos agentes do workspace",
+      empty: "As capturas dos agentes deste workspace aparecem aqui.",
     },
     pullRequest: {
       label: "Pull request",

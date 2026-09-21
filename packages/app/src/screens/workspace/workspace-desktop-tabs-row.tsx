@@ -575,6 +575,7 @@ function getFallbackTabLabel(
     agent: string;
     changes: string;
     files: string;
+    artifacts: string;
     pullRequest: string;
   },
 ): string {
@@ -598,6 +599,9 @@ function getFallbackTabLabel(
   }
   if (tab.target.kind === "files") {
     return labels.files;
+  }
+  if (tab.target.kind === "artifacts") {
+    return labels.artifacts;
   }
   if (tab.target.kind === "pull_request") {
     return labels.pullRequest;
@@ -1068,6 +1072,7 @@ function ResolvedWorkspaceDesktopTabsRow({
       agent: t("workspace.tabs.fallback.agent"),
       changes: t("panels.diff.changesLabel"),
       files: t("panels.files.label"),
+      artifacts: t("panels.artifacts.label"),
       pullRequest: t("panels.pullRequest.label"),
     }),
     [t],

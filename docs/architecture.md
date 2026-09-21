@@ -414,6 +414,7 @@ One workspace can span zero or more directories: its `members` list holds each p
 | Composer attachments         | `buildWorkspaceAttachmentScopeKey`                 | `packages/app/src/attachments/workspace-attachments-store.ts` |
 | File explorer nav/open state | `fileExplorer` map keyed `workspace:{workspaceId}` | `packages/app/src/hooks/use-file-explorer-actions.ts`         |
 | File explorer expanded paths | `expandedPathsByWorkspace[workspaceStateKey]`      | `packages/app/src/stores/panel-store/state.ts`                |
+| Artifacts timeline           | current workspace agents, not `cwd`                | `packages/app/src/panels/artifacts/select.ts`                 |
 
 `diff-pane.tsx` is the canonical wiring site: it passes `{ serverId, cwd }` to the git queries and `{ serverId, workspaceId, cwd }` to the draft/comparison/attachment scope keys.
 
