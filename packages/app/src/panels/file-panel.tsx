@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { FilePane } from "@/file-pane/pane";
 import { usePaneContext } from "@/panels/pane-context";
 import { definePanel } from "@/panels/panel-registry";
-import { useWorkspaceDirectory } from "@/stores/session-store-hooks";
+import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selection-store";
 import { createMaterialFileIcon } from "@/components/material-file-icon";
 import { isAbsolutePath } from "@/utils/path";
 
@@ -38,8 +38,8 @@ function FilePanel() {
     target,
     fileNavigationRevision,
   } = usePaneContext();
-  const primaryWorkspaceRoot = useWorkspaceDirectory(serverId, workspaceId);
-  const workspaceRoot = paneWorkspaceRoot ?? primaryWorkspaceRoot ?? "";
+  const { cwd: selectedProjectRoot } = useSelectedWorkspaceProject(serverId, workspaceId);
+  const workspaceRoot = paneWorkspaceRoot ?? selectedProjectRoot ?? "";
   invariant(target.kind === "file", "FilePanel requires file target");
   if (!workspaceRoot && !isAbsolutePath(target.path)) {
     return (

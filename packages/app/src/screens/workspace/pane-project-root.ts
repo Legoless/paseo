@@ -60,5 +60,16 @@ export function resolvePaneProjectRoot(input: {
   if (candidates.every(ownsItsProject)) {
     return null;
   }
-  return input.primaryCwd?.trim() || null;
+  const primary = input.primaryCwd?.trim() || null;
+  if (primary || input.scope !== "tab") {
+    return primary;
+  }
+  // Active-tab scope prefers the workspace primary over a sibling. A file still has to open
+  // when that primary does not exist, so the sibling project is the directory it was opened beside.
+  for (const tab of input.tabs) {
+    if (tab === active) continue;
+    const cwd = targetCwd(tab, input.agentCwdById, input.terminalCwdById)?.trim();
+    if (cwd) return cwd;
+  }
+  return null;
 }

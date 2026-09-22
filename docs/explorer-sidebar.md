@@ -59,9 +59,10 @@ While Explorer is closed, its toggle sits at the main tray's top-right. Opening 
 same control to the far-right of the Files/Changes rail, so the pointer can close it in place.
 
 By default, the dock and project tray follow only the active agent, terminal, or draft tab. When the
-active tab supplies no project, use the workspace primary. **Layout → Workspace panes → Explorer
+active tab supplies no project, use the workspace primary. If the workspace has no primary, a file
+or diff uses another tab in the pane that has one. **Layout → Workspace panes → Explorer
 project** can switch to **Pane tab group**, which lets a supporting tab inherit another
-project-bound tab in the pane. The Explorer project picker remains on layouts without desktop pane
+project-bound tab in the pane even when a primary exists. The Explorer project picker remains on layouts without desktop pane
 splits, where there is one shared Explorer destination.
 
 `packages/app/src/workspace-tabs/open-supporting-view.ts` owns semantic Changes and pull-request
