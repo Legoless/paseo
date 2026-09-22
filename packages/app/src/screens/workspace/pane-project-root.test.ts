@@ -41,6 +41,18 @@ describe("pane project root", () => {
     ).toBe("/primary");
   });
 
+  it("opens a file beside an agent when the workspace has no primary project", () => {
+    expect(
+      resolvePaneProjectRoot({
+        ...input,
+        scope: "tab",
+        primaryCwd: null,
+        tabs: [file, agent],
+        activeTabId: file.tabId,
+      }),
+    ).toBe("/project-a");
+  });
+
   it("uses a draft's selected project and otherwise falls back to the primary project", () => {
     const draft = tab({
       kind: "draft",

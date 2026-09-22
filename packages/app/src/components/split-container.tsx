@@ -1622,6 +1622,7 @@ function SplitPaneView({
                 activeTabId={activeTabDescriptor?.tabId ?? null}
                 normalizedServerId={normalizedServerId}
                 normalizedWorkspaceId={normalizedWorkspaceId}
+                workspaceRoot={paneWorkspaceRoot ?? undefined}
                 isWorkspaceFocused={isWorkspaceFocused}
                 isPaneFocused={isFocused}
                 onFocusPane={stableOnFocusPane}
