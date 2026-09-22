@@ -1060,16 +1060,16 @@ const x = 1;
     expect(shortstat).toBeNull();
   });
 
-  it("reports outgoing changes when the base branch is ahead of its remote", async () => {
+  it("does not report committed outgoing changes when the working tree is clean", async () => {
     setupRemoteTrackingMain(repoDir, tempDir);
     commitFile(repoDir, "file.txt", "local one\nlocal two\n", "local update");
 
     const shortstat = await getCheckoutShortstat(repoDir);
 
-    expect(shortstat).toEqual({ additions: 2, deletions: 1 });
+    expect(shortstat).toBeNull();
   });
 
-  it("uses the merge-base for shortstat when the base branch diverged from its remote", async () => {
+  it("does not report a committed local commit when the base branch diverged from its remote", async () => {
     const { cloneDir } = setupRemoteTrackingMain(repoDir, tempDir);
     commitFile(cloneDir, "file.txt", "remote one\nremote two\n", "remote update");
     execFileSync("git", ["push"], { cwd: cloneDir });
@@ -1078,10 +1078,10 @@ const x = 1;
 
     const shortstat = await getCheckoutShortstat(repoDir);
 
-    expect(shortstat).toEqual({ additions: 1, deletions: 0 });
+    expect(shortstat).toBeNull();
   });
 
-  it("keeps base branch divergence pointed at local work when the remote has more commits", async () => {
+  it("ignores committed local work when the remote base has more commits", async () => {
     const { cloneDir } = setupRemoteTrackingMain(repoDir, tempDir);
     commitFile(cloneDir, "remote-one.txt", "remote one\n", "remote update one");
     commitFile(cloneDir, "remote-two.txt", "remote two\n", "remote update two");
@@ -1091,7 +1091,7 @@ const x = 1;
 
     const shortstat = await getCheckoutShortstat(repoDir);
 
-    expect(shortstat).toEqual({ additions: 1, deletions: 0 });
+    expect(shortstat).toBeNull();
   });
 
   it("reports only working tree changes when the base branch is behind", async () => {
@@ -1107,7 +1107,7 @@ const x = 1;
     expect(shortstat).toEqual({ additions: 2, deletions: 1 });
   });
 
-  it("keeps feature shortstat scoped to feature changes when the base remote is ahead", async () => {
+  it("does not report committed feature changes when the base remote is ahead", async () => {
     const { cloneDir } = setupRemoteTrackingMain(repoDir, tempDir);
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
     commitFile(repoDir, "feature.txt", "feature\n", "feature update");
@@ -1118,7 +1118,7 @@ const x = 1;
 
     const shortstat = await getCheckoutShortstat(repoDir);
 
-    expect(shortstat).toEqual({ additions: 1, deletions: 0 });
+    expect(shortstat).toBeNull();
   });
 
   it("does not report incoming base changes when a feature branch has no local work beyond merge-base", async () => {
@@ -1134,17 +1134,17 @@ const x = 1;
     expect(shortstat).toBeNull();
   });
 
-  it("reports feature shortstat ahead of the comparison merge-base", async () => {
+  it("does not report committed feature changes ahead of the base", async () => {
     setupRemoteTrackingMain(repoDir, tempDir);
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
     commitFile(repoDir, "feature.txt", "feature\n", "feature update");
 
     const shortstat = await getCheckoutShortstat(repoDir);
 
-    expect(shortstat).toEqual({ additions: 1, deletions: 0 });
+    expect(shortstat).toBeNull();
   });
 
-  it("includes untracked file lines in shortstat additions", async () => {
+  it("counts untracked lines without committed feature changes", async () => {
     setupRemoteTrackingMain(repoDir, tempDir);
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
     commitFile(repoDir, "committed.txt", "one\n", "add committed");
@@ -1152,7 +1152,7 @@ const x = 1;
 
     const shortstat = await getCheckoutShortstat(repoDir);
 
-    expect(shortstat).toEqual({ additions: 4, deletions: 0 });
+    expect(shortstat).toEqual({ additions: 3, deletions: 0 });
   });
 
   it("reports untracked-only additions when no tracked changes exist", async () => {
@@ -1164,7 +1164,7 @@ const x = 1;
     expect(shortstat).toEqual({ additions: 2, deletions: 0 });
   });
 
-  it("counts empty untracked files as 0 additions", async () => {
+  it("counts empty untracked files as no shortstat when nothing else is uncommitted", async () => {
     setupRemoteTrackingMain(repoDir, tempDir);
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
     commitFile(repoDir, "committed.txt", "one\n", "add committed");
@@ -1172,10 +1172,10 @@ const x = 1;
 
     const shortstat = await getCheckoutShortstat(repoDir);
 
-    expect(shortstat).toEqual({ additions: 1, deletions: 0 });
+    expect(shortstat).toBeNull();
   });
 
-  it("uses the merge-base for shortstat when a feature branch diverged from its tracked remote", async () => {
+  it("ignores a committed feature update when the feature remote diverged", async () => {
     setupRemoteTrackingMain(repoDir, tempDir);
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
     execFileSync("git", ["push", "-u", "origin", "feature"], { cwd: repoDir });
@@ -1191,10 +1191,10 @@ const x = 1;
 
     const shortstat = await getCheckoutShortstat(repoDir);
 
-    expect(shortstat).toEqual({ additions: 1, deletions: 0 });
+    expect(shortstat).toBeNull();
   });
 
-  it("uses the remote-only base branch as the feature shortstat comparison", async () => {
+  it("does not report committed feature changes against a remote-only base branch", async () => {
     const { cloneDir } = setupRemoteTrackingMain(repoDir, tempDir);
     execFileSync("git", ["remote", "set-head", "origin", "main"], { cwd: repoDir });
     execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
@@ -1206,7 +1206,7 @@ const x = 1;
 
     const shortstat = await getCheckoutShortstat(repoDir);
 
-    expect(shortstat).toEqual({ additions: 1, deletions: 0 });
+    expect(shortstat).toBeNull();
   });
 
   it("returns no shortstat for a clean base branch that is up to date with its remote", async () => {
@@ -1225,6 +1225,33 @@ const x = 1;
     const shortstat = await getCheckoutShortstat(repoDir);
 
     expect(shortstat).toEqual({ additions: 2, deletions: 1 });
+  });
+
+  it("reports staged and unstaged changes without committed branch work", async () => {
+    setupRemoteTrackingMain(repoDir, tempDir);
+    execFileSync("git", ["checkout", "-b", "feature"], { cwd: repoDir });
+    commitFile(repoDir, "committed.txt", "committed\n", "feature commit");
+    expect(await getCheckoutShortstat(repoDir)).toBeNull();
+    __resetCheckoutShortstatCacheForTests();
+
+    writeFileSync(join(repoDir, "staged.txt"), "staged\n");
+    execFileSync("git", ["add", "staged.txt"], { cwd: repoDir });
+    writeFileSync(join(repoDir, "file.txt"), "");
+
+    const shortstat = await getCheckoutShortstat(repoDir);
+
+    expect(shortstat).toEqual({ additions: 1, deletions: 1 });
+  });
+
+  it("reports untracked lines before the first commit", async () => {
+    const unbornRepo = join(tempDir, "unborn-shortstat");
+    mkdirSync(unbornRepo, { recursive: true });
+    execFileSync("git", ["init", "-b", "main"], { cwd: unbornRepo });
+    writeFileSync(join(unbornRepo, "greeting.txt"), "hello\n");
+
+    const shortstat = await getCheckoutShortstat(unbornRepo);
+
+    expect(shortstat).toEqual({ additions: 1, deletions: 0 });
   });
 
   it("uses the freshest comparison base for status and shortstat when local main is stale", async () => {
@@ -1261,7 +1288,7 @@ const x = 1;
     expect(status.aheadBehind).toEqual({ ahead: 1, behind: 0 });
 
     const shortstat = await getCheckoutShortstat(repoDir);
-    expect(shortstat).toEqual({ additions: 1, deletions: 0 });
+    expect(shortstat).toBeNull();
   });
 
   it("does not count origin base commits as feature changes when local main is stale", async () => {
@@ -1310,7 +1337,7 @@ const x = 1;
     });
 
     const shortstat = await getCheckoutShortstat(repoDir);
-    expect(shortstat).toEqual({ additions: 1, deletions: 0 });
+    expect(shortstat).toBeNull();
 
     const diff = await getCheckoutDiff(repoDir, { mode: "base", baseRef: "main" });
     expect(diff.diff).toContain("local-feature.txt");
@@ -1360,7 +1387,7 @@ const x = 1;
     });
 
     const shortstat = await getCheckoutShortstat(repoDir);
-    expect(shortstat).toEqual({ additions: 1, deletions: 0 });
+    expect(shortstat).toBeNull();
 
     const diff = await getCheckoutDiff(repoDir, { mode: "base", baseRef: "main" });
     expect(diff.diff).toContain("feature.txt");
@@ -3767,6 +3794,8 @@ const x = 1;
 
     const baseDiff = await getCheckoutDiff(worktree.worktreePath, { mode: "base" }, { paseoHome });
     expect(baseDiff.diff).toContain("feature.txt");
+
+    writeFileSync(join(worktree.worktreePath, "feature.txt"), "feature\nextra\n");
 
     const shortstat = await getCheckoutShortstat(worktree.worktreePath, { paseoHome });
     expect(shortstat).toEqual({ additions: 1, deletions: 0 });

@@ -114,13 +114,17 @@ function computeSelectedDiffStat(
   if (isLoading) {
     return null;
   }
-  return files.reduce(
+  const stat = files.reduce(
     (total, file) => ({
       additions: total.additions + file.additions,
       deletions: total.deletions + file.deletions,
     }),
     { additions: 0, deletions: 0 },
   );
+  if (stat.additions === 0 && stat.deletions === 0) {
+    return null;
+  }
+  return stat;
 }
 
 function useDiscardChangesAction({
