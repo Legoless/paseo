@@ -301,13 +301,10 @@ export function buildGitActions(input: BuildGitActionsInput): GitActions {
   if (!input.isOnBaseBranch) {
     secondaryIds.push(...getFeatureActionIds(input));
   }
-  secondaryIds.push("archive-workspace");
 
   return {
     primary,
-    secondary: secondaryIds
-      .filter((id) => id !== "archive-workspace" || primaryActionId !== "archive-workspace")
-      .map((id) => allActions.get(id)!),
+    secondary: secondaryIds.map((id) => allActions.get(id)!),
     menu: [],
   };
 }

@@ -171,12 +171,7 @@ describe("git-actions-policy", () => {
     const actions = buildGitActions(createInput({ hasRemote: true }));
 
     expect(actions.primary).toBeNull();
-    expect(actions.secondary.map((action) => action.id)).toEqual([
-      "pull",
-      "push",
-      "pull-and-push",
-      "archive-workspace",
-    ]);
+    expect(actions.secondary.map((action) => action.id)).toEqual(["pull", "push", "pull-and-push"]);
   });
 
   it("prioritizes pull when the branch is behind origin", () => {
@@ -308,7 +303,6 @@ describe("git-actions-policy", () => {
       "merge-pr-squash",
       "merge-pr-merge",
       "merge-pr-rebase",
-      "archive-workspace",
     ]);
     expect(
       actions.secondary.some((action) => action.id === "pr" && action.label === "View PR"),
@@ -417,21 +411,17 @@ describe("git-actions-policy", () => {
     expect(directory).toEqual({ primary: null, secondary: [], menu: [] });
   });
 
-  it("offers archive workspace for Git checkouts and worktrees", () => {
+  it("keeps close workspace out of the git menu", () => {
     const localCheckout = buildGitActions(createInput({ hasUncommittedChanges: true }));
     const worktree = buildGitActions(
       createInput({ hasUncommittedChanges: true, isPaseoOwnedWorktree: true }),
     );
+    const idleCheckout = buildGitActions(createInput());
 
-    expect(localCheckout.secondary.some((action) => action.id === "archive-workspace")).toBe(true);
-    expect(worktree.secondary.some((action) => action.id === "archive-workspace")).toBe(true);
-  });
-
-  it("does not promote archive to primary for an idle regular Git checkout", () => {
-    const actions = buildGitActions(createInput());
-
-    expect(actions.primary).toBeNull();
-    expect(actions.secondary.some((action) => action.id === "archive-workspace")).toBe(true);
+    expect(localCheckout.secondary.some((action) => action.id === "archive-workspace")).toBe(false);
+    expect(worktree.secondary.some((action) => action.id === "archive-workspace")).toBe(false);
+    expect(idleCheckout.primary).toBeNull();
+    expect(idleCheckout.secondary.some((action) => action.id === "archive-workspace")).toBe(false);
   });
 
   it("still promotes archive as primary for an idle Paseo-owned worktree", () => {
@@ -659,7 +649,6 @@ describe("git-actions-policy", () => {
       "merge-pr-squash",
       "merge-pr-merge",
       "merge-pr-rebase",
-      "archive-workspace",
     ]);
   });
 
@@ -836,7 +825,6 @@ describe("git-actions-policy", () => {
       "merge-pr-squash",
       "merge-pr-merge",
       "merge-pr-rebase",
-      "archive-workspace",
     ]);
   });
 
@@ -877,7 +865,6 @@ describe("git-actions-policy", () => {
       "merge-branch",
       "pr",
       "enable-pr-auto-merge-squash",
-      "archive-workspace",
     ]);
     expect(
       actions.secondary.some((action) =>
@@ -1020,7 +1007,6 @@ describe("git-actions-policy", () => {
       "merge-branch",
       "pr",
       "merge-pr-merge",
-      "archive-workspace",
     ]);
   });
 
@@ -1074,7 +1060,7 @@ describe("git-actions-policy", () => {
       .filter((action) => !action.startsGroup)
       .map((action) => action.id);
 
-    expect(groupStarters).toEqual(["merge-from-base", "merge-pr-squash", "archive-workspace"]);
+    expect(groupStarters).toEqual(["merge-from-base", "merge-pr-squash"]);
     expect(nonGroupStarters).toEqual([
       "pull",
       "push",
