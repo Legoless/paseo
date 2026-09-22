@@ -306,28 +306,49 @@ export function presentBrowserWebview(
   const surfaceTop = Math.ceil(top);
   const surfaceRight = Math.floor(right);
   const surfaceBottom = Math.floor(bottom);
-  const hasVisibleArea = surfaceRight > surfaceLeft && surfaceBottom > surfaceTop;
+  const surfaceWidth = Math.max(0, surfaceRight - surfaceLeft);
+  const surfaceHeight = Math.max(0, surfaceBottom - surfaceTop);
+  const hasVisibleArea = surfaceWidth > 0 && surfaceHeight > 0;
+  const webviewSize =
+    viewport.mode === "responsive"
+      ? {
+          width: Math.max(1, Math.round(anchorBounds.width)),
+          height: Math.max(1, Math.round(anchorBounds.height)),
+        }
+      : {
+          width: Math.max(1, Math.round(viewport.width)),
+          height: Math.max(1, Math.round(viewport.height)),
+        };
+  // Guest frames larger than the pane scroll from the top-left so the hidden
+  // edges stay reachable. The guest keeps its layout size. A responsive guest is
+  // sized from the anchor it already fills, so excess there is only ceil/floor
+  // rounding on a fractional pane rect, never a frame the user has to reach.
+  const canOverflow = viewport.mode !== "responsive";
+  const widthOverflows = canOverflow && webviewSize.width > surfaceWidth + 1;
+  const heightOverflows = canOverflow && webviewSize.height > surfaceHeight + 1;
   ensureOverlayPointerEventsSubscription();
   surface.setAttribute("aria-hidden", "false");
   surface.style.position = "fixed";
   surface.style.left = `${surfaceLeft}px`;
   surface.style.top = `${surfaceTop}px`;
-  surface.style.width = `${Math.max(0, surfaceRight - surfaceLeft)}px`;
-  surface.style.height = `${Math.max(0, surfaceBottom - surfaceTop)}px`;
-  surface.style.overflow = "hidden";
+  surface.style.width = `${surfaceWidth}px`;
+  surface.style.height = `${surfaceHeight}px`;
+  surface.style.overflowX = widthOverflows ? "auto" : "hidden";
+  surface.style.overflowY = heightOverflows ? "auto" : "hidden";
   surface.style.opacity = "1";
   surface.style.display = "flex";
   surface.style.visibility = "visible";
   clearResidentWebviewParkingStyle(webview);
-  applyBrowserWebviewDimensions(
-    webview,
-    viewport.mode === "responsive"
-      ? { width: anchorBounds.width, height: anchorBounds.height }
-      : viewport,
-  );
-  webview.style.position = "absolute";
-  webview.style.left = `${Math.round(anchorBounds.left - surfaceLeft)}px`;
-  webview.style.top = `${Math.round(anchorBounds.top - surfaceTop)}px`;
+  applyBrowserWebviewDimensions(webview, webviewSize);
+  if (widthOverflows || heightOverflows) {
+    webview.style.position = "relative";
+    webview.style.left = "0";
+    webview.style.top = "0";
+  } else {
+    webview.style.position = "absolute";
+    webview.style.left = `${Math.round(anchorBounds.left - surfaceLeft)}px`;
+    webview.style.top = `${Math.round(anchorBounds.top - surfaceTop)}px`;
+  }
   // Electron <webview> is a native compositor surface: CSS z-index can paint
   // overlay-root above it while clicks still land in the guest. Drop pointer
   // events for as long as a host overlay is registered.

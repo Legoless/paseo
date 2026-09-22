@@ -243,7 +243,7 @@ describe("resident browser webviews", () => {
     }
   });
 
-  it("clips an oversized fixed viewport to its pane without resizing the webview", () => {
+  it("scrolls an oversized fixed viewport inside its pane without resizing the webview", () => {
     const webview = ensureTestBrowser({
       browserId: "browser-oversized",
       workspaceId: "workspace-oversized",
@@ -271,17 +271,82 @@ describe("resident browser webviews", () => {
     expect(webview.parentElement.style.top).toBe("150px");
     expect(webview.parentElement.style.width).toBe("800px");
     expect(webview.parentElement.style.height).toBe("600px");
-    expect(webview.style.left).toBe("-900px");
-    expect(webview.style.top).toBe("-450px");
+    expect(webview.parentElement.style.overflowX).toBe("auto");
+    expect(webview.parentElement.style.overflowY).toBe("auto");
+    expect(webview.style.position).toBe("relative");
+    expect(webview.style.left).toBe("0px");
+    expect(webview.style.top).toBe("0px");
     expect(webview.style.width).toBe("2560px");
     expect(webview.style.height).toBe("1440px");
 
     resizeResidentBrowserWebview({ browserId: "browser-oversized", width: 2560, height: 1440 });
 
-    expect(webview.style.left).toBe("-900px");
-    expect(webview.style.top).toBe("-450px");
+    expect(webview.style.left).toBe("0px");
+    expect(webview.style.top).toBe("0px");
     expect(webview.parentElement.style.width).toBe("800px");
     expect(webview.parentElement.style.height).toBe("600px");
+  });
+
+  it("scrolls only the axis that overflows a fixed viewport", () => {
+    const webview = ensureTestBrowser({
+      browserId: "browser-wide",
+      workspaceId: "workspace-wide",
+      url: "https://example.com",
+    });
+    if (!webview?.parentElement) {
+      throw new Error("Expected resident browser surface");
+    }
+    const anchor = document.createElement("div");
+    const clip = document.createElement("div");
+    Object.defineProperty(anchor, "getBoundingClientRect", {
+      value: () => ({ left: -220, top: 40, width: 1440, height: 900 }),
+    });
+    Object.defineProperty(clip, "getBoundingClientRect", {
+      value: () => ({ left: 0, top: 40, width: 1000, height: 900 }),
+    });
+
+    presentBrowserWebview("browser-wide", webview, anchor, clip, {
+      mode: "fixed",
+      width: 1440,
+      height: 900,
+    });
+
+    expect(webview.parentElement.style.width).toBe("1000px");
+    expect(webview.parentElement.style.height).toBe("900px");
+    expect(webview.parentElement.style.overflowX).toBe("auto");
+    expect(webview.parentElement.style.overflowY).toBe("hidden");
+    expect(webview.style.position).toBe("relative");
+    expect(webview.style.left).toBe("0px");
+    expect(webview.style.top).toBe("0px");
+    expect(webview.style.width).toBe("1440px");
+    expect(webview.style.height).toBe("900px");
+  });
+
+  it("keeps a responsive guest clipped when a fractional pane rect rounds short", () => {
+    const webview = ensureTestBrowser({
+      browserId: "browser-fractional",
+      workspaceId: "workspace-fractional",
+      url: "https://example.com",
+    });
+    if (!webview?.parentElement) {
+      throw new Error("Expected resident browser surface");
+    }
+    const anchor = document.createElement("div");
+    const clip = document.createElement("div");
+    // ceil(100.1) and floor(800.95) leave a 699px surface while the guest rounds
+    // to 701px. The guest fills the anchor here, so that 2px gap is rounding, not
+    // an oversized frame, and must not turn the pane into a scroll container.
+    const bounds = { left: 100.1, top: 40, width: 700.85, height: 900 };
+    Object.defineProperty(anchor, "getBoundingClientRect", { value: () => bounds });
+    Object.defineProperty(clip, "getBoundingClientRect", { value: () => bounds });
+
+    presentBrowserWebview("browser-fractional", webview, anchor, clip, {
+      mode: "responsive",
+    });
+
+    expect(webview.parentElement.style.overflowX).toBe("hidden");
+    expect(webview.parentElement.style.overflowY).toBe("hidden");
+    expect(webview.style.position).toBe("absolute");
   });
 
   it("creates a resident webview for an agent-created unfocused tab", () => {
@@ -443,6 +508,11 @@ describe("resident browser webviews", () => {
     expect(webview.style.flex).toBe("0 0 auto");
     expect(webview.style.width).toBe("640px");
     expect(webview.style.height).toBe("480px");
+    expect(webview.style.position).toBe("absolute");
+    expect(webview.style.left).toBe("0px");
+    expect(webview.style.top).toBe("0px");
+    expect(webview.parentElement?.style.overflowX).toBe("hidden");
+    expect(webview.parentElement?.style.overflowY).toBe("hidden");
   });
 
   it("parks a browser at its last resolved viewport dimensions", () => {

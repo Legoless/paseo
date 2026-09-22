@@ -127,7 +127,8 @@ interface DeviceSizePreset {
 
 // Viewport presets for the in-app browser. "responsive" fills the pane; the
 // others render a fixed-size, centered frame so the user can preview how a page
-// behaves at common device sizes. Content is centered (not left-aligned).
+// behaves at common device sizes. A frame larger than the pane scrolls from the
+// top-left.
 const DEVICE_SIZE_PRESETS: readonly DeviceSizePreset[] = [
   { id: "responsive", name: "Responsive", width: null, height: null, icon: Maximize },
   { id: "iphone-se", name: "iPhone SE", width: 375, height: 667, icon: Smartphone },
@@ -528,9 +529,8 @@ function DeviceSizeMenu({
   triggerStyle: (state: { hovered?: boolean; pressed?: boolean }) => StyleProp<ViewStyle>;
 }) {
   const { t } = useTranslation();
-  const selectedPreset =
-    DEVICE_SIZE_PRESETS.find((preset) => preset.id === selectedId) ?? DEVICE_SIZE_PRESETS[0];
-  const SelectedIcon = resolveThemedDeviceIcon(selectedPreset.icon);
+  const selectedPreset = DEVICE_SIZE_PRESETS.find((preset) => preset.id === selectedId);
+  const SelectedIcon = resolveThemedDeviceIcon(selectedPreset?.icon ?? Monitor);
   const label = t("workspace.browser.devices.label");
   return (
     <DropdownMenu>
