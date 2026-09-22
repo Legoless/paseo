@@ -772,6 +772,10 @@ export const ar = {
       hideFolderTree: "إخفاء شجرة المجلدات",
     },
     git: {
+      paneTray: {
+        editor: "المحرر",
+        git: "Git",
+      },
       actions: {
         moreOptions: "المزيد من الخيارات",
         moreActions: "المزيد من الإجراءات",

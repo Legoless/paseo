@@ -807,6 +807,10 @@ export const en = {
       hideFolderTree: "Hide folder tree",
     },
     git: {
+      paneTray: {
+        editor: "Editor",
+        git: "Git",
+      },
       actions: {
         moreOptions: "More options",
         moreActions: "More actions",

@@ -816,6 +816,10 @@ export const ptBR = {
       hideFolderTree: "Ocultar árvore de pastas",
     },
     git: {
+      paneTray: {
+        editor: "Editor",
+        git: "Git",
+      },
       actions: {
         moreOptions: "Mais opções",
         moreActions: "Mais ações",

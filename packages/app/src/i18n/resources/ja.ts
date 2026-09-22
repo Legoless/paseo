@@ -816,6 +816,10 @@ export const ja = {
       hideFolderTree: "フォルダツリーを非表示",
     },
     git: {
+      paneTray: {
+        editor: "エディタ",
+        git: "Git",
+      },
       actions: {
         moreOptions: "その他のオプション",
         moreActions: "その他のアクション",

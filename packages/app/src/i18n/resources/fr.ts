@@ -821,6 +821,10 @@ export const fr = {
       hideFolderTree: "Masquer l'arborescence des dossiers",
     },
     git: {
+      paneTray: {
+        editor: "Éditeur",
+        git: "Git",
+      },
       actions: {
         moreOptions: "Plus d'options",
         moreActions: "Plus de propositions",

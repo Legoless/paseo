@@ -813,6 +813,10 @@ export const ko = {
       hideFolderTree: "폴더 트리 숨기기",
     },
     git: {
+      paneTray: {
+        editor: "편집기",
+        git: "Git",
+      },
       actions: {
         moreOptions: "옵션 더 보기",
         moreActions: "작업 더 보기",

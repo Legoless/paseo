@@ -321,7 +321,7 @@ function PaneProjectTray({
                 closeOnSelect={false}
                 onSelect={toggleEditor}
               >
-                {t("workspace.git.openInEditor.chooseEditor")}
+                {t("workspace.git.paneTray.editor")}
               </DropdownMenuItem>
               <DropdownMenuItem
                 selected={visibleActions.gitActions}
@@ -329,7 +329,7 @@ function PaneProjectTray({
                 closeOnSelect={false}
                 onSelect={toggleGitActions}
               >
-                {t("workspace.git.actions.push.label")}
+                {t("workspace.git.paneTray.git")}
               </DropdownMenuItem>
               {customCommandsSupported ? (
                 <DropdownMenuItem
