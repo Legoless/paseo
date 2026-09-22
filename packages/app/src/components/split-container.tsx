@@ -254,6 +254,10 @@ function PaneProjectTray({
   const toggleEditor = useCallback(() => toggleAction("editor"), [toggleAction]);
   const toggleGitActions = useCallback(() => toggleAction("gitActions"), [toggleAction]);
   const toggleCustomCommands = useCallback(() => toggleAction("customCommands"), [toggleAction]);
+  const paneTab = useMemo(
+    () => (activeTab ? { tabId: activeTab.tabId, target: activeTab.target } : null),
+    [activeTab],
+  );
   const switchTabProject = useCallback(
     (input: { tabId: string; cwd: string }) => {
       void onSwitchTabProject(input);
@@ -291,7 +295,7 @@ function PaneProjectTray({
             serverId={serverId}
             workspaceId={workspaceId}
             cwd={cwd}
-            hideLabels
+            paneTab={paneTab}
           />
         ) : null}
         {showProjectActions ? (

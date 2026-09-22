@@ -1,7 +1,7 @@
 import { router } from "expo-router";
 import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
-import { useCallback, useEffect, useMemo, type ReactElement } from "react";
-import { Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, type ComponentProps, type ReactElement } from "react";
+import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -47,6 +47,7 @@ import { useCustomCommandsSupported } from "@/commands/use-custom-commands-suppo
 import { applyShortcutOverrides, type ParsedShortcutBinding } from "@/keyboard/keyboard-shortcuts";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import { getIsElectronRuntime } from "@/constants/layout";
+import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 import type { Theme } from "@/styles/theme";
 
 interface WorkspaceCommandsButtonProps {
@@ -56,6 +57,8 @@ interface WorkspaceCommandsButtonProps {
   workspaceId: string;
   presentation?: "split" | "ghost";
   hideLabels?: boolean;
+  /** Tab of the pane that owns this button. The top command runs there, like a git action. */
+  paneTab?: { tabId: string; target: WorkspaceTabTarget } | null;
 }
 
 const ThemedFolder = withUnistyles(Folder);
@@ -183,6 +186,7 @@ export function WorkspaceCommandsButton({
   workspaceId,
   presentation = "split",
   hideLabels,
+  paneTab,
 }: WorkspaceCommandsButtonProps): ReactElement | null {
   const { t } = useTranslation();
   const toast = useToast();
@@ -295,13 +299,34 @@ export function WorkspaceCommandsButton({
         workspaceId,
         command,
         client,
+        paneTab,
         onError: (message) => toast.error(message),
       });
     },
-    [serverId, workspaceId, client, toast],
+    [serverId, workspaceId, client, paneTab, toast],
   );
+  const topCommand = projectEntry.project[0] ?? visibleGlobalCommands[0] ?? null;
+  const runTopCommand = useCallback(() => {
+    if (topCommand) {
+      handleSelect(topCommand);
+    }
+  }, [handleSelect, topCommand]);
 
   const triggerIconSize = presentation === "ghost" ? GHOST_TRIGGER_ICON_SIZE : 14;
+  const primaryStyle = useCallback(
+    ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
+      hideLabels ? styles.splitButtonPrimaryIconOnly : styles.splitButtonPrimary,
+      (Boolean(hovered) || pressed) && styles.splitButtonPrimaryHovered,
+    ],
+    [hideLabels],
+  );
+  const caretStyle = useCallback(
+    ({ hovered, pressed, open }: { hovered: boolean; pressed: boolean; open: boolean }) => [
+      styles.splitButtonCaret,
+      (hovered || pressed || open) && styles.splitButtonCaretHovered,
+    ],
+    [],
+  );
   const triggerStyle = useCallback(
     ({ hovered, pressed, open }: { hovered: boolean; pressed: boolean; open: boolean }) => [
       presentation === "ghost" ? styles.ghostButton : styles.splitButtonPrimary,
@@ -317,52 +342,150 @@ export function WorkspaceCommandsButton({
   if (!supported) {
     return null;
   }
+  return (
+    <CommandsControl
+      presentation={presentation}
+      hideLabels={hideLabels}
+      triggerIconSize={triggerIconSize}
+      triggerStyle={triggerStyle}
+      primaryStyle={primaryStyle}
+      caretStyle={caretStyle}
+      topCommand={topCommand}
+      runTopCommand={runTopCommand}
+      handleMenuOpenChange={handleMenuOpenChange}
+      handleSelect={handleSelect}
+      openSettings={openSettings}
+      projectCommands={projectEntry.project}
+      projectError={projectEntry.projectError}
+      globalCommands={visibleGlobalCommands}
+      globalErrors={globalEntry.globalErrors}
+      bindingByCommandId={bindingByCommandId}
+      conflicts={conflicts}
+      menuLabel={t("workspace.commands.accessibility.trigger")}
+      commandsTitle={t("workspace.commands.title")}
+      manageLabel={t("settings.commands.manage")}
+    />
+  );
+}
+
+function CommandsControl({
+  presentation,
+  hideLabels,
+  triggerIconSize,
+  triggerStyle,
+  primaryStyle,
+  caretStyle,
+  topCommand,
+  runTopCommand,
+  handleMenuOpenChange,
+  handleSelect,
+  openSettings,
+  projectCommands,
+  projectError,
+  globalCommands,
+  globalErrors,
+  bindingByCommandId,
+  conflicts,
+  menuLabel,
+  commandsTitle,
+  manageLabel,
+}: {
+  presentation: "split" | "ghost";
+  hideLabels: boolean | undefined;
+  triggerIconSize: number;
+  triggerStyle: ComponentProps<typeof DropdownMenuTrigger>["style"];
+  primaryStyle: ComponentProps<typeof Pressable>["style"];
+  caretStyle: ComponentProps<typeof DropdownMenuTrigger>["style"];
+  topCommand: CustomCommand | null;
+  runTopCommand: () => void;
+  handleMenuOpenChange: (open: boolean) => void;
+  handleSelect: (command: CustomCommand) => void;
+  openSettings: () => void;
+  projectCommands: CustomCommand[];
+  projectError: string | null;
+  globalCommands: CustomCommand[];
+  globalErrors: string[];
+  bindingByCommandId: Map<string, ParsedShortcutBinding>;
+  conflicts: Set<string>;
+  menuLabel: string;
+  commandsTitle: string;
+  manageLabel: string;
+}): ReactElement {
   const hasContent = Boolean(
-    projectEntry.project.length ||
-    visibleGlobalCommands.length ||
-    projectEntry.projectError ||
-    globalEntry.globalErrors.length,
+    projectCommands.length || globalCommands.length || projectError || globalErrors.length,
+  );
+  const menu = (
+    <DropdownMenuContent align="end" minWidth={220} maxWidth={300} testID="workspace-commands-menu">
+      <CommandsMenuContent
+        projectCommands={projectCommands}
+        projectError={projectError}
+        globalCommands={globalCommands}
+        globalErrors={globalErrors}
+        bindingByCommandId={bindingByCommandId}
+        conflicts={conflicts}
+        onSelect={handleSelect}
+      />
+      {hasContent ? <DropdownMenuSeparator /> : null}
+      <DropdownMenuItem onSelect={openSettings} testID="workspace-commands-settings">
+        {manageLabel}
+      </DropdownMenuItem>
+    </DropdownMenuContent>
   );
 
+  // No command yet: the whole control opens the menu, so Manage commands stays one click away.
+  // A ghost trigger is the compact header icon and stays a menu.
+  if (presentation === "ghost" || !topCommand) {
+    return (
+      <View style={presentation === "ghost" ? styles.ghostButtonFrame : styles.splitButton}>
+        <DropdownMenu onOpenChange={handleMenuOpenChange}>
+          <DropdownMenuTrigger
+            testID="workspace-commands-button"
+            style={triggerStyle}
+            accessibilityRole="button"
+            accessibilityLabel={menuLabel}
+          >
+            <View style={styles.splitButtonContent}>
+              <ThemedSquareSlash size={triggerIconSize} uniProps={mutedColorMapping} />
+              {!hideLabels && <Text style={styles.splitButtonText}>{commandsTitle}</Text>}
+              {presentation === "split" ? (
+                <ThemedChevronDown size={16} uniProps={extraMutedIconColorMapping} />
+              ) : null}
+            </View>
+          </DropdownMenuTrigger>
+          {menu}
+        </DropdownMenu>
+      </View>
+    );
+  }
+
   return (
-    <View style={presentation === "ghost" ? styles.ghostButtonFrame : styles.splitButton}>
+    <View style={styles.splitButton}>
+      <Pressable
+        testID="workspace-commands-button"
+        style={primaryStyle}
+        onPress={runTopCommand}
+        accessibilityRole="button"
+        accessibilityLabel={topCommand.title}
+      >
+        <View style={styles.splitButtonContent}>
+          {targetLeadingIcon(topCommand.target)}
+          {!hideLabels ? (
+            <Text numberOfLines={1} style={styles.splitButtonText}>
+              {topCommand.title}
+            </Text>
+          ) : null}
+        </View>
+      </Pressable>
       <DropdownMenu onOpenChange={handleMenuOpenChange}>
         <DropdownMenuTrigger
-          testID="workspace-commands-button"
-          style={triggerStyle}
+          testID="workspace-commands-caret"
+          style={caretStyle}
           accessibilityRole="button"
-          accessibilityLabel={t("workspace.commands.accessibility.trigger")}
+          accessibilityLabel={menuLabel}
         >
-          <View style={styles.splitButtonContent}>
-            <ThemedSquareSlash size={triggerIconSize} uniProps={mutedColorMapping} />
-            {!hideLabels && (
-              <Text style={styles.splitButtonText}>{t("workspace.commands.title")}</Text>
-            )}
-            {presentation === "split" ? (
-              <ThemedChevronDown size={16} uniProps={extraMutedIconColorMapping} />
-            ) : null}
-          </View>
+          <ThemedChevronDown size={16} uniProps={extraMutedIconColorMapping} />
         </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          minWidth={220}
-          maxWidth={300}
-          testID="workspace-commands-menu"
-        >
-          <CommandsMenuContent
-            projectCommands={projectEntry.project}
-            projectError={projectEntry.projectError}
-            globalCommands={visibleGlobalCommands}
-            globalErrors={globalEntry.globalErrors}
-            bindingByCommandId={bindingByCommandId}
-            conflicts={conflicts}
-            onSelect={handleSelect}
-          />
-          {hasContent ? <DropdownMenuSeparator /> : null}
-          <DropdownMenuItem onSelect={openSettings} testID="workspace-commands-settings">
-            {t("settings.commands.manage")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
+        {menu}
       </DropdownMenu>
     </View>
   );
@@ -403,7 +526,28 @@ const styles = StyleSheet.create((theme) => ({
     },
     justifyContent: "center",
   },
+  splitButtonPrimaryIconOnly: {
+    width: {
+      xs: buttonControlHeight.xs,
+      md: HEADER_CONTROL_HEIGHT,
+    },
+    paddingHorizontal: 0,
+    justifyContent: "center",
+  },
   splitButtonPrimaryHovered: {
+    backgroundColor: theme.colors.surface2,
+  },
+  splitButtonCaret: {
+    width: {
+      xs: buttonControlHeight.xs,
+      md: HEADER_CONTROL_HEIGHT,
+    },
+    alignItems: "center",
+    justifyContent: "center",
+    borderLeftWidth: theme.borderWidth[1],
+    borderLeftColor: theme.colors.borderAccent,
+  },
+  splitButtonCaretHovered: {
     backgroundColor: theme.colors.surface2,
   },
   splitButtonText: {
