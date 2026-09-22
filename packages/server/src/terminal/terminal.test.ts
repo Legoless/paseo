@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
+import { deriveTerminalActivityStatusBucket } from "@getpaseo/protocol/terminal-activity";
 import { isPlatform } from "../test-utils/platform.js";
 import {
   buildTerminalEnvironment,
@@ -1342,6 +1343,39 @@ describe("terminal pty activity scanning", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 4000));
     expect(session.getActivity()).toBeNull();
+  });
+
+  it("publishes a failed pane bucket when the PTY shows an out-of-quota stop", async () => {
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: [
+          "-e",
+          'process.stdout.write("Welcome to the Antigravity CLI\\r\\n"); process.stdin.setRawMode(true); process.stdin.resume(); process.stdin.on("data", (chunk) => { if (String(chunk).includes("\\r") || String(chunk).includes("\\n")) process.stdout.write("You are out of quota. Stop.\\r\\n> "); });',
+        ],
+      }),
+    );
+
+    await waitForState(session, (state) =>
+      getLines(state).join("\n").includes("Welcome to the Antigravity CLI"),
+    );
+
+    session.send({ type: "input", data: "\r" });
+
+    const start = Date.now();
+    let activity = session.getActivity();
+    while (Date.now() - start < 4000) {
+      activity = session.getActivity();
+      if (activity?.attentionReason === "quota") {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    expect(activity).toMatchObject({ state: "idle", attentionReason: "quota" });
+    expect(deriveTerminalActivityStatusBucket(activity)).toBe("failed");
   });
 });
 

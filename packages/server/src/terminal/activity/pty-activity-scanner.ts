@@ -10,7 +10,10 @@ interface ObservedTerminalActivity {
 }
 
 export interface PtyActivityScannerOptions {
-  setActivity: (state: TerminalActivityState) => void;
+  setActivity: (
+    state: TerminalActivityState,
+    attentionReason?: TerminalActivityAttentionReason,
+  ) => void;
   clearActivity: () => void;
   getActivity: () => ObservedTerminalActivity;
   readLastLines: (limit: number) => string[];
@@ -33,17 +36,17 @@ export const KNOWN_AGENT_NAMES = [
 
 export type KnownAgentName = (typeof KNOWN_AGENT_NAMES)[number];
 
+const TYPOGRAPHIC_APOSTROPHE = /[\u2018\u2019\u201a\u201b\u2032\u02bc]/g;
+
+// Phrases the CLIs print when the account itself cannot continue. Kept specific
+// so a source file that merely mentions "spend limit" does not light the pane.
+const SPEND_LIMIT_NOTICE =
+  /you(?:'ve| have) hit your (?:(?:monthly|weekly|daily|session) )?(?:spend |usage )?limit\b|spend limit (?:has been )?reached|usage limit (?:has been )?reached|\bout of (?:credits|quota|extra usage)\b|\b(?:quota|rate limit) (?:exceeded|exhausted|reached)\b|\binsufficient quota\b|\bcredit balance is too low\b|\bexhausted your (?:capacity|quota|credits)\b|\bsubscription limit\b/;
+
 export function isSpendLimitScreen(lines: string[]): boolean {
   if (lines.length === 0) return false;
-  const tail = stripAnsi(lines.slice(-10).join("\n")).toLowerCase();
-  const hasLimitNotice =
-    /you(?:'ve| have) hit your monthly spend limit/.test(tail) ||
-    /spend limit (?:has been )?reached/.test(tail) ||
-    /usage limit reached/.test(tail) ||
-    /you(?:'ve| have) hit your usage limit/.test(tail) ||
-    /\bout of credits\b/.test(tail);
-  const hasLimitContext = /\b(reset|resets|upgrade|billing|credits?)\b|\/usage/.test(tail);
-  return hasLimitNotice && hasLimitContext;
+  const tail = stripAnsi(lines.join("\n")).toLowerCase().replace(TYPOGRAPHIC_APOSTROPHE, "'");
+  return SPEND_LIMIT_NOTICE.test(tail);
 }
 
 export function isNeedsInputScreen(lines: string[]): boolean {
@@ -455,7 +458,7 @@ export class PtyActivityScanner {
     if (isSpendLimitScreen(lines)) {
       this.currentActivity = "attention";
       this.unresolvedWorkingStillness = 0;
-      this.options.setActivity("attention");
+      this.options.setActivity("attention", "quota");
       return;
     }
 

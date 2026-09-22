@@ -43,6 +43,32 @@ describe("TerminalActivityTracker — set", () => {
       attentionReason: "finished",
     });
   });
+
+  it("replaces a finished turn with quota and keeps it across a later idle", () => {
+    const tracker = new TerminalActivityTracker();
+
+    tracker.set("working");
+    tracker.set("idle");
+    tracker.set("attention", "quota");
+    tracker.set("idle");
+
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "quota",
+    });
+  });
+
+  it("clears quota when the next turn starts", () => {
+    const tracker = new TerminalActivityTracker();
+
+    tracker.set("attention", "quota");
+    tracker.set("working");
+
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "working",
+      attentionReason: null,
+    });
+  });
 });
 
 describe("TerminalActivityTracker — clearAttention", () => {

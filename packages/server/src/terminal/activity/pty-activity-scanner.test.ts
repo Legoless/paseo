@@ -8,6 +8,7 @@ import {
   isIdlePromptLine,
   isNeedsInputScreen,
   isSpendLimitScreen,
+  KNOWN_AGENT_NAMES,
   PtyActivityScanner,
 } from "./pty-activity-scanner.js";
 import { TerminalActivityTracker } from "./terminal-activity-tracker.js";
@@ -101,6 +102,26 @@ describe("isSpendLimitScreen", () => {
       "/usage-credits to adjust",
     ];
     expect(isSpendLimitScreen(screen)).toBe(true);
+  });
+
+  it("detects the Claude, Codex, and other harness banners", () => {
+    expect(
+      isSpendLimitScreen([
+        "You’ve hit your monthly spend limit · raise it at",
+        "claude.ai/settings/usage?from=cc_cli_limit_message · your session limit resets",
+        "7:10pm (Europe/Ljubljana)",
+      ]),
+    ).toBe(true);
+    expect(
+      isSpendLimitScreen([
+        "[System Error] You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage",
+      ]),
+    ).toBe(true);
+    expect(isSpendLimitScreen(["API rate limit reached"])).toBe(true);
+    expect(isSpendLimitScreen(["Insufficient quota."])).toBe(true);
+    expect(isSpendLimitScreen(["You are out of credits. Upgrade to continue."])).toBe(true);
+    expect(isSpendLimitScreen(["You are out of quota. Stop."])).toBe(true);
+    expect(isSpendLimitScreen(["Credit balance is too low"])).toBe(true);
   });
 
   it("ignores code discussing limits", () => {
@@ -238,7 +259,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
     let cursorLine = "";
 
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => screenLines,
@@ -306,7 +327,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
     let cursorLine = "";
 
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => screenLines,
@@ -346,7 +367,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
   it("uses shell command boundaries without treating a working directory as an agent", () => {
     const tracker = new TerminalActivityTracker();
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => [],
@@ -369,7 +390,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
     (shellTitle) => {
       const tracker = new TerminalActivityTracker();
       const scanner = new PtyActivityScanner({
-        setActivity: (state) => tracker.set(state),
+        setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
         clearActivity: () => tracker.clear(),
         getActivity: () => tracker.getSnapshot(),
         readLastLines: () => [],
@@ -389,7 +410,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
     const tracker = new TerminalActivityTracker();
     let cursorLine = "Refactoring parser";
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => ["Refactoring parser"],
@@ -413,7 +434,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
   it("starts working for Codex exec without waiting for Enter", () => {
     const tracker = new TerminalActivityTracker();
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => [],
@@ -429,7 +450,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
   it("does not start working for an interactive agent launch", () => {
     const tracker = new TerminalActivityTracker();
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => [],
@@ -446,7 +467,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
   it("clears a working turn that never reaches a prompt", () => {
     const tracker = new TerminalActivityTracker();
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => ["running long task", "still going"],
@@ -472,7 +493,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
   it("clears a working turn that produces no further output", () => {
     const tracker = new TerminalActivityTracker();
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => ["Welcome to the Antigravity CLI"],
@@ -499,7 +520,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
   it("does not treat multiline pasted input as prompt submission", () => {
     const tracker = new TerminalActivityTracker();
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => [],
@@ -516,7 +537,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
   it("preserves hook-reported finished attention while the initial prompt settles", () => {
     const tracker = new TerminalActivityTracker();
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => ["Done", "❯"],
@@ -541,7 +562,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
     const tracker = new TerminalActivityTracker();
     let screenLines = ["Cursor Agent", "v2026.09.18-9a7762b", "  → Plan, search, build anything"];
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => screenLines,
@@ -588,7 +609,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
     let cursorLine = "";
 
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => screenLines,
@@ -636,7 +657,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
       "Gemini 3.8 Flash · high · 1 task(s) · /tasks",
     ];
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => screenLines,
@@ -670,7 +691,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
     let screenLines: string[] = [];
 
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => screenLines,
@@ -695,7 +716,7 @@ describe("PtyActivityScanner — full lifecycle", () => {
     let screenLines: string[] = [];
 
     const scanner = new PtyActivityScanner({
-      setActivity: (state) => tracker.set(state),
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
       getActivity: () => tracker.getSnapshot(),
       readLastLines: () => screenLines,
@@ -713,7 +734,46 @@ describe("PtyActivityScanner — full lifecycle", () => {
 
     expect(tracker.getSnapshot()).toMatchObject({
       state: "idle",
-      attentionReason: "needs_input",
+      attentionReason: "quota",
     });
   });
+
+  it.each(KNOWN_AGENT_NAMES)(
+    "keeps a %s spend limit red after the turn settles at the prompt",
+    (agent) => {
+      const tracker = new TerminalActivityTracker();
+      let screenLines: string[] = [];
+      const scanner = new PtyActivityScanner({
+        setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+        clearActivity: () => tracker.clear(),
+        getActivity: () => tracker.getSnapshot(),
+        readLastLines: () => screenLines,
+        readCursorLine: () => (agent === "codex" ? "›" : ">"),
+        stillnessMs: 500,
+      });
+
+      let command: string = agent;
+      if (agent === "antigravity") command = "agy";
+      if (agent === "cursor") command = "cursor-agent";
+      scanner.handleInitialCommand(command);
+      scanner.feedInput("\r");
+      expect(tracker.getSnapshot().state).toBe("working");
+
+      screenLines = [
+        "You've hit your monthly spend limit · resets 7:10pm",
+        agent === "codex" ? "›" : ">",
+      ];
+      scanner.feedOutput("limit\n");
+      vi.advanceTimersByTime(500);
+
+      expect(tracker.getSnapshot()).toMatchObject({
+        state: "idle",
+        attentionReason: "quota",
+      });
+
+      // A Stop hook reporting idle must not repaint the pane green.
+      tracker.set("idle");
+      expect(tracker.getSnapshot().attentionReason).toBe("quota");
+    },
+  );
 });

@@ -178,6 +178,8 @@ function resolveTerminalAttentionReason(input: {
   previousState: "working" | "idle" | "attention" | null;
   state: "working" | "idle" | "attention" | null;
 }): TerminalAttentionReason | null {
+  // A quota stop is the red pane, not a "turn finished" notification.
+  if (input.attentionReason === "quota") return null;
   if (input.attentionReason === "finished") return "finished";
   if (input.attentionReason === "needs_input") return "needs_input";
   if (input.state === "attention") return "needs_input";

@@ -264,13 +264,20 @@ function transition(input: {
   changedAt: number;
   id?: string;
   workspaceId?: string;
+  attentionReason?: "finished" | "needs_input" | "quota";
 }): TerminalActivityTransitionEvent {
   return {
     terminalId: input.id ?? "term-1",
     name: "bash",
     cwd: CWD,
     workspaceId: input.workspaceId ?? "ws-1",
-    activity: input.state ? { state: input.state, changedAt: input.changedAt } : null,
+    activity: input.state
+      ? {
+          state: input.state,
+          changedAt: input.changedAt,
+          ...(input.attentionReason ? { attentionReason: input.attentionReason } : {}),
+        }
+      : null,
     previous: { state: input.previousState, changedAt: input.previousChangedAt },
   };
 }
@@ -297,6 +304,26 @@ describe("VoiceAssistantWebSocketServer terminal attention notifications", () =>
 
     expectNoTerminalAttentionMessage(ws);
     expect(pushNotifications.sent).toHaveLength(1);
+  });
+
+  it("does not announce a finished turn for a spend limit", async () => {
+    const { manager, emit } = createTerminalManager();
+    const { server, pushNotifications } = createServer(manager);
+    const ws = connectClient(server);
+
+    emit(
+      transition({
+        previousState: "working",
+        previousChangedAt: 1000,
+        state: "idle",
+        changedAt: 11001,
+        attentionReason: "quota",
+      }),
+    );
+    await flushAsync();
+
+    expectNoTerminalAttentionMessage(ws);
+    expect(pushNotifications.sent).toHaveLength(0);
   });
 
   it("broadcasts terminal_attention_required after working -> idle", async () => {

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const TERMINAL_ACTIVITY_STATES = ["idle", "working", "attention"] as const;
-export const TERMINAL_ACTIVITY_ATTENTION_REASONS = ["finished", "needs_input"] as const;
+export const TERMINAL_ACTIVITY_ATTENTION_REASONS = ["finished", "needs_input", "quota"] as const;
 
 export type TerminalActivityState = (typeof TERMINAL_ACTIVITY_STATES)[number];
 export type TerminalActivityAttentionReason = (typeof TERMINAL_ACTIVITY_ATTENTION_REASONS)[number];
@@ -17,12 +17,13 @@ export const TerminalActivitySchema = z.object({
 
 export type TerminalActivity = z.infer<typeof TerminalActivitySchema>;
 
-export type TerminalActivityStatusBucket = "running" | "needs_input" | "attention";
+export type TerminalActivityStatusBucket = "running" | "needs_input" | "attention" | "failed";
 
 export function deriveTerminalActivityStatusBucket(
   activity: TerminalActivity | null | undefined,
 ): TerminalActivityStatusBucket | null {
   if (!activity) return null;
+  if (activity.attentionReason === "quota") return "failed";
   if (activity.attentionReason === "needs_input") return "needs_input";
   if (activity.attentionReason === "finished") return "attention";
   if (activity.state === "working") return "running";
