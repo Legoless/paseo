@@ -1,15 +1,16 @@
 # Custom commands
 
-A custom command is a titled snippet of text. Picking it from the **Commands** dropdown — or pressing
-its keyboard shortcut — types the text into the agent composer or the focused terminal and, by
+A custom command is a titled snippet of text. The commands button runs the first one, the same way
+the git button runs its primary action. The caret opens the full list, and a keyboard shortcut runs
+one from anywhere. Either way the text goes into the agent composer or the focused terminal and, by
 default, presses Enter. Commands are JSON files the daemon serves; the app never reads the files
 itself.
 
-The dropdown sits next to the Git actions: in each pane's project tray, in the workspace header on
+The control sits next to the Git actions: in each pane's project tray, in the workspace header on
 desktop without pane splits, and in the compact header cluster on mobile. Use the tray’s ellipsis
-menu (left or right click) to show or hide **Commands**, alongside Branch,
-Editor, and Push. An enabled dropdown stays visible even when no commands exist; **Manage commands…**
-opens **Settings → Host → Commands** for that host.
+menu (left or right click) to show or hide **Commands**, alongside Branch, Editor, and Git. An
+enabled control stays visible even when no commands exist; **Manage commands…** opens
+**Settings → Host → Commands** for that host.
 
 ## Editing commands
 
@@ -57,13 +58,17 @@ global one leaves the menu.
 
 ## What running one does
 
-**Agent target.** The focused pane's chat tab answers first, then any visible chat. With
+A command started from a pane's button uses that pane's tab when the tab matches the command's
+target. A keyboard shortcut, and a command whose target does not match the pane, still follows
+focus.
+
+**Agent target.** A pane button uses that pane's chat tab when the open tab is a chat. Otherwise the focused pane's chat answers first, then any visible chat. With
 `submit: true` the message is sent through the same path the app uses to drain queued messages — the
 mounted composer is never touched, and the draft is cleared. With `submit: false` the text replaces
 the composer's draft and the tab is surfaced. A draft tab (no agent yet) always takes the second
 path, whatever `submit` says — there is nothing to send to yet.
 
-**Terminal target.** The focused pane's terminal tab, then any visible terminal. The text is typed
+**Terminal target.** A pane button uses that pane's terminal tab when the open tab is a terminal. Otherwise the focused pane's terminal answers first, then any visible terminal. The text is typed
 at the prompt; `submit: true` appends the carriage return. The tab is surfaced either way.
 
 No matching tab at all is a toast, not a silent drop.

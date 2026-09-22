@@ -94,7 +94,7 @@ test("enables empty commands from the tray, manages commands in settings and run
       }),
     );
     await openWorkspace();
-    await commands.click();
+    await page.getByTestId("workspace-commands-caret").filter({ visible: true }).first().click();
     await expect(page.getByTestId("workspace-commands-project-group").locator("svg")).toBeVisible();
     await expect(page.getByTestId("workspace-commands-global-group").locator("svg")).toBeVisible();
     await expect(page.getByTestId("workspace-command-project-review")).toContainText(
@@ -108,7 +108,7 @@ test("enables empty commands from the tray, manages commands in settings and run
       )
       .toBe("commands-ok");
 
-    await commands.click();
+    await page.getByTestId("workspace-commands-caret").filter({ visible: true }).first().click();
     await page.getByTestId("workspace-commands-settings").click();
     await row.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByTestId("command-name").fill("Unsaved draft");
