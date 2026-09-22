@@ -106,11 +106,29 @@ export function isIdlePromptLine(line: string, agent: KnownAgentName): boolean {
   return patterns.some((pattern) => pattern.test(normalized));
 }
 
+const ANTIGRAVITY_RUNNING_STATUS = /\[\d{1,2}:\d{2}:\d{2}\].*\brunning$/i;
+const ANTIGRAVITY_OPEN_TASKS = /\b[1-9]\d*\s+task\(s\)\b/i;
+
+// The agy composer stays on `>` while a command is still running. That prompt is only
+// idle once the status line and the open-task count are gone.
+export function isAntigravityBusyScreen(lines: string[]): boolean {
+  const tail = lines.slice(-20).map((line) => stripAnsi(line).trim());
+  return tail.some(
+    (line) => ANTIGRAVITY_RUNNING_STATUS.test(line) || ANTIGRAVITY_OPEN_TASKS.test(line),
+  );
+}
+
 export function isIdleAgentScreen(
   lines: string[],
   cursorLine: string,
   agent: KnownAgentName,
 ): boolean {
+  if (agent === "antigravity") {
+    if (isAntigravityBusyScreen(lines)) {
+      return false;
+    }
+    return isIdlePromptLine(cursorLine, agent);
+  }
   if (agent !== "cursor") {
     return isIdlePromptLine(cursorLine, agent);
   }
@@ -419,6 +437,20 @@ export class PtyActivityScanner {
     if (!this.activeAgent) return;
 
     const lines = this.options.readLastLines(15);
+
+    if (
+      this.activeAgent === "antigravity" &&
+      isAntigravityBusyScreen(lines) &&
+      !isSpendLimitScreen(lines)
+    ) {
+      this.unresolvedWorkingStillness = 0;
+      if (this.currentActivity !== "working") {
+        this.currentActivity = "working";
+        this.options.setActivity("working");
+      }
+      this.scheduleStillnessCheck();
+      return;
+    }
 
     if (isSpendLimitScreen(lines)) {
       this.currentActivity = "attention";
