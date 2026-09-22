@@ -228,6 +228,45 @@ export function describeACPSettingsGate(model: string | null | undefined): strin
   return "Cursor blocked this model until you approve it in the Cursor dashboard restricted-models page.";
 }
 
+export const CURSOR_TRANSPORT_CANCELED_LINE =
+  "Error: RetriableError: [canceled] http/2 stream closed with error code CANCEL (0x8)";
+export const CURSOR_TRANSPORT_UNAVAILABLE_LINE = "Error: RetriableError: [unavailable] Error";
+
+export interface CursorTransportFailure {
+  raw: string;
+  summary: string;
+}
+
+// cursor-agent prints these after the HTTP/2 stream drops, then ends the ACP turn
+// as end_turn. The last non-empty line is the failure; earlier assistant text is kept.
+function lastNonEmptyLine(text: string): string | undefined {
+  const lines = text.split(/\r?\n/);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]?.trim() ?? "";
+    if (line.length > 0) {
+      return line;
+    }
+  }
+  return undefined;
+}
+
+export function readCursorTransportFailure(text: string): CursorTransportFailure | null {
+  const lastLine = lastNonEmptyLine(text);
+  if (lastLine === CURSOR_TRANSPORT_CANCELED_LINE) {
+    return {
+      raw: lastLine,
+      summary: "Cursor's connection dropped before the turn finished.",
+    };
+  }
+  if (lastLine === CURSOR_TRANSPORT_UNAVAILABLE_LINE) {
+    return {
+      raw: lastLine,
+      summary: "Cursor was unavailable before the turn finished.",
+    };
+  }
+  return null;
+}
+
 function toACPRequestError(error: unknown): Error {
   if (readACPError(error)) {
     const next = new Error(summarizeACPRequestError(error).message);
@@ -1745,6 +1784,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   private activeForegroundTurnId: string | null = null;
   private fallbackAssistantMessageId: string | null = null;
   private turnAssistantText = "";
+  private cursorTransportRecoveryUsed = false;
   private closed = false;
   private historyPending = false;
   private replayingHistory = false;
@@ -1907,6 +1947,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       throw new Error("A foreground turn is already active");
     }
 
+    this.cursorTransportRecoveryUsed = false;
     this.deliverTranslatedEvents(this.flushPendingUserMessage());
     const turnId = randomUUID();
     const messageId = options?.clientMessageId ?? randomUUID();
@@ -2896,7 +2937,17 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       }
     }
     if (this.config.thinkingOptionId && this.config.thinkingOptionId !== this.thinkingOptionId) {
-      await this.setThinkingOption(this.config.thinkingOptionId);
+      try {
+        await this.setThinkingOption(this.config.thinkingOptionId);
+      } catch (error) {
+        if (!this.isThoughtLevelSelectionUnavailableError(error)) {
+          throw error;
+        }
+        this.logger.warn(
+          { value: this.config.thinkingOptionId },
+          `${this.provider} does not expose ACP thought-level selection; keeping the current level`,
+        );
+      }
     }
     const configuredFeatureValues = this.config.featureValues ?? {};
     for (const featureOption of this.configFeatureOptions) {
@@ -2917,6 +2968,13 @@ export class ACPAgentSession implements AgentSession, ACPClient {
 
   private isModelSelectionUnavailableError(error: unknown): boolean {
     return error instanceof Error && error.message === this.modelSelectionUnavailableMessage();
+  }
+
+  private isThoughtLevelSelectionUnavailableError(error: unknown): boolean {
+    return (
+      error instanceof Error &&
+      error.message.endsWith("does not expose ACP thought-level selection")
+    );
   }
 
   private translateSessionUpdate(update: SessionUpdate): AgentStreamEvent[] {
@@ -3176,6 +3234,23 @@ export class ACPAgentSession implements AgentSession, ACPClient {
           });
           break;
         }
+        const transportFailure =
+          this.provider === "cursor" ? readCursorTransportFailure(this.turnAssistantText) : null;
+        if (transportFailure) {
+          if (!this.cursorTransportRecoveryUsed) {
+            this.continueAfterCursorTransportFailure(turnId, transportFailure);
+            break;
+          }
+          this.finishTurn({
+            type: "turn_failed",
+            provider: this.provider,
+            error: transportFailure.summary,
+            code: "cursor_transport",
+            diagnostic: transportFailure.raw,
+            turnId,
+          });
+          break;
+        }
         this.finishTurn({
           type: "turn_completed",
           provider: this.provider,
@@ -3184,6 +3259,59 @@ export class ACPAgentSession implements AgentSession, ACPClient {
         });
         break;
     }
+  }
+
+  private continueAfterCursorTransportFailure(
+    turnId: string,
+    failure: CursorTransportFailure,
+  ): void {
+    if (!this.connection || !this.sessionId) {
+      this.finishTurn({
+        type: "turn_failed",
+        provider: this.provider,
+        error: failure.summary,
+        code: "cursor_transport",
+        diagnostic: failure.raw,
+        turnId,
+      });
+      return;
+    }
+
+    this.cursorTransportRecoveryUsed = true;
+    this.turnAssistantText = "";
+    this.pushEvent(
+      this.wrapTimeline({
+        type: "error",
+        message: `${failure.summary} Continuing the turn.`,
+      }),
+    );
+    void this.connection
+      .prompt({
+        sessionId: this.sessionId,
+        messageId: randomUUID(),
+        prompt: toACPContentBlocks("Continue."),
+      })
+      .then((response) => {
+        if (this.activeForegroundTurnId !== turnId) {
+          return;
+        }
+        this.handlePromptResponse(response, turnId);
+        return;
+      })
+      .catch((error) => {
+        if (this.activeForegroundTurnId !== turnId) {
+          return;
+        }
+        const summary = summarizeACPRequestError(error);
+        this.finishTurn({
+          type: "turn_failed",
+          provider: this.provider,
+          error: summary.message,
+          code: summary.code,
+          diagnostic: this.collectDiagnostic(summary.diagnostic ?? summary.message),
+          turnId,
+        });
+      });
   }
 
   private wrapTimeline(item: AgentTimelineItem): AgentStreamEvent {

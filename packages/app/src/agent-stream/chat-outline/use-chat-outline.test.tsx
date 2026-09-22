@@ -37,6 +37,27 @@ describe("useChatOutline", () => {
     runtime.subscribeAgentTimeline.mockClear();
   });
 
+  it("does not ask the daemon for prompts of a composer draft", async () => {
+    const viewportRef = createRef<StreamViewportHandle>();
+    renderHook(() =>
+      useChatOutline({
+        agentId: "draft_msg_1",
+        serverId: "server-1",
+        timelineEpoch: "epoch-1",
+        tail: [],
+        head: [],
+        enabled: true,
+        viewportRef,
+        onJumpError: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(runtime.listAgentTimelinePrompts).not.toHaveBeenCalled();
+  });
+
   it("drops a late prompt index after the authoritative timeline epoch changes", async () => {
     const first = deferred<{ epoch: string; prompts: [] }>();
     const second = deferred<{

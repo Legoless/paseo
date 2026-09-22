@@ -1034,6 +1034,10 @@ async function getRebaseHeadBranch(cwd: string, context?: CheckoutContext): Prom
 }
 
 async function getWorktreeRoot(cwd: string, context?: CheckoutContext): Promise<string | null> {
+  // Node reports `spawn git ENOENT` when cwd is missing, which is not a git failure.
+  if (!existsSync(cwd)) {
+    return null;
+  }
   try {
     const { stdout } = await getRunGitCommand(context)(["rev-parse", "--show-toplevel"], {
       cwd,

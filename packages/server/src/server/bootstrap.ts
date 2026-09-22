@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { hostname as getHostname } from "node:os";
 import path from "node:path";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { rejectUnsupportedMcpProtocolVersion } from "./agent/mcp-protocol-negotiation.js";
 import type { Logger } from "pino";
 import { z } from "zod";
 import { createBranchChangeRouteHandler } from "./script-route-branch-handler.js";
@@ -1525,6 +1526,14 @@ export async function createPaseoDaemon(
             },
             id: null,
           });
+          return;
+        }
+        const rejectedProtocol = rejectUnsupportedMcpProtocolVersion({
+          protocolVersion: req.header("mcp-protocol-version") ?? undefined,
+          body: req.body,
+        });
+        if (rejectedProtocol) {
+          res.status(rejectedProtocol.status).json(rejectedProtocol.body);
           return;
         }
         const callerAgentIdRaw = req.query.callerAgentId;

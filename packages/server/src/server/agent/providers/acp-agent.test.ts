@@ -29,6 +29,8 @@ import {
   resolveACPModelSelection,
   describeACPSettingsGate,
   isACPSettingsGateText,
+  CURSOR_TRANSPORT_CANCELED_LINE,
+  CURSOR_TRANSPORT_UNAVAILABLE_LINE,
   summarizeACPRequestError,
 } from "./acp-agent.js";
 import type { ProcessTerminator, TreeKillTarget } from "../../../utils/tree-kill.js";
@@ -211,6 +213,59 @@ function createSessionWithConfig(
       },
     },
   );
+}
+
+async function startTrackedAcpTurn(provider: string) {
+  const session = createSessionWithConfig({ provider });
+  const events: AgentStreamEvent[] = [];
+  const resolvers: Array<(value: PromptResponse) => void> = [];
+  const prompt = vi.fn(
+    () =>
+      new Promise<PromptResponse>((resolve) => {
+        resolvers.push(resolve);
+      }),
+  );
+  asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+  asInternals<ACPSessionInternals>(session).connection = { prompt };
+  session.subscribe((event) => {
+    events.push(event);
+  });
+  const { turnId } = await session.startTurn("fix the build");
+  return { session, events, resolvers, prompt, turnId };
+}
+
+async function sendAcpAssistantText(session: ACPAgentSession, text: string): Promise<void> {
+  await session.sessionUpdate({
+    sessionId: "session-1",
+    update: {
+      sessionUpdate: "agent_message_chunk",
+      messageId: "assistant-1",
+      content: { type: "text", text },
+    } as SessionUpdate,
+  });
+}
+
+async function flushAcpTurn(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+function isUserMessage(event: AgentStreamEvent): event is Extract<
+  AgentStreamEvent,
+  { type: "timeline" }
+> & {
+  item: { type: "user_message"; text: string };
+} {
+  return event.type === "timeline" && event.item.type === "user_message";
+}
+
+function isErrorNotice(event: AgentStreamEvent): event is Extract<
+  AgentStreamEvent,
+  { type: "timeline" }
+> & {
+  item: { type: "error"; message: string };
+} {
+  return event.type === "timeline" && event.item.type === "error";
 }
 
 function createKiroSession(
@@ -2883,6 +2938,97 @@ describe("ACPAgentSession", () => {
       error: describeACPSettingsGate("claude-fable-5-1"),
     });
     expect(events.some((event) => event.type === "turn_completed")).toBe(false);
+  });
+
+  test("continues a Cursor turn once when the connection drops after real work", async () => {
+    const { session, events, resolvers, prompt, turnId } = await startTrackedAcpTurn("cursor");
+
+    await sendAcpAssistantText(session, `Edited the file.\n${CURSOR_TRANSPORT_CANCELED_LINE}`);
+    resolvers[0]?.({ stopReason: "end_turn", usage: { outputTokens: 20 } });
+    await flushAcpTurn();
+
+    expect(prompt).toHaveBeenCalledTimes(2);
+    expect(prompt).toHaveBeenNthCalledWith(2, {
+      sessionId: "session-1",
+      messageId: expect.any(String),
+      prompt: [{ type: "text", text: "Continue." }],
+    });
+    expect(events.filter(isUserMessage).map((event) => event.item.text)).toEqual(["fix the build"]);
+    expect(events.filter(isErrorNotice).map((event) => event.item.message)).toEqual([
+      "Cursor's connection dropped before the turn finished. Continuing the turn.",
+    ]);
+
+    await sendAcpAssistantText(session, "Finished the edit.");
+    resolvers[1]?.({ stopReason: "end_turn", usage: { outputTokens: 4 } });
+    await flushAcpTurn();
+
+    expect(prompt).toHaveBeenCalledTimes(2);
+    expect(events.find((event) => event.type === "turn_completed")).toMatchObject({ turnId });
+    expect(events.some((event) => event.type === "turn_failed")).toBe(false);
+  });
+
+  test("continues a Cursor turn once when Cursor is unavailable", async () => {
+    const { session, events, resolvers, prompt } = await startTrackedAcpTurn("cursor");
+
+    await sendAcpAssistantText(session, CURSOR_TRANSPORT_UNAVAILABLE_LINE);
+    resolvers[0]?.({ stopReason: "end_turn" });
+    await flushAcpTurn();
+
+    expect(prompt).toHaveBeenNthCalledWith(2, {
+      sessionId: "session-1",
+      messageId: expect.any(String),
+      prompt: [{ type: "text", text: "Continue." }],
+    });
+    expect(events.filter(isErrorNotice).map((event) => event.item.message)).toEqual([
+      "Cursor was unavailable before the turn finished. Continuing the turn.",
+    ]);
+  });
+
+  test("stops after a second Cursor transport drop", async () => {
+    const { session, events, resolvers, prompt, turnId } = await startTrackedAcpTurn("cursor");
+
+    await sendAcpAssistantText(session, CURSOR_TRANSPORT_CANCELED_LINE);
+    resolvers[0]?.({ stopReason: "end_turn" });
+    await flushAcpTurn();
+    await sendAcpAssistantText(session, CURSOR_TRANSPORT_UNAVAILABLE_LINE);
+    resolvers[1]?.({ stopReason: "end_turn" });
+    await flushAcpTurn();
+
+    expect(prompt).toHaveBeenCalledTimes(2);
+    expect(events.find((event) => event.type === "turn_failed")).toMatchObject({
+      type: "turn_failed",
+      turnId,
+      code: "cursor_transport",
+      error: "Cursor was unavailable before the turn finished.",
+      diagnostic: CURSOR_TRANSPORT_UNAVAILABLE_LINE,
+    });
+    expect(events.some((event) => event.type === "turn_completed")).toBe(false);
+  });
+
+  test("keeps a Cursor turn that only mentions a transport error", async () => {
+    const { session, events, resolvers, prompt, turnId } = await startTrackedAcpTurn("cursor");
+
+    await sendAcpAssistantText(
+      session,
+      `The log contained ${CURSOR_TRANSPORT_UNAVAILABLE_LINE} and then the build passed.`,
+    );
+    resolvers[0]?.({ stopReason: "end_turn" });
+    await flushAcpTurn();
+
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(events.find((event) => event.type === "turn_completed")).toMatchObject({ turnId });
+  });
+
+  test("does not continue a non-Cursor turn that ends on Cursor's transport error", async () => {
+    const { session, events, resolvers, prompt, turnId } = await startTrackedAcpTurn("copilot");
+
+    await sendAcpAssistantText(session, CURSOR_TRANSPORT_CANCELED_LINE);
+    resolvers[0]?.({ stopReason: "end_turn" });
+    await flushAcpTurn();
+
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(events.find((event) => event.type === "turn_completed")).toMatchObject({ turnId });
+    expect(events.some((event) => event.type === "turn_failed")).toBe(false);
   });
 
   test("startTurn emits the submitted user message even when ACP does not echo it", async () => {
