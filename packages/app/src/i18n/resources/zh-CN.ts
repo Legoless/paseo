@@ -807,6 +807,10 @@ export const zhCN = {
       hideFolderTree: "隐藏文件夹树",
     },
     git: {
+      paneTray: {
+        editor: "编辑器",
+        git: "Git",
+      },
       actions: {
         moreOptions: "更多选项",
         moreActions: "更多操作",

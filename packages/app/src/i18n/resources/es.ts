@@ -820,6 +820,10 @@ export const es = {
       hideFolderTree: "Ocultar árbol de carpetas",
     },
     git: {
+      paneTray: {
+        editor: "Editor",
+        git: "Git",
+      },
       actions: {
         moreOptions: "Más opciones",
         moreActions: "Más acciones",

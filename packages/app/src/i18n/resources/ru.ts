@@ -821,6 +821,10 @@ export const ru = {
       hideFolderTree: "Скрыть дерево папок",
     },
     git: {
+      paneTray: {
+        editor: "Редактор",
+        git: "Git",
+      },
       actions: {
         moreOptions: "Дополнительные параметры",
         moreActions: "Дополнительные действия",
