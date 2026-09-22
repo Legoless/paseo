@@ -19,7 +19,18 @@ export class TerminalActivityTracker {
     (snapshot: TerminalActivitySnapshot, previous: TerminalActivitySnapshot) => void
   >();
 
-  set(state: TerminalActivityState): void {
+  set(state: TerminalActivityState, attentionReason?: TerminalActivityAttentionReason): void {
+    if (state === "attention") {
+      this.setState("idle", attentionReason === "quota" ? "quota" : "needs_input");
+      return;
+    }
+
+    // A later idle report (the prompt, or a Stop hook) must not turn a quota
+    // banner into a finished turn. The next real turn clears it by going working.
+    if (state === "idle" && this.attentionReason === "quota") {
+      return;
+    }
+
     if (state === "idle" && this.resolvedState === "working") {
       this.setState("idle", "finished");
       return;
@@ -29,10 +40,7 @@ export class TerminalActivityTracker {
       return;
     }
 
-    this.setState(
-      state === "attention" ? "idle" : state,
-      state === "attention" ? "needs_input" : null,
-    );
+    this.setState(state, null);
   }
 
   clear(): void {

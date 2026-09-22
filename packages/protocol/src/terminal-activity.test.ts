@@ -47,6 +47,13 @@ describe("TerminalActivitySchema", () => {
         changedAt: 1,
       }),
     ).toBe("needs_input");
+    expect(
+      deriveTerminalActivityStatusBucket({
+        state: "idle",
+        attentionReason: "quota",
+        changedAt: 1,
+      }),
+    ).toBe("failed");
     expect(deriveTerminalActivityStatusBucket({ state: "idle", changedAt: 1 })).toBeNull();
   });
 });

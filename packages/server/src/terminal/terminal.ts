@@ -966,7 +966,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   });
 
   const activityScanner = new PtyActivityScanner({
-    setActivity: (state) => activityTracker.set(state),
+    setActivity: (state, attentionReason) => activityTracker.set(state, attentionReason),
     clearActivity: () => activityTracker.clear(),
     getActivity: () => activityTracker.getSnapshot(),
     readLastLines: (limit) => extractLastOutputLines(terminal, limit),
