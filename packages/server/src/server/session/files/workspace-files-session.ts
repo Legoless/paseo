@@ -352,10 +352,18 @@ export class WorkspaceFilesSession {
         }
       }
     } catch (error) {
-      this.logger.error(
-        { err: error, cwd, path: requestedPath },
-        `Failed to fulfill file explorer request for workspace ${cwd}`,
-      );
+      const missing = error instanceof Error && "code" in error && error.code === "ENOENT";
+      if (missing) {
+        this.logger.warn(
+          { err: error, cwd, path: requestedPath },
+          `File explorer path is missing for workspace ${cwd}`,
+        );
+      } else {
+        this.logger.error(
+          { err: error, cwd, path: requestedPath },
+          `Failed to fulfill file explorer request for workspace ${cwd}`,
+        );
+      }
       this.host.emit(
         {
           type: "file_explorer_response",

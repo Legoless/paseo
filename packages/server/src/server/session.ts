@@ -8301,6 +8301,23 @@ export class Session {
     msg: Extract<SessionInboundMessage, { type: "agent.timeline.list_prompts.request" }>,
     source?: object,
   ): Promise<void> {
+    if (msg.agentId.startsWith("draft_")) {
+      this.emitForSource(
+        {
+          type: "agent.timeline.list_prompts.response",
+          payload: {
+            requestId: msg.requestId,
+            agentId: msg.agentId,
+            epoch: "",
+            prompts: [],
+            error: null,
+          },
+        },
+        source,
+      );
+      return;
+    }
+
     try {
       await ensureAgentLoaded(msg.agentId, {
         agentManager: this.agentManager,

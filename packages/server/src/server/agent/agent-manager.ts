@@ -1176,9 +1176,7 @@ export class AgentManager {
     const session = await client.createSession(normalizedConfig);
     try {
       if (!session.listCommands) {
-        throw new Error(
-          `Provider '${normalizedConfig.provider}' does not support listing commands`,
-        );
+        return [];
       }
       return await session.listCommands();
     } finally {

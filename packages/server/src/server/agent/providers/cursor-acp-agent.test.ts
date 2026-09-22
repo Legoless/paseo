@@ -319,4 +319,42 @@ describe("Cursor thought-level writes", () => {
     });
     await expect(session.getRuntimeInfo()).resolves.toMatchObject({ thinkingOptionId: "xhigh" });
   });
+
+  test("keeps the session when the stored thinking level is not a Cursor effort", async () => {
+    const logger = createTestLogger();
+    const childLogger = { trace: vi.fn(), warn: vi.fn() };
+    vi.spyOn(logger, "child").mockReturnValue(asInternals<typeof logger>(childLogger));
+    const session = new ACPAgentSession(
+      {
+        provider: "cursor",
+        cwd: "/tmp/cursor",
+        thinkingOptionId: "max",
+      },
+      {
+        provider: "cursor",
+        logger,
+        defaultCommand: ["cursor-agent", "acp"],
+        defaultModes: [],
+        capabilities: DEFAULT_ACP_CAPABILITIES,
+        thinkingOptionWriter: writeCursorThinkingOption,
+      },
+    );
+    const setSessionConfigOption = vi.fn();
+    const internals = asInternals<{
+      sessionId: string;
+      connection: { setSessionConfigOption: typeof setSessionConfigOption };
+      thinkingOptionId: string | null;
+      applyConfiguredOverrides: () => Promise<void>;
+    }>(session);
+    internals.sessionId = "session-1";
+    internals.connection = { setSessionConfigOption };
+    internals.thinkingOptionId = "high";
+
+    await expect(internals.applyConfiguredOverrides()).resolves.toBeUndefined();
+    expect(setSessionConfigOption).not.toHaveBeenCalled();
+    expect(childLogger.warn).toHaveBeenCalledWith(
+      { value: "max" },
+      "cursor does not expose ACP thought-level selection; keeping the current level",
+    );
+  });
 });

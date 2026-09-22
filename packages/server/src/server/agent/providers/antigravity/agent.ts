@@ -25,6 +25,7 @@ import type {
   AgentRuntimeInfo,
   AgentSession,
   AgentSessionConfig,
+  AgentSlashCommand,
   AgentStreamEvent,
   FetchCatalogOptions,
   ImportableProviderSession,
@@ -568,6 +569,10 @@ export class AntigravityAgentClient implements AgentClient {
       options?.logger?.child?.({ provider: "antigravity" }) ?? pino({ level: "silent" });
     this.runtimeSettings = options?.runtimeSettings;
     this.homeDir = options?.homeDir;
+  }
+
+  async listCommands(_config: AgentSessionConfig): Promise<AgentSlashCommand[]> {
+    return [];
   }
 
   async isAvailable(): Promise<boolean> {

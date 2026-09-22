@@ -33,7 +33,8 @@ async function enumerateCandidatesViaSystemWhich(name: string): Promise<string[]
   } catch (error) {
     // which exits 1 for a missing command. A failed lookup is not evidence of absence.
     if (error instanceof Error && "code" in error && error.code === 1) return [];
-    throw error;
+    // A SIGKILL from our timeout, or a spawn failure, says nothing about PATH.
+    return enumerateCandidatesViaLibrary(name);
   }
 }
 
@@ -110,6 +111,28 @@ export function executableExists(
   return exists(executablePath) ? executablePath : null;
 }
 
+// Feature lists and catalog refresh probe the same binaries on every request.
+// The key includes PATH, so a shell-path change still discovers a newly installed CLI.
+const EXECUTABLE_HIT_TTL_MS = 5 * 60 * 1000;
+const EXECUTABLE_MISS_TTL_MS = 30 * 1000;
+
+interface ExecutableLookup {
+  value: string | null;
+  expiresAt: number;
+}
+
+const executableLookupCache = new Map<string, ExecutableLookup>();
+const executableLookupInflight = new Map<string, Promise<string | null>>();
+
+function executableLookupKey(name: string, probeTimeoutMs: number): string {
+  return [
+    process.env.PATH ?? "",
+    process.platform === "win32" ? (process.env.PATHEXT ?? "") : "",
+    name,
+    String(probeTimeoutMs),
+  ].join("\0");
+}
+
 export async function findExecutable(
   name: string,
   probeTimeoutMs = PROBE_TIMEOUT_MS,
@@ -119,6 +142,33 @@ export async function findExecutable(
     return null;
   }
 
+  const key = executableLookupKey(trimmed, probeTimeoutMs);
+  const cached = executableLookupCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+  const inflight = executableLookupInflight.get(key);
+  if (inflight) {
+    return inflight;
+  }
+
+  const lookup = lookupExecutable(trimmed, probeTimeoutMs).then((value) => {
+    executableLookupCache.set(key, {
+      value,
+      expiresAt: Date.now() + (value === null ? EXECUTABLE_MISS_TTL_MS : EXECUTABLE_HIT_TTL_MS),
+    });
+    return value;
+  });
+  executableLookupInflight.set(key, lookup);
+  void lookup.finally(() => {
+    if (executableLookupInflight.get(key) === lookup) {
+      executableLookupInflight.delete(key);
+    }
+  });
+  return lookup;
+}
+
+async function lookupExecutable(trimmed: string, probeTimeoutMs: number): Promise<string | null> {
   if (process.platform === "win32") {
     return windowsExecutableResolution.find(trimmed, {
       enumeratePathCandidates: enumerateCandidates,
