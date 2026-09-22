@@ -3,6 +3,7 @@ import {
   detectAgentFromCommand,
   detectAgentFromOutput,
   detectAgentFromTitle,
+  isAntigravityBusyScreen,
   isIdleAgentScreen,
   isIdlePromptLine,
   isNeedsInputScreen,
@@ -618,6 +619,44 @@ describe("PtyActivityScanner — full lifecycle", () => {
     screenLines = ["Antigravity completed.", ">"];
     cursorLine = ">";
     scanner.feedOutput("> ");
+    vi.advanceTimersByTime(500);
+
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "finished",
+    });
+  });
+
+  it("keeps Antigravity working while its status line still shows a running task", () => {
+    const tracker = new TerminalActivityTracker();
+    let screenLines = [
+      "Investigating storage.",
+      ">",
+      "[16:31:22] du -sh /Users/legoless/Library/Developer/Xcode/DerivedData  running",
+      "Gemini 3.8 Flash · high · 1 task(s) · /tasks",
+    ];
+    const scanner = new PtyActivityScanner({
+      setActivity: (state) => tracker.set(state),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screenLines,
+      readCursorLine: () => ">",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("agy");
+    scanner.feedInput("\r");
+    scanner.feedOutput("running");
+    vi.advanceTimersByTime(500);
+    vi.advanceTimersByTime(500);
+    vi.advanceTimersByTime(500);
+
+    expect(isAntigravityBusyScreen(screenLines)).toBe(true);
+    expect(isIdleAgentScreen(screenLines, ">", "antigravity")).toBe(false);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    screenLines = ["Done.", ">"];
+    scanner.feedOutput(">");
     vi.advanceTimersByTime(500);
 
     expect(tracker.getSnapshot()).toMatchObject({
