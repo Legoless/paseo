@@ -28,7 +28,9 @@ import {
   resolveACPModeSelection,
   resolveACPModelSelection,
   describeACPSettingsGate,
+  describeCursorSignInGate,
   isACPSettingsGateText,
+  isCursorSignInGateText,
   CURSOR_TRANSPORT_CANCELED_LINE,
   CURSOR_TRANSPORT_UNAVAILABLE_LINE,
   summarizeACPRequestError,
@@ -2554,6 +2556,14 @@ describe("ACPAgentSession", () => {
     );
   });
 
+  test("names Cursor's canned sign-in label", () => {
+    expect(isCursorSignInGateText("\n\nPlease sign in to continue")).toBe(true);
+    expect(isCursorSignInGateText("Please sign in to continue the migration.")).toBe(false);
+    expect(describeCursorSignInGate()).toBe(
+      "Cursor rejected the request and labeled it as a sign-in. That label is also used when the CLI is already signed in.",
+    );
+  });
+
   test("accepts ACP extension notifications without failing the JSON-RPC connection", async () => {
     const logger = createTestLogger();
     const trace = vi.spyOn(logger, "trace");
@@ -2936,6 +2946,64 @@ describe("ACPAgentSession", () => {
       turnId,
       code: "settings_gate",
       error: describeACPSettingsGate("claude-fable-5-1"),
+    });
+    expect(events.some((event) => event.type === "turn_completed")).toBe(false);
+  });
+
+  test("turns Cursor's canned sign-in line into a failed turn", async () => {
+    const session = createSessionWithConfig({ provider: "cursor" });
+    const events: AgentStreamEvent[] = [];
+    let resolvePrompt!: (value: PromptResponse) => void;
+    const prompt = vi.fn(
+      () =>
+        new Promise<PromptResponse>((resolve) => {
+          resolvePrompt = resolve;
+        }),
+    );
+
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+    asInternals<ACPSessionInternals>(session).connection = { prompt };
+
+    session.subscribe((event) => {
+      events.push(event);
+    });
+
+    const { turnId } = await session.startTurn("open the file");
+    await session.sessionUpdate({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-1",
+        content: { type: "text", text: "\n\nPlease sign in to continue" },
+      } as SessionUpdate,
+    });
+    resolvePrompt({ stopReason: "end_turn", usage: { outputTokens: 8 } });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      events.filter(
+        (event) => event.type === "timeline" && event.item.type === "assistant_message",
+      ),
+    ).toEqual([]);
+    expect(
+      events.filter((event) => event.type === "timeline" && event.item.type === "error"),
+    ).toEqual([
+      {
+        type: "timeline",
+        provider: "cursor",
+        turnId,
+        item: {
+          type: "error",
+          message: describeCursorSignInGate(),
+        },
+      },
+    ]);
+    expect(events.find((event) => event.type === "turn_failed")).toMatchObject({
+      type: "turn_failed",
+      turnId,
+      code: "cursor_sign_in",
+      error: describeCursorSignInGate(),
     });
     expect(events.some((event) => event.type === "turn_completed")).toBe(false);
   });

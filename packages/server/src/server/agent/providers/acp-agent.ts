@@ -216,9 +216,20 @@ export function summarizeACPRequestError(error: unknown): {
 }
 
 export const ACP_SETTINGS_GATE_TEXT = "Check your settings to continue";
+// cursor-agent substitutes this for any backend error it tags `login`, including
+// rejections where the CLI is already signed in. The original error is discarded.
+export const CURSOR_SIGN_IN_GATE_TEXT = "Please sign in to continue";
 
 export function isACPSettingsGateText(text: string): boolean {
   return text.trim() === ACP_SETTINGS_GATE_TEXT;
+}
+
+export function isCursorSignInGateText(text: string): boolean {
+  return text.trim() === CURSOR_SIGN_IN_GATE_TEXT;
+}
+
+export function describeCursorSignInGate(): string {
+  return "Cursor rejected the request and labeled it as a sign-in. That label is also used when the CLI is already signed in.";
 }
 
 export function describeACPSettingsGate(model: string | null | undefined): string {
@@ -2990,12 +3001,13 @@ export class ACPAgentSession implements AgentSession, ACPClient {
           return pendingUserEvents;
         }
         this.turnAssistantText += item.text;
-        if (isACPSettingsGateText(this.turnAssistantText)) {
+        const cursorGateMessage = this.describeCursorCannedGate(this.turnAssistantText);
+        if (cursorGateMessage) {
           return [
             ...pendingUserEvents,
             this.wrapTimeline({
               type: "error",
-              message: describeACPSettingsGate(this.currentModel),
+              message: cursorGateMessage,
             }),
           ];
         }
@@ -3206,6 +3218,20 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     void update;
   }
 
+  private readCursorCannedGate(text: string): { code: string; error: string } | null {
+    if (isACPSettingsGateText(text)) {
+      return { code: "settings_gate", error: describeACPSettingsGate(this.currentModel) };
+    }
+    if (isCursorSignInGateText(text)) {
+      return { code: "cursor_sign_in", error: describeCursorSignInGate() };
+    }
+    return null;
+  }
+
+  private describeCursorCannedGate(text: string): string | null {
+    return this.readCursorCannedGate(text)?.error ?? null;
+  }
+
   private handlePromptResponse(response: PromptResponse, turnId: string): void {
     this.currentTurnUsage = mapACPUsage(response.usage) ?? this.currentTurnUsage;
 
@@ -3224,12 +3250,13 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       case "max_turn_requests":
       case "refusal":
       default:
-        if (isACPSettingsGateText(this.turnAssistantText)) {
+        const cursorGate = this.readCursorCannedGate(this.turnAssistantText);
+        if (cursorGate) {
           this.finishTurn({
             type: "turn_failed",
             provider: this.provider,
-            error: describeACPSettingsGate(this.currentModel),
-            code: "settings_gate",
+            error: cursorGate.error,
+            code: cursorGate.code,
             turnId,
           });
           break;
