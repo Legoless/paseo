@@ -2748,6 +2748,35 @@ function handleShortstatGitError(error: unknown, throwOnGitError = false): null 
   return null;
 }
 
+function isMissingHeadError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("ambiguous argument 'HEAD'");
+}
+
+// Sidebar and composer markers match the Changes uncommitted view. Commits
+// already on the branch stay in the committed comparison.
+async function readUncommittedTrackedShortstat(
+  cwd: string,
+  context?: CheckoutContext,
+): Promise<string> {
+  const run = getRunGitCommand(context);
+  try {
+    const { stdout } = await run(["diff", "--shortstat", "HEAD"], {
+      cwd,
+      envOverlay: READ_ONLY_GIT_ENV,
+    });
+    return stdout;
+  } catch (error) {
+    if (!isMissingHeadError(error)) {
+      throw error;
+    }
+    const { stdout } = await run(["diff", "--cached", "--shortstat"], {
+      cwd,
+      envOverlay: READ_ONLY_GIT_ENV,
+    });
+    return stdout;
+  }
+}
+
 async function getCheckoutShortstatUncached(
   cwd: string,
   context?: CheckoutContext,
@@ -2764,43 +2793,11 @@ async function getCheckoutShortstatUncached(
     }
   }
 
-  const facts = context?.facts;
-  const localBaseRef = facts?.isGit
-    ? facts.resolvedBaseRef
-    : await getResolvedBaseRefForCwd(cwd, context);
-  const currentBranch = facts?.isGit ? facts.currentBranch : await getCurrentBranch(cwd, context);
-  const comparisonRef = await resolveShortstatComparisonRef({
-    cwd,
-    currentBranch,
-    localBaseRef,
-    facts,
-    context,
-  });
-  if (!comparisonRef) {
-    return null;
-  }
-
   try {
-    const { stdout: mergeBaseOut } = await getRunGitCommand(context)(
-      ["merge-base", "HEAD", comparisonRef],
-      {
-        cwd,
-        envOverlay: READ_ONLY_GIT_ENV,
-      },
-    );
-    const mergeBase = mergeBaseOut.trim();
-    if (!mergeBase) {
-      return null;
-    }
-
-    const [{ stdout }, untrackedAdditions] = await Promise.all([
-      getRunGitCommand(context)(["diff", "--shortstat", mergeBase], {
-        cwd,
-        envOverlay: READ_ONLY_GIT_ENV,
-      }),
+    const [stdout, untrackedAdditions] = await Promise.all([
+      readUncommittedTrackedShortstat(cwd, context),
       countUntrackedAdditions(cwd, context, options?.throwOnGitError),
     ]);
-
     const tracked = parseCheckoutShortstat(stdout);
 
     if (tracked) {
@@ -2813,32 +2810,6 @@ async function getCheckoutShortstatUncached(
   } catch (error) {
     return handleShortstatGitError(error, options?.throwOnGitError);
   }
-}
-
-async function resolveShortstatComparisonRef(input: {
-  cwd: string;
-  currentBranch: string | null;
-  localBaseRef: string | null;
-  facts?: CheckoutSnapshotFacts | null;
-  context?: CheckoutContext;
-}): Promise<string | null> {
-  const { cwd, currentBranch, localBaseRef, facts, context } = input;
-  if (!currentBranch) {
-    return null;
-  }
-
-  if (localBaseRef && currentBranch !== localBaseRef) {
-    try {
-      return facts?.isGit && facts.resolvedBaseRef === localBaseRef && facts.comparisonBaseRef
-        ? facts.comparisonBaseRef
-        : await resolveBestComparisonBaseRef(cwd, localBaseRef, context);
-    } catch {
-      return null;
-    }
-  }
-
-  const hasOrigin = await doesGitRefExist(cwd, `refs/remotes/origin/${currentBranch}`, context);
-  return hasOrigin ? `origin/${currentBranch}` : null;
 }
 
 function getOrLoadCheckoutShortstat(
