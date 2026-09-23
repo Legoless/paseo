@@ -123,7 +123,7 @@ describe("runHooksCommand", () => {
     const send = await runHook(
       claudeProvider.id,
       claudeProvider.events[4].event,
-      inputFrom('{"reason":"idle_prompt"}'),
+      inputFrom('{"hook_event_name":"Notification","notification_type":"idle_prompt"}'),
     );
 
     expectPostedState(send, "needs-input");
@@ -131,11 +131,11 @@ describe("runHooksCommand", () => {
 
   it.each(["permission_prompt", "elicitation_prompt", "elicitation_response", "auth_success"])(
     "ignores Claude %s notifications",
-    async (reason) => {
+    async (notificationType) => {
       const send = await runHook(
         claudeProvider.id,
         claudeProvider.events[4].event,
-        inputFrom(JSON.stringify({ reason })),
+        inputFrom(JSON.stringify({ notification_type: notificationType })),
       );
 
       expect(send.calls).toEqual([]);

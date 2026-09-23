@@ -40,8 +40,7 @@ function isIdlePrompt(raw: string | null): boolean {
   try {
     const notification = JSON.parse(raw) as unknown;
     if (!notification || typeof notification !== "object") return false;
-    const payload = notification as { matcher?: unknown; reason?: unknown };
-    return payload.matcher === "idle_prompt" || payload.reason === "idle_prompt";
+    return (notification as { notification_type?: unknown }).notification_type === "idle_prompt";
   } catch {
     return false;
   }
