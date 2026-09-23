@@ -17,6 +17,10 @@ export function applyAgyWorkspaceMcpOverlay(
   servers: Record<string, McpServerConfig>,
 ): AgyMcpOverlay | null {
   if (Object.keys(servers).length === 0) return null;
+  // A history load of an archived agent can point at a worktree that was removed.
+  // Writing the overlay would recreate it as a plain folder, which then reads as
+  // "not a checkout" and erases the placement workspace recovery needs.
+  if (!existsSync(cwd)) return null;
 
   const agentsDir = join(cwd, ".agents");
   const path = join(agentsDir, "mcp_config.json");
