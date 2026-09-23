@@ -36593,7 +36593,7 @@ WARNING: This link could potentially be dangerous`)
           // after another barrier it's false and the barrier applies immediately, saving a parse
           // cycle of latency. Cleared when a barrier starts (it gates every write before it).
           hasUngatedWrites = false;
-          needsTextureAtlasReset = true;
+          needsTextureAtlasReset = false;
           inputModeDecoder = new TextDecoder();
           suppressInput = false;
           inputModeTracker = new TerminalInputModeTracker();
@@ -36759,6 +36759,7 @@ WARNING: This link could potentially be dangerous`)
           mount(input) {
             this.unmount();
             input.host.innerHTML = "";
+            this.needsTextureAtlasReset = input.resetTextureAtlasOnFirstSnapshot === true;
             this.lastSize = null;
             this.inputModeTracker.reset();
             this.emitInputModeChange();
@@ -37835,6 +37836,8 @@ body,
               theme: message.theme,
               fontFamily: message.fontFamily,
               fontSize: message.fontSize,
+              // This page renders one terminal at a time, so its glyph atlas is never shared.
+              resetTextureAtlasOnFirstSnapshot: true,
             });
             sendToNative({ type: "rendererReady", streamKey: message.streamKey, isReady: true });
           }

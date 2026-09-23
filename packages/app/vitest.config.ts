@@ -35,7 +35,17 @@ export default defineConfig({
           include: ["src/**/*.browser.{test,spec}.{ts,tsx}"],
           browser: {
             enabled: true,
-            provider: playwright(),
+            // Headless Chromium has no GPU. SwiftShader gives it WebGL, so the terminal tests run
+            // the real xterm WebGL renderer (its glyph atlas is shared between terminals).
+            provider: playwright({
+              launchOptions: {
+                args: [
+                  "--use-angle=swiftshader",
+                  "--enable-unsafe-swiftshader",
+                  "--ignore-gpu-blocklist",
+                ],
+              },
+            }),
             headless: true,
             connectTimeout: 180_000,
             instances: [{ browser: "chromium" }],
