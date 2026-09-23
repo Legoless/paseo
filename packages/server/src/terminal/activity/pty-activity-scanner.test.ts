@@ -155,6 +155,39 @@ describe("isNeedsInputScreen", () => {
     expect(isNeedsInputScreen(["? What would you like to do?", "❯ Continue", "  Exit"])).toBe(true);
   });
 
+  it("ignores Claude's composer while the turn runs", () => {
+    const rule = "─".repeat(60);
+    expect(
+      isNeedsInputScreen([
+        "✻ Waiting for 1 dynamic workflow to finish",
+        "                        ✘ Auto-update failed · Run claude doctor",
+        `${rule} ultracode ─`,
+        "❯\u00a0continue",
+        rule,
+        "  branch:master | !28 ?5",
+        "  [OMC#5.5.0L] | Model: Opus 5.5",
+        "  thinking | session:800m | ctx:[#####-----]45% | 🔧125",
+        "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents",
+        "",
+        "  ◯ anya-codex-parity-core 1/4 agents done · 21m 53s · ↓ 844.3k",
+      ]),
+    ).toBe(false);
+  });
+
+  it("detects a numbered approval menu inside a ruled dialog", () => {
+    const rule = "─".repeat(60);
+    expect(
+      isNeedsInputScreen([
+        rule,
+        " Bash command",
+        "   rm -rf build",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. No, and tell Claude what to do differently (esc)",
+      ]),
+    ).toBe(true);
+  });
+
   it("detects shortcut bars", () => {
     expect(isNeedsInputScreen(["Enter to accept · Esc to cancel"])).toBe(true);
   });
