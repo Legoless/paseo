@@ -67,6 +67,18 @@ describe("applyAgyWorkspaceMcpOverlay", () => {
     expect(restored.mcpServers).toEqual({ docs: { command: "docs" } });
   });
 
+  it("leaves a missing workspace directory missing", () => {
+    const cwd = join(tmpdir(), `agy-mcp-missing-${Date.now()}`);
+    dirs.push(cwd);
+
+    const overlay = applyAgyWorkspaceMcpOverlay(cwd, {
+      paseo: { type: "http", url: "http://127.0.0.1:9/mcp" },
+    });
+
+    expect(overlay).toBeNull();
+    expect(existsSync(cwd)).toBe(false);
+  });
+
   it("removes a file it created when no previous config existed", () => {
     const cwd = join(tmpdir(), `agy-mcp-empty-${Date.now()}`);
     dirs.push(cwd);
