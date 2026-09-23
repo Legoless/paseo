@@ -14,6 +14,7 @@ import type {
 import {
   ClientSideConnection,
   PROTOCOL_VERSION,
+  RequestError,
   type AgentCapabilities as ACPAgentCapabilities,
   type AnyMessage,
   type Client as ACPClient,
@@ -68,6 +69,7 @@ import {
   type AgentMetadata,
   type AgentMode,
   type AgentModelDefinition,
+  type AgentPermissionAction,
   type AgentPermissionRequest,
   type AgentPermissionRequestKind,
   type AgentPermissionResponse,
@@ -2680,6 +2682,57 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     }
   }
 
+  // Grok asks the client to approve a plan with this request, not with
+  // session/request_permission. Any error reply reads to Grok as a disconnect:
+  // it fails exit_plan_mode, cancels the turn and stays in plan mode.
+  async extMethod(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const planText = params.planContent;
+    if (method !== GROK_EXIT_PLAN_MODE_METHOD || typeof planText !== "string") {
+      throw RequestError.methodNotFound(method);
+    }
+    // After session/load Grok re-sends a parked approval outside any turn, and
+    // answering it starts a Grok-initiated turn Paseo cannot track or stop.
+    // Declining keeps it parked; Grok asks again in the user's next turn.
+    if (this.activeForegroundTurnId === null) {
+      throw RequestError.internalError(undefined, "Plan approval needs an active turn");
+    }
+
+    const requestId = randomUUID();
+    const request: AgentPermissionRequest = {
+      id: requestId,
+      provider: this.provider,
+      name: "exit_plan_mode",
+      kind: "plan",
+      title: "Plan",
+      input: { plan: planText },
+      actions: PLAN_APPROVAL_ACTIONS,
+      metadata: { planText, toolCallId: params.toolCallId },
+    };
+    const promise = new Promise<RequestPermissionResponse>((resolve, reject) => {
+      this.pendingPermissions.set(requestId, {
+        request,
+        options: PLAN_APPROVAL_OPTIONS,
+        resolve,
+        reject,
+        turnId: this.activeForegroundTurnId,
+      });
+    });
+    this.pushEvent({
+      type: "permission_requested",
+      provider: this.provider,
+      request,
+      turnId: this.activeForegroundTurnId ?? undefined,
+    });
+
+    const response = await promise;
+    const approved =
+      response.outcome.outcome === "selected" && response.outcome.optionId === "implement";
+    return { outcome: approved ? "approved" : "cancelled" };
+  }
+
   // Cache an asynchronously-delivered slash-command batch and unblock any
   // listCommands() call that is waiting on the initial batch. Used when a
   // provider supplies an extensionCommandsParser whose result arrives after
@@ -4029,6 +4082,25 @@ function mapPermissionRequest(
     },
   };
 }
+
+const GROK_EXIT_PLAN_MODE_METHOD = "_x.ai/exit_plan_mode";
+
+const PLAN_APPROVAL_ACTIONS: AgentPermissionAction[] = [
+  { id: "dismiss", label: "Dismiss", behavior: "deny", variant: "danger", intent: "dismiss" },
+  {
+    id: "implement",
+    label: "Implement",
+    behavior: "allow",
+    variant: "primary",
+    intent: "implement",
+  },
+];
+
+// Option ids mirror the action ids so selectPermissionOption resolves the app's choice.
+const PLAN_APPROVAL_OPTIONS: PermissionOption[] = [
+  { optionId: "implement", name: "Implement", kind: "allow_once" },
+  { optionId: "dismiss", name: "Dismiss", kind: "reject_once" },
+];
 
 function selectPermissionOption(
   options: PermissionOption[],

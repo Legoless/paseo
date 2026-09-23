@@ -1485,6 +1485,114 @@ describe("ACPAgentSession Zed parity", () => {
     });
   });
 
+  describe("Grok _x.ai/exit_plan_mode", () => {
+    function connectGrokAgent(session: ACPAgentSession) {
+      const clientToAgent = new TransformStream();
+      const agentToClient = new TransformStream();
+      const agent: Agent = {
+        async initialize() {
+          return { protocolVersion: PROTOCOL_VERSION, agentCapabilities: {} };
+        },
+        async newSession() {
+          return { sessionId: "session-1" };
+        },
+        async prompt() {
+          return { stopReason: "end_turn" };
+        },
+        async authenticate() {},
+        async cancel() {},
+      };
+      const agentConnection = new AgentSideConnection(
+        () => agent,
+        ndJsonStream(agentToClient.writable, clientToAgent.readable),
+      );
+      const clientConnection = new ClientSideConnection(
+        () => session,
+        ndJsonStream(clientToAgent.writable, agentToClient.readable),
+      );
+      return { agentConnection, clientConnection };
+    }
+
+    // Races the reply so a method-not-found error fails the test instead of hanging.
+    function sendExitPlanMode(session: ACPAgentSession) {
+      const { agentConnection } = connectGrokAgent(session);
+      asInternals<ACPSessionInternals>(session).activeForegroundTurnId = "turn-1";
+      const requested = new Promise<Extract<AgentStreamEvent, { type: "permission_requested" }>>(
+        (resolve) => {
+          session.subscribe((event) => {
+            if (event.type === "permission_requested") resolve(event);
+          });
+        },
+      );
+      const reply = agentConnection.extMethod("_x.ai/exit_plan_mode", exitPlanParams);
+      return { reply, requested: Promise.race([requested, reply.then(() => requested)]) };
+    }
+
+    const exitPlanParams = {
+      sessionId: "session-1",
+      toolCallId: "call-1",
+      planContent: "# Plan\n- ship it",
+    };
+
+    test("surfaces the plan for approval even with auto accept on", async () => {
+      const session = createSessionWithConfig({
+        provider: "grok",
+        featureValues: { auto_accept: true },
+      });
+      const { reply, requested } = sendExitPlanMode(session);
+      const { request } = await requested;
+
+      expect(request).toMatchObject({
+        kind: "plan",
+        input: { plan: "# Plan\n- ship it" },
+        metadata: { planText: "# Plan\n- ship it", toolCallId: "call-1" },
+      });
+      await session.respondToPermission(request.id, {
+        behavior: "allow",
+        selectedActionId: "implement",
+      });
+      await expect(reply).resolves.toEqual({ outcome: "approved" });
+    });
+
+    test("keeps planning when the plan is dismissed", async () => {
+      const session = createSessionWithConfig({ provider: "grok" });
+      const { reply, requested } = sendExitPlanMode(session);
+      const { request } = await requested;
+      await session.respondToPermission(request.id, {
+        behavior: "deny",
+        selectedActionId: "dismiss",
+      });
+
+      await expect(reply).resolves.toEqual({ outcome: "cancelled" });
+    });
+
+    test("keeps a plan approval restored outside a turn parked", async () => {
+      const session = createSessionWithConfig({ provider: "grok" });
+      const { agentConnection } = connectGrokAgent(session);
+      const listener = vi.fn();
+      session.subscribe(listener);
+
+      await expect(
+        agentConnection.extMethod("_x.ai/exit_plan_mode", {
+          ...exitPlanParams,
+          toolCallId: "exit-plan-mode-resume-session-1",
+        }),
+      ).rejects.toMatchObject({ code: -32603 });
+      expect(listener).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "permission_requested" }),
+      );
+    });
+
+    test("still rejects unknown extension methods", async () => {
+      const session = createSessionWithConfig({ provider: "grok" });
+      const { agentConnection } = connectGrokAgent(session);
+
+      await expect(agentConnection.extMethod("_x.ai/unknown", {})).rejects.toMatchObject({
+        code: -32601,
+      });
+    });
+  });
+
   test("maps Copilot Allow All mode to allow_all ACP config on session start", async () => {
     const setSessionConfigOption = vi.fn(async () => ({
       configOptions: [
