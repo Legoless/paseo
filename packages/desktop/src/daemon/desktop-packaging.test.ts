@@ -20,23 +20,36 @@ function writeExecutable(filePath: string, contents: string): void {
   chmodSync(filePath, 0o755);
 }
 
-function createFakeMacBundle(options: { includeHelper: boolean }): {
+const FAKE_ELECTRON_SCRIPT = [
+  "#!/bin/sh",
+  'printf "helper env=%s/%s cli=%s\\n" "$ELECTRON_RUN_AS_NODE" "$PASEO_NODE_ENV" "$PASEO_CLI"',
+  'printf "home=%s listen=%s\\n" "${PASEO_HOME:-}" "${PASEO_LISTEN:-}"',
+  'printf "args=%s\\n" "$*"',
+  "",
+].join("\n");
+
+function createFakeMacBundle(options: {
+  includeHelper: boolean;
+  appName?: string;
+  variant?: string;
+}): {
   root: string;
   shimPath: string;
 } {
+  const appName = options.appName ?? "Paseo";
   const root = mkdtempSync(join(tmpdir(), "paseo-cli-shim-test-"));
-  const appPath = join(root, "Paseo.app");
+  const appPath = join(root, `${appName}.app`);
   const contentsPath = join(appPath, "Contents");
   const resourcesPath = join(contentsPath, "Resources");
   const shimPath = join(resourcesPath, "bin", "paseo");
-  const mainPath = join(contentsPath, "MacOS", "Paseo");
+  const mainPath = join(contentsPath, "MacOS", appName);
   const helperPath = join(
     contentsPath,
     "Frameworks",
-    "Paseo Helper.app",
+    `${appName} Helper.app`,
     "Contents",
     "MacOS",
-    "Paseo Helper",
+    `${appName} Helper`,
   );
 
   mkdirSync(dirname(shimPath), { recursive: true });
@@ -48,17 +61,26 @@ function createFakeMacBundle(options: { includeHelper: boolean }): {
 
   if (options.includeHelper) {
     mkdirSync(dirname(helperPath), { recursive: true });
-    writeExecutable(
-      helperPath,
-      [
-        "#!/bin/sh",
-        'printf "helper env=%s/%s cli=%s\\n" "$ELECTRON_RUN_AS_NODE" "$PASEO_NODE_ENV" "$PASEO_CLI"',
-        'printf "args=%s\\n" "$*"',
-        "",
-      ].join("\n"),
+    writeExecutable(helperPath, FAKE_ELECTRON_SCRIPT);
+  }
+  if (options.variant) {
+    writeFileSync(
+      join(resourcesPath, "variant.json"),
+      JSON.stringify({ variant: options.variant }),
+      "utf8",
     );
   }
 
+  return { root, shimPath };
+}
+
+function createFakeLinuxBundle(executableName: string): { root: string; shimPath: string } {
+  const root = mkdtempSync(join(tmpdir(), "paseo-cli-shim-test-"));
+  const shimPath = join(root, "resources", "bin", "paseo");
+  mkdirSync(dirname(shimPath), { recursive: true });
+  copyFileSync(join(packageRoot, "bin", "paseo"), shimPath);
+  chmodSync(shimPath, 0o755);
+  writeExecutable(join(root, executableName), FAKE_ELECTRON_SCRIPT);
   return { root, shimPath };
 }
 
@@ -157,6 +179,56 @@ describe("desktop packaging", () => {
       expect(result.stdout).toContain("@getpaseo/cli/dist/index.js");
       expect(result.stdout).toContain("--version");
       expect(result.stdout).not.toContain("main-executable");
+    } finally {
+      rmSync(bundle.root, { recursive: true, force: true });
+    }
+  });
+
+  it("launches a renamed macOS build through its own Helper", () => {
+    if (process.platform === "win32") return;
+
+    const bundle = createFakeMacBundle({ includeHelper: true, appName: "Paseo Neo" });
+    try {
+      const result = spawnSync(bundle.shimPath, ["--version"], { encoding: "utf8" });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(`helper env=1/production cli=${bundle.shimPath}`);
+      expect(result.stdout).not.toContain("main-executable");
+    } finally {
+      rmSync(bundle.root, { recursive: true, force: true });
+    }
+  });
+
+  it("points the Neo CLI at Neo's home and port", () => {
+    if (process.platform === "win32") return;
+
+    const bundle = createFakeMacBundle({
+      includeHelper: true,
+      appName: "Paseo Neo",
+      variant: "neo",
+    });
+    try {
+      const env = { ...process.env, HOME: "/home/tester" };
+      delete env.PASEO_HOME;
+      delete env.PASEO_LISTEN;
+      const result = spawnSync(bundle.shimPath, ["ls"], { encoding: "utf8", env });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("home=/home/tester/.paseo-neo listen=127.0.0.1:6768");
+    } finally {
+      rmSync(bundle.root, { recursive: true, force: true });
+    }
+  });
+
+  it("launches a renamed Linux build through its product-named executable", () => {
+    if (process.platform === "win32") return;
+
+    const bundle = createFakeLinuxBundle("Paseo Neo");
+    try {
+      const result = spawnSync(bundle.shimPath, ["--version"], { encoding: "utf8" });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(`helper env=1/production cli=${bundle.shimPath}`);
     } finally {
       rmSync(bundle.root, { recursive: true, force: true });
     }
