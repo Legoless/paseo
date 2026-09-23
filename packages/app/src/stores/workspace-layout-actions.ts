@@ -1118,25 +1118,34 @@ function isEphemeralTab(tab: WorkspaceTab): boolean {
   return tab.target.kind === "new_tab" && !tab.target.cwd;
 }
 
-function stripEphemeralTabsFromNode(node: SplitNodeInternal): SplitNodeInternal {
+function stripEphemeralTabsFromNode(
+  node: SplitNodeInternal,
+  parentTabIdByTabId: Record<string, string> | undefined,
+): SplitNodeInternal {
   if (node.kind === "pane") {
     const nextTabs = node.pane.tabs.filter((tab) => !isEphemeralTab(tab));
     if (nextTabs.length === node.pane.tabs.length) {
       return node;
     }
-    // createPaneNode repoints focusedTabId to a surviving tab (or null) when the
-    // previously focused tab was an ephemeral one that we just removed.
+    // A dropped focused tab hands focus back to the tab it was opened from.
+    // createPaneNode repoints anything else that did not survive to a surviving tab.
+    const focusedTabId = node.pane.focusedTabId;
+    const focusedWasDropped = !nextTabs.some((tab) => tab.tabId === focusedTabId);
+    const openerTabId =
+      focusedWasDropped && focusedTabId ? parentTabIdByTabId?.[focusedTabId] : undefined;
     return createPaneNode({
       id: node.pane.id,
       tabs: nextTabs,
-      focusedTabId: node.pane.focusedTabId,
+      focusedTabId: openerTabId ?? focusedTabId,
       hidden: node.pane.hidden,
     });
   }
   return createGroupNode({
     id: node.group.id,
     direction: node.group.direction,
-    children: node.group.children.map((child) => stripEphemeralTabsFromNode(child)),
+    children: node.group.children.map((child) =>
+      stripEphemeralTabsFromNode(child, parentTabIdByTabId),
+    ),
     sizes: node.group.sizes,
   });
 }
@@ -1147,7 +1156,7 @@ function stripEphemeralTabsFromNode(node: SplitNodeInternal): SplitNodeInternal 
  */
 export function stripEphemeralTabsFromLayout(layout: WorkspaceLayout): WorkspaceLayout {
   const internalLayout = asInternalLayout(layout);
-  const nextRoot = stripEphemeralTabsFromNode(internalLayout.root);
+  const nextRoot = stripEphemeralTabsFromNode(internalLayout.root, layout.parentTabIdByTabId);
   return withNormalizedParentTabMap({
     root: nextRoot,
     focusedPaneId: internalLayout.focusedPaneId,
@@ -1541,6 +1550,8 @@ function insertNewTabIntoPane(
   }
 
   const preservedFocusTabId = targetPane.focusedTabId ?? tabId;
+  // A tab opened on top of another returns there when it closes, not to its row neighbour.
+  const openerTabId = input.focus ? targetPane.focusedTabId : null;
 
   return {
     tabId,
@@ -1552,7 +1563,9 @@ function insertNewTabIntoPane(
         focusTabId: input.focus ? tabId : preservedFocusTabId,
       }),
       focusedPaneId: input.focus ? targetPane.id : layout.focusedPaneId,
-      parentTabIdByTabId: input.layout.parentTabIdByTabId,
+      parentTabIdByTabId: openerTabId
+        ? { ...input.layout.parentTabIdByTabId, [tabId]: openerTabId }
+        : input.layout.parentTabIdByTabId,
     }),
   };
 }

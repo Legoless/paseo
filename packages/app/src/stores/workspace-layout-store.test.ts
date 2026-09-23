@@ -766,6 +766,53 @@ describe("workspace-layout-store tree transforms", () => {
 });
 
 describe("workspace-layout-store actions", () => {
+  it("saves the opener as focused while a New tab opened from it is showing", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    const opener = store.openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "raceline" },
+      intent: "reveal",
+    })!;
+    store.openTab({ workspaceKey, target: { kind: "agent", agentId: "atlas" }, intent: "reveal" });
+    store.focusTab(workspaceKey, opener);
+    store.openTab({
+      workspaceKey,
+      target: { kind: "new_tab" },
+      intent: "new",
+      placement: { mode: "pane", paneId: "main" },
+    });
+
+    const saved = stripEphemeralTabsFromLayout(
+      workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey],
+    );
+
+    expect(findPaneById(saved.root, "main")?.focusedTabId).toBe(opener);
+  });
+
+  it("returns to the opener when a New tab opened from it closes", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    const opener = store.openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "raceline" },
+      intent: "reveal",
+    })!;
+    store.openTab({ workspaceKey, target: { kind: "agent", agentId: "atlas" }, intent: "reveal" });
+    store.focusTab(workspaceKey, opener);
+    const newTab = store.openTab({
+      workspaceKey,
+      target: { kind: "new_tab" },
+      intent: "new",
+      placement: { mode: "pane", paneId: "main" },
+    })!;
+
+    store.closeTab(workspaceKey, newTab);
+
+    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+    expect(findPaneById(layout.root, "main")?.focusedTabId).toBe(opener);
+  });
+
   it("creates duplicate Changes instances while reveal keeps the first instance", () => {
     const workspaceKey = createWorkspaceKey();
     const store = workspaceLayoutStore.getState();
