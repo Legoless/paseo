@@ -49,6 +49,8 @@ export function isSpendLimitScreen(lines: string[]): boolean {
   return SPEND_LIMIT_NOTICE.test(tail);
 }
 
+const HORIZONTAL_RULE = /^[─━═]{3,}/;
+
 export function isNeedsInputScreen(lines: string[]): boolean {
   if (lines.length === 0) return false;
   const tailLines = lines.slice(-10).map(stripAnsi);
@@ -78,7 +80,14 @@ export function isNeedsInputScreen(lines: string[]): boolean {
     return true;
   }
 
-  const hasSelectedOption = tailLines.some((line) => /^[>❯]\s+\S+/.test(line.trim()));
+  // Claude's composer is a `❯ text` line directly under its input rule. It is not a
+  // highlighted option, and the footer below it often carries a `?` (git counts, tips).
+  const tailStart = lines.length - tailLines.length;
+  const hasSelectedOption = tailLines.some(
+    (line, index) =>
+      /^[>❯]\s+\S+/.test(line.trim()) &&
+      !HORIZONTAL_RULE.test(stripAnsi(lines[tailStart + index - 1] ?? "").trim()),
+  );
   const hasSelectionContext =
     lowerTail.includes("?") ||
     /(?:↑\/↓|up\/down).*\b(?:navigate|select)\b/.test(lowerTail) ||
