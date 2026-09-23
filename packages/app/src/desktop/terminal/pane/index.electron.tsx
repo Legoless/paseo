@@ -13,7 +13,10 @@ import { StyleSheet, View } from "react-native";
 import type { ITheme } from "@xterm/xterm";
 import type { TerminalState } from "@getpaseo/protocol/messages";
 import type { TerminalInputModeState } from "@getpaseo/protocol/terminal-input-mode";
-import type { TerminalOutputData } from "@/terminal/runtime/terminal-emulator-runtime";
+import type {
+  TerminalFindResult,
+  TerminalOutputData,
+} from "@/terminal/runtime/terminal-emulator-runtime";
 import type {
   TerminalLocalFileLinkSource,
   TerminalLocalFileLinkTarget,
@@ -63,6 +66,9 @@ type BridgeInboundMessage =
   | { type: "setFont"; streamKey: string; fontFamily?: string; fontSize?: number }
   | { type: "setPendingModifiers"; streamKey: string; pendingModifiers: PendingTerminalModifiers }
   | { type: "setSwipeGesturesEnabled"; streamKey: string; enabled: boolean }
+  | { type: "find"; streamKey: string; query: string; direction?: "next" | "previous" }
+  | { type: "clearFind"; streamKey: string }
+  | { type: "findWidgetSize"; streamKey: string; size: { width: number; height: number } }
   | {
       type: "resolveLocalFileLinkResponse";
       streamKey: string;
@@ -110,6 +116,8 @@ type BridgeOutboundMessage =
   | { type: "swipeLeft"; streamKey: string }
   | { type: "swipeRight"; streamKey: string }
   | { type: "copySelection"; streamKey: string; text: string }
+  | { type: "findRequest"; streamKey: string }
+  | { type: "findResult"; streamKey: string; result: TerminalFindResult }
   | { type: "debug"; message: string; details?: unknown };
 
 interface ElectronTerminalWebview extends HTMLElement {
@@ -211,6 +219,8 @@ export function IsolatedTerminalEmulator({
   onInputModeChange,
   onResolveLocalFileLink,
   onOpenLocalFileLink,
+  onFindRequest,
+  onFindResult,
   onRendererReadyChange,
   onGuestReloaded,
   isPresented = false,
@@ -265,6 +275,8 @@ export function IsolatedTerminalEmulator({
     onGuestReloaded,
     onResolveLocalFileLink,
     onOpenLocalFileLink,
+    onFindRequest,
+    onFindResult,
     onSwipeLeft,
     onSwipeRight,
   });
@@ -279,6 +291,8 @@ export function IsolatedTerminalEmulator({
     onGuestReloaded,
     onResolveLocalFileLink,
     onOpenLocalFileLink,
+    onFindRequest,
+    onFindResult,
     onSwipeLeft,
     onSwipeRight,
   };
@@ -353,6 +367,11 @@ export function IsolatedTerminalEmulator({
       },
       paste: (text: string) => {
         sendToWebView({ type: "paste", streamKey, text });
+      },
+      find: {
+        setWidgetSize: (size) => sendToWebView({ type: "findWidgetSize", streamKey, size }),
+        search: (query, direction) => sendToWebView({ type: "find", streamKey, query, direction }),
+        clear: () => sendToWebView({ type: "clearFind", streamKey }),
       },
       copySelection: async (clipboard) => {
         const webview = webviewRef.current;
@@ -481,7 +500,13 @@ export function IsolatedTerminalEmulator({
 
   const handleTerminalMessage = useCallback(
     (
-      message: Exclude<BridgeOutboundMessage, { type: "bridgeReady" } | { type: "rendererReady" }>,
+      message: Exclude<
+        BridgeOutboundMessage,
+        | { type: "bridgeReady" }
+        | { type: "rendererReady" }
+        | { type: "findRequest" }
+        | { type: "findResult" }
+      >,
     ) => {
       if (message.type === "resolveLocalFileLink") {
         void resolveLocalFileLink(message);
@@ -566,6 +591,14 @@ export function IsolatedTerminalEmulator({
           mountedStreamKey: mountRequestedStreamKeyRef.current,
         })
       ) {
+        return;
+      }
+      if (message.type === "findRequest") {
+        callbacksRef.current.onFindRequest?.();
+        return;
+      }
+      if (message.type === "findResult") {
+        callbacksRef.current.onFindResult?.(message.result);
         return;
       }
       handleTerminalMessage(message);
