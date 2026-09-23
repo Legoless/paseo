@@ -174,6 +174,34 @@ describe("isNeedsInputScreen", () => {
     ).toBe(false);
   });
 
+  it("ignores approval words typed into Claude's composer", () => {
+    const rule = "─".repeat(60);
+    expect(
+      isNeedsInputScreen([
+        "✻ Worked for 2m 42s",
+        rule,
+        "❯\u00a0please confirm the build passes and allow the migration",
+        rule,
+        "  branch:master | !28 ?5",
+        "  ⏵⏵ bypass permissions on (shift+tab to cycle)",
+      ]),
+    ).toBe(false);
+  });
+
+  it("ignores a queued message above Claude's composer", () => {
+    const rule = "─".repeat(60);
+    expect(
+      isNeedsInputScreen([
+        "✻ Waiting for 1 dynamic workflow to finish",
+        "❯ continue once the workflow is done",
+        rule,
+        "❯\u00a0",
+        rule,
+        "  branch:master | !28 ?5",
+      ]),
+    ).toBe(false);
+  });
+
   it("detects a numbered approval menu inside a ruled dialog", () => {
     const rule = "─".repeat(60);
     expect(
@@ -352,6 +380,60 @@ describe("PtyActivityScanner — full lifecycle", () => {
 
     scanner.handleCommandFinished();
     expect(tracker.getSnapshot().state).toBeNull();
+  });
+
+  it("returns Claude to working when its title shows a running turn after a needs-input stop", () => {
+    const tracker = new TerminalActivityTracker();
+    let screenLines: string[] = [];
+    let cursorLine = "";
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screenLines,
+      readCursorLine: () => cursorLine,
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("claude");
+    scanner.feedInput("\r");
+    screenLines = [
+      "Bash command",
+      "  npm test",
+      "Do you want to proceed?",
+      "❯ 1. Yes",
+      "  2. No",
+      "Esc to cancel",
+    ];
+    cursorLine = "❯ 1. Yes";
+    scanner.feedOutput("\x1b]0;✳ Claude Code\x07Do you want to proceed?");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+
+    // Claude's numbered menu takes "1" without Enter, so no lone "\r" reaches feedInput.
+    scanner.feedInput("1");
+    scanner.feedOutput("\x1b]0;◐ Claude Code\x07✻ Levitating… (1s)");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("keeps a Claude approval orange while its title stays idle", () => {
+    const tracker = new TerminalActivityTracker();
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => ["Do you want to proceed?", "❯ 1. Yes", "  2. No"],
+      readCursorLine: () => "❯ 1. Yes",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("claude");
+    scanner.feedInput("\r");
+    scanner.feedOutput("Do you want to proceed?");
+    vi.advanceTimersByTime(500);
+    scanner.feedOutput("\x1b]0;✳ Claude Code\x07");
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
   });
 
   it("tracks Codex approval and completion", () => {

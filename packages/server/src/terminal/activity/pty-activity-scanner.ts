@@ -51,9 +51,22 @@ export function isSpendLimitScreen(lines: string[]): boolean {
 
 const HORIZONTAL_RULE = /^[─━═]{3,}/;
 
+// Claude's input box is a `❯ text` composer directly under a rule, with its status line
+// below. None of it is a prompt from the agent: words typed into the composer
+// ("confirm", "allow") and footer `?`s (git counts, tips) must not read as one.
+function dropComposerBlock(lines: string[]): string[] {
+  for (let index = lines.length - 1; index > 0; index -= 1) {
+    if (/^[>❯]/.test(lines[index].trim()) && HORIZONTAL_RULE.test(lines[index - 1].trim())) {
+      return lines.slice(0, index - 1);
+    }
+  }
+  return lines;
+}
+
 export function isNeedsInputScreen(lines: string[]): boolean {
   if (lines.length === 0) return false;
-  const tailLines = lines.slice(-10).map(stripAnsi);
+  const tailStart = Math.max(0, lines.length - 10);
+  const tailLines = dropComposerBlock(lines.map(stripAnsi)).slice(tailStart);
   const tailText = tailLines.join("\n");
   const lowerTail = tailText.toLowerCase();
 
@@ -80,14 +93,7 @@ export function isNeedsInputScreen(lines: string[]): boolean {
     return true;
   }
 
-  // Claude's composer is a `❯ text` line directly under its input rule. It is not a
-  // highlighted option, and the footer below it often carries a `?` (git counts, tips).
-  const tailStart = lines.length - tailLines.length;
-  const hasSelectedOption = tailLines.some(
-    (line, index) =>
-      /^[>❯]\s+\S+/.test(line.trim()) &&
-      !HORIZONTAL_RULE.test(stripAnsi(lines[tailStart + index - 1] ?? "").trim()),
-  );
+  const hasSelectedOption = tailLines.some((line) => /^[>❯]\s+\S+/.test(line.trim()));
   const hasSelectionContext =
     lowerTail.includes("?") ||
     /(?:↑\/↓|up\/down).*\b(?:navigate|select)\b/.test(lowerTail) ||
@@ -303,6 +309,11 @@ export function detectAgentFromOutput(chunk: string): KnownAgentName | null {
 }
 
 const BRAILLE_SPINNER_REGEX = /[\u2800-\u28FF]/;
+// Claude Code titles the tab "◐ …"/"◑ …" only while a turn runs, and "✳ …" when idle or a
+// dialog waits. Its spinner is not braille and it repaints too often for a stillness check,
+// so this title is the one output signal that a turn resumed after a needs-input stop, such
+// as a numbered permission menu answered with "1" and no Enter.
+const CLAUDE_BUSY_TITLE_REGEX = /\][02];[\u25D0\u25D1] /;
 
 export class PtyActivityScanner {
   private activeAgent: KnownAgentName | null = null;
@@ -398,8 +409,8 @@ export class PtyActivityScanner {
     if (
       !this.initialLaunch &&
       this.currentActivity !== "working" &&
-      BRAILLE_SPINNER_REGEX.test(chunk) &&
-      !this.options.getActivity().attentionReason
+      ((this.activeAgent === "claude" && CLAUDE_BUSY_TITLE_REGEX.test(chunk)) ||
+        (BRAILLE_SPINNER_REGEX.test(chunk) && !this.options.getActivity().attentionReason))
     ) {
       this.setWorking();
     }
