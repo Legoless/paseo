@@ -8,6 +8,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
+import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
 
 /**
  * Shared overlay root for web portals (modals, toasts, etc.)
@@ -178,6 +179,8 @@ export function dispatchTopWebOverlayKeyDown(event: KeyboardEvent): boolean {
   // IME candidate confirmation into an overlay shortcut before the browser has
   // committed the composed text.
   if (event.isComposing || event.key === "Process") return false;
+  // A shortcut recorder owns every key, Escape and Tab included, even inside a modal.
+  if (useKeyboardShortcutsStore.getState().capturingShortcut) return false;
 
   const top = getTopWebOverlay();
   const scope = top?.getScope();

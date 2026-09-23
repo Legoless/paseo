@@ -3,14 +3,7 @@ import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
 import { useCallback, useEffect, useMemo, type ComponentProps, type ReactElement } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  ChevronDown,
-  Folder,
-  Globe,
-  MessageSquare,
-  SquareSlash,
-  SquareTerminal,
-} from "lucide-react-native";
+import { ChevronDown, Folder, Globe, SquareSlash } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import type { CustomCommand } from "@getpaseo/protocol/custom-commands";
@@ -64,8 +57,6 @@ interface WorkspaceCommandsButtonProps {
 const ThemedFolder = withUnistyles(Folder);
 const ThemedGlobe = withUnistyles(Globe);
 const ThemedSquareSlash = withUnistyles(SquareSlash);
-const ThemedSquareTerminal = withUnistyles(SquareTerminal);
-const ThemedMessageSquare = withUnistyles(MessageSquare);
 const ThemedChevronDown = withUnistyles(ChevronDown);
 
 const GHOST_TRIGGER_ICON_SIZE = 16;
@@ -78,12 +69,7 @@ function customCommandsQueryKey(serverId: string, cwd: string | null) {
   return ["custom-commands", "project", serverId, cwd] as const;
 }
 
-function targetLeadingIcon(target: CustomCommand["target"]): ReactElement {
-  if (target === "terminal") {
-    return <ThemedSquareTerminal size={14} uniProps={mutedColorMapping} />;
-  }
-  return <ThemedMessageSquare size={14} uniProps={mutedColorMapping} />;
-}
+const commandLeadingIcon = <ThemedSquareSlash size={14} uniProps={mutedColorMapping} />;
 
 interface CommandMenuItemProps {
   command: CustomCommand;
@@ -111,7 +97,7 @@ function CommandMenuItem({
   return (
     <DropdownMenuItem
       testID={`workspace-command-${command.id}`}
-      leading={targetLeadingIcon(command.target)}
+      leading={commandLeadingIcon}
       trailing={trailing}
       onSelect={handleSelect}
     >
@@ -468,7 +454,7 @@ function CommandsControl({
         accessibilityLabel={topCommand.title}
       >
         <View style={styles.splitButtonContent}>
-          {targetLeadingIcon(topCommand.target)}
+          {commandLeadingIcon}
           {!hideLabels ? (
             <Text numberOfLines={1} style={styles.splitButtonText}>
               {topCommand.title}

@@ -2,8 +2,8 @@
 
 A custom command is a titled snippet of text. The commands button runs the first one, the same way
 the git button runs its primary action. The caret opens the full list, and a keyboard shortcut runs
-one from anywhere. Either way the text goes into the agent composer or the focused terminal and, by
-default, presses Enter. Commands are JSON files the daemon serves; the app never reads the files
+one from anywhere. Either way the text goes into the tab it was run from, a chat or a terminal, and
+by default presses Enter. Commands are JSON files the daemon serves; the app never reads the files
 itself.
 
 The control sits next to the Git actions: in each pane's project tray, in the workspace header on
@@ -15,8 +15,11 @@ enabled control stays visible even when no commands exist; **Manage commands…*
 ## Editing commands
 
 Use **Settings → Host → Commands** to add, edit, or delete global commands. Set the name, text,
-Agent or Terminal target, whether to submit immediately, and an optional keyboard shortcut.
-These commands are available across the host’s projects. Project-specific commands remain file-authored.
+whether to submit immediately, and an optional keyboard shortcut. To set the shortcut, click the
+field and press the combo: Esc cancels, Delete or Backspace clears. The field keeps one combo; bind a
+multi-step chord under **Settings → Shortcuts**. The field is hidden on mobile, which has no
+shortcuts. These commands are available across the host’s projects. Project-specific commands remain
+file-authored.
 
 Settings writes the global file atomically and updates connected clients without a daemon restart
 or reload. Renaming preserves command identity and shortcut overrides. A stale editor cannot overwrite
@@ -37,7 +40,6 @@ $PASEO_HOME/commands.json                  # global, every project
       "id": "run-tests",
       "title": "Run tests",
       "text": "npm test",
-      "target": "terminal",
       "submit": true,
       "shortcut": "Cmd+Shift+R"
     }
@@ -48,7 +50,8 @@ $PASEO_HOME/commands.json                  # global, every project
 - `title` and `text` are required. Everything else has a default.
 - `id` — optional. Derived from the title when omitted: lowercase, non-alphanumeric runs become one
   dash. A title with no letters or numbers fails the file; give that entry an explicit `id`.
-- `target` — `"agent"` (default) or `"terminal"`.
+- `target` — ignored. The app from v0.9.2 runs a command in whichever tab it starts from; the daemon
+  still reads and serves the field because older apps require it.
 - `submit` — default `true`. With `false`, the text waits for you to send it.
 - `shortcut` — an app-side key combo like `"Cmd+Shift+R"` (`Cmd`/`Ctrl`/`Alt`/`Shift`/`Mod` plus a
   key). The daemon treats it as opaque text; a combo that cannot parse degrades to no shortcut.
@@ -58,20 +61,17 @@ global one leaves the menu.
 
 ## What running one does
 
-A command started from a pane's button uses that pane's tab when the tab matches the command's
-target. A keyboard shortcut, and a command whose target does not match the pane, still follows
-focus.
+A command runs in one tab and never looks for another. A pane's button uses that pane's open tab. A
+keyboard shortcut, or a header button (mobile, or desktop without pane splits), uses the focused
+pane's open tab. Any other kind of tab (browser, file, changes, and so on) is a toast.
 
-**Agent target.** A pane button uses that pane's chat tab when the open tab is a chat. Otherwise the focused pane's chat answers first, then any visible chat. With
-`submit: true` the message is sent through the same path the app uses to drain queued messages — the
-mounted composer is never touched, and the draft is cleared. With `submit: false` the text replaces
-the composer's draft and the tab is surfaced. A draft tab (no agent yet) always takes the second
-path, whatever `submit` says — there is nothing to send to yet.
+**Chat tab.** With `submit: true` the message is sent through the same path the app uses to drain
+queued messages — the mounted composer is never touched, and the draft is cleared. With
+`submit: false` the text replaces the composer's draft. A draft tab (no agent yet) always takes the
+second path, whatever `submit` says — there is nothing to send to yet.
 
-**Terminal target.** A pane button uses that pane's terminal tab when the open tab is a terminal. Otherwise the focused pane's terminal answers first, then any visible terminal. The text is typed
-at the prompt; `submit: true` appends the carriage return. The tab is surfaced either way.
-
-No matching tab at all is a toast, not a silent drop.
+**Terminal tab.** The text is typed at the prompt; `submit: true` appends the carriage return, the
+same as pressing Enter.
 
 ## Shortcuts
 

@@ -40,11 +40,10 @@ import {
   keyboardEventToComboString,
 } from "@/keyboard/shortcut-string";
 import type { ShortcutKey } from "@/utils/format-shortcut";
-import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
+import { useShortcutRecording } from "@/keyboard/use-shortcut-recording";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import { getIsElectronRuntime } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
-import { getDesktopHost } from "@/desktop/host";
 
 const EMPTY_CAPTURED_COMBOS: string[] = [];
 const NO_WORKSPACE_COMMANDS: CustomCommand[] = [];
@@ -344,8 +343,6 @@ export function KeyboardShortcutsSection() {
   const [heldModifiers, setHeldModifiers] = useState<string | null>(null);
   const { overrides, hasOverrides, setOverride, clearOverride, removeOverride, resetAll } =
     useKeyboardShortcutOverrides();
-  const setCapturingShortcut = useKeyboardShortcutsStore((s) => s.setCapturingShortcut);
-  const capturing = useKeyboardShortcutsStore((s) => s.capturingShortcut);
 
   const isFocused = useIsFocused();
   const isMac = getShortcutOs() === "mac";
@@ -404,18 +401,13 @@ export function KeyboardShortcutsSection() {
     setCapturedCombos([]);
     setHeldModifiers(null);
     setCapturingBindingId(null);
-    setCapturingShortcut(false);
-  }, [setCapturingShortcut]);
+  }, []);
 
-  const startCapture = useCallback(
-    (bindingId: string) => {
-      setCapturedCombos([]);
-      setHeldModifiers(null);
-      setCapturingBindingId(bindingId);
-      setCapturingShortcut(true);
-    },
-    [setCapturingShortcut],
-  );
+  const startCapture = useCallback((bindingId: string) => {
+    setCapturedCombos([]);
+    setHeldModifiers(null);
+    setCapturingBindingId(bindingId);
+  }, []);
 
   const saveCapture = useCallback(() => {
     if (capturingBindingId === null || capturedCombos.length === 0) {
@@ -431,52 +423,23 @@ export function KeyboardShortcutsSection() {
     }
   }, [isFocused, capturingBindingId, cancelCapture]);
 
-  useEffect(() => {
-    if (isNative) return;
-    if (capturingBindingId === null) return;
-
-    function handleKeyDown(event: KeyboardEvent) {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const key = event.key ?? "";
-      if (key === "Backspace") {
-        setCapturedCombos((current) => (current.length > 0 ? current.slice(0, -1) : current));
-        return;
-      }
-
-      const comboString = keyboardEventToComboString(event);
-      if (comboString === null) {
-        setHeldModifiers(heldModifiersFromEvent(event));
-        return;
-      }
-
-      setHeldModifiers(null);
-      setCapturedCombos((current) => [...current, comboString]);
+  const handleCaptureKeyDown = useCallback((event: KeyboardEvent) => {
+    const key = event.key ?? "";
+    if (key === "Backspace") {
+      setCapturedCombos((current) => (current.length > 0 ? current.slice(0, -1) : current));
+      return;
     }
 
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown, true);
-    };
-  }, [capturingBindingId]);
+    const comboString = keyboardEventToComboString(event);
+    if (comboString === null) {
+      setHeldModifiers(heldModifiersFromEvent(event));
+      return;
+    }
 
-  useEffect(() => {
-    return () => {
-      setCapturingShortcut(false);
-    };
-  }, [setCapturingShortcut]);
-
-  // Suppress desktop zoom accelerators while capturing so combos like Cmd+- are
-  // recorded instead of zooming the window. No-op outside Electron.
-  useEffect(() => {
-    if (isNative || !capturing) return;
-    const menu = getDesktopHost()?.menu;
-    void menu?.setCapturingShortcut?.(true);
-    return () => {
-      void menu?.setCapturingShortcut?.(false);
-    };
-  }, [capturing]);
+    setHeldModifiers(null);
+    setCapturedCombos((current) => [...current, comboString]);
+  }, []);
+  useShortcutRecording(capturingBindingId === null ? null : handleCaptureKeyDown);
 
   const handleResetAll = useCallback(() => void resetAll(), [resetAll]);
   const handleClearOverride = useCallback(
