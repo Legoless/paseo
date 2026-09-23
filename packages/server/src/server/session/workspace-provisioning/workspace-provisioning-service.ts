@@ -1,6 +1,7 @@
 import type { PluginLifecycle } from "../../plugins/lifecycle/index.js";
 import { describeHookWorkspace } from "../../plugins/lifecycle/index.js";
 import { basename, resolve } from "node:path";
+import type { ProjectCheckoutLitePayload } from "@getpaseo/protocol/messages";
 import type { Logger } from "pino";
 import {
   generateWorkspaceId,
@@ -134,10 +135,26 @@ export function createWorkspaceProvisioningService(deps: {
   workspaceRegistry: WorkspaceRegistry;
   projectRegistry: ProjectRegistry;
   workspaceGitService: Pick<WorkspaceGitService, "getCheckout" | "getSnapshot" | "peekSnapshot">;
+  isDirectory: (path: string) => Promise<boolean>;
   logger: Logger;
   lifecycle?: PluginLifecycle;
 }): WorkspaceProvisioningService {
   const { serverId, workspaceRegistry, projectRegistry, workspaceGitService, logger } = deps;
+
+  /**
+   * Placement facts at a workspace directory, or null when there is nothing
+   * there to read. A git read answers "not a checkout" for a plain directory
+   * and for a directory that is gone, and only the first is evidence that a
+   * worktree stopped being one. That answer therefore counts only while the
+   * directory is there on both sides of the read, so a worktree removed or
+   * unmounted while the read is in flight stays an absence.
+   */
+  async function observeWorkspaceCheckout(cwd: string): Promise<ProjectCheckoutLitePayload | null> {
+    if (!(await deps.isDirectory(cwd))) return null;
+    const checkout = await workspaceGitService.getCheckout(cwd);
+    if (!checkout.isGit && !(await deps.isDirectory(cwd))) return null;
+    return checkout;
+  }
 
   async function runInImportWorkspace<T>(
     input: ImportWorkspaceInput,
@@ -460,14 +477,14 @@ export function createWorkspaceProvisioningService(deps: {
       workspace.members.map(async (member) => {
         const project = await projectRegistry.get(member.projectId);
         if (!project) throw new Error(`Unknown project: ${member.projectId}`);
-        const checkout =
-          workspace.archivedAt || project.archivedAt
-            ? await workspaceGitService.getCheckout(member.cwd)
-            : null;
-        let projectCheckout = checkout;
-        if (checkout && !areEquivalentPaths(project.rootPath, member.cwd)) {
-          projectCheckout = await workspaceGitService.getCheckout(project.rootPath);
+        if (!workspace.archivedAt && !project.archivedAt) {
+          return { member, project, checkout: null, projectCheckout: null };
         }
+        const checkout = await observeWorkspaceCheckout(member.cwd);
+        const projectCheckout =
+          checkout && areEquivalentPaths(project.rootPath, member.cwd)
+            ? checkout
+            : await workspaceGitService.getCheckout(project.rootPath);
         return { member, project, checkout, projectCheckout };
       }),
     );
@@ -497,7 +514,7 @@ export function createWorkspaceProvisioningService(deps: {
     const updates = new Map(
       placements.map(({ member, checkout }) => [
         member.cwd,
-        checkout ? reconcileWorkspacePlacement({ member, checkout })?.fields : undefined,
+        reconcileWorkspacePlacement({ member, checkout })?.fields,
       ]),
     );
     return (
@@ -516,9 +533,11 @@ export function createWorkspaceProvisioningService(deps: {
   ): Promise<PersistedWorkspaceRecord> {
     const updates = new Map<string, Partial<MutableWorkspacePlacement>>();
     for (const member of workspace.members) {
-      const checkout = await workspaceGitService.getCheckout(member.cwd);
+      const checkout = await observeWorkspaceCheckout(member.cwd);
       const project = await projectRegistry.get(member.projectId);
-      if (project && !project.archivedAt) await refreshProjectKind(project, member.cwd, checkout);
+      if (project && !project.archivedAt) {
+        await refreshProjectKind(project, member.cwd, checkout ?? undefined);
+      }
       const update = reconcileWorkspacePlacement({ member, checkout });
       if (update) updates.set(member.cwd, update.fields);
     }

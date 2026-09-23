@@ -36437,6 +36437,27 @@ WARNING: This link could potentially be dangerous`)
           return Boolean(nextLine?.isWrapped && nextCell?.getWidth() === 2);
         }
 
+        // src/pane-find/find-shortcut.ts
+        function isFindShortcut(event, platform) {
+          const primaryModifier = platform.isMac
+            ? event.metaKey && !event.ctrlKey
+            : event.ctrlKey && !event.metaKey;
+          return (
+            primaryModifier && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "f"
+          );
+        }
+
+        // src/utils/mac-user-agent.ts
+        function isMacUserAgent() {
+          if (typeof navigator === "undefined") return false;
+          const userAgent = navigator.userAgent ?? "";
+          const platform = navigator.platform ?? "";
+          return (
+            /Macintosh|Mac OS|iPhone|iPad|iPod/i.test(userAgent) ||
+            /Mac|iPhone|iPad|iPod/i.test(platform)
+          );
+        }
+
         // src/terminal/runtime/terminal-font.ts
         var DEFAULT_TERMINAL_FONT_SIZE = 13;
         var DEFAULT_TERMINAL_FONT_FAMILY = [
@@ -36469,6 +36490,7 @@ WARNING: This link could potentially be dangerous`)
         }
 
         // src/terminal/runtime/terminal-emulator-runtime.ts
+        var FIND_HIGHLIGHT_LIMIT = 2e4;
         function createTerminalResizeEvent(input) {
           return {
             rows: input.rows,
@@ -36477,10 +36499,6 @@ WARNING: This link could potentially be dangerous`)
             forceClaim: input.shouldClaim && input.forceClaim,
           };
         }
-        var isMac =
-          typeof navigator !== "undefined" &&
-          (/Macintosh|Mac OS/i.test(navigator.userAgent ?? "") ||
-            /Mac/i.test(navigator.platform ?? ""));
         var isAppleHandheld =
           typeof navigator !== "undefined" &&
           isAppleHandheldPlatform({
@@ -36510,6 +36528,10 @@ WARNING: This link could potentially be dangerous`)
           };
         }
         var TerminalEmulatorRuntime = class {
+          constructor(options = { isMac: isMacUserAgent() }) {
+            this.options = options;
+          }
+          options;
           callbacks = {};
           pendingModifiers = {
             ctrl: false,
@@ -36518,6 +36540,44 @@ WARNING: This link could potentially be dangerous`)
           };
           terminal = null;
           fitAddon = null;
+          searchAddon = null;
+          findResult = { resultIndex: -1, resultCount: 0 };
+          findQuery = "";
+          findOutputAnchor;
+          findWidgetSize = { width: 0, height: 0 };
+          find = {
+            setWidgetSize: (size) => {
+              this.findWidgetSize = size;
+              this.emitFindResult();
+            },
+            search: (query, direction) => {
+              this.releaseFindOutputAnchor();
+              this.findQuery = query;
+              if (this.terminal && !this.searchAddon) this.loadSearchAddon(this.terminal);
+              const theme = this.terminal?.options.theme;
+              const options = {
+                regex: false,
+                caseSensitive: false,
+                incremental: direction === void 0,
+                decorations: {
+                  matchBorder: theme?.yellow ?? "#b58900",
+                  matchOverviewRuler: theme?.yellow ?? "#b58900",
+                  activeMatchBorder: theme?.blue ?? "#268bd2",
+                  activeMatchColorOverviewRuler: theme?.blue ?? "#268bd2",
+                },
+              };
+              if (direction === "next") this.searchAddon?.findNext(query, options);
+              else this.searchAddon?.findPrevious(query, options);
+            },
+            clear: () => {
+              this.releaseFindOutputAnchor();
+              this.findQuery = "";
+              this.searchAddon?.dispose();
+              this.searchAddon = null;
+              this.findResult = { resultIndex: -1, resultCount: 0 };
+              this.emitFindResult();
+            },
+          };
           fitAndEmitResize = null;
           lastSize = null;
           cleanup = null;
@@ -36555,6 +36615,143 @@ WARNING: This link could potentially be dangerous`)
           }
           setPendingModifiers(input) {
             this.pendingModifiers = input.pendingModifiers;
+          }
+          loadSearchAddon(terminal) {
+            const searchAddon = new A2({ highlightLimit: FIND_HIGHLIGHT_LIMIT });
+            terminal.loadAddon(searchAddon);
+            this.searchAddon = searchAddon;
+            searchAddon.onDidChangeResults((result) => {
+              this.findResult = result;
+              this.emitFindResult();
+            });
+          }
+          releaseFindOutputAnchor() {
+            this.findOutputAnchor?.dispose();
+            this.findOutputAnchor = void 0;
+          }
+          preserveFindViewport(terminal) {
+            if (!this.findQuery || this.findResult.resultCount === 0 || this.findOutputAnchor)
+              return;
+            const buffer = terminal.buffer.active;
+            this.findOutputAnchor = terminal.registerMarker(
+              buffer.viewportY - buffer.baseY - buffer.cursorY,
+            );
+          }
+          writeCopiedSelection(selection) {
+            if (this.callbacks.onCopySelection) {
+              void this.callbacks.onCopySelection(selection);
+              return;
+            }
+            void navigator.clipboard.writeText(selection);
+          }
+          attachKeyEventHandler(terminal) {
+            terminal.attachCustomKeyEventHandler((event) => {
+              if (event.type !== "keydown" || event.isComposing) {
+                return true;
+              }
+              if (this.handleFindShortcut(event)) return false;
+              if (
+                !this.options.isMac &&
+                event.ctrlKey &&
+                !event.shiftKey &&
+                !event.altKey &&
+                !event.metaKey
+              ) {
+                const key = event.key.toLowerCase();
+                if (key === "c" && terminal.hasSelection()) {
+                  this.writeCopiedSelection(terminal.getSelection());
+                  return false;
+                }
+                if (key === "v") {
+                  event.preventDefault();
+                  void navigator.clipboard.readText().then((text) => {
+                    if (text) {
+                      terminal.paste(text);
+                    }
+                    return;
+                  });
+                  return false;
+                }
+                return true;
+              }
+              const normalizedKey = normalizeDomTerminalKey(event.key);
+              if (!normalizedKey || isTerminalModifierDomKey(event.key)) {
+                return true;
+              }
+              if (
+                !shouldInterceptDomTerminalKey({
+                  key: normalizedKey,
+                  ctrlKey: event.ctrlKey,
+                  shiftKey: event.shiftKey,
+                  altKey: event.altKey,
+                  metaKey: event.metaKey,
+                  pendingModifiers: this.pendingModifiers,
+                  enhancedInputActive: this.inputModeTracker.supportsModifiedEnter(),
+                  isAppleHandheld,
+                })
+              ) {
+                return true;
+              }
+              const modifiers = mergeTerminalModifiers({
+                pendingModifiers: this.pendingModifiers,
+                ctrlKey: event.ctrlKey,
+                shiftKey: event.shiftKey,
+                altKey: event.altKey,
+                metaKey: event.metaKey,
+              });
+              this.callbacks.onTerminalKey?.({
+                key: normalizeTerminalTransportKey(normalizedKey),
+                ...modifiers,
+              });
+              if (
+                this.pendingModifiers.ctrl ||
+                this.pendingModifiers.shift ||
+                this.pendingModifiers.alt
+              ) {
+                this.callbacks.onPendingModifiersConsumed?.();
+              }
+              event.preventDefault();
+              event.stopPropagation();
+              return false;
+            });
+          }
+          handleFindShortcut(event) {
+            if (!isFindShortcut(event, this.options) || !this.callbacks.onFindRequest) return false;
+            event.preventDefault();
+            event.stopPropagation();
+            this.callbacks.onFindRequest();
+            return true;
+          }
+          findWidgetCoversSelection() {
+            if (!this.findQuery) return false;
+            const terminal = this.terminal;
+            const element = terminal?.element;
+            const screen2 = element?.querySelector(".xterm-screen");
+            const selection = terminal?.getSelectionPosition();
+            if (!terminal || !element || !screen2 || !selection) return false;
+            const root2 = element.getBoundingClientRect();
+            const grid = screen2.getBoundingClientRect();
+            const cellWidth = grid.width / terminal.cols;
+            const cellHeight = grid.height / terminal.rows;
+            const firstRow = terminal.buffer.active.viewportY;
+            const top = grid.top + (selection.start.y - firstRow) * cellHeight;
+            const bottom = grid.top + (selection.end.y - firstRow + 1) * cellHeight;
+            const rightCol =
+              selection.start.y === selection.end.y ? selection.end.x : terminal.cols;
+            const right = grid.left + rightCol * cellWidth;
+            return (
+              top < root2.top + this.findWidgetSize.height &&
+              bottom > root2.top &&
+              right > root2.right - this.findWidgetSize.width
+            );
+          }
+          emitFindResult() {
+            const placement = this.findWidgetCoversSelection() ? "bottom" : "top";
+            this.callbacks.onFindResult?.({
+              ...this.findResult,
+              limited: this.findResult.resultCount >= FIND_HIGHLIGHT_LIMIT,
+              placement,
+            });
           }
           getInputModeState() {
             return this.inputModeTracker.getState();
@@ -36605,7 +36802,15 @@ WARNING: This link could potentially be dangerous`)
                 },
               }),
             );
-            terminal.loadAddon(new A2({ highlightLimit: 2e4 }));
+            this.loadSearchAddon(terminal);
+            terminal.onWriteParsed(() => {
+              const anchor = this.findOutputAnchor;
+              if (anchor && !anchor.isDisposed) terminal.scrollToLine(anchor.line);
+              if (this.pendingWriteCommits.size === 0) this.releaseFindOutputAnchor();
+            });
+            terminal.onScroll(() => {
+              if (this.findQuery) this.emitFindResult();
+            });
             terminal.loadAddon(new j());
             try {
               terminal.loadAddon(new sa());
@@ -36724,73 +36929,7 @@ WARNING: This link could potentially be dangerous`)
               }
               this.callbacks.onInput?.(data);
             });
-            terminal.attachCustomKeyEventHandler((event) => {
-              if (event.type !== "keydown" || event.isComposing) {
-                return true;
-              }
-              if (!isMac && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
-                const key = event.key.toLowerCase();
-                if (key === "c" && terminal.hasSelection()) {
-                  const selection = terminal.getSelection();
-                  if (this.callbacks.onCopySelection) {
-                    void this.callbacks.onCopySelection(selection);
-                  } else {
-                    void navigator.clipboard.writeText(selection);
-                  }
-                  return false;
-                }
-                if (key === "v") {
-                  event.preventDefault();
-                  void navigator.clipboard.readText().then((text) => {
-                    if (text) {
-                      terminal.paste(text);
-                    }
-                    return;
-                  });
-                  return false;
-                }
-                return true;
-              }
-              const normalizedKey = normalizeDomTerminalKey(event.key);
-              if (!normalizedKey || isTerminalModifierDomKey(event.key)) {
-                return true;
-              }
-              if (
-                !shouldInterceptDomTerminalKey({
-                  key: normalizedKey,
-                  ctrlKey: event.ctrlKey,
-                  shiftKey: event.shiftKey,
-                  altKey: event.altKey,
-                  metaKey: event.metaKey,
-                  pendingModifiers: this.pendingModifiers,
-                  enhancedInputActive: this.inputModeTracker.supportsModifiedEnter(),
-                  isAppleHandheld,
-                })
-              ) {
-                return true;
-              }
-              const modifiers = mergeTerminalModifiers({
-                pendingModifiers: this.pendingModifiers,
-                ctrlKey: event.ctrlKey,
-                shiftKey: event.shiftKey,
-                altKey: event.altKey,
-                metaKey: event.metaKey,
-              });
-              this.callbacks.onTerminalKey?.({
-                key: normalizeTerminalTransportKey(normalizedKey),
-                ...modifiers,
-              });
-              if (
-                this.pendingModifiers.ctrl ||
-                this.pendingModifiers.shift ||
-                this.pendingModifiers.alt
-              ) {
-                this.callbacks.onPendingModifiersConsumed?.();
-              }
-              event.preventDefault();
-              event.stopPropagation();
-              return false;
-            });
+            this.attachKeyEventHandler(terminal);
             const removeTouchListeners = this.setupTouchScrollHandlers({
               root: input.root,
               host: input.host,
@@ -37033,6 +37172,7 @@ WARNING: This link could potentially be dangerous`)
             }
           }
           unmount() {
+            this.releaseFindOutputAnchor();
             this.clearInFlightOutputTimeout();
             const inFlightOperation = this.inFlightOutputOperation;
             this.inFlightOutputOperation = null;
@@ -37053,6 +37193,9 @@ WARNING: This link could potentially be dangerous`)
               window.__paseoTerminal = void 0;
             }
             this.terminal = null;
+            this.searchAddon = null;
+            this.findQuery = "";
+            this.findResult = { resultIndex: -1, resultCount: 0 };
             this.fitAddon = null;
             this.fitAndEmitResize = null;
             this.lastSize = null;
@@ -37116,6 +37259,7 @@ WARNING: This link could potentially be dangerous`)
             }
           }
           submitWrite(terminal, operation) {
+            this.preserveFindViewport(terminal);
             const text = this.inputModeDecoder.decode(operation.data, { stream: true });
             const result = this.inputModeTracker.feed(text);
             if (result.changed) {
@@ -37123,17 +37267,11 @@ WARNING: This link could potentially be dangerous`)
             }
             this.hasUngatedWrites = true;
             const onCommitted = operation.onCommitted;
-            if (!onCommitted) {
-              try {
-                terminal.write(operation.data);
-              } catch {}
-              return;
-            }
             const commit = () => {
               if (!this.pendingWriteCommits.delete(commit)) {
                 return;
               }
-              onCommitted();
+              onCommitted?.();
             };
             this.pendingWriteCommits.add(commit);
             try {
@@ -37572,6 +37710,18 @@ body,
               this.resolveLocalFileLinkRequest(message.requestId, message.target);
               return;
             }
+            if (message.type === "findWidgetSize") {
+              this.runtime?.find.setWidgetSize(message.size);
+              return;
+            }
+            if (message.type === "find") {
+              this.runtime?.find.search(message.query, message.direction);
+              return;
+            }
+            if (message.type === "clearFind") {
+              this.runtime?.find.clear();
+              return;
+            }
             this.receiveMounted(message);
           }
           receiveMounted(message) {
@@ -37637,6 +37787,10 @@ body,
             this.runtime = runtime;
             runtime.setCallbacks({
               callbacks: {
+                onFindRequest: () =>
+                  sendToNative({ type: "findRequest", streamKey: message.streamKey }),
+                onFindResult: (result) =>
+                  sendToNative({ type: "findResult", streamKey: message.streamKey, result }),
                 onInput: (data) =>
                   sendToNative({ type: "input", streamKey: message.streamKey, data }),
                 onResize: ({ rows, cols, shouldClaim, forceClaim }) =>

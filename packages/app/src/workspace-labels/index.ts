@@ -150,6 +150,11 @@ class WorkspaceLabelsController {
     supportsWorkspaceLabels: boolean;
     supportsAgentLabels?: boolean;
   }): Promise<void> {
+    const existing = this.connections.get(input.serverId);
+    if (existing?.client === input.client && input.supportsWorkspaceLabels) {
+      await this.refresh(input.serverId);
+      return;
+    }
     this.disconnect(input.serverId);
     this.agentLabelsSupported.set(input.serverId, input.supportsAgentLabels === true);
     const replica = this.replicas.get(input.serverId) ?? new HostWorkspaceLabelReplica();

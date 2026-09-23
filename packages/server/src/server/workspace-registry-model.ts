@@ -117,11 +117,16 @@ export function initialWorkspacePlacement(
 /**
  * Applies live placement facts without rewriting the workspace's durable name
  * or its creation-time base branch.
+ *
+ * A null checkout is an absence, not an observation: nothing was read at the
+ * workspace directory, so the recorded placement stands. Only a directory that
+ * is there can show that a worktree stopped being one.
  */
 export function reconcileWorkspacePlacement(input: {
   member: PersistedWorkspaceMember;
-  checkout: ProjectCheckoutLitePayload;
+  checkout: ProjectCheckoutLitePayload | null;
 }): WorkspacePlacementUpdate | null {
+  if (!input.checkout) return null;
   const observed = initialWorkspacePlacement({
     source: "checkout",
     cwd: input.member.cwd,

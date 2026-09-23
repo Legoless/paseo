@@ -64,6 +64,8 @@ interface SidebarWorkspaceOrderScope {
   projectViewKey: string;
 }
 
+// Trims each key. Only for persisted state read at migration time, where a
+// stray space is an artifact of an older format rather than part of the key.
 function normalizeKeys(keys: string[]): string[] {
   const seen = new Set<string>();
   const normalized: string[] = [];
@@ -78,6 +80,28 @@ function normalizeKeys(keys: string[]): string[] {
   }
 
   return normalized;
+}
+
+/**
+ * Drops blank keys and duplicates but keeps each key exactly as given. View
+ * keys embed a project's path, so a directory whose name ends in a space
+ * produces a key that ends in a space. Trimming it stores a key that can never
+ * match the one the sidebar looks up, so the caller sees its key as missing,
+ * writes it again, and the effect that reconciles the order never settles.
+ */
+function dedupeKeys(keys: string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const key of keys) {
+    if (!key.trim() || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(key);
+  }
+
+  return deduped;
 }
 
 function normalizeScopedOrders(
@@ -176,71 +200,59 @@ export const useSidebarOrderStore = create<SidebarOrderStoreState>()(
       agentOrderByMember: {},
       getProjectOrder: () => get().projectOrder,
       setProjectOrder: (keys) => {
-        const normalized = normalizeKeys(keys);
-        set({ projectOrder: normalized });
+        set({ projectOrder: dedupeKeys(keys) });
       },
       getPinnedWorkspaceOrder: () => get().pinnedWorkspaceOrder,
       setPinnedWorkspaceOrder: (keys) => {
-        const normalized = normalizeKeys(keys);
-        set({ pinnedWorkspaceOrder: normalized });
+        set({ pinnedWorkspaceOrder: dedupeKeys(keys) });
       },
       getWorkspaceOrder: (projectViewKey) => {
-        const scope = projectViewKey.trim();
-        if (!scope) return [];
-        return get().workspaceOrderByProject[scope] ?? [];
+        if (!projectViewKey.trim()) return [];
+        return get().workspaceOrderByProject[projectViewKey] ?? [];
       },
       setWorkspaceOrder: (projectViewKey, keys) => {
-        const scope = projectViewKey.trim();
-        if (!scope) return;
-        const normalized = normalizeKeys(keys);
+        if (!projectViewKey.trim()) return;
         set((state) => ({
           workspaceOrderByProject: {
             ...state.workspaceOrderByProject,
-            [scope]: normalized,
+            [projectViewKey]: dedupeKeys(keys),
           },
         }));
       },
       getTopLevelWorkspaceOrder: () => get().workspaceOrder,
       setTopLevelWorkspaceOrder: (keys) => {
-        const normalized = normalizeKeys(keys);
-        set({ workspaceOrder: normalized });
+        set({ workspaceOrder: dedupeKeys(keys) });
       },
       getMemberOrder: (workspaceKey) => {
-        const scope = workspaceKey.trim();
-        if (!scope) return [];
-        return get().memberOrderByWorkspace[scope] ?? [];
+        if (!workspaceKey.trim()) return [];
+        return get().memberOrderByWorkspace[workspaceKey] ?? [];
       },
       setMemberOrder: (workspaceKey, keys) => {
-        const scope = workspaceKey.trim();
-        if (!scope) return;
-        const normalized = normalizeKeys(keys);
+        if (!workspaceKey.trim()) return;
         set((state) => ({
           memberOrderByWorkspace: {
             ...state.memberOrderByWorkspace,
-            [scope]: normalized,
+            [workspaceKey]: dedupeKeys(keys),
           },
         }));
       },
+      // Member keys embed a project's cwd, so they keep a trailing space for the same
+      // reason view keys do (see dedupeKeys).
       getAgentOrder: (memberKey) => {
-        const scope = memberKey.trim();
-        if (!scope) return [];
-        return get().agentOrderByMember[scope] ?? [];
+        if (!memberKey.trim()) return [];
+        return get().agentOrderByMember[memberKey] ?? [];
       },
       setAgentOrder: (memberKey, keys) => {
-        const scope = memberKey.trim();
-        if (!scope) return;
-        const normalized = normalizeKeys(keys);
+        if (!memberKey.trim()) return;
         set((state) => ({
           agentOrderByMember: {
             ...state.agentOrderByMember,
-            [scope]: normalized,
+            [memberKey]: dedupeKeys(keys),
           },
         }));
       },
-      rekeyAgentOrder: (fromMemberKey, toMemberKey) => {
-        const from = fromMemberKey.trim();
-        const to = toMemberKey.trim();
-        if (!from || !to || from === to) return;
+      rekeyAgentOrder: (from, to) => {
+        if (!from.trim() || !to.trim() || from === to) return;
         set((state) => {
           const carried = state.agentOrderByMember[from];
           if (!carried) return state;
