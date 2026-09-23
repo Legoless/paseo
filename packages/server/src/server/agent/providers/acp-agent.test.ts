@@ -31,7 +31,7 @@ import {
   describeACPSettingsGate,
   describeCursorSignInGate,
   isACPSettingsGateText,
-  isCursorSignInGateText,
+  readCursorActionGate,
   CURSOR_TRANSPORT_CANCELED_LINE,
   CURSOR_TRANSPORT_UNAVAILABLE_LINE,
   summarizeACPRequestError,
@@ -2781,8 +2781,9 @@ describe("ACPAgentSession", () => {
   });
 
   test("names Cursor's canned sign-in label", () => {
-    expect(isCursorSignInGateText("\n\nPlease sign in to continue")).toBe(true);
-    expect(isCursorSignInGateText("Please sign in to continue the migration.")).toBe(false);
+    expect(readCursorActionGate("\n\nPlease sign in to continue")?.code).toBe("cursor_sign_in");
+    expect(readCursorActionGate("Please sign in to continue the migration.")).toBeNull();
+    expect(readCursorActionGate("toString")).toBeNull();
     expect(describeCursorSignInGate()).toBe(
       "Cursor rejected the request and labeled it as a sign-in. That label is also used when the CLI is already signed in.",
     );
@@ -3174,7 +3175,12 @@ describe("ACPAgentSession", () => {
     expect(events.some((event) => event.type === "turn_completed")).toBe(false);
   });
 
-  test("turns Cursor's canned sign-in line into a failed turn", async () => {
+  test.each([
+    ["Please sign in to continue", "cursor_sign_in"],
+    ["Upgrade your plan to continue", "cursor_usage_limit"],
+    ["Add a payment method to continue", "cursor_payment"],
+  ])("turns Cursor's canned line %j into a failed turn", async (line, code) => {
+    const gate = readCursorActionGate(line);
     const session = createSessionWithConfig({ provider: "cursor" });
     const events: AgentStreamEvent[] = [];
     let resolvePrompt!: (value: PromptResponse) => void;
@@ -3198,7 +3204,7 @@ describe("ACPAgentSession", () => {
       update: {
         sessionUpdate: "agent_message_chunk",
         messageId: "assistant-1",
-        content: { type: "text", text: "\n\nPlease sign in to continue" },
+        content: { type: "text", text: `\n\n${line}` },
       } as SessionUpdate,
     });
     resolvePrompt({ stopReason: "end_turn", usage: { outputTokens: 8 } });
@@ -3219,15 +3225,15 @@ describe("ACPAgentSession", () => {
         turnId,
         item: {
           type: "error",
-          message: describeCursorSignInGate(),
+          message: gate?.error,
         },
       },
     ]);
     expect(events.find((event) => event.type === "turn_failed")).toMatchObject({
       type: "turn_failed",
       turnId,
-      code: "cursor_sign_in",
-      error: describeCursorSignInGate(),
+      code,
+      error: gate?.error,
     });
     expect(events.some((event) => event.type === "turn_completed")).toBe(false);
   });

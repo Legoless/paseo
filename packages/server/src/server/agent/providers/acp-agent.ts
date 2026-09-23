@@ -218,20 +218,44 @@ export function summarizeACPRequestError(error: unknown): {
 }
 
 export const ACP_SETTINGS_GATE_TEXT = "Check your settings to continue";
-// cursor-agent substitutes this for any backend error it tags `login`, including
-// rejections where the CLI is already signed in. The original error is discarded.
-export const CURSOR_SIGN_IN_GATE_TEXT = "Please sign in to continue";
 
 export function isACPSettingsGateText(text: string): boolean {
   return text.trim() === ACP_SETTINGS_GATE_TEXT;
 }
 
-export function isCursorSignInGateText(text: string): boolean {
-  return text.trim() === CURSOR_SIGN_IN_GATE_TEXT;
-}
-
 export function describeCursorSignInGate(): string {
   return "Cursor rejected the request and labeled it as a sign-in. That label is also used when the CLI is already signed in.";
+}
+
+interface CursorActionGate {
+  code: string;
+  error: string;
+}
+
+// cursor-agent replaces a backend error tagged with an action by one of these lines,
+// discards the original error, and ends the turn as end_turn. `login` is also used when
+// the CLI is already signed in; `upgrade` covers spent usage and rate limits, not only plans.
+const CURSOR_ACTION_GATES = new Map<string, CursorActionGate>([
+  ["Please sign in to continue", { code: "cursor_sign_in", error: describeCursorSignInGate() }],
+  [
+    "Upgrade your plan to continue",
+    {
+      code: "cursor_usage_limit",
+      error:
+        "Cursor rejected the request as over your usage or rate limit. Check usage in the Cursor dashboard, switch to Auto, or ask your team admin to raise your limit.",
+    },
+  ],
+  [
+    "Add a payment method to continue",
+    {
+      code: "cursor_payment",
+      error: "Cursor rejected the request until you add a payment method in the Cursor dashboard.",
+    },
+  ],
+]);
+
+export function readCursorActionGate(text: string): CursorActionGate | null {
+  return CURSOR_ACTION_GATES.get(text.trim()) ?? null;
 }
 
 export function describeACPSettingsGate(model: string | null | undefined): string {
@@ -3280,10 +3304,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     if (isACPSettingsGateText(text)) {
       return { code: "settings_gate", error: describeACPSettingsGate(this.currentModel) };
     }
-    if (isCursorSignInGateText(text)) {
-      return { code: "cursor_sign_in", error: describeCursorSignInGate() };
-    }
-    return null;
+    return readCursorActionGate(text);
   }
 
   private describeCursorCannedGate(text: string): string | null {
