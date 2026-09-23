@@ -194,6 +194,7 @@ export const ar = {
     },
   },
   agentControls: {
+    chatHistoryCarryOverFailed: "تعذّر نقل المحادثة. سيبدأ الوكيل الجديد بدونها.",
     provider: {
       fallback: "مزود",
       select: "حدد مزود الوكيل",
@@ -335,6 +336,7 @@ export const ar = {
       copied: "منقول",
     },
     attachments: {
+      toggleChatHistory: "إظهار سجل المحادثة المنقول أو إخفاؤه",
       dismissImage: "تجاهل الصورة",
       closeImage: "إغلاق الصورة",
       imageLoadFailed: "تعذر تحميل الصورة",

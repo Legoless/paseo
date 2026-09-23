@@ -1,12 +1,21 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import {
   CLIENT_SLASH_COMMANDS,
   buildDraftAgentSetup,
   buildProviderSwitchDraftSetup,
   replaceOpenAgentWithDraft,
   resolveClientSlashCommand,
+  switchAgentProviderToDraft,
 } from "@/client-slash-commands";
+import {
+  buildDraftWorkspaceAttachmentScopeKey,
+  resetWorkspaceAttachmentsStore,
+  useWorkspaceAttachmentsStore,
+} from "@/attachments/workspace-attachments-store";
 import type { Agent } from "@/stores/session-store";
+
+type ChatHistoryAttachment = Extract<AgentAttachment, { type: "text" }>;
 
 function createAgent(overrides: Partial<Agent> = {}): Agent {
   const now = new Date("2026-05-15T00:00:00.000Z");
@@ -271,5 +280,159 @@ describe("replaceOpenAgentWithDraft", () => {
     ).resolves.toBeUndefined();
 
     expect(retargetCurrentTab).toHaveBeenCalled();
+  });
+});
+
+describe("switchAgentProviderToDraft", () => {
+  const historyAttachment: ChatHistoryAttachment = {
+    type: "text",
+    mimeType: "text/plain",
+    contextKind: "chat_history",
+    title: "Chat history",
+    text: "<chat-history-summary>prior turns</chat-history-summary>",
+  };
+
+  function createSwitchInput(
+    overrides: Partial<Parameters<typeof switchAgentProviderToDraft>[0]> = {},
+  ): Parameters<typeof switchAgentProviderToDraft>[0] {
+    return {
+      serverId: "server-1",
+      agentId: "agent-1",
+      workspaceId: "workspace-1",
+      setup: buildProviderSwitchDraftSetup({
+        cwd: "/repo",
+        provider: "codex",
+        model: "gpt-5.4",
+      }),
+      draftId: "draft-1",
+      chatHistoryClient: null,
+      retargetCurrentTab: vi.fn(),
+      unpinWorkspaceAgent: vi.fn(),
+      hideWorkspaceAgent: vi.fn(),
+      archiveAgent: vi.fn(async () => {}),
+      ...overrides,
+    };
+  }
+
+  /** Resolves only when the test releases it, so ordering cannot pass by luck. */
+  function createDeferredForkContextClient(itemCount = 7) {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return {
+      release,
+      client: {
+        buildAgentForkContext: vi.fn(async () => {
+          await released;
+          return {
+            requestId: "request-1",
+            agentId: "agent-1",
+            attachment: itemCount === 0 ? null : historyAttachment,
+            itemCount,
+            boundaryCursor: null,
+            boundaryMessageId: null,
+            error: null,
+          };
+        }),
+      },
+    };
+  }
+
+  function readDraftAttachments(draftId: string) {
+    return useWorkspaceAttachmentsStore.getState().attachmentsByScope[
+      buildDraftWorkspaceAttachmentScopeKey(draftId)
+    ];
+  }
+
+  beforeEach(() => {
+    resetWorkspaceAttachmentsStore();
+  });
+
+  it("shows the replacement draft immediately, then carries the history, then archives", async () => {
+    const order: string[] = [];
+    const { release, client } = createDeferredForkContextClient();
+    const retargetCurrentTab = vi.fn(() => {
+      order.push("retarget");
+    });
+    const archiveAgent = vi.fn(async () => {
+      order.push("archive");
+    });
+
+    const switched = switchAgentProviderToDraft(
+      createSwitchInput({ chatHistoryClient: client, retargetCurrentTab, archiveAgent }),
+    );
+    // The fork-context RPC is still in flight: the user already sees the new
+    // draft, and the source agent is still alive to be read from.
+    await Promise.resolve();
+    expect(order).toEqual(["retarget"]);
+    expect(archiveAgent).not.toHaveBeenCalled();
+
+    release();
+    expect(await switched).toBe("carried");
+
+    // Archiving closes the runtime and discards the retained timeline, so the
+    // history has to be in hand before it runs.
+    expect(order).toEqual(["retarget", "archive"]);
+    expect(client.buildAgentForkContext).toHaveBeenCalledWith("agent-1", undefined);
+    expect(readDraftAttachments("draft-1")).toEqual([
+      {
+        kind: "chat_history",
+        id: "chat_history:draft-1",
+        attachment: historyAttachment,
+        source: {
+          serverId: "server-1",
+          agentId: "agent-1",
+          boundaryMessageId: null,
+          boundaryCursor: null,
+          itemCount: 7,
+        },
+      },
+    ]);
+  });
+
+  it("reports the failure to the caller and still completes the switch", async () => {
+    const archiveAgent = vi.fn(async () => {});
+    const chatHistoryClient = {
+      buildAgentForkContext: vi.fn(async () => {
+        throw new Error("host disconnected");
+      }),
+    };
+
+    const outcome = await switchAgentProviderToDraft(
+      createSwitchInput({ chatHistoryClient, archiveAgent }),
+    );
+
+    // Being stranded on the provider you are leaving is worse than arriving
+    // without the history, so the switch completes and the caller is told.
+    expect(outcome).toBe("failed");
+    expect(archiveAgent).toHaveBeenCalledOnce();
+    expect(readDraftAttachments("draft-1")).toBeUndefined();
+  });
+
+  it("leaves the draft clean when the source agent had no conversation yet", async () => {
+    const archiveAgent = vi.fn(async () => {});
+    const { release, client } = createDeferredForkContextClient(0);
+    release();
+
+    const outcome = await switchAgentProviderToDraft(
+      createSwitchInput({ chatHistoryClient: client, archiveAgent }),
+    );
+
+    // Switching provider before ever prompting must not prepend the daemon's
+    // "No chat history to display." to the first real prompt.
+    expect(outcome).toBe("skipped");
+    expect(archiveAgent).toHaveBeenCalledOnce();
+    expect(readDraftAttachments("draft-1")).toBeUndefined();
+  });
+
+  it("switches with a clean draft when the host cannot build fork context", async () => {
+    const archiveAgent = vi.fn(async () => {});
+
+    const outcome = await switchAgentProviderToDraft(createSwitchInput({ archiveAgent }));
+
+    expect(outcome).toBe("skipped");
+    expect(archiveAgent).toHaveBeenCalledOnce();
+    expect(readDraftAttachments("draft-1")).toBeUndefined();
   });
 });

@@ -1,4 +1,8 @@
 import type { AgentProvider } from "@getpaseo/protocol/agent-types";
+import {
+  type ChatHistoryDraftClient,
+  seedDraftChatHistory,
+} from "@/attachments/chat-history-draft";
 import { type Agent, useSessionStore } from "@/stores/session-store";
 import {
   buildWorkspaceTabPersistenceKey,
@@ -118,6 +122,13 @@ export interface ReplaceOpenAgentWithDraftInput {
   unpinWorkspaceAgent: (workspaceKey: string, agentId: string) => void;
   hideWorkspaceAgent: (workspaceKey: string, agentId: string) => void;
   archiveAgent: (input: { serverId: string; agentId: string }) => Promise<unknown>;
+  /**
+   * Runs once the tab already shows the replacement draft and before the source
+   * agent is archived — the only window where the replacement exists and the
+   * source is still readable. Archiving closes the runtime and discards the
+   * retained timeline, so anything that reads the source has to happen here.
+   */
+  beforeArchive?: () => Promise<void>;
 }
 
 export async function replaceOpenAgentWithDraft(
@@ -139,9 +150,68 @@ export async function replaceOpenAgentWithDraft(
     draftId: input.draftId,
     setup: input.setup,
   });
+  await input.beforeArchive?.();
   try {
     await input.archiveAgent({ serverId: input.serverId, agentId: input.agentId });
   } catch (error) {
     console.warn("[replaceOpenAgentWithDraft] failed to archive old agent", error);
   }
+}
+
+// `beforeArchive` is this function's own mechanism for reading the source before
+// it goes, so a caller cannot supply one for it to silently discard.
+export interface SwitchAgentProviderToDraftInput extends Omit<
+  ReplaceOpenAgentWithDraftInput,
+  "beforeArchive"
+> {
+  /**
+   * Fetches the retiring agent's chat history. Null switches without it — a
+   * host predating the `agentForkContext` feature, or a caller that wants the
+   * replacement to start clean the way `/clear` does.
+   */
+  chatHistoryClient: ChatHistoryDraftClient | null;
+}
+
+/** What became of the source agent's conversation. "skipped" means there was none to carry. */
+export type ChatHistoryCarryOutcome = "carried" | "skipped" | "failed";
+
+/**
+ * Switching provider is the one moment a conversation outlives the process that
+ * held it: the reason to switch mid-task — a spent quota — is not a reason to
+ * retell the task. The history rides over as the replacement draft's chat-history
+ * attachment, the same plain-text one Fork builds, so the new provider reads it
+ * without either side knowing the other's transcript format. It lands as a
+ * composer chip, so a switch meant as a clean start is one tap from being one.
+ *
+ * The switch itself never fails on the history: being stranded on the provider
+ * you are trying to leave is worse than arriving without your notes. The caller
+ * gets the outcome instead, because a user who believes the context came along
+ * when it did not is the one person this feature must not create.
+ */
+export async function switchAgentProviderToDraft(
+  input: SwitchAgentProviderToDraftInput,
+): Promise<ChatHistoryCarryOutcome> {
+  const { chatHistoryClient, ...replace } = input;
+  let outcome: ChatHistoryCarryOutcome = "skipped";
+  await replaceOpenAgentWithDraft({
+    ...replace,
+    beforeArchive: chatHistoryClient
+      ? async () => {
+          try {
+            outcome = (await seedDraftChatHistory({
+              client: chatHistoryClient,
+              serverId: input.serverId,
+              agentId: input.agentId,
+              draftId: input.draftId,
+            }))
+              ? "carried"
+              : "skipped";
+          } catch (error) {
+            console.warn("[switchAgentProviderToDraft] failed to carry chat history", error);
+            outcome = "failed";
+          }
+        }
+      : undefined,
+  });
+  return outcome;
 }

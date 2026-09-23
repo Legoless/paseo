@@ -196,6 +196,7 @@ export const ptBR = {
     },
   },
   agentControls: {
+    chatHistoryCarryOverFailed: "Não foi possível levar a conversa. O novo agente começa sem ela.",
     provider: {
       fallback: "Provedor",
       select: "Selecionar provedor do agente",
@@ -340,6 +341,7 @@ export const ptBR = {
       copied: "Copiado",
     },
     attachments: {
+      toggleChatHistory: "Mostrar ou ocultar o histórico de conversa trazido",
       dismissImage: "Dispensar imagem",
       closeImage: "Fechar imagem",
       imageLoadFailed: "Não foi possível carregar a imagem",

@@ -197,6 +197,8 @@ export const ja = {
     },
   },
   agentControls: {
+    chatHistoryCarryOverFailed:
+      "会話を引き継げませんでした。新しいエージェントはこの内容なしで開始します。",
     provider: {
       fallback: "プロバイダー",
       select: "エージェントプロバイダーを選択",
@@ -341,6 +343,7 @@ export const ja = {
       copied: "コピーしました",
     },
     attachments: {
+      toggleChatHistory: "引き継いだチャット履歴の表示を切り替える",
       dismissImage: "画像を閉じる",
       closeImage: "画像を閉じる",
       imageLoadFailed: "画像を読み込めませんでした",
