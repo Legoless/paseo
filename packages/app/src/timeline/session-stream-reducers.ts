@@ -8,6 +8,7 @@ import {
   flushHeadToTail,
   hydrateStreamState,
   isAgentToolCallItem,
+  isUnreconciledLocalUserMessage,
   mergeAgentToolCallItem,
   replaceWithCanonicalStream,
   reduceStreamUpdate,
@@ -158,6 +159,9 @@ export interface ProcessTimelineResponseInput {
   hasActiveInitDeferred: boolean;
   initRequestDirection: InitRequestDirection;
   sendingClientMessageIds: readonly string[];
+  // COMPAT(canonicalSubmittedPrompts): added in v0.2.6; remove after 2027-01-31 once daemon floor >= v0.2.6.
+  // Older hosts leave local prompts untracked, so an unmatched one may still be in flight.
+  hostRecordsSubmittedPrompts?: boolean;
 }
 
 export interface ProcessTimelineResponseOutput {
@@ -503,6 +507,7 @@ function applyTimelineReplacePath(args: {
   currentHead: StreamItem[];
   sendingClientMessageIds: readonly string[];
   preserveContinuity: boolean;
+  hostRecordsSubmittedPrompts: boolean;
   toHydratedEvents: (
     units: TimelineUnit[],
   ) => Array<{ event: AgentStreamEventPayload; timestamp: Date }>;
@@ -515,6 +520,7 @@ function applyTimelineReplacePath(args: {
     currentHead,
     sendingClientMessageIds,
     preserveContinuity,
+    hostRecordsSubmittedPrompts,
     toHydratedEvents,
   } = args;
   const hydratedTail = hydrateStreamState(toHydratedEvents(timelineUnits), {
@@ -530,6 +536,7 @@ function applyTimelineReplacePath(args: {
       epoch: payload.epoch,
       endSeq: payload.endCursor?.seq ?? null,
     },
+    settledLocalsPredateCanonical: payload.hasOlder && hostRecordsSubmittedPrompts,
   });
   const cursor: TimelineCursor | null =
     payload.startCursor && payload.endCursor
@@ -1217,6 +1224,42 @@ function applyTimelineIncrementalPath(args: {
   };
 }
 
+// On a host that records every accepted prompt, a settled local prompt ahead of every
+// positioned row predates the loaded history (see replaceWithCanonicalStream). Older-page
+// and prompt-jump merges order rows by position, so until its canonical twin arrives they
+// would drop it after the rows they merge in.
+function keepPredatingLocalPromptsFirst(
+  tail: StreamItem[],
+  input: {
+    payload: ProcessTimelineResponseInput["payload"];
+    previousTail: StreamItem[];
+    sendingClientMessageIds: readonly string[];
+    hostRecordsSubmittedPrompts: boolean;
+  },
+): StreamItem[] {
+  const mergesByPosition =
+    input.payload.direction === "before" || input.payload.mergeWindow === true;
+  if (!input.hostRecordsSubmittedPrompts || !mergesByPosition) return tail;
+  const predatingIds = new Set<string>();
+  for (const item of input.previousTail) {
+    const isSettledLocalPrompt =
+      item.kind === "user_message" &&
+      isUnreconciledLocalUserMessage(item) &&
+      item.clientMessageId !== undefined &&
+      !input.sendingClientMessageIds.includes(item.clientMessageId);
+    if (!isSettledLocalPrompt) break;
+    predatingIds.add(item.id);
+  }
+  const predating = tail.filter(
+    (item) =>
+      predatingIds.has(item.id) &&
+      item.kind === "user_message" &&
+      isUnreconciledLocalUserMessage(item),
+  );
+  if (predating.length === 0) return tail;
+  return [...predating, ...tail.filter((item) => !predating.includes(item))];
+}
+
 export function processTimelineResponse(
   input: ProcessTimelineResponseInput,
 ): ProcessTimelineResponseOutput {
@@ -1230,6 +1273,7 @@ export function processTimelineResponse(
     initRequestDirection,
     sendingClientMessageIds,
   } = input;
+  const hostRecordsSubmittedPrompts = input.hostRecordsSubmittedPrompts === true;
 
   // ------------------------------------------------------------------
   // Error path: reject init and leave stream state unchanged
@@ -1348,6 +1392,7 @@ export function processTimelineResponse(
         responseEpoch: payload.epoch,
         reset: payload.reset,
       }),
+      hostRecordsSubmittedPrompts,
       toHydratedEvents,
     });
   } else {
@@ -1364,7 +1409,12 @@ export function processTimelineResponse(
     });
   }
 
-  const nextTail = timelineResult.tail;
+  const nextTail = keepPredatingLocalPromptsFirst(timelineResult.tail, {
+    payload,
+    previousTail: currentTail,
+    sendingClientMessageIds,
+    hostRecordsSubmittedPrompts,
+  });
   const nextHead = timelineResult.head;
   const nextCursor = timelineResult.cursor;
   const cursorChanged = timelineResult.cursorChanged;

@@ -418,6 +418,12 @@ export interface CanonicalStreamReplacementInput {
   sendingClientMessageIds: readonly string[];
   preserveContinuity: boolean;
   canonicalCoverage: { epoch: string; endSeq: number | null };
+  /**
+   * The page starts after history start on a host that records every accepted prompt. A
+   * preserved local prompt that is no longer sending then predates the page: its canonical
+   * twin was recorded before the page begins. The draft-create handoff row is the usual case.
+   */
+  settledLocalsPredateCanonical?: boolean;
 }
 
 export interface CanonicalStreamReplacementResult {
@@ -673,11 +679,16 @@ export function replaceWithCanonicalStream(
   }
 
   const retainedTailMessages: UserMessageItem[] = [];
+  const predatingLocals: UserMessageItem[] = [];
   for (const local of unmatchedTailMessages) {
+    const isSending =
+      local.clientMessageId !== undefined && sendingClientMessageIds.has(local.clientMessageId);
     const preserveLocal = input.preserveContinuity
       ? isUnreconciledLocalUserMessage(local)
-      : local.clientMessageId !== undefined && sendingClientMessageIds.has(local.clientMessageId);
-    if (preserveLocal) {
+      : isSending;
+    if (preserveLocal && input.settledLocalsPredateCanonical && !isSending) {
+      predatingLocals.push(local);
+    } else if (preserveLocal) {
       nextTail.push(local);
     } else if (
       input.preserveContinuity &&
@@ -690,7 +701,7 @@ export function replaceWithCanonicalStream(
   nextHead = [...retainedTailMessages, ...nextHead];
 
   const replacement = preserveReplacementHead(
-    nextTail,
+    [...predatingLocals, ...nextTail],
     nextHead,
     input.preserveContinuity,
     sendingClientMessageIds,

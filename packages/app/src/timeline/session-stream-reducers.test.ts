@@ -314,6 +314,32 @@ const baseTimelineInput: ProcessTimelineResponseInput = {
   sendingClientMessageIds: [],
 };
 
+const firstPromptClientMessageId = "draft-1:initial-message";
+const createdAgentFirstPrompt = makeSubmittedUserMessage(
+  "continue the last session",
+  firstPromptClientMessageId,
+);
+const latestTailPayload: ProcessTimelineResponseInput["payload"] = {
+  ...baseTimelineInput.payload,
+  direction: "tail",
+  window: { minSeq: 1, maxSeq: 44, nextSeq: 45 },
+  startCursor: { seq: 5 },
+  endCursor: { seq: 44 },
+  entries: [makeTimelineEntry(5, "reading", "reasoning"), makeTimelineEntry(44, "TL;DR: done")],
+  hasOlder: true,
+};
+
+function bootstrapLatestTail(input: Partial<ProcessTimelineResponseInput> = {}) {
+  return processTimelineResponse({
+    ...baseTimelineInput,
+    currentTail: [createdAgentFirstPrompt],
+    isInitializing: true,
+    hasActiveInitDeferred: true,
+    payload: latestTailPayload,
+    ...input,
+  });
+}
+
 const baseStreamInput: ProcessAgentStreamEventInput = {
   event: makeTimelineEvent("hello"),
   seq: undefined,
@@ -1304,6 +1330,137 @@ describe("processTimelineResponse", () => {
     });
 
     expect(result.tail).toEqual([local]);
+  });
+
+  it("keeps a created agent's first prompt above a latest tail that starts after it", () => {
+    const result = bootstrapLatestTail({ hostRecordsSubmittedPrompts: true });
+
+    expect(result.tail.map((item) => item.kind)).toEqual([
+      "user_message",
+      "thought",
+      "assistant_message",
+    ]);
+    expect(result.tail[0]).toBe(createdAgentFirstPrompt);
+  });
+
+  it("moves a created agent's first prompt into canonical order when the older page arrives", () => {
+    const bootstrap = bootstrapLatestTail({ hostRecordsSubmittedPrompts: true });
+    const canonicalPrompt: TimelineResponseEntry = {
+      ...makeTimelineEntry(1, createdAgentFirstPrompt.text, "user_message"),
+      item: {
+        type: "user_message",
+        text: createdAgentFirstPrompt.text,
+        messageId: firstPromptClientMessageId,
+        clientMessageId: firstPromptClientMessageId,
+      },
+    };
+
+    const result = processTimelineResponse({
+      ...baseTimelineInput,
+      currentTail: bootstrap.tail,
+      currentHead: bootstrap.head,
+      currentCursor: bootstrap.cursor ?? undefined,
+      hostRecordsSubmittedPrompts: true,
+      payload: {
+        ...latestTailPayload,
+        direction: "before",
+        startCursor: { seq: 1 },
+        endCursor: { seq: 4 },
+        entries: [canonicalPrompt, makeTimelineEntry(4, "planning", "reasoning")],
+        hasNewer: true,
+        hasOlder: false,
+      },
+    });
+
+    const userMessages = result.tail.filter((item) => item.kind === "user_message");
+    expect(userMessages).toEqual([
+      expect.objectContaining({ clientMessageId: firstPromptClientMessageId }),
+    ]);
+    expect(result.tail[0]).toEqual(expect.objectContaining({ kind: "user_message" }));
+    expect(result.tail.at(-1)).toEqual(
+      expect.objectContaining({ kind: "assistant_message", text: "TL;DR: done" }),
+    );
+  });
+
+  it("keeps a created agent's first prompt first when an older page stops short of it", () => {
+    const bootstrap = bootstrapLatestTail({ hostRecordsSubmittedPrompts: true });
+
+    const result = processTimelineResponse({
+      ...baseTimelineInput,
+      currentTail: bootstrap.tail,
+      currentHead: bootstrap.head,
+      currentCursor: bootstrap.cursor ?? undefined,
+      hostRecordsSubmittedPrompts: true,
+      payload: {
+        ...latestTailPayload,
+        direction: "before",
+        startCursor: { seq: 3 },
+        endCursor: { seq: 4 },
+        entries: [
+          makeTimelineEntry(3, "earlier reading", "reasoning"),
+          makeTimelineEntry(4, "plan"),
+        ],
+        hasNewer: true,
+        hasOlder: true,
+      },
+    });
+
+    expect(result.tail[0]).toBe(createdAgentFirstPrompt);
+    expect(result.tail).toHaveLength(bootstrap.tail.length + 2);
+  });
+
+  it("keeps a created agent's first prompt first after a prompt jump", () => {
+    const bootstrap = bootstrapLatestTail({ hostRecordsSubmittedPrompts: true });
+
+    const result = processTimelineResponse({
+      ...baseTimelineInput,
+      currentTail: bootstrap.tail,
+      currentHead: bootstrap.head,
+      currentCursor: bootstrap.cursor ?? undefined,
+      hostRecordsSubmittedPrompts: true,
+      payload: {
+        ...latestTailPayload,
+        direction: "before",
+        mergeWindow: true,
+        startCursor: { seq: 10 },
+        endCursor: { seq: 20 },
+        entries: [
+          makeTimelineEntry(12, "second turn reading", "reasoning"),
+          {
+            ...makeTimelineEntry(15, "second prompt", "user_message"),
+            item: {
+              type: "user_message",
+              text: "second prompt",
+              messageId: "client-second",
+              clientMessageId: "client-second",
+            },
+          },
+          makeTimelineEntry(18, "second answer"),
+        ],
+        hasNewer: true,
+        hasOlder: true,
+      },
+    });
+
+    expect(result.tail[0]).toBe(createdAgentFirstPrompt);
+    expect(result.tail.at(-1)).toEqual(
+      expect.objectContaining({ kind: "assistant_message", text: "TL;DR: done" }),
+    );
+  });
+
+  it("appends a sending prompt after a latest tail with older history", () => {
+    const result = bootstrapLatestTail({
+      hostRecordsSubmittedPrompts: true,
+      sendingClientMessageIds: [firstPromptClientMessageId],
+    });
+
+    expect(result.tail.at(-1)).toBe(createdAgentFirstPrompt);
+  });
+
+  it("appends an untracked prompt after a latest tail on an older host", () => {
+    const result = bootstrapLatestTail();
+
+    expect(result.tail.at(-1)).toBe(createdAgentFirstPrompt);
   });
 
   it("drops an unreconciled local row omitted by a known epoch change", () => {
