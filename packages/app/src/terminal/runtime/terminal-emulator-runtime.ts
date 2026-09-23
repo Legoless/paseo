@@ -57,6 +57,12 @@ export interface TerminalEmulatorRuntimeMountInput {
   theme: ITheme;
   fontFamily?: string;
   fontSize?: number;
+  /**
+   * Regenerate the WebGL glyph atlas at the first snapshot commit. Only for a renderer that
+   * holds this one terminal (the webview guest): every embedded terminal in a window shares
+   * one atlas, and clearing it blanks the glyphs of every other terminal on screen.
+   */
+  resetTextureAtlasOnFirstSnapshot?: boolean;
 }
 
 export interface TerminalEmulatorRuntimeCallbacks {
@@ -247,7 +253,7 @@ export class TerminalEmulatorRuntime {
   // after another barrier it's false and the barrier applies immediately, saving a parse
   // cycle of latency. Cleared when a barrier starts (it gates every write before it).
   private hasUngatedWrites = false;
-  private needsTextureAtlasReset = true;
+  private needsTextureAtlasReset = false;
   private readonly inputModeDecoder = new TextDecoder();
   private suppressInput = false;
   private readonly inputModeTracker = new TerminalInputModeTracker();
@@ -440,6 +446,7 @@ export class TerminalEmulatorRuntime {
     this.unmount();
 
     input.host.innerHTML = "";
+    this.needsTextureAtlasReset = input.resetTextureAtlasOnFirstSnapshot === true;
     this.lastSize = null;
     this.inputModeTracker.reset();
     this.emitInputModeChange();

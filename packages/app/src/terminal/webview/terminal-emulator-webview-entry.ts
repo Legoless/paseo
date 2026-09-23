@@ -379,6 +379,8 @@ class TerminalWebViewBridge {
       theme: message.theme,
       fontFamily: message.fontFamily,
       fontSize: message.fontSize,
+      // This page renders one terminal at a time, so its glyph atlas is never shared.
+      resetTextureAtlasOnFirstSnapshot: true,
     });
     sendToNative({ type: "rendererReady", streamKey: message.streamKey, isReady: true });
   }
