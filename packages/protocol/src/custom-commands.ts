@@ -57,6 +57,8 @@ export const CustomCommandWireSchema: z.ZodType<CustomCommand> = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   text: z.string().min(1),
+  // COMPAT(customCommandTarget): added in v0.9.2, remove after 2027-03-23. Apps from v0.9.2 run a
+  // command in the tab it was started from and ignore `target`; older apps require it here.
   target: CustomCommandTargetSchema,
   submit: z.boolean(),
   shortcut: z.string().min(1).optional(),
