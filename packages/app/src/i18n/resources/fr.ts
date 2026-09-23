@@ -199,6 +199,8 @@ export const fr = {
     },
   },
   agentControls: {
+    chatHistoryCarryOverFailed:
+      "Impossible de transférer la conversation. Le nouvel agent démarre sans elle.",
     provider: {
       fallback: "Fournisseur",
       select: "Sélectionnez le fournisseur d'agent",
@@ -342,6 +344,7 @@ export const fr = {
       copied: "Copié",
     },
     attachments: {
+      toggleChatHistory: "Afficher ou masquer l'historique de conversation transféré",
       dismissImage: "Ignorer l'image",
       closeImage: "Fermer l'image",
       imageLoadFailed: "Impossible de charger l'image",

@@ -1,10 +1,9 @@
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import type {
-  AgentForkContextOptions,
-  DaemonClient,
-} from "@getpaseo/client/internal/daemon-client";
-import type { WorkspaceComposerAttachment } from "@/attachments/types";
+import {
+  type ChatHistoryDraftBoundary,
+  seedDraftChatHistory,
+} from "@/attachments/chat-history-draft";
 import type { AssistantForkTarget } from "@/components/assistant-fork-menu";
 import type { ToastApi } from "@/components/toast-host";
 import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
@@ -13,10 +12,6 @@ import { useHostFeature } from "@/runtime/host-features";
 import { generateDraftId } from "@/stores/draft-keys";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { useSessionStore } from "@/stores/session-store";
-import {
-  buildDraftWorkspaceAttachmentScopeKey,
-  useWorkspaceAttachmentsStore,
-} from "@/attachments/workspace-attachments-store";
 import { useWorkspaceDraftSubmissionStore } from "@/stores/workspace-draft-submission-store";
 import { toErrorMessage } from "@/utils/error-messages";
 import { buildNewWorkspaceRoute } from "@/utils/host-routes";
@@ -40,16 +35,7 @@ export type ForkAgentSource = Pick<
   | "projectPlacement"
 >;
 
-/**
- * Boundary marking where the forked context should stop. Omit it entirely to
- * fork the whole timeline *up to now* — including a partially streamed
- * in-flight turn. `selectForkContextRows` projects the full timeline when
- * neither field is present, which is what makes mid-run forking work.
- */
-export type ForkAgentBoundary = Pick<
-  AgentForkContextOptions,
-  "boundaryCursor" | "boundaryMessageId"
->;
+export type ForkAgentBoundary = ChatHistoryDraftBoundary;
 
 export interface ForkAgentRequest {
   agentId: string;
@@ -64,30 +50,6 @@ export interface UseForkAgentInput {
   toast?: ToastApi | null;
   /** Read-only surfaces (provider subagent panes) must never fork. */
   readOnly?: boolean;
-}
-
-function buildChatHistoryAttachment(input: {
-  draftId: string;
-  serverId: string;
-  agentId: string;
-  payload: Awaited<ReturnType<DaemonClient["buildAgentForkContext"]>>;
-  missingAttachmentMessage: string;
-}): WorkspaceComposerAttachment {
-  if (!input.payload.attachment) {
-    throw new Error(input.missingAttachmentMessage);
-  }
-  return {
-    kind: "chat_history",
-    id: `chat_history:${input.draftId}`,
-    attachment: input.payload.attachment,
-    source: {
-      serverId: input.serverId,
-      agentId: input.agentId,
-      boundaryMessageId: input.payload.boundaryMessageId,
-      boundaryCursor: input.payload.boundaryCursor,
-      itemCount: input.payload.itemCount,
-    },
-  };
 }
 
 function buildForkDraftSetup(agent: ForkAgentSource): WorkspaceDraftTabSetup | undefined {
@@ -144,17 +106,13 @@ export function useForkAgent(
       const draftSetup = buildForkDraftSetup(agent);
       const prepareForkDraft = async () => {
         const draftId = generateDraftId();
-        const payload = await client.buildAgentForkContext(agentId, boundary);
-        const attachment = buildChatHistoryAttachment({
-          draftId,
+        await seedDraftChatHistory({
+          client,
           serverId,
           agentId,
-          payload,
+          draftId,
+          boundary,
           missingAttachmentMessage: t("message.actions.forkFailed"),
-        });
-        useWorkspaceAttachmentsStore.getState().setWorkspaceAttachments({
-          scopeKey: buildDraftWorkspaceAttachmentScopeKey(draftId),
-          attachments: [attachment],
         });
         return draftId;
       };

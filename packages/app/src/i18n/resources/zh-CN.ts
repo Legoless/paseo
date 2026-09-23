@@ -195,6 +195,7 @@ export const zhCN = {
     },
   },
   agentControls: {
+    chatHistoryCarryOverFailed: "无法转移对话。新 Agent 将不带这些内容启动。",
     provider: {
       fallback: "Provider",
       select: "选择 Agent Provider",
@@ -336,6 +337,7 @@ export const zhCN = {
       copied: "已复制",
     },
     attachments: {
+      toggleChatHistory: "显示或隐藏转移过来的对话记录",
       dismissImage: "关闭图片",
       closeImage: "关闭图片",
       imageLoadFailed: "无法加载图片",

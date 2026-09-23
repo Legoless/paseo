@@ -48,7 +48,8 @@ import { generateDraftId } from "@/stores/draft-keys";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useArchiveAgent } from "@/hooks/use-archive-agent";
 import { usePaneContext } from "@/panels/pane-context";
-import { buildProviderSwitchDraftSetup, replaceOpenAgentWithDraft } from "@/client-slash-commands";
+import { buildProviderSwitchDraftSetup, switchAgentProviderToDraft } from "@/client-slash-commands";
+import { useHostFeature } from "@/runtime/host-features";
 import { buildLiveAgentModelSelectorProviders, resolveLiveAgentModelPick } from "./live-model-pick";
 import { resolveProviderDefinition } from "@/utils/provider-definitions";
 import { mergeProviderPreferences, useFormPreferences } from "@/hooks/use-form-preferences";
@@ -1577,6 +1578,8 @@ export const AgentControls = memo(function AgentControls({
     useShallow((state) => selectAgentControlsSlice(state, serverId, agentId)),
   );
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
+  const supportsChatHistoryCarryOver = useHostFeature(serverId, "agentForkContext");
+  const { t } = useTranslation();
   const toast = useToast();
   const { workspaceId, retargetCurrentTab } = usePaneContext();
   const { archiveAgent } = useArchiveAgent();
@@ -1666,7 +1669,8 @@ export const AgentControls = memo(function AgentControls({
   );
   // A running agent cannot change the process it is, so every provider switch in
   // this picker archives it and opens a fresh draft. Model rows and profile rows
-  // both land here; only a profile carries mode, thinking and features.
+  // both land here; only a profile carries mode, thinking and features. The
+  // conversation comes along as the draft's chat-history attachment.
   const restartAsDraft = useCallback(
     (next: {
       provider: AgentProvider;
@@ -1678,17 +1682,26 @@ export const AgentControls = memo(function AgentControls({
       if (!agent) {
         return;
       }
-      void replaceOpenAgentWithDraft({
-        serverId,
-        agentId,
-        workspaceId,
-        setup: buildProviderSwitchDraftSetup({ cwd: agent.cwd, ...next }),
-        draftId: generateDraftId(),
-        retargetCurrentTab,
-        unpinWorkspaceAgent,
-        hideWorkspaceAgent,
-        archiveAgent,
-      }).catch((error) => {
+      void (async () => {
+        const outcome = await switchAgentProviderToDraft({
+          serverId,
+          agentId,
+          workspaceId,
+          setup: buildProviderSwitchDraftSetup({ cwd: agent.cwd, ...next }),
+          draftId: generateDraftId(),
+          chatHistoryClient: supportsChatHistoryCarryOver ? client : null,
+          retargetCurrentTab,
+          unpinWorkspaceAgent,
+          hideWorkspaceAgent,
+          archiveAgent,
+        });
+        // Say so when the conversation did not make it. Silence here reads as
+        // "the new agent has your context" and costs the user the retelling
+        // this whole path exists to save.
+        if (outcome === "failed") {
+          toast.error(t("agentControls.chatHistoryCarryOverFailed"));
+        }
+      })().catch((error) => {
         console.warn("[AgentControls] switch provider failed", error);
         toast.error(toErrorMessage(error));
       });
@@ -1697,9 +1710,12 @@ export const AgentControls = memo(function AgentControls({
       agent,
       agentId,
       archiveAgent,
+      client,
       hideWorkspaceAgent,
       retargetCurrentTab,
       serverId,
+      supportsChatHistoryCarryOver,
+      t,
       toast,
       unpinWorkspaceAgent,
       workspaceId,

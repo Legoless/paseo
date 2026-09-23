@@ -195,6 +195,8 @@ export const ko = {
     },
   },
   agentControls: {
+    chatHistoryCarryOverFailed:
+      "대화를 이어가지 못했습니다. 새 에이전트는 대화 내용 없이 시작합니다.",
     provider: {
       fallback: "프로바이더",
       select: "에이전트 프로바이더 선택",
@@ -337,6 +339,7 @@ export const ko = {
       copied: "복사됨",
     },
     attachments: {
+      toggleChatHistory: "이어받은 대화 기록 표시/숨기기",
       dismissImage: "이미지 닫기",
       closeImage: "이미지 닫기",
       imageLoadFailed: "이미지를 불러올 수 없습니다",

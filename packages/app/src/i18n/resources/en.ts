@@ -191,6 +191,8 @@ export const en = {
     },
   },
   agentControls: {
+    chatHistoryCarryOverFailed:
+      "Couldn't carry the conversation over. The new agent starts without it.",
     provider: {
       fallback: "Provider",
       select: "Select agent provider",
@@ -333,6 +335,7 @@ export const en = {
       copied: "Copied",
     },
     attachments: {
+      toggleChatHistory: "Show or hide the carried chat history",
       dismissImage: "Dismiss image",
       closeImage: "Close image",
       imageLoadFailed: "Couldn't load image",

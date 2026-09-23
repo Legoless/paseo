@@ -197,6 +197,7 @@ export const ru = {
     },
   },
   agentControls: {
+    chatHistoryCarryOverFailed: "Не удалось перенести переписку. Новый агент начнёт без неё.",
     provider: {
       fallback: "Провайдер",
       select: "Выбрать провайдера агента",
@@ -340,6 +341,7 @@ export const ru = {
       copied: "Скопировано",
     },
     attachments: {
+      toggleChatHistory: "Показать или скрыть перенесённую историю переписки",
       dismissImage: "Закрыть изображение",
       closeImage: "Закрыть изображение",
       imageLoadFailed: "Не удалось загрузить изображение",
