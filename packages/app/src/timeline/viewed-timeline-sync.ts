@@ -281,6 +281,7 @@ function applyAuthoritativeTimelineResponse(input: {
     hasActiveInitDeferred: Boolean(activeInitDeferred),
     initRequestDirection: activeInitDeferred?.requestDirection ?? "tail",
     sendingClientMessageIds: getSendingClientMessageIds(session?.messageSubmissions.get(agentId)),
+    hostRecordsSubmittedPrompts: session?.serverInfo?.features?.canonicalSubmittedPrompts === true,
   });
 
   if (result.error) {

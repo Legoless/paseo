@@ -260,8 +260,13 @@ drops acknowledged local rows omitted by the new canonical epoch; every transact
 acknowledged by the provider, and no other local row, crosses that destructive boundary. A cold
 reset without an existing epoch is destructive because the client has no continuity anchor.
 
-Tail rows are positioned history, so an unmatched local presentation is appended after the
-canonical replacement rather than ordered by timestamps from different machines. The head is a
+Tail rows are positioned history, so an unmatched local presentation is placed by what the client
+knows, never by timestamps from different machines. A prompt still sending is appended after the
+canonical replacement. On a `canonicalSubmittedPrompts` host, a prompt that is no longer sending
+was recorded before the page, so when the page has older history it goes before the page, and
+older pages and prompt jumps keep it first until its canonical twin arrives. The draft-create
+handoff row is the common case: a long first turn pushes the canonical prompt out of the bounded
+latest tail, and appending it would draw the first prompt under the answer. The head is a
 live overlay: cursorless items stay there during continuity replacement until canonical positions
 arrive, while a destructive replacement retains only active submission transactions.
 
