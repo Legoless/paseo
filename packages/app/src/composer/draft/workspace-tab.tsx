@@ -64,7 +64,7 @@ const DRAFT_CAPABILITIES: AgentCapabilityFlags = {
 };
 
 interface AutoSubmitConfig {
-  provider: string;
+  provider: string | null;
   modeId: string | null;
   model: string | null;
   thinkingOptionId: string | null;
@@ -73,7 +73,7 @@ interface AutoSubmitConfig {
 
 function resolveAutoSubmitConfig(
   pending: {
-    provider: string;
+    provider?: string;
     modeId?: string | null;
     model?: string | null;
     thinkingOptionId?: string | null;
@@ -82,7 +82,7 @@ function resolveAutoSubmitConfig(
 ): AutoSubmitConfig | null {
   if (!pending) return null;
   return {
-    provider: pending.provider,
+    provider: pending.provider ?? null,
     modeId: pending.modeId ?? null,
     model: pending.model ?? null,
     thinkingOptionId: pending.thinkingOptionId ?? null,
@@ -175,7 +175,7 @@ async function submitDraftCreateRequest(input: {
     throw new Error(input.hostDisconnectedMessage);
   }
 
-  const provider = autoSubmitConfig?.provider ?? composerState.selectedProvider;
+  const provider = autoSubmitConfig?.provider || composerState.selectedProvider;
   if (!provider) {
     throw new Error(input.selectModelMessage);
   }
@@ -241,7 +241,7 @@ function buildDraftAgentSnapshot(input: {
     modeOptionIds: composerState.modeOptions.map((mode) => mode.id),
     selectedMode: composerState.selectedMode,
   });
-  const provider = autoSubmitConfig?.provider ?? composerState.selectedProvider;
+  const provider = autoSubmitConfig?.provider || composerState.selectedProvider;
   if (!provider) {
     throw new Error(input.selectModelMessage);
   }

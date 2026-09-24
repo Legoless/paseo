@@ -7,13 +7,19 @@ import { encodeImages } from "@/utils/encode-images";
 import { useDraftStore } from "@/stores/draft-store";
 import { buildDraftStoreKey } from "@/stores/draft-keys";
 import { useSessionStore } from "@/stores/session-store";
+import { useWorkspaceDraftSubmissionStore } from "@/stores/workspace-draft-submission-store";
+import { generateMessageId } from "@/types/stream";
 import {
   collectAllTabs,
   findPaneById,
   useWorkspaceLayoutStore,
   type WorkspaceLayout,
 } from "@/stores/workspace-layout-store";
-import { buildWorkspaceTabPersistenceKey, type WorkspaceTabTarget } from "@/workspace-tabs/model";
+import {
+  buildWorkspaceTabPersistenceKey,
+  type WorkspaceDraftTabSetup,
+  type WorkspaceTabTarget,
+} from "@/workspace-tabs/model";
 import { i18n } from "@/i18n/i18next";
 
 interface CommandTab {
@@ -37,7 +43,15 @@ export interface RunCustomCommandInput {
 
 export type CommandTabTarget =
   | { kind: "terminal"; tabId: string; terminalId: string }
-  | { kind: "chat"; tabId: string; draftKey: string; agentId: string | null };
+  | {
+      kind: "chat";
+      tabId: string;
+      draftKey: string;
+      agentId: string | null;
+      draftId?: string;
+      cwd?: string;
+      setup?: WorkspaceDraftTabSetup;
+    };
 
 // The pane the workspace screen shows: an unfocused layout (a workspace marked unread) still
 // displays its restore pane.
@@ -84,10 +98,58 @@ export function resolveCommandTabTarget(input: {
           draftId: tab.target.draftId,
         }),
         agentId: null,
+        draftId: tab.target.draftId,
+        cwd: tab.target.cwd,
+        setup: tab.target.setup,
       };
     default:
       return null;
   }
+}
+
+function enqueueDraftTabCommandSubmission(input: {
+  serverId: string;
+  workspaceId: string;
+  commandText: string;
+  target: Extract<CommandTabTarget, { kind: "chat" }>;
+}): void {
+  const { serverId, workspaceId, commandText, target } = input;
+  useWorkspaceDraftSubmissionStore.getState().setPending({
+    serverId,
+    workspaceId,
+    draftId: target.draftId ?? "",
+    text: commandText.trim(),
+    attachments: [],
+    cwd: target.setup?.cwd ?? target.cwd ?? "",
+    provider: target.setup?.provider,
+    clientMessageId: generateMessageId(),
+    timestamp: Date.now(),
+    modeId: target.setup?.modeId ?? undefined,
+    model: target.setup?.model ?? undefined,
+    thinkingOptionId: target.setup?.thinkingOptionId ?? undefined,
+    featureValues: target.setup?.featureValues,
+    allowEmptyText: true,
+  });
+  useDraftStore.getState().clearDraftInput({ draftKey: target.draftKey, lifecycle: "sent" });
+}
+
+async function dispatchAgentCommandMessage(input: {
+  client: DaemonClient;
+  serverId: string;
+  agentId: string;
+  commandText: string;
+}): Promise<void> {
+  const supportsForgeAttachments =
+    useSessionStore.getState().sessions[input.serverId]?.serverInfo?.features?.forgeSearch === true;
+  await dispatchComposerAgentMessage({
+    client: input.client,
+    agentId: input.agentId,
+    text: input.commandText,
+    attachments: [],
+    attachmentSubmitFormat: resolveComposerAttachmentSubmitFormat({ supportsForgeAttachments }),
+    encodeImages,
+    submission: createMessageSubmissionWriter(input.serverId),
+  });
 }
 
 export async function runCustomCommand(input: RunCustomCommandInput): Promise<void> {
@@ -120,33 +182,47 @@ export async function runCustomCommand(input: RunCustomCommandInput): Promise<vo
     return;
   }
 
-  // A draft tab has no agent yet, so there is nothing to send to — the text lands in the
-  // composer for the user to submit, the same place a `submit: false` command goes.
-  if (!command.submit || !target.agentId) {
+  if (!command.submit) {
     await useDraftStore
       .getState()
       .replaceDraftText({ draftKey: target.draftKey, text: command.text });
     layoutStore.focusTab(workspaceKey, target.tabId);
     return;
   }
+
   if (!client) {
     onError(i18n.t("common.errors.daemonClientUnavailable"));
     return;
   }
 
+  // A draft tab has no running agent yet. If submit is requested, enqueue an auto-submit
+  // so the draft creates the agent with the command's prompt; without draftId, fall back
+  // to draft text replacement.
+  if (!target.agentId) {
+    if (!target.draftId) {
+      await useDraftStore
+        .getState()
+        .replaceDraftText({ draftKey: target.draftKey, text: command.text });
+    } else {
+      enqueueDraftTabCommandSubmission({
+        serverId,
+        workspaceId,
+        commandText: command.text,
+        target,
+      });
+    }
+    layoutStore.focusTab(workspaceKey, target.tabId);
+    return;
+  }
+
   // Send path only, out of the composer: the same wiring the host runtime uses to drain
   // queued messages, so a mounted input is never touched.
-  const supportsForgeAttachments =
-    useSessionStore.getState().sessions[serverId]?.serverInfo?.features?.forgeSearch === true;
   try {
-    await dispatchComposerAgentMessage({
+    await dispatchAgentCommandMessage({
       client,
+      serverId,
       agentId: target.agentId,
-      text: command.text,
-      attachments: [],
-      attachmentSubmitFormat: resolveComposerAttachmentSubmitFormat({ supportsForgeAttachments }),
-      encodeImages,
-      submission: createMessageSubmissionWriter(serverId),
+      commandText: command.text,
     });
   } catch (error) {
     onError(

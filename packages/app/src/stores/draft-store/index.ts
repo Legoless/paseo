@@ -358,8 +358,14 @@ export const useDraftStore = create<DraftStore>()(
       clearDraftInput: ({ draftKey, lifecycle }) => {
         set((state) => {
           const existing = state.drafts[draftKey];
+          const nextReplacementRequests = {
+            ...state.textReplacementRequestByDraftKey,
+            [draftKey]: (state.textReplacementRequestByDraftKey[draftKey] ?? 0) + 1,
+          };
           if (!existing) {
-            return state;
+            return {
+              textReplacementRequestByDraftKey: nextReplacementRequests,
+            };
           }
           const cleared = applyClearDraftRecord({
             record: existing,
@@ -372,11 +378,15 @@ export const useDraftStore = create<DraftStore>()(
                 ...state.drafts,
                 [draftKey]: cleared,
               },
+              textReplacementRequestByDraftKey: nextReplacementRequests,
             };
           }
           const nextDrafts = { ...state.drafts };
           delete nextDrafts[draftKey];
-          return { drafts: nextDrafts };
+          return {
+            drafts: nextDrafts,
+            textReplacementRequestByDraftKey: nextReplacementRequests,
+          };
         });
 
         scheduleAttachmentGc();
