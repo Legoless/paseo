@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import {
+  APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS,
   APPLICATION_SOCKET_LEASE_MS,
   ApplicationSocketLease,
   MAX_PHYSICAL_SOCKET_BUFFERED_BYTES,
@@ -44,6 +45,49 @@ test("an application ping claims a socket lease", () => {
   now = APPLICATION_SOCKET_LEASE_MS;
 
   expect(lease.listExpired()).toEqual([rawSocket]);
+});
+
+test("a lease check delayed by system sleep does not count the slept time", () => {
+  let now = 0;
+  const lease = new ApplicationSocketLease<object>(() => now);
+  const applicationSocket = {};
+  lease.listExpired();
+  lease.claim(applicationSocket);
+
+  // The clock kept running through 10 minutes of sleep, so the next check runs
+  // late, before the client could ping.
+  now = APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS + 10 * 60_000;
+  expect(lease.listExpired()).toEqual([]);
+
+  // Awake time still counts: the lease expires on the same check it would have without sleep.
+  for (let check = 0; check < 3; check += 1) {
+    now += APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS;
+    expect(lease.listExpired()).toEqual([]);
+  }
+  now += APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS;
+  expect(lease.listExpired()).toEqual([applicationSocket]);
+});
+
+test("a lease renewed after a wake does not also get the slept time", () => {
+  let now = 0;
+  const lease = new ApplicationSocketLease<object>(() => now);
+  const applicationSocket = {};
+  lease.listExpired();
+  lease.claim(applicationSocket);
+
+  // A frame arrives right after a 10 minute sleep, before the overdue check runs.
+  now = APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS + 10 * 60_000;
+  lease.renew(applicationSocket);
+  now += 5;
+  expect(lease.listExpired()).toEqual([]);
+
+  // Then the client goes silent: it is reaped one lease after the renewal.
+  for (let check = 0; check < 4; check += 1) {
+    now += APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS;
+    expect(lease.listExpired()).toEqual([]);
+  }
+  now += APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS;
+  expect(lease.listExpired()).toEqual([applicationSocket]);
 });
 
 test("the shared physical send boundary rejects binary above the hard bound", () => {

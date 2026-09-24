@@ -11,8 +11,11 @@ type Clock = () => number;
 
 export class ApplicationSocketLease<TSocket extends object> {
   private readonly deadlines = new Map<TSocket, number>();
+  private lastCheckAt: number | null = null;
 
-  constructor(private readonly clock: Clock = Date.now) {}
+  // performance.now() is monotonic, but on macOS it still counts system sleep
+  // (libuv reads mach_continuous_time), so listExpired() discounts late checks.
+  constructor(private readonly clock: Clock = () => performance.now()) {}
 
   claim(socket: TSocket): void {
     this.deadlines.set(socket, this.clock() + APPLICATION_SOCKET_LEASE_MS);
@@ -28,8 +31,24 @@ export class ApplicationSocketLease<TSocket extends object> {
     this.deadlines.delete(socket);
   }
 
+  // Call every APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS. A check that runs late
+  // means system sleep or a stalled event loop, when no ping could renew a lease,
+  // so that time does not count: without this, the first check after a wake runs
+  // before any client can ping and terminates every live socket.
   listExpired(): TSocket[] {
     const now = this.clock();
+    const lateMs =
+      this.lastCheckAt === null
+        ? 0
+        : now - this.lastCheckAt - APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS;
+    this.lastCheckAt = now;
+    if (lateMs > 0) {
+      // Capped at one lease from now: a lease renewed after the wake, before this check,
+      // already counts from the wake and must not also get the slept time.
+      for (const [socket, deadline] of this.deadlines) {
+        this.deadlines.set(socket, Math.min(deadline + lateMs, now + APPLICATION_SOCKET_LEASE_MS));
+      }
+    }
     const expired: TSocket[] = [];
     for (const [socket, deadline] of this.deadlines) {
       if (deadline > now) continue;
@@ -40,6 +59,7 @@ export class ApplicationSocketLease<TSocket extends object> {
 
   clear(): void {
     this.deadlines.clear();
+    this.lastCheckAt = null;
   }
 }
 

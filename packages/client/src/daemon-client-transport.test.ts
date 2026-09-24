@@ -75,6 +75,25 @@ describe("daemon-client transport helpers", () => {
     expect(close).toHaveBeenCalledWith(1000, "bye");
   });
 
+  test("createWebSocketTransportFactory still closes a browser socket that rejects the code", () => {
+    // Browser WebSocket.close only accepts 1000 and 3000-4999.
+    const close = vi.fn((code?: number) => {
+      if (code !== undefined && code !== 1000 && (code < 3000 || code > 4999)) {
+        throw new DOMException("Invalid close code", "InvalidAccessError");
+      }
+    });
+    const transport = createWebSocketTransportFactory(() => ({
+      readyState: 1,
+      send: vi.fn(),
+      close,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }))({ url: "ws://example.test" });
+
+    expect(() => transport.close(1001, "Reconnecting")).not.toThrow();
+    expect(close).toHaveBeenLastCalledWith();
+  });
+
   test("createWebSocketTransportFactory passes WebSocket protocols to the socket factory", () => {
     const socketFactory = vi.fn(() => ({
       readyState: 1,

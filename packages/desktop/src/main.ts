@@ -3,6 +3,8 @@ process.emitWarning = (() => {}) as typeof process.emitWarning;
 import log from "electron-log/main";
 log.transports.console.level = "info";
 log.initialize({ spyRendererConsole: true });
+// Browser-pane guest console spam rotated the 1 MB default away within hours.
+log.transports.file.maxSize = 10 * 1024 ** 2;
 
 import { inheritLoginShellEnv } from "./login-shell-env.js";
 
@@ -40,6 +42,7 @@ import {
   setupWindowStatePersistence,
   setupDefaultContextMenu,
   setupDragDropPrevention,
+  setupRendererRecovery,
   buildStandardContextMenuItems,
 } from "./window/window-manager.js";
 import {
@@ -750,6 +753,7 @@ async function createWindow(
   }
 
   setupDarwinCompositorWatchdog(mainWindow);
+  setupRendererRecovery(mainWindow, { log });
   setupWindowResizeEvents(mainWindow);
   if (windowStateStore) {
     setupWindowStatePersistence(mainWindow, windowStateStore);
@@ -833,6 +837,8 @@ function ownedDesktopWindow(win: BrowserWindow): OwnedDesktopWindow<AgentDeepLin
     restore: () => win.restore(),
     show: () => win.show(),
     focus: () => win.focus(),
+    isCrashed: () => win.webContents.isCrashed(),
+    reload: () => win.webContents.reload(),
     sendAgent: (target) => win.webContents.send("paseo:event:open-agent", target),
   };
 }
@@ -891,6 +897,20 @@ function receiveAgentDeepLink(input: string): void {
 app.on("open-url", (event, url) => {
   event.preventDefault();
   receiveAgentDeepLink(url);
+});
+
+// Logging only: record why a GPU, network-service or renderer process died
+// (guests included), so a blank or frozen window can be diagnosed from main.log.
+app.on("child-process-gone", (_event, details) => {
+  log.warn("[desktop] child process gone", details);
+});
+app.on("render-process-gone", (_event, contents, details) => {
+  log.warn("[desktop] render process gone", {
+    webContentsId: contents.id,
+    type: contents.getType(),
+    reason: details.reason,
+    exitCode: details.exitCode,
+  });
 });
 
 function setupSingleInstanceLock(): boolean {
@@ -952,6 +972,10 @@ async function runCliPassthroughIfRequested(): Promise<boolean> {
 }
 
 async function bootstrap(): Promise<void> {
+  // Send main-process console output (compositor watchdog, window manager) to main.log. GUI
+  // only: the CLI passthrough prints through console and must keep plain output. Safe:
+  // electron-log's console transport captured the original console methods on load.
+  Object.assign(console, log.functions);
   if (!setupSingleInstanceLock()) {
     return;
   }

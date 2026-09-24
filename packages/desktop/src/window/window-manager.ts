@@ -417,6 +417,67 @@ export function setupDefaultContextMenu(win: BrowserWindow): void {
   });
 }
 
+const RENDERER_RELOAD_LIMIT = 3;
+const RENDERER_RELOAD_WINDOW_MS = 5 * 60_000;
+
+interface RecoverableWebContents {
+  on(
+    event: "render-process-gone",
+    listener: (event: unknown, details: Electron.RenderProcessGoneDetails) => void,
+  ): void;
+  on(event: "unresponsive" | "responsive", listener: () => void): void;
+  getURL(): string;
+  reload(): void;
+}
+
+interface RecoverableWindow {
+  isDestroyed(): boolean;
+  readonly webContents: RecoverableWebContents;
+}
+
+interface RendererRecoveryLog {
+  warn(...params: unknown[]): void;
+  error(...params: unknown[]): void;
+}
+
+/**
+ * A dead renderer (crash, OOM, or an external kill) leaves the window showing only
+ * its background color, and Electron never reloads it by itself. Reload it, but give
+ * up after a few deaths so a renderer that dies on load does not loop; on macOS, clicking
+ * the dock icon retries (see restoreWhenActivated in desktop-window-owner.ts). Hangs are
+ * only logged: recovering one means killing the renderer and losing its state.
+ */
+export function setupRendererRecovery(
+  win: RecoverableWindow,
+  deps: { log: RendererRecoveryLog; now?: () => number },
+): void {
+  const now = deps.now ?? Date.now;
+  let reloadTimes: number[] = [];
+
+  win.webContents.on("render-process-gone", (_event, details) => {
+    // Before the first page commits, Chromium starts a new renderer for the pending navigation
+    // itself; a reload here would abort the window's initial loadURL.
+    if (win.isDestroyed() || details.reason === "clean-exit" || win.webContents.getURL() === "") {
+      return;
+    }
+    const at = now();
+    reloadTimes = reloadTimes.filter((time) => at - time < RENDERER_RELOAD_WINDOW_MS);
+    const gone = { reason: details.reason, exitCode: details.exitCode };
+    if (reloadTimes.length >= RENDERER_RELOAD_LIMIT) {
+      deps.log.error(
+        `[window] renderer gone; stopped reloading after ${RENDERER_RELOAD_LIMIT} reloads in 5 minutes; click the dock icon (macOS) or reload the window to retry`,
+        gone,
+      );
+      return;
+    }
+    reloadTimes.push(at);
+    deps.log.error("[window] renderer gone; reloading", gone);
+    win.webContents.reload();
+  });
+  win.webContents.on("unresponsive", () => deps.log.warn("[window] renderer unresponsive"));
+  win.webContents.on("responsive", () => deps.log.warn("[window] renderer responsive again"));
+}
+
 /**
  * Prevent Electron from navigating to files dragged onto the window.
  * The renderer handles drag-drop via standard HTML5 APIs instead.

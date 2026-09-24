@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -10,7 +11,35 @@ import {
   readWindowChromeUpdate,
   readWindowTheme,
   resolveWindowBounds,
+  setupRendererRecovery,
 } from "./window-manager";
+
+function rendererRecoveryHarness() {
+  let url = "paseo://app/";
+  const webContents = Object.assign(new EventEmitter(), {
+    reload: vi.fn(),
+    getURL: () => url,
+  });
+  let destroyed = false;
+  let time = 0;
+  const log = { warn: vi.fn(), error: vi.fn() };
+  setupRendererRecovery({ isDestroyed: () => destroyed, webContents }, { log, now: () => time });
+  return {
+    webContents,
+    log,
+    gone: (reason: Electron.RenderProcessGoneDetails["reason"]) =>
+      webContents.emit("render-process-gone", {}, { reason, exitCode: 9 }),
+    destroy: () => {
+      destroyed = true;
+    },
+    uncommitted: () => {
+      url = "";
+    },
+    advance: (ms: number) => {
+      time += ms;
+    },
+  };
+}
 
 describe("window-manager", () => {
   describe("readBadgeCount", () => {
@@ -188,6 +217,67 @@ describe("window-manager", () => {
         width: 1024,
         height: 720,
       });
+    });
+  });
+
+  describe("setupRendererRecovery", () => {
+    it("reloads a renderer that was killed or crashed and logs why", () => {
+      const h = rendererRecoveryHarness();
+      h.gone("killed");
+      h.gone("crashed");
+      expect(h.webContents.reload).toHaveBeenCalledTimes(2);
+      expect(h.log.error).toHaveBeenCalledWith("[window] renderer gone; reloading", {
+        reason: "killed",
+        exitCode: 9,
+      });
+    });
+
+    it("does not reload after a clean exit or once the window is destroyed", () => {
+      const h = rendererRecoveryHarness();
+      h.gone("clean-exit");
+      h.destroy();
+      h.gone("crashed");
+      expect(h.webContents.reload).not.toHaveBeenCalled();
+      expect(h.log.error).not.toHaveBeenCalled();
+    });
+
+    it("leaves a renderer that dies before the first page commits to Chromium", () => {
+      const h = rendererRecoveryHarness();
+      h.uncommitted();
+      h.gone("killed");
+      expect(h.webContents.reload).not.toHaveBeenCalled();
+    });
+
+    it("stops after three reloads in five minutes and allows reloads again later", () => {
+      const h = rendererRecoveryHarness();
+      h.gone("crashed");
+      h.advance(60_000);
+      h.gone("crashed");
+      h.advance(60_000);
+      h.gone("crashed");
+      h.advance(60_000);
+      h.gone("crashed");
+      expect(h.webContents.reload).toHaveBeenCalledTimes(3);
+      expect(h.log.error).toHaveBeenLastCalledWith(expect.stringContaining("stopped reloading"), {
+        reason: "crashed",
+        exitCode: 9,
+      });
+
+      // The first reload is now more than five minutes old.
+      h.advance(2 * 60_000);
+      h.gone("crashed");
+      expect(h.webContents.reload).toHaveBeenCalledTimes(4);
+    });
+
+    it("logs when the renderer becomes unresponsive and responsive again", () => {
+      const h = rendererRecoveryHarness();
+      h.webContents.emit("unresponsive");
+      h.webContents.emit("responsive");
+      expect(h.log.warn.mock.calls).toEqual([
+        ["[window] renderer unresponsive"],
+        ["[window] renderer responsive again"],
+      ]);
+      expect(h.webContents.reload).not.toHaveBeenCalled();
     });
   });
 });
