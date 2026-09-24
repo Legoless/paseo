@@ -6,6 +6,7 @@ import {
   isPaseoBrowserWebviewAttach,
   preparePaseoBrowserWebContents,
   registerAttachedPaseoBrowser,
+  resolveBrowserHistoryGesture,
   unregisterPaseoBrowser,
   unregisterPaseoBrowserFromHost,
 } from "./index.js";
@@ -201,5 +202,26 @@ describe("browser webview attachment", () => {
     guest.destroy();
 
     expect(getPaseoBrowserIdForWebContents(guest)).toBeNull();
+  });
+});
+
+describe("browser history gestures", () => {
+  const window = { contentBounds: { x: 100, y: 50 }, cursor: { x: 400, y: 250 } };
+
+  test.each([
+    { command: "left", direction: "back" },
+    { command: "browser-backward", direction: "back" },
+    { command: "right", direction: "forward" },
+    { command: "browser-forward", direction: "forward" },
+  ])("maps $command to $direction at the cursor in host CSS pixels", ({ command, direction }) => {
+    expect(resolveBrowserHistoryGesture({ ...window, command, zoomFactor: 1.25 })).toEqual({
+      direction,
+      x: 240,
+      y: 160,
+    });
+  });
+
+  test.each(["up", "down", "media-play-pause", "constructor"])("ignores %s", (command) => {
+    expect(resolveBrowserHistoryGesture({ ...window, command, zoomFactor: 1 })).toBeNull();
   });
 });

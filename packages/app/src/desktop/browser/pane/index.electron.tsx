@@ -51,7 +51,7 @@ import {
 import type { AttachmentMetadata, BrowserElementAttachment } from "@/attachments/types";
 import { persistAttachmentFromDataUrl } from "@/attachments/service";
 import { WORKSPACE_SECONDARY_HEADER_HEIGHT } from "@/constants/layout";
-import { getOverlayRoot } from "@/lib/overlay-root";
+import { getOverlayRoot, hasActiveWebOverlay } from "@/lib/overlay-root";
 import {
   getDesktopHost,
   isElectronRuntime,
@@ -78,6 +78,7 @@ import {
   type BrowserElementSelection,
   type ElementSelectorOutcome,
 } from "./element-selector.electron";
+import { resolveBrowserHistoryGestureForPane } from "../shortcuts";
 
 type ElectronWebview = HTMLElement & {
   canGoBack?: () => boolean;
@@ -608,6 +609,7 @@ export function BrowserPane({
   const webviewRef = useRef<ElectronWebview | null>(null);
   const webviewHostRef = useRef<HTMLDivElement | null>(null);
   const webviewClipRef = useRef<HTMLElement | null>(null);
+  const paneRootRef = useRef<HTMLElement | null>(null);
   const urlInputRef = useRef<EditingTextInputHandle | null>(null);
   const initialUrlRef = useRef(browser?.url ?? "https://example.com");
   const browserIdRef = useRef(browserId);
@@ -1050,6 +1052,33 @@ export function BrowserPane({
     };
   }, [focusUrlBar, isInteractive]);
 
+  useEffect(() => {
+    if (!isElectronRuntime()) {
+      return;
+    }
+    const unsubscribe = getDesktopHost()?.events?.on?.("browser-history-gesture", (payload) => {
+      // A modal or menu over the pane owns the pointer, the same rule the guest's pointer
+      // events follow.
+      if (hasActiveWebOverlay()) {
+        return;
+      }
+      const paneRect = paneRootRef.current?.getBoundingClientRect();
+      const direction = paneRect ? resolveBrowserHistoryGestureForPane(payload, paneRect) : null;
+      if (direction === "back" && browserRef.current?.canGoBack) {
+        handleBack();
+      } else if (direction === "forward" && browserRef.current?.canGoForward) {
+        handleForward();
+      }
+    });
+
+    if (typeof unsubscribe === "function") {
+      return unsubscribe;
+    }
+    return () => {
+      void unsubscribe?.then((dispose) => dispose());
+    };
+  }, [handleBack, handleForward]);
+
   const handleNavigateDraftUrl = useCallback(() => {
     navigate(draftUrl);
   }, [draftUrl, navigate]);
@@ -1423,6 +1452,10 @@ export function BrowserPane({
     webviewClipRef.current = node instanceof HTMLElement ? node : null;
   }, []);
 
+  const setPaneRootNode = useCallback((node: unknown) => {
+    paneRootRef.current = node instanceof HTMLElement ? node : null;
+  }, []);
+
   if (!isElectronRuntime()) {
     return (
       <View style={styles.unavailableState}>
@@ -1433,7 +1466,7 @@ export function BrowserPane({
   }
 
   return (
-    <View style={styles.container}>
+    <View ref={setPaneRootNode} style={styles.container}>
       <View style={styles.chromeRow}>
         <View style={styles.chromeLeft}>
           <ToolbarButton
