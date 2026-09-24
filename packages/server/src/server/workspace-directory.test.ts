@@ -272,6 +272,7 @@ interface AgentState {
   id: string;
   status: AgentSnapshotPayload["status"];
   pendingPermissionCount?: number;
+  backgroundWorkCount?: number;
   requiresAttention?: boolean;
   attentionReason?: AgentSnapshotPayload["attentionReason"];
 }
@@ -292,6 +293,7 @@ function createAgent(
     updatedAt: NOW,
     lastUserMessageAt: null,
     status: input.status,
+    ...(input.backgroundWorkCount ? { backgroundWorkCount: input.backgroundWorkCount } : {}),
     capabilities: {
       supportsStreaming: true,
       supportsSessionPersistence: true,
@@ -417,6 +419,15 @@ describe("WorkspaceDirectory", () => {
 
     workspace.hasRootAgent({ id: "parent-agent", status: "idle" });
     workspace.hasDelegatedAgent({ id: "child-agent", status: "running" });
+
+    await expect(workspace.workspaceStatus()).resolves.toBe("running");
+  });
+
+  test("same-workspace subagent with background work contributes running to its parent workspace", async () => {
+    const workspace = new WorkspaceStatus();
+
+    workspace.hasRootAgent({ id: "parent-agent", status: "idle" });
+    workspace.hasDelegatedAgent({ id: "child-agent", status: "idle", backgroundWorkCount: 1 });
 
     await expect(workspace.workspaceStatus()).resolves.toBe("running");
   });

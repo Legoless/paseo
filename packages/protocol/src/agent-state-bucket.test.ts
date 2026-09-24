@@ -60,6 +60,36 @@ describe("deriveAgentStateBucket", () => {
       }),
     ).toBe("done");
   });
+
+  it("keeps an idle agent with live background work running, ahead of unseen finished", () => {
+    expect(
+      deriveAgentStateBucket({
+        status: "idle",
+        backgroundWorkCount: 1,
+        requiresAttention: true,
+        attentionReason: "finished",
+      }),
+    ).toBe("running");
+  });
+
+  it("drops back when background work empties", () => {
+    expect(
+      deriveAgentStateBucket({
+        status: "idle",
+        backgroundWorkCount: 0,
+        requiresAttention: true,
+        attentionReason: "finished",
+      }),
+    ).toBe("attention");
+    expect(deriveAgentStateBucket({ status: "idle", backgroundWorkCount: 0 })).toBe("done");
+  });
+
+  it("lets permissions and errors outrank background work", () => {
+    expect(
+      deriveAgentStateBucket({ status: "idle", pendingPermissionCount: 1, backgroundWorkCount: 2 }),
+    ).toBe("needs_input");
+    expect(deriveAgentStateBucket({ status: "error", backgroundWorkCount: 2 })).toBe("failed");
+  });
 });
 
 describe("getWorkspaceStateBucketPriority", () => {

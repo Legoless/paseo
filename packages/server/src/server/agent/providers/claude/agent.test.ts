@@ -3175,6 +3175,100 @@ describe("ClaudeAgentSession context window usage", () => {
       },
     ]);
   });
+
+  const SPEND_LIMIT_TEXT =
+    "You've hit your monthly spend limit · raise it at claude.ai/settings/usage · your session limit resets 6pm (UTC)";
+
+  // Claude Code reports an API error as a synthetic assistant frame with `error` set, then a
+  // success result with is_error and the same text. Shape taken from a real rate_limit turn.
+  function createApiErrorTurn(): Array<Record<string, unknown>> {
+    return [
+      {
+        type: "assistant",
+        message: {
+          id: "api-error-message-1",
+          model: "<synthetic>",
+          role: "assistant",
+          stop_reason: "stop_sequence",
+          content: [{ type: "text", text: SPEND_LIMIT_TEXT }],
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+        parent_tool_use_id: null,
+        error: "rate_limit",
+        session_id: "session-1",
+        uuid: "api-error-assistant-1",
+      },
+      createSuccessResult({
+        is_error: true,
+        api_error_status: 429,
+        result: SPEND_LIMIT_TEXT,
+        usage: { input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 },
+      }),
+    ];
+  }
+
+  function isTurnFailedEvent(event: AgentStreamEvent): boolean {
+    return event.type === "turn_failed";
+  }
+
+  test("fails the turn when Claude ends it on an API error", async () => {
+    const session = await createSessionForTurns([[createInitMessage(), ...createApiErrorTurn()]]);
+
+    try {
+      const events = await collectStreamEvents(session, "Still in progress?");
+
+      expect(events.find((event) => event.type === "turn_failed")).toMatchObject({
+        provider: "claude",
+        error: SPEND_LIMIT_TEXT,
+        code: "429",
+      });
+      expect(events.some((event) => event.type === "turn_completed")).toBe(false);
+      expect(
+        events.some(
+          (event) => event.type === "timeline" && event.item.type === "assistant_message",
+        ),
+      ).toBe(false);
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("fails an autonomous turn that ends on an API error", async () => {
+    // A background task notification wakes Claude after the foreground result; that turn hits
+    // the same limit.
+    const session = await createSessionForTurns([
+      [createInitMessage(), createSuccessResult(), ...createApiErrorTurn()],
+    ]);
+
+    try {
+      const observed: AgentStreamEvent[] = [];
+      const unsubscribe = session.subscribe((event) => {
+        observed.push(event);
+      });
+
+      await collectStreamEvents(session, "foreground turn");
+      await vi.waitFor(() => {
+        expect(observed.some(isTurnFailedEvent)).toBe(true);
+      });
+      unsubscribe();
+
+      expect(
+        observed
+          .filter((event) => event.type === "turn_completed" || event.type === "turn_failed")
+          .map((event) => event.type),
+      ).toEqual(["turn_completed", "turn_failed"]);
+      expect(observed.find((event) => event.type === "turn_failed")).toMatchObject({
+        error: SPEND_LIMIT_TEXT,
+      });
+      expect(
+        observed.some(
+          (event) => event.type === "timeline" && event.item.type === "assistant_message",
+        ),
+      ).toBe(false);
+    } finally {
+      await session.close();
+    }
+  });
 });
 
 describe("toClaudeSdkMcpConfig", () => {

@@ -840,6 +840,9 @@ export const AgentSnapshotPayloadSchema = z.object({
   currentModeId: z.string().nullable(),
   availableModes: z.array(AgentModeSchema),
   pendingPermissions: z.array(AgentPermissionRequestPayloadSchema),
+  // Background work the provider still runs while the agent's own turn may be idle (Claude's
+  // background shells and subagents). Absent from older daemons: none known.
+  backgroundWorkCount: z.number().int().nonnegative().optional(),
   persistence: AgentPersistenceHandleSchema.nullable(),
   runtimeInfo: AgentRuntimeInfoSchema.optional(),
   lastUsage: AgentUsageSchema.optional(),

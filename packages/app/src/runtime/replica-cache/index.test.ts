@@ -382,6 +382,27 @@ describe("ReplicaCache", () => {
     });
   });
 
+  it("round-trips live background work and omits an empty count", async () => {
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    const busy = { ...agent("busy"), backgroundWorkCount: 2 };
+    const quiet = { ...agent("quiet"), backgroundWorkCount: 0 };
+    writer.commitDirectoryMutations(SERVER_ID, [
+      { kind: "agent", type: "upsert", id: busy.id, value: busy },
+      { kind: "agent", type: "upsert", id: quiet.id, value: quiet },
+    ]);
+    await writer.flush();
+
+    const restored = await createCache(storage).readDirectory(SERVER_ID);
+
+    expect(restored.agents.get("busy")?.backgroundWorkCount).toBe(2);
+    expect(restored.agents.get("quiet")).not.toHaveProperty("backgroundWorkCount");
+    const quietRow = storage.rows.get(`${SERVER_ID}:agent:quiet`);
+    expect(JSON.parse(quietRow?.payload ?? "{}").snapshot).not.toHaveProperty(
+      "backgroundWorkCount",
+    );
+  });
+
   it("coalesces timeline values before serialization", async () => {
     const storage = new MemoryStorage();
     const cache = createCache(storage);

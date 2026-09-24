@@ -136,6 +136,7 @@ export function toAgentPayload(
     availableModes: cloneAvailableModes(agent.availableModes),
     features: normalizeFeatures(agent.features),
     pendingPermissions: sanitizePendingPermissions(agent.pendingPermissions),
+    ...(agent.backgroundWorkCount ? { backgroundWorkCount: agent.backgroundWorkCount } : {}),
     persistence: projectPersistenceHandleForWire(agent.persistence),
     title: options?.title ?? null,
     labels: agent.labels,

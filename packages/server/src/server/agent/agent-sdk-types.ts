@@ -479,7 +479,9 @@ export type AgentStreamEvent =
       type: "provider_subagent";
       provider: AgentProvider;
       event: import("./provider-subagents/store.js").ProviderSubagentInputEvent;
-    };
+    }
+  // Server-internal: the manager folds it into the snapshot and never streams it.
+  | { type: "background_work_changed"; provider: AgentProvider; count: number };
 
 export function getAgentStreamEventTurnId(event: AgentStreamEvent): string | undefined {
   return "turnId" in event ? event.turnId : undefined;

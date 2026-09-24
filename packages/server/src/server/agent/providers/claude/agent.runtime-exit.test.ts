@@ -118,6 +118,20 @@ const RUNNING_WORKFLOW_TURN_EVENTS = [
   COMPLETED_TURN_EVENTS[2],
 ];
 
+const LOCAL_BASH_BACKGROUND_TASK = {
+  task_id: "b1",
+  task_type: "local_bash",
+  description: "Re-render all steps",
+};
+
+function backgroundTasksChanged(tasks: unknown[]) {
+  return { type: "system", subtype: "background_tasks_changed", tasks };
+}
+
+function backgroundWorkCounts(events: AgentStreamEvent[]): number[] {
+  return events.flatMap((event) => (event.type === "background_work_changed" ? [event.count] : []));
+}
+
 const MISSING_RESUMED_CONVERSATION_RESULT = {
   type: "result",
   subtype: "error_during_execution",
@@ -197,6 +211,83 @@ describe("Claude runtime exit", () => {
         .filter((event) => event.type === "upsert" && event.id === "toolu_workflow");
       expect(workflowUpserts[0]).toMatchObject({ title: "Workflow", status: "running" });
       expect(workflowUpserts.at(-1)).toMatchObject({ status: "failed" });
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("reports live background work after the turn ends and clears it when the set empties", async () => {
+    let emptyBackgroundSet: ((event: unknown) => void) | undefined;
+    const queryFactory = vi.fn(() =>
+      createQueryMock(
+        [
+          COMPLETED_TURN_EVENTS[0],
+          COMPLETED_TURN_EVENTS[1],
+          backgroundTasksChanged([
+            LOCAL_BASH_BACKGROUND_TASK,
+            { task_id: "m1", task_type: "monitor_ws", description: "watch", ambient: true },
+          ]),
+          COMPLETED_TURN_EVENTS[2],
+        ],
+        {
+          tail: new Promise<unknown>((resolve) => {
+            emptyBackgroundSet = resolve;
+          }),
+        },
+      ),
+    );
+    const client = new ClaudeAgentClient({
+      logger: createTestLogger(),
+      queryFactory,
+      resolveBinary: async () => "/test/claude/bin",
+    });
+    const session = await client.createSession({ provider: "claude", cwd: process.cwd() });
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    try {
+      await session.run("start a background shell");
+      expect(backgroundWorkCounts(events)).toEqual([1]);
+
+      // The CLI reports the empty set after the turn's result, with no turn active.
+      emptyBackgroundSet?.(backgroundTasksChanged([]));
+
+      await vi.waitFor(() => expect(backgroundWorkCounts(events)).toEqual([1, 0]));
+      // Nothing would close a turn opened by the post-result report, so it must not open one.
+      expect(events.filter((event) => event.type === "turn_started")).toHaveLength(1);
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("clears background work when the idle Claude runtime exits", async () => {
+    let capturedOptions: Options | undefined;
+    const queryFactory = vi.fn(({ options }: ClaudeQueryInput) => {
+      capturedOptions = options;
+      return createQueryMock([
+        COMPLETED_TURN_EVENTS[0],
+        COMPLETED_TURN_EVENTS[1],
+        backgroundTasksChanged([LOCAL_BASH_BACKGROUND_TASK]),
+        COMPLETED_TURN_EVENTS[2],
+      ]);
+    });
+    const child = createChildProcessStub();
+    vi.spyOn(spawnUtils, "spawnProcess").mockReturnValue(child);
+    const client = new ClaudeAgentClient({
+      logger: createTestLogger(),
+      queryFactory,
+      resolveBinary: async () => "/test/claude/bin",
+    });
+    const session = await client.createSession({ provider: "claude", cwd: process.cwd() });
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    try {
+      await session.run("start a background shell");
+      capturedOptions?.spawnClaudeCodeProcess?.(SPAWN_OPTIONS);
+      child.emit("exit", 1, null);
+
+      expect(backgroundWorkCounts(events)).toEqual([1, 0]);
     } finally {
       await session.close();
     }

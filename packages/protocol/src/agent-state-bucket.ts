@@ -7,6 +7,8 @@ export type AgentAttentionReason = "finished" | "error" | "permission" | null | 
 export interface AgentStateBucketInput {
   status: AgentLifecycleStatus;
   pendingPermissionCount?: number;
+  /** Background work the provider still runs; buckets an idle agent as running. */
+  backgroundWorkCount?: number;
   requiresAttention?: boolean;
   attentionReason?: AgentAttentionReason;
 }
@@ -26,7 +28,7 @@ export function deriveAgentStateBucket(input: AgentStateBucketInput): WorkspaceS
   if (input.status === "error" || input.attentionReason === "error") {
     return "failed";
   }
-  if (input.status === "running") {
+  if (input.status === "running" || (input.backgroundWorkCount ?? 0) > 0) {
     return "running";
   }
   if (input.requiresAttention) {

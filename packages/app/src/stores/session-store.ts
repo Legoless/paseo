@@ -83,6 +83,7 @@ export interface Agent {
   currentModeId: string | null;
   availableModes: AgentMode[];
   pendingPermissions: AgentPermissionRequest[];
+  backgroundWorkCount?: number;
   persistence: AgentPersistenceHandle | null;
   runtimeInfo?: AgentRuntimeInfo;
   lastUsage?: AgentUsage;
