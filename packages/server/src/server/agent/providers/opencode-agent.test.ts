@@ -467,6 +467,30 @@ describe("OpenCodeAgentClient adapter smoke tests", () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
+  test("unarchives a session OpenCode no longer has without failing", async () => {
+    const cwd = tmpCwd();
+    const runtime = new TestOpenCodeHarness();
+    const unarchiveClient = new TestOpenCodeClient();
+    unarchiveClient.sessionUpdateResponse = {
+      error: { name: "NotFoundError", data: { message: "Session not found: session-1" } },
+    };
+    runtime.enqueueClient(unarchiveClient);
+    const client = new OpenCodeAgentClient(logger, undefined, {
+      serverManager: runtime,
+      createClient: runtime.createClient,
+    });
+
+    await expect(
+      client.unarchiveNativeSession({
+        provider: "opencode" as const,
+        sessionId: "session-1",
+        metadata: { cwd },
+      }),
+    ).resolves.toBeUndefined();
+    expect(runtime.acquisitions.every((acquisition) => acquisition.releaseCount === 1)).toBe(true);
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
   test("single turn completes with streaming deltas", async () => {
     const cwd = tmpCwd();
     const runtime = new TestOpenCodeHarness();
@@ -1465,6 +1489,123 @@ describe("OpenCode adapter startTurn error handling", () => {
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
+  });
+
+  test("continues in a new OpenCode session when OpenCode lost the agent's session", async () => {
+    const eventsGate = createTestDeferred<void>();
+    const sessionNotFound = {
+      name: "NotFoundError",
+      data: { message: "Session not found: ses_missing" },
+    };
+    const fakeClient = {
+      global: {
+        event: vi.fn().mockResolvedValue({
+          stream: (async function* () {
+            yield { payload: { type: "server.connected", properties: {} } };
+            await eventsGate.promise;
+            yield {
+              directory: "/tmp/test",
+              payload: {
+                type: "session.status",
+                properties: { sessionID: "ses_replacement", status: { type: "idle" } },
+              },
+            };
+          })(),
+        }),
+      },
+      session: {
+        promptAsync: vi
+          .fn()
+          .mockResolvedValueOnce({ data: undefined, error: sessionNotFound })
+          .mockImplementationOnce(async () => {
+            eventsGate.resolve();
+            return { data: {}, error: undefined };
+          }),
+      },
+    } as never;
+    const releaseOldBridge = vi.fn();
+    const releaseNewBridge = vi.fn();
+    const recovery = {
+      createSession: vi
+        .fn()
+        .mockResolvedValue({ sessionId: "ses_replacement", releaseBridge: releaseNewBridge }),
+      readChatHistory: () => "<chat-history-summary>earlier turns</chat-history-summary>",
+    };
+
+    const session = new __openCodeInternals.OpenCodeAgentSession(
+      { provider: "opencode", cwd: "/tmp/test" },
+      fakeClient,
+      "ses_missing",
+      createTestLogger(),
+      new Map(),
+      createDirectEventSource(fakeClient),
+      undefined,
+      undefined,
+      "agent-1",
+      undefined,
+      false,
+      releaseOldBridge,
+      recovery,
+    );
+
+    const turn = await collectTurnEvents(streamSession(session, "resume the drive"));
+
+    expect(turn.turnFailed).toBe(false);
+    expect(turn.turnCompleted).toBe(true);
+    expect(recovery.createSession).toHaveBeenCalledTimes(1);
+    expect(releaseOldBridge).toHaveBeenCalledTimes(1);
+    const promptAsync = (
+      fakeClient as unknown as { session: { promptAsync: ReturnType<typeof vi.fn> } }
+    ).session.promptAsync;
+    expect(promptAsync.mock.calls[1]?.[0]).toMatchObject({
+      sessionID: "ses_replacement",
+      parts: [
+        { type: "text", text: "<chat-history-summary>earlier turns</chat-history-summary>" },
+        { type: "text", text: "resume the drive" },
+      ],
+    });
+    expect(turn.events).toContainEqual(
+      expect.objectContaining({ type: "thread_started", sessionId: "ses_replacement" }),
+    );
+    expect(turn.assistantMessages.map((item) => item.text)).toEqual([
+      "OpenCode no longer had this conversation, so Paseo continued it in a new OpenCode session and carried the chat history over.",
+    ]);
+    expect(session.describePersistence()?.sessionId).toBe("ses_replacement");
+    await session.close();
+  });
+
+  test("fails with OpenCode's message when a lost session cannot be replaced", async () => {
+    const fakeClient = {
+      global: {
+        event: vi.fn().mockResolvedValue({
+          stream: (async function* () {
+            yield { payload: { type: "server.connected", properties: {} } };
+          })(),
+        }),
+      },
+      session: {
+        promptAsync: vi.fn().mockResolvedValue({
+          data: undefined,
+          error: { name: "NotFoundError", data: { message: "Session not found: ses_missing" } },
+        }),
+      },
+    } as never;
+
+    const session = new __openCodeInternals.OpenCodeAgentSession(
+      { provider: "opencode", cwd: "/tmp/test" },
+      fakeClient,
+      "ses_missing",
+      createTestLogger(),
+      new Map(),
+      createDirectEventSource(fakeClient),
+    );
+
+    const turn = await collectTurnEvents(streamSession(session, "hello"));
+
+    expect(turn.events).toContainEqual(
+      expect.objectContaining({ type: "turn_failed", error: "Session not found: ses_missing" }),
+    );
+    await session.close();
   });
 
   test("emits turn_started before live OpenCode timeline items", async () => {

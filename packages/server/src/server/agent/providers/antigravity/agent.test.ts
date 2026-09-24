@@ -359,6 +359,55 @@ describe("AntigravityStreamDecoder", () => {
     ]);
   });
 
+  it("completes a turn whose only error is an API failure agy already retried", () => {
+    const events: AgentStreamEvent[] = [];
+    const decoder = new AntigravityStreamDecoder("antigravity", (event) => events.push(event));
+
+    // agy logged "Run: attempt 1 failed (INTERNAL (code 500) …), retrying in 4s", finished the
+    // turn, and still reported the retry notice on this and later turns' results.
+    decoder.write(
+      JSON.stringify({
+        event: "result",
+        result: {
+          conversation_id: "conv-1",
+          status: "ERROR",
+          response: "The Golf GTI 2019 watcher is active.",
+          error: "API error (attempt 1): INTERNAL (code 500): Internal error encountered.",
+        },
+      }) + "\n",
+      "turn-1",
+    );
+
+    expect(events.map((event) => event.type)).toEqual(["timeline", "turn_completed"]);
+  });
+
+  it("still fails a retried API error when the turn delivered no response", () => {
+    const events: AgentStreamEvent[] = [];
+    const decoder = new AntigravityStreamDecoder("antigravity", (event) => events.push(event));
+
+    decoder.write(
+      JSON.stringify({
+        event: "result",
+        result: {
+          conversation_id: "conv-1",
+          status: "ERROR",
+          response: "",
+          error: "API error (attempt 5): INTERNAL (code 500): Internal error encountered.",
+        },
+      }) + "\n",
+      "turn-1",
+    );
+
+    expect(events).toEqual([
+      {
+        type: "turn_failed",
+        provider: "antigravity",
+        error: "API error (attempt 5): INTERNAL (code 500): Internal error encountered.",
+        turnId: "turn-1",
+      },
+    ]);
+  });
+
   it("surfaces denied_actions as permission cards and cancels interrupted turns", () => {
     const events: AgentStreamEvent[] = [];
     const decoder = new AntigravityStreamDecoder("antigravity", (event) => events.push(event));

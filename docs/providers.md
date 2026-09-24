@@ -139,6 +139,8 @@ Draft metadata lookups should avoid creating provider sessions when the upstream
 
 Provider session import has its own contract. The picker calls `listImportableSessions` and receives rows only: provider handle, cwd, title, prompt previews, and last activity. Import calls `importSession({ providerHandleId, cwd })` for the selected row and must not call listing again. The provider returns the resumed session, storage config, persistence handle, and hydrated timeline for that one native session; `AgentManager.importProviderSession` seeds the daemon timeline and publishes the Paseo agent only after it is ready.
 
+A native session can disappear under a resumed agent, for example when the provider's own store is cleared. Do not let every later message fail: continue in a new native session, carry the conversation over with `AgentLaunchContext.readChatHistory()` (the agent's Paseo timeline rendered as the same transcript "carry the conversation" uses), and emit `thread_started` with the new id so the next resume opens it. OpenCode does this once per session when a prompt returns `Session not found`.
+
 ## Provider Helper Processes
 
 Provider-owned helper processes that can outlive an individual agent session must be recorded in the daemon's managed-process registry. Store provider/kind metadata, the PID, launch command/args, and process identity captured from the platform process table. Remove the record on normal exit or shutdown.
@@ -590,6 +592,8 @@ Tests use `isProviderAvailable(provider)` to skip when the binary or credentials
 **Mode IDs can be URIs.** ACP providers like Copilot use full URIs as mode IDs (e.g., `"https://agentclientprotocol.com/protocol/session-modes#agent"`). Never assume mode IDs are simple strings. The manifest `defaultModeId` must match exactly.
 
 **Models and modes are discovered dynamically.** ACP providers report available models and modes at runtime via the protocol. The static definitions in `provider-manifest.ts` are used for UI scaffolding (icons, color tiers) but the runtime values from the agent process are the source of truth.
+
+**Antigravity repeats an error it already retried.** `agy` retries a transient API failure itself (`API error (attempt 1): INTERNAL (code 500)…`), then reports that error with a non-success status on the result of the turn and of every later turn in the same process, even turns that finished. The decoder treats such a result that carries a final response as completed.
 
 **`AgentProvider` is always `string`.** The type alias is `type AgentProvider = string`. Provider IDs are validated against the manifest at runtime, not at the type level.
 

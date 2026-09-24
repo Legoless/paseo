@@ -164,6 +164,19 @@ export function mapAgyToolDetail(
   }
 }
 
+// agy retries a transient API failure itself ("API error (attempt 1): INTERNAL (code 500)…"),
+// but its long-lived process then reports that error on the result of the turn and of every
+// later turn, even ones that finished. A final response means the turn completed.
+const RETRIED_API_ERROR = /^API error \(attempt \d+\):/;
+
+function isRecoveredApiErrorResult(result: AgyResultPayload): boolean {
+  return (
+    result.status === "ERROR" &&
+    RETRIED_API_ERROR.test(result.error ?? "") &&
+    result.response.trim().length > 0
+  );
+}
+
 export class AntigravityStreamDecoder {
   private lineBuffer = "";
   private emittedAssistantText = "";
@@ -375,7 +388,7 @@ export class AntigravityStreamDecoder {
       }
     }
 
-    if (result.status === "SUCCESS") {
+    if (result.status === "SUCCESS" || isRecoveredApiErrorResult(result)) {
       this.onEvent({
         type: "turn_completed",
         provider: this.provider,

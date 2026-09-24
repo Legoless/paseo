@@ -535,6 +535,30 @@ function isOpenCodeNotFoundError(error: unknown): boolean {
   );
 }
 
+// OpenCode API errors are `{ name, data: { message } }`; show the message, not the JSON.
+function describeOpenCodeError(error: unknown): string {
+  const data =
+    typeof error === "object" && error !== null ? (error as { data?: unknown }).data : null;
+  const message =
+    typeof data === "object" && data !== null ? (data as { message?: unknown }).message : null;
+  return typeof message === "string" && message.trim()
+    ? message.trim()
+    : toDiagnosticErrorMessage(error);
+}
+
+function isOpenCodeSessionNotFoundError(error: unknown): boolean {
+  return isOpenCodeNotFoundError(error) && /session not found/i.test(describeOpenCodeError(error));
+}
+
+/**
+ * Lets a session continue in a new OpenCode session when OpenCode no longer has its own
+ * (its store was cleared or pruned), carrying the conversation from Paseo's timeline.
+ */
+interface OpenCodeMissingSessionRecovery {
+  createSession(): Promise<{ sessionId: string; releaseBridge?: () => void }>;
+  readChatHistory?: () => string | null;
+}
+
 async function abortOpenCodeSession(params: {
   client: Pick<OpencodeClient, "session">;
   sessionId: string;
@@ -1493,6 +1517,7 @@ export class OpenCodeAgentClient implements AgentClient {
         url,
         false,
         unbindBridge,
+        this.createMissingSessionRecovery(client, openCodeConfig, launchContext),
       );
     } catch (error) {
       await acquisition.release();
@@ -1547,6 +1572,10 @@ export class OpenCodeAgentClient implements AgentClient {
         url,
         registeredAcquisition !== null,
         unbindBridge,
+        // A registered child session belongs to its parent; never replace it.
+        registeredAcquisition === null
+          ? this.createMissingSessionRecovery(client, openCodeConfig, launchContext)
+          : undefined,
       );
     } catch (error) {
       await acquisition.release();
@@ -1564,6 +1593,28 @@ export class OpenCodeAgentClient implements AgentClient {
         : this.serverManager.acquireCurrent();
     }
     return this.serverManager.acquireCurrent();
+  }
+
+  private createMissingSessionRecovery(
+    client: OpencodeClient,
+    config: OpenCodeAgentConfig,
+    launchContext?: AgentLaunchContext,
+  ): OpenCodeMissingSessionRecovery {
+    return {
+      createSession: async () => {
+        const response = await client.session.create({ directory: config.cwd });
+        if (response.error || !response.data) {
+          throw new Error(
+            `Failed to create OpenCode session: ${
+              response.error ? toDiagnosticErrorMessage(response.error) : "no data"
+            }`,
+          );
+        }
+        const sessionId = response.data.id;
+        return { sessionId, releaseBridge: this.bindBridgeSession(sessionId, launchContext) };
+      },
+      readChatHistory: launchContext?.readChatHistory,
+    };
   }
 
   private bindBridgeSession(
@@ -1722,6 +1773,15 @@ export class OpenCodeAgentClient implements AgentClient {
         }),
       );
       if (response?.error) {
+        // OpenCode no longer has the session: there is nothing to archive, and the next
+        // prompt continues in a new session (replaceMissingSession).
+        if (isOpenCodeSessionNotFoundError(response.error)) {
+          this.logger.warn(
+            { sessionId: handle.sessionId },
+            "OpenCode session no longer exists; skipping its archive update",
+          );
+          return;
+        }
         throw new Error(
           `Failed to ${archivedAt === 0 ? "unarchive" : "archive"} OpenCode session: ${toDiagnosticErrorMessage(response.error)}`,
         );
@@ -3315,7 +3375,8 @@ class OpenCodeAgentSession implements AgentSession {
 
   private readonly config: OpenCodeAgentConfig;
   private readonly client: OpencodeClient;
-  private readonly sessionId: string;
+  // Replaced once if OpenCode loses the session; see replaceMissingSession.
+  private sessionId: string;
   private readonly logger: Logger;
   private readonly modelContextWindowsByModelKey: ReadonlyMap<string, number>;
   private currentMode: string | null = null;
@@ -3381,6 +3442,8 @@ class OpenCodeAgentSession implements AgentSession {
   private closed = false;
   private readonly persistSession: boolean;
   private deletedFromProvider = false;
+  private readonly recovery: OpenCodeMissingSessionRecovery | null;
+  private replacedMissingSession = false;
   constructor(
     config: OpenCodeAgentConfig,
     client: OpencodeClient,
@@ -3394,7 +3457,9 @@ class OpenCodeAgentSession implements AgentSession {
     private readonly serverUrl?: string,
     private readonly externallyDriven = false,
     releaseBridge?: () => void,
+    recovery?: OpenCodeMissingSessionRecovery,
   ) {
+    this.recovery = recovery ?? null;
     this.config = config;
     this.client = client;
     this.sessionId = sessionId;
@@ -3868,37 +3933,50 @@ class OpenCodeAgentSession implements AgentSession {
             this.config.providerOptions,
             this.config.toolPolicy,
           );
-          const promptResponse = await this.client.session.promptAsync({
-            sessionID: this.sessionId,
-            directory: this.config.cwd,
-            messageID: dispatchMessageId,
-            parts,
-            ...(options?.outputSchema
-              ? {
-                  format: {
-                    type: "json_schema" as const,
-                    schema: options.outputSchema as Record<string, unknown>,
-                  },
-                }
-              : {}),
-            ...(systemPrompt ? { system: systemPrompt } : {}),
-            ...(permission ? { permission } : {}),
-            ...(model ? { model } : {}),
-            ...(effectiveMode ? { agent: effectiveMode } : {}),
-            ...(effectiveVariant ? { variant: effectiveVariant } : {}),
-          });
+          const sendPrompt = (promptParts: typeof parts, messageID: string) =>
+            this.client.session.promptAsync({
+              sessionID: this.sessionId,
+              directory: this.config.cwd,
+              messageID,
+              parts: promptParts,
+              ...(options?.outputSchema
+                ? {
+                    format: {
+                      type: "json_schema" as const,
+                      schema: options.outputSchema as Record<string, unknown>,
+                    },
+                  }
+                : {}),
+              ...(systemPrompt ? { system: systemPrompt } : {}),
+              ...(permission ? { permission } : {}),
+              ...(model ? { model } : {}),
+              ...(effectiveMode ? { agent: effectiveMode } : {}),
+              ...(effectiveVariant ? { variant: effectiveVariant } : {}),
+            });
+          let promptResponse = await sendPrompt(parts, dispatchMessageId);
           this.traceOpenCode("provider.opencode.prompt_async.response", {
             turnId,
             hasError: promptResponse.error !== undefined,
             error: promptResponse.error,
             data: promptResponse.data,
           });
+          if (promptResponse.error && isOpenCodeSessionNotFoundError(promptResponse.error)) {
+            const replaced = await this.replaceMissingSession(turnId);
+            if (replaced) {
+              const retryMessageId = createOpenCodeMessageId();
+              this.activeDispatchMessageId = retryMessageId;
+              const retryParts = replaced.history
+                ? [{ type: "text" as const, text: replaced.history }, ...parts]
+                : parts;
+              promptResponse = await sendPrompt(retryParts, retryMessageId);
+            }
+          }
           if (promptResponse.error) {
             this.finishForegroundTurn(
               {
                 type: "turn_failed",
                 provider: "opencode",
-                error: toDiagnosticErrorMessage(promptResponse.error),
+                error: describeOpenCodeError(promptResponse.error),
               },
               turnId,
             );
@@ -3924,6 +4002,51 @@ class OpenCodeAgentSession implements AgentSession {
     }
 
     return { turnId };
+  }
+
+  // OpenCode no longer has this session (its store was cleared or pruned), so every prompt
+  // would fail. Continue in a new session once, carrying the conversation over from Paseo's
+  // timeline; the new id is reported so the agent resumes it next time.
+  private async replaceMissingSession(turnId: string): Promise<{ history: string | null } | null> {
+    if (!this.recovery || this.replacedMissingSession) return null;
+    this.replacedMissingSession = true;
+    const previousSessionId = this.sessionId;
+    let replacement: { sessionId: string; releaseBridge?: () => void };
+    try {
+      replacement = await this.recovery.createSession();
+    } catch (error) {
+      this.logger.warn(
+        { err: error, previousSessionId },
+        "Failed to replace a missing OpenCode session",
+      );
+      return null;
+    }
+    this.releaseBridge?.();
+    this.releaseBridge = replacement.releaseBridge ?? null;
+    this.sessionId = replacement.sessionId;
+    const history = this.recovery.readChatHistory?.() ?? null;
+    this.logger.warn(
+      { previousSessionId, sessionId: this.sessionId },
+      "OpenCode session no longer exists; continuing in a new session",
+    );
+    this.notifySubscribers(
+      { type: "thread_started", sessionId: this.sessionId, provider: "opencode" },
+      turnId,
+    );
+    this.notifySubscribers(
+      {
+        type: "timeline",
+        provider: "opencode",
+        item: {
+          type: "assistant_message",
+          text: history
+            ? "OpenCode no longer had this conversation, so Paseo continued it in a new OpenCode session and carried the chat history over."
+            : "OpenCode no longer had this conversation, so Paseo continued it in a new OpenCode session.",
+        },
+      },
+      turnId,
+    );
+    return { history };
   }
 
   private async awaitEventStreamReady(turnAbortController: AbortController): Promise<void> {
