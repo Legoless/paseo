@@ -3,6 +3,7 @@ import {
   buildBrowserKeyboardPolicy,
   parseBrowserShortcutInput,
   parseTerminalShortcutInput,
+  resolveBrowserHistoryGestureForPane,
   shouldPublishBrowserShortcutPolicy,
 } from "./shortcuts";
 import { buildEffectiveBindings, resolveKeyboardShortcut } from "../../keyboard/keyboard-shortcuts";
@@ -377,4 +378,40 @@ describe("buildBrowserKeyboardPolicy focus scope", () => {
       expect.objectContaining({ code: "KeyO", control: true }),
     );
   });
+});
+
+describe("resolveBrowserHistoryGestureForPane", () => {
+  const paneRect = { left: 200, top: 40, right: 800, bottom: 600 };
+
+  it("navigates the pane under the cursor", () => {
+    expect(
+      resolveBrowserHistoryGestureForPane({ direction: "back", x: 200, y: 40 }, paneRect),
+    ).toBe("back");
+    expect(
+      resolveBrowserHistoryGestureForPane({ direction: "forward", x: 799, y: 599 }, paneRect),
+    ).toBe("forward");
+  });
+
+  it("ignores a cursor over another pane", () => {
+    expect(
+      resolveBrowserHistoryGestureForPane({ direction: "back", x: 800, y: 300 }, paneRect),
+    ).toBeNull();
+    expect(
+      resolveBrowserHistoryGestureForPane({ direction: "back", x: 100, y: 300 }, paneRect),
+    ).toBeNull();
+  });
+
+  it("ignores a hidden pane's empty rect", () => {
+    const emptyRect = { left: 0, top: 0, right: 0, bottom: 0 };
+    expect(
+      resolveBrowserHistoryGestureForPane({ direction: "back", x: 0, y: 0 }, emptyRect),
+    ).toBeNull();
+  });
+
+  it.each([null, { direction: "up", x: 300, y: 300 }, { direction: "back", x: "300", y: 300 }])(
+    "rejects malformed payload %o",
+    (payload) => {
+      expect(resolveBrowserHistoryGestureForPane(payload, paneRect)).toBeNull();
+    },
+  );
 });

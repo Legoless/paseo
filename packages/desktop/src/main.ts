@@ -72,6 +72,7 @@ import {
   preparePaseoBrowserWebContents,
   PendingBrowserWindowOpenRequests,
   registerBrowserWebviewNavigationGuards,
+  setupBrowserHistoryGestures,
   unregisterPaseoBrowserFromHost,
   registerAttachedPaseoBrowser,
   setWorkspaceActivePaseoBrowserId,
@@ -760,6 +761,7 @@ async function createWindow(
   }
   setupDefaultContextMenu(mainWindow);
   setupDragDropPrevention(mainWindow);
+  setupBrowserHistoryGestures(mainWindow);
   mainWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
     const isTerminalGuest = isPaseoTerminalWebviewAttach(params);
     if (!isTerminalGuest && !isPaseoBrowserWebviewAttach(params)) {

@@ -1,4 +1,9 @@
-import { webContents as allWebContents, type WebContents } from "electron";
+import {
+  screen,
+  webContents as allWebContents,
+  type BrowserWindow,
+  type WebContents,
+} from "electron";
 import { PASEO_BROWSER_PROFILE_PARTITION } from "../browser-profile.js";
 import {
   BROWSER_NEW_TAB_REQUEST_EVENT,
@@ -193,4 +198,68 @@ export function registerBrowserWebviewNavigationGuards(contents: WebContents): v
   contents.on("will-redirect", (event) => {
     preventUnsafeBrowserWebviewNavigation(event, event.url);
   });
+}
+
+const BROWSER_HISTORY_GESTURE_EVENT = "paseo:event:browser-history-gesture";
+
+interface BrowserHistoryGesture {
+  direction: "back" | "forward";
+  // Cursor position in the host page's CSS pixels.
+  x: number;
+  y: number;
+}
+
+function historyDirectionForWindowCommand(
+  command: string,
+): BrowserHistoryGesture["direction"] | null {
+  switch (command) {
+    // macOS: mouse drivers such as Logi Options+ synthesize the legacy swipe, which Electron
+    // reports as "left" for deltaX = 1 (Chrome's back) and "right" for deltaX = -1.
+    case "left":
+    case "browser-backward":
+      return "back";
+    case "right":
+    case "browser-forward":
+      return "forward";
+    default:
+      return null;
+  }
+}
+
+export function resolveBrowserHistoryGesture(input: {
+  command: string;
+  cursor: { x: number; y: number };
+  contentBounds: { x: number; y: number };
+  zoomFactor: number;
+}): BrowserHistoryGesture | null {
+  const direction = historyDirectionForWindowCommand(input.command);
+  if (!direction) {
+    return null;
+  }
+  return {
+    direction,
+    x: (input.cursor.x - input.contentBounds.x) / input.zoomFactor,
+    y: (input.cursor.y - input.contentBounds.y) / input.zoomFactor,
+  };
+}
+
+// Mouse back/forward reach the window, not the guest (macOS "swipe", Windows/Linux
+// "app-command"). The renderer picks the browser pane under the cursor, like Chrome.
+export function setupBrowserHistoryGestures(win: BrowserWindow): void {
+  const forward = (_event: Electron.Event, command: string) => {
+    if (win.isDestroyed() || win.webContents.isDestroyed()) {
+      return;
+    }
+    const gesture = resolveBrowserHistoryGesture({
+      command,
+      cursor: screen.getCursorScreenPoint(),
+      contentBounds: win.getContentBounds(),
+      zoomFactor: win.webContents.getZoomFactor(),
+    });
+    if (gesture) {
+      win.webContents.send(BROWSER_HISTORY_GESTURE_EVENT, gesture);
+    }
+  };
+  win.on("swipe", forward);
+  win.on("app-command", forward);
 }

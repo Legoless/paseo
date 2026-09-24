@@ -51,6 +51,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// Desktop main forwards mouse back/forward (macOS swipe, Windows/Linux app-command) with the
+// cursor in host CSS pixels; only the browser pane under the cursor navigates, like Chrome.
+export function resolveBrowserHistoryGestureForPane(
+  value: unknown,
+  paneRect: { left: number; top: number; right: number; bottom: number },
+): "back" | "forward" | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { direction, x, y } = value;
+  if (
+    (direction !== "back" && direction !== "forward") ||
+    typeof x !== "number" ||
+    typeof y !== "number"
+  ) {
+    return null;
+  }
+  // Half-open bounds so a hidden pane's empty rect never matches.
+  const isInside =
+    x >= paneRect.left && x < paneRect.right && y >= paneRect.top && y < paneRect.bottom;
+  return isInside ? direction : null;
+}
+
 export function parseBrowserShortcutInput(value: unknown): BrowserShortcutInput | null {
   if (!isRecord(value)) {
     return null;

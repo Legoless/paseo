@@ -212,6 +212,8 @@ file after the daemon confirms persistence.
 >
 > **In-app browser ownership.** Each registered guest records its owning host window. The active browser is keyed by `(host window, workspace)`, and application-menu Reload / Force Reload resolve only within the window Electron supplies to the menu callback. A non-null active update must name a browser owned by that host; a null update clears only that host/workspace. Browser automation continues to target explicit browser ids returned by `browser_new_tab` or `browser_list_tabs`.
 >
+> **In-app browser mouse back/forward.** Electron does not navigate a `<webview>` on mouse side buttons. On macOS, mouse drivers such as Logi Options+ send them as the legacy swipe-between-pages gesture, which Electron emits only as the window `swipe` event (`left` is back). On Windows and Linux they arrive as the window `app-command` event (`browser-backward`/`browser-forward`). Main forwards either to the host renderer with the cursor position, and only the browser pane under the cursor navigates, unless a modal or menu covers it.
+>
 > **Browser keyboard boundary.** Guest pages receive renderer-published shortcuts first. `Cmd/Ctrl+L` and `Cmd/Ctrl+R` are explicit guest-shell reservations; ordinary Paseo shortcuts run only after the page declines them. The sandboxed guest preload runs in every frame so focused iframes use the same boundary, while Node integration remains disabled. Human guest input disables Electron's menu fallback for plain keys. Agent-generated keys use guest `sendInputEvent` with `skipIfUnhandled`, so an unhandled Enter stops at the guest instead of reaching the host composer. Main selects the preload; it exposes no APIs to guest pages.
 
 ```text
