@@ -535,7 +535,8 @@ function getActiveTerminalRouteForQueryKey(input: {
   if (!isQueryForServer(input.queryKey, "terminals", input.serverId)) {
     return null;
   }
-  const cwd = input.queryKey[2];
+  // A workspace without a single root keys its terminal list with a null cwd.
+  const cwd = input.queryKey[2] ?? "";
   const workspaceId = input.queryKey[3];
   if (
     typeof cwd !== "string" ||

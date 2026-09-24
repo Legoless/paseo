@@ -572,42 +572,59 @@ describe("server data push router", () => {
     unmount();
   });
 
-  it("routes terminal pushes after another observer attaches without push metadata", () => {
-    const queryClient = new QueryClient();
-    const fake = createFakeClient();
-    const serverId = "server-1";
-    const cwd = "/repo";
-    const workspaceId = "workspace-a";
-    const queryKey = buildTerminalsQueryKey(serverId, cwd, workspaceId);
-    const pushObserver = new QueryObserver(queryClient, {
-      queryKey,
-      queryFn: skipToken,
-      enabled: true,
-      gcTime: Infinity,
-      staleTime: Infinity,
-      meta: workspaceTerminalsPushRoute({
+  it.each([
+    { scope: "a project root", listRoot: "/repo", cwd: "/repo" },
+    { scope: "a whole multi-project workspace", listRoot: null, cwd: "" },
+  ])(
+    "routes terminal pushes for $scope after another observer attaches without push metadata",
+    ({ listRoot, cwd }) => {
+      const queryClient = new QueryClient();
+      const fake = createFakeClient();
+      const serverId = "server-1";
+      const workspaceId = "workspace-a";
+      const queryKey = buildTerminalsQueryKey(serverId, listRoot, workspaceId);
+      const pushObserver = new QueryObserver(queryClient, {
+        queryKey,
+        queryFn: skipToken,
         enabled: true,
-        serverId,
-        cwd,
-        workspaceId,
-      }),
-    });
-    const unsubscribePushObserver = pushObserver.subscribe(() => undefined);
-    const unmount = mountServerDataPushRouter({ client: fake.client, queryClient, serverId });
-    expect(fake.subscribeTerminalCalls).toEqual([{ cwd, workspaceId }]);
+        gcTime: Infinity,
+        staleTime: Infinity,
+        meta: workspaceTerminalsPushRoute({
+          enabled: true,
+          serverId,
+          cwd,
+          workspaceId,
+        }),
+      });
+      const unsubscribePushObserver = pushObserver.subscribe(() => undefined);
+      const unmount = mountServerDataPushRouter({ client: fake.client, queryClient, serverId });
+      expect(fake.subscribeTerminalCalls).toEqual([{ cwd, workspaceId }]);
 
-    const plainObserver = new QueryObserver(queryClient, {
-      queryKey,
-      queryFn: skipToken,
-      enabled: true,
-      gcTime: Infinity,
-      staleTime: Infinity,
-    });
-    const unsubscribePlainObserver = plainObserver.subscribe(() => undefined);
+      const plainObserver = new QueryObserver(queryClient, {
+        queryKey,
+        queryFn: skipToken,
+        enabled: true,
+        gcTime: Infinity,
+        staleTime: Infinity,
+      });
+      const unsubscribePlainObserver = plainObserver.subscribe(() => undefined);
 
-    fake.emit({
-      type: "terminals_changed",
-      payload: {
+      fake.emit({
+        type: "terminals_changed",
+        payload: {
+          cwd,
+          terminals: [
+            {
+              id: "terminal-a",
+              name: "Main",
+              workspaceId,
+              activity: { state: "idle", attentionReason: "needs_input", changedAt: 1 },
+            },
+          ],
+        },
+      });
+
+      expect(queryClient.getQueryData(queryKey)).toEqual({
         cwd,
         terminals: [
           {
@@ -617,27 +634,15 @@ describe("server data push router", () => {
             activity: { state: "idle", attentionReason: "needs_input", changedAt: 1 },
           },
         ],
-      },
-    });
+        requestId: expect.stringMatching(/^terminals-changed-/),
+      });
+      expect(fake.unsubscribeTerminalCalls).toEqual([]);
 
-    expect(queryClient.getQueryData(queryKey)).toEqual({
-      cwd,
-      terminals: [
-        {
-          id: "terminal-a",
-          name: "Main",
-          workspaceId,
-          activity: { state: "idle", attentionReason: "needs_input", changedAt: 1 },
-        },
-      ],
-      requestId: expect.stringMatching(/^terminals-changed-/),
-    });
-    expect(fake.unsubscribeTerminalCalls).toEqual([]);
-
-    unsubscribePlainObserver();
-    unsubscribePushObserver();
-    unmount();
-  });
+      unsubscribePlainObserver();
+      unsubscribePushObserver();
+      unmount();
+    },
+  );
 
   it("invalidates only the reconnect-repair scopes for one server", () => {
     const queryClient = new QueryClient();
