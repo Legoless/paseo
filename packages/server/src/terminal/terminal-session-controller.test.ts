@@ -699,6 +699,103 @@ describe("terminal-session-controller workspace-scoped subscriptions", () => {
   });
 });
 
+describe("terminal-session-controller whole-workspace subscriptions", () => {
+  test("an empty cwd follows every terminal of the workspace across project roots", async () => {
+    const appsTerminal = listSession({
+      id: "apps",
+      name: "Apps",
+      cwd: "/work/apps",
+      workspaceId: "ws-multi",
+    });
+    const meshTerminal = listSession({
+      id: "mesh",
+      name: "Mesh",
+      cwd: "/work/mesh",
+      workspaceId: "ws-multi",
+    });
+    const otherTerminal = listSession({
+      id: "other",
+      name: "Other",
+      cwd: "/work/mesh",
+      workspaceId: "ws-other",
+    });
+    const terminalsByCwd = new Map([
+      ["/work/apps", [appsTerminal]],
+      ["/work/mesh", [meshTerminal, otherTerminal]],
+    ]);
+
+    let changedListener: ((event: TerminalsChangedEvent) => void) | null = null;
+    const terminalManager: TerminalManager = {
+      getTerminals: vi.fn(async (cwd: string) => terminalsByCwd.get(cwd) ?? []),
+      createTerminal: vi.fn(),
+      registerCwdEnv: vi.fn(),
+      validateTerminalActivityToken: vi.fn(() => "unknown"),
+      getTerminal: vi.fn(),
+      getTerminalState: vi.fn(),
+      setTerminalTitle: vi.fn(),
+      setTerminalWorkspaceId: vi.fn(),
+      setTerminalActivity: vi.fn(),
+      killTerminal: vi.fn(),
+      killTerminalAndWait: vi.fn(),
+      captureTerminal: vi.fn(),
+      listDirectories: vi.fn(() => [...terminalsByCwd.keys()]),
+      killAll: vi.fn(),
+      subscribeTerminalsChanged: vi.fn((listener) => {
+        changedListener = listener;
+        return vi.fn();
+      }),
+      subscribeTerminalActivity: vi.fn(() => vi.fn()),
+      subscribeTerminalWorkspaceContributionChanged: vi.fn(() => vi.fn()),
+    };
+
+    const outboundMessages: SessionOutboundMessage[] = [];
+    const controller = createController({
+      terminalManager,
+      emit: (message) => outboundMessages.push(message),
+      emitBinary: vi.fn(),
+      hasBinaryChannel: () => true,
+      isPathWithinRoot: isSameOrDescendantPath,
+      sessionLogger: createLogger(),
+    });
+    controller.start();
+
+    controller.dispatch({ type: "subscribe_terminals_request", cwd: "", workspaceId: "ws-multi" });
+    await flushMicrotasks();
+    await expect(
+      controller.hasDirectorySubscription({ cwd: "/work/mesh", workspaceId: "ws-multi" }),
+    ).resolves.toBe(true);
+    await expect(
+      controller.hasDirectorySubscription({ cwd: "/work/mesh", workspaceId: "ws-other" }),
+    ).resolves.toBe(false);
+    outboundMessages.length = 0;
+
+    meshTerminal.getActivity = () => ({ state: "working", attentionReason: null, changedAt: 1 });
+    changedListener?.({
+      cwd: "/work/mesh",
+      terminals: [{ id: "mesh", name: "Mesh", cwd: "/work/mesh", workspaceId: "ws-multi" }],
+    });
+    await flushMicrotasks();
+
+    expect(outboundMessages).toEqual([
+      {
+        type: "terminals_changed",
+        payload: {
+          cwd: "",
+          terminals: [
+            { id: "apps", name: "Apps", workspaceId: "ws-multi", activity: null },
+            {
+              id: "mesh",
+              name: "Mesh",
+              workspaceId: "ws-multi",
+              activity: { state: "working", attentionReason: null, changedAt: 1 },
+            },
+          ],
+        },
+      },
+    ]);
+  });
+});
+
 describe("terminal-session-controller backpressure snapshot fallback", () => {
   async function setup(getClientBufferedAmount: () => number | null): Promise<{
     pushOutput: (data: string) => void;

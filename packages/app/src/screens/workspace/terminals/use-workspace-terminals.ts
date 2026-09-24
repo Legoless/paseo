@@ -108,7 +108,7 @@ export function useWorkspaceTerminals(input: UseWorkspaceTerminalsInput) {
     enabled: canCreateNow,
     pushEvent: "terminals_changed",
     meta: workspaceTerminalsPushRoute({
-      enabled: canCreateNow && workspaceMemberCount === 1,
+      enabled: canCreateNow && (workspaceMemberCount === 1 || Boolean(paneWorkspaceId)),
       serverId: normalizedServerId,
       cwd: terminalListRoot ?? "",
       ...(paneWorkspaceId ? { workspaceId: paneWorkspaceId } : {}),

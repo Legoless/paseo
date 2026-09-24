@@ -3007,6 +3007,7 @@ export const ListTerminalsRequestSchema = z.object({
 export const SubscribeTerminalsRequestSchema = z.object({
   type: z.literal("subscribe_terminals_request"),
   requestId: z.string().optional(),
+  // Empty with a workspaceId: every terminal of that workspace.
   cwd: z.string(),
   workspaceId: z.string().optional(),
 });

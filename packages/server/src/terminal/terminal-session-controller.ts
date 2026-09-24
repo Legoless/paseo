@@ -196,6 +196,7 @@ export class TerminalSessionController {
       ) {
         return false;
       }
+      if (!subscription.cwd) return subscription.workspaceId !== undefined;
       return this.terminalBelongsToRoot(subscription.cwd, input.cwd, workspaceRoots);
     });
   }
@@ -338,9 +339,12 @@ export class TerminalSessionController {
     // agent can open one there). Deliver the change to every subscribed root at
     // or above the terminal's cwd, keyed by that root, carrying the full
     // aggregated list — so the client's cache replacement doesn't drop the
-    // terminals that live directly at the root.
+    // terminals that live directly at the root. A workspace-scoped subscription has no
+    // root, and a terminal leaving it is missing from the event, so it refreshes on every change.
+    // ponytail: refreshes every workspace-scoped subscription per change; track each one's
+    // terminal ids if many clients watch many multi-project workspaces.
     const matchingSubscriptions = Array.from(this.subscribedDirectories.values()).filter(
-      (subscription) => this.isPathWithinRoot(subscription.cwd, event.cwd),
+      (subscription) => !subscription.cwd || this.isPathWithinRoot(subscription.cwd, event.cwd),
     );
     for (const subscription of matchingSubscriptions) {
       await this.emitTerminalsSnapshotForSubscription(subscription);
@@ -394,10 +398,11 @@ export class TerminalSessionController {
     const refresh = (async () => {
       do {
         subscription.pending = false;
-        const terminals = await this.getTerminalsForWorkspaceRoot(
-          subscription.cwd,
-          subscription.workspaceId,
-        );
+        // An empty cwd subscribes to the whole workspace: a workspace with several projects, or
+        // none, has no single root to scope by.
+        const terminals = subscription.cwd
+          ? await this.getTerminalsForWorkspaceRoot(subscription.cwd, subscription.workspaceId)
+          : await this.getWorkspaceTerminals(subscription.workspaceId);
         if (subscription.owner.signal.aborted) return;
         subscription.owner.emit({
           type: "terminals_changed",
@@ -435,9 +440,7 @@ export class TerminalSessionController {
     try {
       let terminals: TerminalSession[];
       if (msg.workspaceId !== undefined) {
-        terminals = (await this.getAllTerminalSessions()).filter(
-          (terminal) => terminal.workspaceId === msg.workspaceId,
-        );
+        terminals = await this.getWorkspaceTerminals(msg.workspaceId);
       } else if (typeof msg.cwd === "string") {
         terminals = await this.getTerminalsForWorkspaceRoot(msg.cwd);
       } else {
@@ -478,6 +481,13 @@ export class TerminalSessionController {
     return [
       ...new Map(terminalsByDirectory.flat().map((terminal) => [terminal.id, terminal])).values(),
     ];
+  }
+
+  private async getWorkspaceTerminals(workspaceId: string | undefined): Promise<TerminalSession[]> {
+    if (workspaceId === undefined) return [];
+    return (await this.getAllTerminalSessions()).filter(
+      (terminal) => terminal.workspaceId === workspaceId,
+    );
   }
 
   private async getTerminalsForWorkspaceRoot(
