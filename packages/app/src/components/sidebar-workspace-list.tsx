@@ -186,7 +186,6 @@ interface SidebarWorkspaceListProps {
   onWorkspacePress?: () => void;
   onAddProject?: () => void;
   onImportSession?: () => void;
-  listHeaderComponent?: ReactElement | null;
   listFooterComponent?: ReactElement | null;
   /** Gesture ref for coordinating with parent gestures (e.g., sidebar close) */
   parentGestureRef?: MutableRefObject<GestureType | undefined>;
@@ -1561,7 +1560,6 @@ export function SidebarWorkspaceList({
   onWorkspacePress,
   onAddProject,
   onImportSession,
-  listHeaderComponent,
   listFooterComponent,
   parentGestureRef,
   dragGestureHostActive,
@@ -1636,24 +1634,21 @@ export function SidebarWorkspaceList({
   // one's `else`.
   const content =
     groupMode !== "project" ? (
-      <>
-        {listHeaderComponent}
-        <SidebarGroupedModeList
-          workspaceGroups={workspaceGroups}
-          pinnedGroups={pinnedGroups}
-          workspaceEntriesByKey={workspaceEntriesByKey}
-          projectIconByProjectViewKey={projectIconByProjectViewKey}
-          shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
-          onWorkspacePress={onWorkspacePress}
-          hostBadgeByServerId={hostBadgeByServerId}
-          supportsPinningByServerId={supportsPinningByServerId}
-          onToggleWorkspacePin={onToggleWorkspacePin}
-          onPinnedWorkspaceReorder={handlePinnedWorkspaceReorder}
-          sidebarFilterEmpty={sidebarFilterEmpty}
-          parentGestureRef={parentGestureRef}
-          dragGestureHostActive={dragGestureHostActive}
-        />
-      </>
+      <SidebarGroupedModeList
+        workspaceGroups={workspaceGroups}
+        pinnedGroups={pinnedGroups}
+        workspaceEntriesByKey={workspaceEntriesByKey}
+        projectIconByProjectViewKey={projectIconByProjectViewKey}
+        shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
+        onWorkspacePress={onWorkspacePress}
+        hostBadgeByServerId={hostBadgeByServerId}
+        supportsPinningByServerId={supportsPinningByServerId}
+        onToggleWorkspacePin={onToggleWorkspacePin}
+        onPinnedWorkspaceReorder={handlePinnedWorkspaceReorder}
+        sidebarFilterEmpty={sidebarFilterEmpty}
+        parentGestureRef={parentGestureRef}
+        dragGestureHostActive={dragGestureHostActive}
+      />
     ) : (
       <WorkspaceSectionList
         topLevelWorkspaces={topLevelWorkspaces}
@@ -1668,7 +1663,6 @@ export function SidebarWorkspaceList({
         onWorkspacePress={onWorkspacePress}
         onAddProject={onAddProject}
         onImportSession={onImportSession}
-        listHeaderComponent={listHeaderComponent}
         listFooterComponent={listFooterComponent}
         sidebarFilterEmpty={sidebarFilterEmpty}
         hasVisibleRows={hasVisibleRows}
@@ -1763,7 +1757,6 @@ function WorkspaceSectionList({
   onWorkspacePress,
   onAddProject,
   onImportSession,
-  listHeaderComponent,
   listFooterComponent,
   sidebarFilterEmpty,
   hasVisibleRows,
@@ -1789,7 +1782,6 @@ function WorkspaceSectionList({
   onWorkspacePress?: () => void;
   onAddProject?: () => void;
   onImportSession?: () => void;
-  listHeaderComponent?: ReactElement | null;
   listFooterComponent?: ReactElement | null;
   sidebarFilterEmpty: boolean;
   hasVisibleRows: boolean;
@@ -2122,7 +2114,6 @@ function WorkspaceSectionList({
 
   const content = (
     <>
-      {listHeaderComponent}
       {pinnedChats.length > 0 ? (
         <View style={styles.pinnedSection} testID="sidebar-pinned-section">
           <PinnedSectionHeader collapsed={pinnedCollapsed} onToggle={togglePinnedCollapsed} />

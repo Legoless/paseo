@@ -121,6 +121,8 @@ export async function fanOutReconciledWorkspaceUpdates(input: {
 import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
 import { WorkspaceSetupRuntime } from "./workspace-setup-runtime.js";
 import { createWorkspaceLabelService } from "./workspace-labels/index.js";
+import { loadPaneLayouts } from "./workspace-layouts.js";
+import { loadCustomCommands } from "./custom-commands.js";
 import { createGitHubService } from "../services/github-service.js";
 import { createPaseoWorktree as createRegisteredPaseoWorktree } from "./paseo-worktree-service.js";
 import { createWorkspaceProvisioningService } from "./session/workspace-provisioning/workspace-provisioning-service.js";
@@ -174,7 +176,7 @@ import { createRelayRuntime, type RelayRuntime } from "./relay-runtime.js";
 import type { PushNotificationSender } from "./push/index.js";
 import { getOrCreateServerId } from "./server-id.js";
 import { resolveDaemonVersion } from "./daemon-version.js";
-import type { AgentClient, AgentProvider } from "./agent/agent-sdk-types.js";
+import type { AgentClient, AgentProvider, FetchCatalogOptions } from "./agent/agent-sdk-types.js";
 import type {
   AgentProfile,
   AgentSkillSelection,
@@ -570,7 +572,36 @@ function createInitialMutableDaemonConfig(config: PaseoDaemonConfig): MutableDae
     initialConfig.agentProfiles = config.agentProfiles;
   }
 
+  Object.assign(initialConfig, readPaneLayoutFields(config.paseoHome));
+  Object.assign(initialConfig, readCustomCommandFields(config.paseoHome));
+
   return initialConfig;
+}
+
+/**
+ * Rescanned on every call rather than watched: `paseo daemon reload` re-invokes
+ * createInitialMutableDaemonConfig and broadcasts daemon_config_changed, which is the whole
+ * refresh path.
+ */
+function readPaneLayoutFields(
+  paseoHome: string,
+): Pick<MutableDaemonConfig, "paneLayouts" | "paneLayoutErrors"> {
+  const { layouts, errors } = loadPaneLayouts(paseoHome);
+  return {
+    ...(layouts.length > 0 ? { paneLayouts: layouts } : {}),
+    ...(errors.length > 0 ? { paneLayoutErrors: errors } : {}),
+  };
+}
+
+/** Same rescan-on-reload contract as readPaneLayoutFields, for `$PASEO_HOME/commands.json`. */
+function readCustomCommandFields(
+  paseoHome: string,
+): Pick<MutableDaemonConfig, "customCommands" | "customCommandErrors"> {
+  const { commands, errors } = loadCustomCommands(paseoHome);
+  return {
+    ...(commands.length > 0 ? { customCommands: commands } : {}),
+    ...(errors.length > 0 ? { customCommandErrors: errors } : {}),
+  };
 }
 
 // Packaged variants pass their protocol scheme when launching the daemon.
@@ -880,10 +911,6 @@ export async function createPaseoDaemon(
     path.join(config.paseoHome, "projects", "workspaces.json"),
     logger,
   );
-  const workspaceLabelService = createWorkspaceLabelService({
-    paseoHome: config.paseoHome,
-    workspaceRegistry,
-  });
   const github = createGitHubService();
   const workspaceGitService = new WorkspaceGitServiceImpl({
     logger,
@@ -948,6 +975,17 @@ export async function createPaseoDaemon(
     resolvePaseoToolPolicy: (provider) =>
       resolvePaseoToolPolicy(provider, daemonConfigStore.get().providers),
     logger,
+  });
+  const refreshProviderFeatures = (provider: AgentProvider, scope: FetchCatalogOptions) =>
+    agentManager.refreshProviderFeatures(
+      provider,
+      scope.scope === "workspace" ? scope.cwd : undefined,
+    );
+  providerSnapshotManager.on("catalog", refreshProviderFeatures);
+  const workspaceLabelService = createWorkspaceLabelService({
+    paseoHome: config.paseoHome,
+    workspaceRegistry,
+    agentStore: agentManager,
   });
   const syncPluginProviders = () => {
     agentManager.updateProviderRegistry(
@@ -1802,6 +1840,7 @@ export async function createPaseoDaemon(
   };
 
   const stop = async () => {
+    providerSnapshotManager.off("catalog", refreshProviderFeatures);
     await pluginRuntime.stopAllPlugins();
     unsubscribePluginProviders();
     await hubRelationships.stop();

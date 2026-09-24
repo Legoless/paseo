@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { FolderPlus, Import, Server, Settings, X } from "lucide-react-native";
+import { FolderPlus, Import, Layers, Plus, Server, Settings, X } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
@@ -14,7 +14,7 @@ import { Gesture } from "react-native-gesture-handler";
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { resolveDesktopSidebarWidth } from "@/components/desktop-sidebar-layout";
 import {
@@ -30,6 +30,7 @@ import { Shortcut } from "@/components/ui/shortcut";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HEADER_INNER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout";
 import { resolveAddProjectTargetWorkspace } from "@/add-project-flow/target-workspace";
+import { useCreateProjectlessWorkspace } from "@/hooks/use-create-projectless-workspace";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { useImportSession } from "@/hooks/use-import-session";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
@@ -50,11 +51,16 @@ import { usePanelStore } from "@/stores/panel-store";
 import { useOwnsWindowChromeCorner, WindowChromeSafeArea } from "@/utils/desktop-window";
 import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelOverlay } from "@/mobile-panels/presentation";
-import { buildSettingsAddHostRoute, buildSettingsRoute } from "@/utils/host-routes";
+import {
+  buildNewWorkspaceRoute,
+  buildSettingsAddHostRoute,
+  buildSettingsRoute,
+} from "@/utils/host-routes";
 import { openHostOverview } from "@/navigation/settings-navigation";
 import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
+import type { Theme } from "@/styles/theme";
 
 type SidebarTheme = ReturnType<typeof useUnistyles>["theme"];
 
@@ -576,7 +582,9 @@ function MobileSidebar({
     >
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
-        <SidebarNavRows style={styles.sidebarHeaderGroup} onBeforeNavigate={closeSidebar} />
+        <SidebarNavRows style={styles.sidebarHeaderGroup} onBeforeNavigate={closeSidebar}>
+          {workspacesSectionHeaderElement}
+        </SidebarNavRows>
         <WindowChromeSafeArea placement="inline" style={styles.mobileCloseButtonRow}>
           <Pressable
             style={styles.mobileCloseButton}
@@ -620,7 +628,6 @@ function MobileSidebar({
             onImportSession={handleImportSession}
             parentGestureRef={closeGestureRef}
             dragGestureHostActive={active}
-            listHeaderComponent={workspacesSectionHeaderElement}
           />
         )}
 
@@ -761,7 +768,9 @@ function DesktopSidebar({
           ) : (
             <TitlebarDragRegion />
           )}
-          <SidebarNavRows style={sidebarHeaderGroupStyle} />
+          <SidebarNavRows style={sidebarHeaderGroupStyle}>
+            {workspacesSectionHeaderElement}
+          </SidebarNavRows>
         </View>
 
         {isInitialLoad && !hasActiveHostFilter ? (
@@ -784,7 +793,6 @@ function DesktopSidebar({
             onRefresh={handleRefresh}
             onAddProject={handleOpenProject}
             onImportSession={handleImportSession}
-            listHeaderComponent={workspacesSectionHeaderElement}
           />
         )}
 
@@ -811,21 +819,77 @@ function DesktopSidebar({
   );
 }
 
-function WorkspacesSectionHeader() {
+const ThemedLayers = withUnistyles(Layers);
+const ThemedPlus = withUnistyles(Plus);
+const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
+const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+
+function renderNewWorkspaceIcon({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) {
   return (
-    <View style={[styles.workspacesSectionHeader, styles.workspacesSectionHeaderRow]}>
-      <Text style={styles.workspacesSectionTitle}>Workspaces</Text>
-      <View style={styles.workspacesSectionActions}>
-        <Tooltip delayDuration={300}>
-          <TooltipTrigger asChild>
-            <View>
-              <SidebarDisplayPreferencesMenu />
-            </View>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" align="center" offset={8}>
-            <IconTooltipContent label="Display preferences" />
-          </TooltipContent>
-        </Tooltip>
+    <ThemedPlus
+      size={14}
+      uniProps={hovered || pressed ? foregroundColorMapping : foregroundMutedColorMapping}
+    />
+  );
+}
+
+function WorkspacesSectionHeader() {
+  const { t } = useTranslation();
+  const createProjectlessWorkspace = useCreateProjectlessWorkspace();
+  const headerIconButtonStyle = useCallback(
+    ({ hovered = false, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
+      styles.workspacesHeaderIconButton,
+      (hovered || pressed) && styles.workspacesHeaderIconButtonHovered,
+    ],
+    [],
+  );
+  const handleNewWorkspacePress = useCallback(() => {
+    // The sidebar overlays the workspace on compact form factors, so the new
+    // workspace would open behind it.
+    usePanelStore.getState().showMobileAgent();
+    void (async () => {
+      const created = await createProjectlessWorkspace();
+      // Several hosts and no active workspace is a real choice; the /new screen
+      // is the surface that can ask which one.
+      if (!created) router.push(buildNewWorkspaceRoute());
+    })();
+  }, [createProjectlessWorkspace]);
+
+  return (
+    <View style={styles.workspacesSectionHeader}>
+      <View style={styles.workspacesSectionHeaderRow}>
+        <ThemedLayers size={14} uniProps={foregroundMutedColorMapping} />
+        <Text style={styles.workspacesSectionTitle}>Workspaces</Text>
+        <View style={styles.workspacesSectionActions}>
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("sidebar.actions.newWorkspace")}
+                testID="sidebar-new-workspace"
+                style={headerIconButtonStyle}
+                onPress={handleNewWorkspacePress}
+              >
+                {renderNewWorkspaceIcon}
+              </Pressable>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" align="center" offset={8}>
+              {/* No shortcut chord here: Cmd+N opens the New Workspace screen, this
+                creates one outright. Same label, different actions. */}
+              <IconTooltipContent label={t("sidebar.actions.newWorkspace")} />
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <View>
+                <SidebarDisplayPreferencesMenu />
+              </View>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" align="center" offset={8}>
+              <IconTooltipContent label="Display preferences" />
+            </TooltipContent>
+          </Tooltip>
+        </View>
       </View>
     </View>
   );
@@ -885,6 +949,16 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[1],
+  },
+  workspacesHeaderIconButton: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: theme.borderRadius.md,
+  },
+  workspacesHeaderIconButtonHovered: {
+    backgroundColor: theme.colors.surfaceSidebarHover,
   },
   sidebarContent: {
     flex: 1,

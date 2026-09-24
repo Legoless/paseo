@@ -113,6 +113,64 @@ describe("paseo daemon bootstrap", () => {
     }
   });
 
+  test("serves the global commands file and pane layouts from PASEO_HOME at startup", async () => {
+    const paseoHomeRoot = await mkdtemp(path.join(os.tmpdir(), "paseo-home-files-"));
+    const paseoHome = path.join(paseoHomeRoot, ".paseo");
+    await mkdir(path.join(paseoHome, "layouts"), { recursive: true });
+    await writeFile(
+      path.join(paseoHome, "commands.json"),
+      JSON.stringify({ commands: [{ title: "Run tests", text: "npm test" }] }),
+      "utf-8",
+    );
+    await writeFile(
+      path.join(paseoHome, "layouts", "review.json"),
+      JSON.stringify({ name: "Review", root: {} }),
+      "utf-8",
+    );
+
+    const daemonHandle = await createTestPaseoDaemon({ paseoHomeRoot, cleanup: false });
+    const client = new DaemonClient({
+      url: `ws://127.0.0.1:${daemonHandle.port}/ws`,
+      appVersion: "0.9.1",
+    });
+    try {
+      await client.connect();
+      const { config } = await client.getDaemonConfig();
+      expect(config.customCommands).toEqual([
+        { id: "run-tests", title: "Run tests", text: "npm test", target: "agent", submit: true },
+      ]);
+      expect(config.paneLayouts?.map((layout) => layout.id)).toEqual(["review"]);
+    } finally {
+      await client.close();
+      await daemonHandle.close();
+      await rm(paseoHomeRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("wires agent labels and provider catalog refreshes into the agent manager", async () => {
+    const daemonHandle = await createTestPaseoDaemon();
+    const refreshProviderFeatures = vi.spyOn(
+      daemonHandle.daemon.agentManager,
+      "refreshProviderFeatures",
+    );
+    const client = new DaemonClient({
+      url: `ws://127.0.0.1:${daemonHandle.port}/ws`,
+      appVersion: "0.9.1",
+    });
+    try {
+      await client.connect();
+      expect(client.getLastServerInfoMessage()?.features?.agentLabels).toBe(true);
+
+      await client.refreshProvidersSnapshot({ providers: ["codex"] });
+      await vi.waitFor(() => {
+        expect(refreshProviderFeatures).toHaveBeenCalledWith("codex", undefined);
+      });
+    } finally {
+      await client.close();
+      await daemonHandle.close();
+    }
+  });
+
   test("does not create a timeline directory for live timeline activity", async () => {
     const paseoHomeRoot = await mkdtemp(path.join(os.tmpdir(), "paseo-timeline-memory-"));
     const agentCwd = await mkdtemp(path.join(os.tmpdir(), "paseo-timeline-agent-"));

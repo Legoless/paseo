@@ -30,7 +30,11 @@ import type { StoredAgentRecord } from "./agent/agent-storage.js";
 import type { AgentManagerEvent } from "./agent/agent-manager.js";
 import type { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import { WorkspaceLabelError, type WorkspaceLabelService } from "./workspace-labels/index.js";
-import { createPersistedProjectRecord } from "./workspace-registry.js";
+import {
+  createPersistedProjectRecord,
+  createPersistedWorkspaceRecord,
+  type PersistedWorkspaceMember,
+} from "./workspace-registry.js";
 import { deriveProjectKey } from "./project-key.js";
 import type { SessionOptions } from "./session.js";
 import type { SessionInboundMessage, SessionOutboundMessage } from "./messages.js";
@@ -1591,19 +1595,14 @@ describe("agent detach RPC", () => {
       updatedAt: "2026-01-01T00:00:01.000Z",
       labels: { topic: "handoff" },
     });
-    const workspace = {
+    const workspace = createSingleMemberWorkspaceRecord({
       workspaceId: "workspace-child",
       projectId: "project-child",
       cwd: "/tmp/child",
-      kind: "worktree" as const,
+      kind: "worktree",
       displayName: "Child workspace",
-      title: null,
       branch: "child",
-      baseBranch: null,
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-      archivedAt: null,
-    };
+    });
     const project = {
       projectId: "project-child",
       rootPath: "/tmp/child",
@@ -1681,6 +1680,35 @@ describe("agent detach RPC", () => {
     });
   });
 });
+
+function createSingleMemberWorkspaceRecord(input: {
+  workspaceId: string;
+  projectId: string;
+  cwd: string;
+  kind: PersistedWorkspaceMember["kind"];
+  displayName: string;
+  branch?: string | null;
+}) {
+  return createPersistedWorkspaceRecord({
+    workspaceId: input.workspaceId,
+    displayName: input.displayName,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    members: [
+      {
+        projectId: input.projectId,
+        cwd: input.cwd,
+        kind: input.kind,
+        displayName: input.displayName,
+        branch: input.branch ?? null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
+  });
+}
 
 function createProjectRecord(rootPath: string, archivedAt: string | null = null) {
   return {
@@ -4043,15 +4071,14 @@ describe("session checkout status handling", () => {
 describe("session workspace descriptors", () => {
   test("fetch_workspaces_request includes project placement for a GitHub-backed workspace", async () => {
     const messages: unknown[] = [];
-    const workspace = {
+    const workspace = createSingleMemberWorkspaceRecord({
       workspaceId: "ws-gh",
       projectId: "prj_app",
       cwd: "/repo/app",
-      kind: "local_checkout" as const,
+      kind: "local_checkout",
       displayName: "app",
       branch: "app",
-      archivedAt: null,
-    };
+    });
     const project = {
       projectId: "prj_app",
       projectKey: "remote:github.com/acme/app",
@@ -4120,15 +4147,14 @@ describe("session workspace descriptors", () => {
 
   test("fetch_workspaces_request includes repo-root fallback placement for a workspace without remote", async () => {
     const messages: unknown[] = [];
-    const workspace = {
+    const workspace = createSingleMemberWorkspaceRecord({
       workspaceId: "ws-local",
       projectId: "/repo/local",
       cwd: "/repo/local",
-      kind: "local_checkout" as const,
+      kind: "local_checkout",
       displayName: "local",
       branch: "local",
-      archivedAt: null,
-    };
+    });
     const project = {
       projectId: "/repo/local",
       rootPath: "/repo/local",
@@ -4206,19 +4232,13 @@ describe("session workspace descriptors", () => {
     });
 
     const descriptor = await asSessionInternals(session).describeWorkspaceRecord(
-      {
+      createSingleMemberWorkspaceRecord({
         workspaceId: "workspace-1",
         projectId: "project-1",
         cwd: "/tmp/workspace",
-        kind: "checkout",
+        kind: "local_checkout",
         displayName: "Workspace",
-      },
-      {
-        projectId: "project-1",
-        rootPath: "/tmp/workspace",
-        displayName: "Project",
-        kind: "git",
-      },
+      }),
     );
 
     expect(workspaceGitService.peekSnapshot).toHaveBeenCalledWith("/tmp/workspace");
@@ -4236,19 +4256,13 @@ describe("session workspace descriptors", () => {
     const session = createSessionForTest({ workspaceGitService });
 
     const descriptor = await asSessionInternals(session).describeWorkspaceRecordWithGitData(
-      {
+      createSingleMemberWorkspaceRecord({
         workspaceId: "workspace-1",
         projectId: "project-1",
         cwd: "/tmp/workspace",
-        kind: "checkout",
+        kind: "local_checkout",
         displayName: "Workspace",
-      },
-      {
-        projectId: "project-1",
-        rootPath: "/tmp/workspace",
-        displayName: "Project",
-        kind: "git",
-      },
+      }),
     );
 
     expect(workspaceGitService.peekSnapshot).toHaveBeenCalledWith("/tmp/workspace");
@@ -4792,10 +4806,15 @@ describe("session workspace script handling", () => {
       getProjectSlug: vi.fn().mockResolvedValue("paseo"),
     };
     const workspaceRegistry = {
-      get: vi.fn().mockResolvedValue({
-        workspaceId: "workspace-1",
-        cwd: "/tmp/repo",
-      }),
+      get: vi.fn().mockResolvedValue(
+        createSingleMemberWorkspaceRecord({
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          cwd: "/tmp/repo",
+          kind: "local_checkout",
+          displayName: "repo",
+        }),
+      ),
     };
     spawnMocks.spawnWorkspaceScript.mockResolvedValue({
       scriptName: "api",
@@ -4809,7 +4828,7 @@ describe("session workspace script handling", () => {
         subscribeTerminalWorkspaceContributionChanged: vi.fn(() => () => {}),
       },
       serviceProxy: { listRoutesForWorkspace: vi.fn(() => []) },
-      scriptRuntimeStore: { listForWorkspace: vi.fn(() => []) },
+      scriptRuntimeStore: { get: vi.fn(() => null), listForWorkspace: vi.fn(() => []) },
       getDaemonTcpPort: () => 6767,
       getDaemonTcpHost: () => "127.0.0.1",
       messages,

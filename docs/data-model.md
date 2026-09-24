@@ -59,8 +59,8 @@ $PASEO_HOME/
 │   └── managed-processes/
 │       └── {recordId}.json              # Helper processes owned by Paseo; reconciled on daemon bootstrap
 ├── plugins/
-│   ├── sources.json                      # Git origin, ref, commit, and managed checkout ownership
-│   └── {pluginId}/{version}/checkout/    # Source checkout for one installed Git commit
+│   ├── sources.json                      # Managed kind and Git acquisition remote
+│   └── {pluginId}/{uuid}/                # Git checkout or npm package/lockfile/dependency tree
 └── push-tokens.json                     # Expo push notification tokens
 ```
 
@@ -250,11 +250,13 @@ snapshot so a mixed edit can apply its live subset and still name the paths that
 
 All fields are optional with sensible defaults.
 
-Git-managed plugins still appear as directory sources in `config.json`. This keeps the plugin
-runtime and protocol config compatible with directory-only clients. `plugins/sources.json` owns the
-Git-specific origin, tracking ref, installed commit, repository subdirectory, and checkout root.
-Paseo writes it atomically. An update creates and validates a new version directory before changing
-the configured directory path; successful activation removes the old version.
+Managed plugins appear as directory sources in `config.json`; it owns the active path and enabled
+state. `plugins/sources.json` is written atomically and stores only managed kind and the Git acquisition
+remote. Installed revision, package/subdirectory identity and ownership root come from retained
+artifacts and the fixed managed layout; [managed source ownership](plugins.md#managed-source-ownership)
+explains their authority. An update prepares a new directory before replacing the active path and
+removing the previous version. Old record fields are accepted at the store boundary and ignored;
+there is no startup migration or persistent update policy.
 
 ### Profile lists
 
@@ -270,6 +272,43 @@ defaults, so both mean none.
 rather than storing something it cannot describe. That is why the client gates the agent profiles
 UI on `server_info.features.agentProfiles` instead of letting a save appear to succeed against an
 older daemon.
+
+### Agent provider Paseo tools
+
+`agents.providers` is keyed by the exact provider ID used to launch the agent. The built-in IDs are
+`antigravity`, `claude`, `codex`, `copilot`, `opencode`, `pi`, and `omp`. Custom provider IDs are
+their literal configuration keys, such as `my-claude` or `zai`, not the provider named by `extends`.
+
+Each entry may include a Paseo-tool policy:
+
+```json
+{
+  "agents": {
+    "providers": {
+      "my-claude": {
+        "extends": "claude",
+        "label": "My Claude",
+        "paseoTools": {
+          "enabled": true,
+          "disabledTools": ["browser_evaluate"]
+        }
+      }
+    }
+  }
+}
+```
+
+Absent `paseoTools`, or absent fields within it, means Paseo tools are enabled and all tools are
+allowed. `enabled: false` disables the provider's Paseo catalog; `disabledTools` lists exact tool
+IDs to omit. The policy covers the core and browser catalog, not the voice-only `speak` tool.
+Browser tools also require `daemon.browserTools.enabled` and a connected browser host.
+This policy controls the catalog presented to an agent. It is not an authorization boundary for
+agents that can access the host through a shell.
+
+`daemon.mcp.injectIntoAgents` is the global override. When it is `false`, no provider receives
+Paseo tools; otherwise the provider policy applies. Provider and global policy are resolved when a
+session is created, resumed, imported, or reloaded, so configuration changes affect the next
+session rather than an already-running one.
 
 ### Git process limits
 
@@ -438,13 +477,17 @@ root project, working directory, or Git branch. Adding, moving, or removing memb
 container's identity and name; removing the last member leaves an empty workspace.
 
 The record holds `workspaceId`, `displayName`, `title`, `members`, creation/update/archive timestamps,
-`autoArchivedChangeRequestUrl`, `pinnedAt`, and optional `labels`. `workspaceId` is opaque identity,
-never a filesystem path.
+`autoArchivedChangeRequestUrl`, `pinnedAt`, and optional `labels` and `untrustedSource`.
+`workspaceId` is opaque identity, never a filesystem path. `untrustedSource` records the forge,
+number, and head repository when a cross-repository change request creates the workspace. While it
+is present, repository automation is blocked; explicit setup removes it.
 
 ### Workspace projects (members)
 
 Each member owns `projectId`, `cwd`, `kind`, `displayName`, `branch`, `worktreeRoot`, `baseBranch`,
-`isPaseoOwnedWorktree`, and `mainRepoRoot`. No member is primary. Commands that need a project use
+`isPaseoOwnedWorktree`, and `mainRepoRoot`. `baseBranch` is the comparison base and survives
+archive and restore; branch-off creation stores the resolved ref, while legacy and PR-checkout
+records hold a bare name, and null means no recorded base. No member is primary. Commands that need a project use
 an explicit member directory; a workspace with several projects cannot silently select one.
 
 The registry normalizes legacy records on read. An explicit member list, including `[]`, is
@@ -541,8 +584,8 @@ Right-sidebar client state splits on whether it is determined by the directory o
 
 The durable client replica uses IndexedDB on browser/Electron and expo-sqlite on native. Rows use the
 compound key `(serverId, kind, id)`; kinds are `agent`, `workspace`, `project`, `timeline`, and
-`checkpoint`. Directory entities have individual rows. Timeline and checkpoint use the singleton id
-and have at most one row per host.
+`checkpoint`. Directory entities have individual rows, timelines use the agent id, and the checkpoint
+uses the singleton id.
 
 The store is a typed persistence boundary. It returns values to directory and timeline owners and
 accepts their explicit commits; it never reads or writes UI state. Reads are scoped to the requested

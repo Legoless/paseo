@@ -177,6 +177,18 @@ describe("loadAppSettingsFromStorage", () => {
     expect(result.workspaceTitleSource).toBe("title");
   });
 
+  it("defaults Explorer to the active tab and preserves pane-group scope", async () => {
+    expect((await loadAppSettingsFromStorage(makeDeps())).explorerProjectScope).toBe("tab");
+    const paneScoped = await loadAppSettingsFromStorage(
+      makeDeps({
+        storage: createInMemoryKeyValueStorage({
+          [APP_SETTINGS_KEY]: JSON.stringify({ explorerProjectScope: "pane" }),
+        }),
+      }),
+    );
+    expect(paneScoped.explorerProjectScope).toBe("pane");
+  });
+
   it("enables the chat outline by default", async () => {
     const deps = makeDeps();
 
@@ -195,6 +207,26 @@ describe("loadAppSettingsFromStorage", () => {
     const result = await loadAppSettingsFromStorage(deps);
 
     expect(result.chatOutlineEnabled).toBe(false);
+  });
+
+  it("enables pane status glow by default", async () => {
+    const deps = makeDeps();
+
+    const result = await loadAppSettingsFromStorage(deps);
+
+    expect(result.paneStatusGlowEnabled).toBe(true);
+  });
+
+  it("loads a disabled pane status glow preference", async () => {
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ paneStatusGlowEnabled: false }),
+      }),
+    });
+
+    const result = await loadAppSettingsFromStorage(deps);
+
+    expect(result.paneStatusGlowEnabled).toBe(false);
   });
 
   it("enables terminal status glow by default", async () => {
@@ -304,6 +336,38 @@ describe("loadAppSettingsFromStorage", () => {
     const result = await loadAppSettingsFromStorage(deps);
 
     expect(result.useLegacyTerminalRenderer).toBe(true);
+  });
+
+  it("keeps the isolated terminal renderer off by default", async () => {
+    const deps = makeDeps();
+
+    const result = await loadAppSettingsFromStorage(deps);
+
+    expect(result.useIsolatedTerminalRenderer).toBe(false);
+  });
+
+  it("loads the per-device isolated terminal renderer preference", async () => {
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ useIsolatedTerminalRenderer: true }),
+      }),
+    });
+
+    const result = await loadAppSettingsFromStorage(deps);
+
+    expect(result.useIsolatedTerminalRenderer).toBe(true);
+  });
+
+  it("drops a non-boolean isolated terminal renderer value back to off", async () => {
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ useIsolatedTerminalRenderer: "yes" }),
+      }),
+    });
+
+    const result = await loadAppSettingsFromStorage(deps);
+
+    expect(result.useIsolatedTerminalRenderer).toBe(false);
   });
 
   it("loads configured terminal scrollback lines from app settings", async () => {

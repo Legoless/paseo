@@ -268,11 +268,16 @@ export function createAgentUpdatesService(deps: AgentUpdatesServiceDeps): AgentU
 
   async function emitStoredRecord(record: StoredAgentRecord): Promise<AgentSnapshotPayload> {
     const payload = deps.buildStoredAgentPayload(record);
-    try {
-      await publishPayload(payload);
-    } catch (error) {
-      deps.logger.error({ err: error, agentId: payload.id }, "Failed to emit stored agent update");
-    }
+    await enqueueAgentUpdate(payload.id, async () => {
+      try {
+        await publishPayload(payload);
+      } catch (error) {
+        deps.logger.error(
+          { err: error, agentId: payload.id },
+          "Failed to emit stored agent update",
+        );
+      }
+    });
     return payload;
   }
 

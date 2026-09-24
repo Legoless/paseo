@@ -11,7 +11,6 @@ import {
 import { seedWorkspace } from "../support/helpers/seed-client";
 import { expectWorkspaceHeader } from "../support/helpers/workspace-ui";
 import { getServerId } from "../support/helpers/server-id";
-import { projectEquivalenceViewKey } from "../support/helpers/project-view-key";
 import { escapeRegex } from "../support/helpers/regex";
 import { openFilesPanel } from "../support/helpers/workspace-tabs";
 import { seedMockAgentWorkspace } from "../support/helpers/mock-agent";
@@ -67,14 +66,25 @@ async function openWorkspaceHoverCard(page: import("@playwright/test").Page, wor
   const row = await waitForSidebarWorkspace(page, workspaceId);
   await row.hover();
 
-  const hoverCard = page.getByRole("menu", { name: "Workspace scripts" });
+  const hoverCard = page.getByTestId("workspace-hover-card");
+  await expect(hoverCard).toBeVisible({ timeout: 30_000 });
+  return hoverCard;
+}
+
+async function openAgentHoverCard(page: import("@playwright/test").Page, agentId: string) {
+  const row = page.getByTestId(`sidebar-agent-row-${agentId}`);
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  const title = await row.getAttribute("aria-label");
+  if (!title) throw new Error(`Agent row ${agentId} has no accessible label`);
+  await row.hover();
+
+  const hoverCard = page.getByRole("menu", { name: title, exact: true });
   await expect(hoverCard).toBeVisible({ timeout: 30_000 });
   return hoverCard;
 }
 
 interface PaseoOwnedWorktree {
-  projectName: string;
-  workspaceId: string;
+  agentId: string;
   worktreeSlug: string;
 }
 
@@ -97,10 +107,17 @@ async function withPaseoOwnedWorktree(
       throw new Error(created.error ?? "Failed to create Paseo-owned worktree");
     }
     expect(path.basename(created.workspace.workspaceDirectory)).toBe(worktreeSlug);
+    const agent = await project.client.createAgent({
+      provider: "mock",
+      cwd: created.workspace.workspaceDirectory,
+      workspaceId: created.workspace.id,
+      title: "Worktree hover agent",
+      modeId: "load-test",
+      model: "e2e-fast-stream",
+    });
 
     await run({
-      projectName: path.basename(project.repoPath),
-      workspaceId: created.workspace.id,
+      agentId: agent.id,
       worktreeSlug,
     });
   } finally {
@@ -187,16 +204,143 @@ test.describe("Sidebar workspace list", () => {
     }
   });
 
-  test("workspace hover card shows host as metadata", async ({ page }) => {
-    const workspace = await seedWorkspace({ repoPrefix: "sidebar-hover-host-" });
+  test("workspace hover card counts only agent tabs and projects", async ({ page }) => {
+    const workspace = await seedMockAgentWorkspace({
+      repoPrefix: "sidebar-hover-counts-",
+      title: "First counted agent",
+    });
 
     try {
+      const secondAgent = await workspace.client.createAgent({
+        provider: "mock",
+        cwd: workspace.cwd,
+        workspaceId: workspace.workspaceId,
+        title: "Second counted agent",
+        modeId: "load-test",
+        model: "e2e-fast-stream",
+      });
       await gotoAppShell(page);
-      await waitForSidebarProject(page, path.basename(workspace.repoPath));
+      await page.getByTestId(`sidebar-agent-row-${workspace.agentId}`).click();
+      await page.getByTestId(`sidebar-agent-row-${secondAgent.id}`).click();
+      await openFilesPanel(page);
 
       const hoverCard = await openWorkspaceHoverCard(page, workspace.workspaceId);
-      await expect(page.getByTestId("hover-card-workspace-host")).toHaveText("localhost");
+      await expect(page.getByTestId("hover-card-workspace-tabs")).toHaveText("Open tabs: 2");
+      await expect(page.getByTestId("hover-card-workspace-projects")).toHaveText("Projects: 1");
+      await expect(hoverCard).not.toContainText("localhost");
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  test("agent hover card shows host as metadata", async ({ page }) => {
+    const workspace = await seedMockAgentWorkspace({
+      repoPrefix: "sidebar-agent-hover-host-",
+      title: "Hover agent",
+    });
+
+    try {
+      const secondAgent = await workspace.client.createAgent({
+        provider: "mock",
+        cwd: workspace.cwd,
+        workspaceId: workspace.workspaceId,
+        title: "Second hover agent",
+        modeId: "load-test",
+        model: "e2e-fast-stream",
+      });
+      await gotoAppShell(page);
+      const firstHoverCard = await openAgentHoverCard(page, workspace.agentId);
+      await expect(firstHoverCard.getByTestId("hover-card-agent-name")).toHaveText("Hover agent");
+      await page.mouse.move(800, 500);
+      await expect(firstHoverCard).toBeHidden();
+
+      const hoverCard = await openAgentHoverCard(page, secondAgent.id);
+      await expect(hoverCard.getByTestId("hover-card-agent-name")).toHaveText("Second hover agent");
+      await expect(hoverCard.getByTestId("hover-card-agent-host")).toHaveText("localhost");
       await expect(hoverCard).not.toContainText(/\b(Online|Connecting|Offline|Error|Idle)\b/);
+
+      const memberRow = page.locator('[data-testid^="sidebar-member-row-"]').first();
+      const memberKebab = page.locator('[data-testid^="sidebar-member-kebab-"]').first();
+      await page.mouse.move(800, 500);
+      await memberRow.focus();
+      await expect(memberKebab).toBeVisible();
+      await memberRow.hover();
+      await expect(memberKebab).toBeVisible();
+      const memberRowBox = await memberRow.boundingBox();
+      const memberKebabBox = await memberKebab.boundingBox();
+      expect(memberRowBox).not.toBeNull();
+      expect(memberKebabBox).not.toBeNull();
+      expect(
+        Math.abs(memberRowBox!.x + memberRowBox!.width - memberKebabBox!.x - memberKebabBox!.width),
+      ).toBeLessThanOrEqual(12);
+      await memberKebab.click();
+      await expect(
+        page.locator('[data-testid^="sidebar-member-menu-copy-path-"]').filter({ visible: true }),
+      ).toBeVisible();
+      await expect(page.locator('[data-testid^="sidebar-member-menu-copy-branch-"]')).toHaveCount(
+        0,
+      );
+      await page.keyboard.press("Escape");
+
+      const agentRow = page.getByTestId(`sidebar-agent-row-${secondAgent.id}`);
+      const agentKebab = page.getByTestId(`sidebar-agent-kebab-${secondAgent.id}`);
+      await page.mouse.move(800, 500);
+      await agentRow.focus();
+      await expect(agentKebab).toBeVisible();
+      await agentRow.hover();
+      await expect(agentKebab).toBeVisible();
+      const agentRowBox = await agentRow.boundingBox();
+      const agentKebabBox = await agentKebab.boundingBox();
+      expect(agentRowBox).not.toBeNull();
+      expect(agentKebabBox).not.toBeNull();
+      expect(
+        Math.abs(agentRowBox!.x + agentRowBox!.width - agentKebabBox!.x - agentKebabBox!.width),
+      ).toBeLessThanOrEqual(12);
+
+      await agentKebab.click();
+      await expect(page.getByTestId(`sidebar-agent-dropdown-${secondAgent.id}`)).toBeVisible();
+      await expect(page.getByTestId(`sidebar-agent-menu-open-${secondAgent.id}`)).toBeVisible();
+      await expect(
+        page.getByTestId(`sidebar-agent-menu-copy-path-${secondAgent.id}`),
+      ).toBeVisible();
+      await expect(
+        page.getByTestId(`sidebar-agent-menu-copy-branch-${secondAgent.id}`),
+      ).toBeVisible();
+      await expect(page.getByTestId(`sidebar-agent-menu-close-${secondAgent.id}`)).toBeVisible();
+      await expect(
+        page
+          .getByTestId(`sidebar-agent-dropdown-${secondAgent.id}`)
+          .getByText(/^Close(?: agent)?$/),
+      ).toHaveCount(1);
+      await expect(page.getByTestId("agent-hover-card")).toHaveCount(0);
+      await page.keyboard.press("Escape");
+
+      await agentRow.click({ button: "right" });
+      await expect(page.getByTestId(`sidebar-agent-context-menu-${secondAgent.id}`)).toBeVisible();
+      await expect(page.getByTestId("agent-hover-card")).toHaveCount(0);
+      await expect(
+        page
+          .getByTestId(`sidebar-agent-context-menu-${secondAgent.id}`)
+          .getByText(/^Close(?: agent)?$/),
+      ).toHaveCount(1);
+      await page.getByTestId(`sidebar-agent-menu-close-${secondAgent.id}`).click();
+      await page.getByTestId("confirm-dialog-cancel").click();
+      await expect(agentRow).toBeVisible();
+      expect(
+        (await workspace.client.fetchAgent({ agentId: secondAgent.id }))?.agent.archivedAt,
+      ).toBeNull();
+
+      await agentRow.click({ button: "right" });
+      await page.getByTestId(`sidebar-agent-menu-close-${secondAgent.id}`).click();
+      await page.getByTestId("confirm-dialog-confirm").click();
+      await expect(agentRow).toHaveCount(0);
+      await expect
+        .poll(async () =>
+          Boolean(
+            (await workspace.client.fetchAgent({ agentId: secondAgent.id }))?.agent.archivedAt,
+          ),
+        )
+        .toBe(true);
     } finally {
       await workspace.cleanup();
     }
@@ -215,9 +359,13 @@ test.describe("Sidebar workspace list", () => {
       expect(workspace.client.getLastServerInfoMessage()?.features?.workspaceMarkUnread).toBe(true);
       await gotoAppShell(page);
 
-      const row = await waitForSidebarWorkspace(page, workspace.workspaceId);
-      await expect(row.getByTestId("workspace-status-indicator-done")).toBeVisible();
+      // The workspace row's leading glyph shows open/closed, not status; read state shows on
+      // the agent row underneath it.
+      await waitForSidebarWorkspace(page, workspace.workspaceId);
+      const agentRow = page.getByTestId(`sidebar-agent-row-${workspace.agentId}`);
+      await expect(agentRow.getByTestId("sidebar-agent-status-done")).toBeVisible();
       await (await openWorkspaceReadAction(page, workspace.workspaceId, "unread")).click();
+      await expect(agentRow.getByTestId("sidebar-agent-status-attention")).toBeVisible();
       await openWorkspaceReadAction(page, workspace.workspaceId, "read");
 
       await page.keyboard.press("Escape");
@@ -228,13 +376,12 @@ test.describe("Sidebar workspace list", () => {
     }
   });
 
-  test("Paseo-owned worktree hover card shows the worktree directory name", async ({ page }) => {
-    await withPaseoOwnedWorktree(async ({ projectName, workspaceId, worktreeSlug }) => {
+  test("Paseo-owned worktree agent hover card shows the agent directory name", async ({ page }) => {
+    await withPaseoOwnedWorktree(async ({ agentId, worktreeSlug }) => {
       await gotoAppShell(page);
-      await waitForSidebarProject(page, projectName);
-      await openWorkspaceHoverCard(page, workspaceId);
+      await openAgentHoverCard(page, agentId);
 
-      await expect(page.getByTestId("hover-card-workspace-cwd")).toHaveText(worktreeSlug);
+      await expect(page.getByTestId("hover-card-agent-cwd")).toHaveText(worktreeSlug);
     });
   });
 });
@@ -299,10 +446,8 @@ test.describe("Half-screen desktop layout", () => {
         lastWorkspaceId = created.workspace.id;
       }
 
+      // Workspace sections are never truncated, so the last one renders without a show-more.
       await gotoAppShell(page);
-      await page
-        .getByTestId(`sidebar-project-show-more-${projectEquivalenceViewKey(workspace.projectKey)}`)
-        .click();
       await waitForSidebarWorkspace(page, lastWorkspaceId);
 
       const sidebarScroll = page.getByTestId("sidebar-project-workspace-list-scroll");
@@ -313,10 +458,10 @@ test.describe("Half-screen desktop layout", () => {
       expect(scrollTop).toBe(160);
 
       await page.getByTestId("menu-button").click();
-      await expect(page.getByTestId("sidebar-global-new-workspace")).not.toBeVisible();
+      await expect(page.getByTestId("sidebar-sessions")).not.toBeVisible();
 
       await page.getByTestId("menu-button").click();
-      await expect(page.getByTestId("sidebar-global-new-workspace")).toBeVisible();
+      await expect(page.getByTestId("sidebar-sessions")).toBeVisible();
       await expect(sidebarScroll).toHaveJSProperty("scrollTop", scrollTop);
     } finally {
       await workspace.cleanup();
@@ -325,7 +470,7 @@ test.describe("Half-screen desktop layout", () => {
 
   test("keeps the pinned sidebar at half of a 14-inch Mac display", async ({ page }) => {
     await gotoAppShell(page);
-    await expect(page.getByTestId("sidebar-global-new-workspace")).toBeVisible();
+    await expect(page.getByTestId("sidebar-sessions")).toBeVisible();
     await expect(page.getByTestId("agent-list-backdrop")).not.toBeVisible();
   });
 
@@ -340,7 +485,7 @@ test.describe("Half-screen desktop layout", () => {
     expect(openBounds?.x).toBeGreaterThan(12);
 
     await openToggle.click();
-    await expect(page.getByTestId("sidebar-global-new-workspace")).not.toBeVisible();
+    await expect(page.getByTestId("sidebar-sessions")).not.toBeVisible();
 
     const closedToggle = page.getByTestId("menu-button");
     const closedIcon = closedToggle.locator("svg").first();
@@ -374,7 +519,7 @@ test.describe("Half-screen desktop layout", () => {
         page.getByTestId("explorer-sidebar-tab-files").filter({ visible: true }),
       ).toBeVisible();
       await expect(explorerToggle).toHaveAccessibleName("Close Explorer sidebar");
-      await expect(page.getByTestId("sidebar-global-new-workspace")).toBeVisible();
+      await expect(page.getByTestId("sidebar-sessions")).toBeVisible();
       await expect(page.getByTestId("explorer-sidebar-tab-rail")).toBeVisible();
       await expect(page.getByTestId("workspace-tabs-row").filter({ visible: true })).toHaveCount(1);
 
@@ -383,7 +528,7 @@ test.describe("Half-screen desktop layout", () => {
         page.getByTestId("explorer-sidebar-tab-files").filter({ visible: true }),
       ).toHaveCount(0);
       await expect(explorerToggle).toHaveAccessibleName("Open Explorer sidebar");
-      await expect(page.getByTestId("sidebar-global-new-workspace")).toBeVisible();
+      await expect(page.getByTestId("sidebar-sessions")).toBeVisible();
     } finally {
       await workspace.cleanup();
     }

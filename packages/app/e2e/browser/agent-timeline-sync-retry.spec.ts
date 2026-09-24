@@ -54,6 +54,29 @@ test.describe("Agent timeline sync retry", () => {
     }
   });
 
+  test("the sync error callout can be dismissed", async ({ page }) => {
+    test.setTimeout(120_000);
+    const gate = await installDaemonWebSocketGate(page);
+    const agent = await seedLongMockAgentTimeline({ turns: 2 });
+    try {
+      await openAgentTimeline(page, agent);
+      await expectTimelinePromptVisible(page, agent.newestPrompt);
+
+      gate.failTimelineResponses(agent.agentId);
+      await disconnectViewedTimeline(page, gate);
+      await restoreViewedTimelineWithHeldResponse(page, gate);
+
+      const callout = page.getByTestId("agent-timeline-sync-error");
+      await expect(callout).toBeVisible({ timeout: 30_000 });
+      await page.getByTestId("agent-timeline-sync-dismiss").click();
+      await expect(callout).toBeHidden();
+      await expectTimelinePromptVisible(page, agent.newestPrompt);
+    } finally {
+      gate.restore();
+      await agent.cleanup();
+    }
+  });
+
   test("a refused first load offers a retry instead of a dead panel", async ({
     page,
   }, testInfo) => {

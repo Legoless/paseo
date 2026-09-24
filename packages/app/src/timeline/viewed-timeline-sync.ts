@@ -734,7 +734,13 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     } catch (error) {
       if (disposed || !connected || generation !== membershipGeneration) return;
       membershipNeedsRetry = true;
-      setVisibilityCatchUpError(requested, error);
+      // Only the new members lack history. An acknowledged agent's status belongs to its own
+      // catch-up, and a membership success never re-runs a completed one, so an error set here
+      // would never clear.
+      setVisibilityCatchUpError(
+        requested.filter((agentId) => !isAcknowledged(agentId)),
+        error,
+      );
       cancelMembershipRetry?.();
       const nextRetryDelayMs = getNextRetryDelayMs(membershipRetryDelayMs);
       cancelMembershipRetry = ports.schedule(() => {
@@ -759,8 +765,12 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     const catchUp = catchUps.get(agentId);
     const membershipRetryable = membershipNeedsRetry && connected;
     if (catchUp?.status !== "error" && !membershipRetryable) return;
-    manualRetries.add(agentId);
-    notifyListeners();
+    // A caught-up member has nothing to wait for: membership success never re-runs a completed
+    // catch-up, so marking it retrying would strand it there.
+    if (!(catchUp?.status === "complete" && isAcknowledged(agentId))) {
+      manualRetries.add(agentId);
+      notifyListeners();
+    }
     if (catchUp?.status === "error") {
       catchUp.cancelRetry?.();
       startCatchUp(agentId, { request: catchUp.request, supersede: true });

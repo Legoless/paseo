@@ -47,7 +47,7 @@ export interface CachedDirectory {
 
 export interface CachedWorkspace {
   workspace: WorkspaceDescriptor;
-  project?: ProjectDescriptor;
+  projects: ProjectDescriptor[];
 }
 
 export interface DirectoryCursor {
@@ -273,6 +273,7 @@ const StoredAgentSchema = z.strictObject({
 
 const WorkspaceScriptSchema = z.strictObject({
   scriptName: z.string(),
+  cwd: z.string().optional(),
   type: z.enum(["script", "service"]),
   hostname: z.string(),
   port: z.number().int().positive().nullable(),
@@ -298,6 +299,21 @@ const WorkspaceGitRuntimeSchema = z
   .nullable()
   .optional();
 
+const StoredWorkspaceMemberSchema = z.strictObject({
+  projectId: z.string(),
+  projectKey: z.string().nullable().optional(),
+  projectKind: z.enum(["git", "non_git", "directory"]).optional(),
+  projectCustomIconRevision: z.string().nullable().optional(),
+  projectDisplayName: z.string(),
+  projectCustomName: z.string().nullable(),
+  projectRootPath: z.string(),
+  workspaceDirectory: z.string(),
+  workspaceKind: z.enum(["directory", "local_checkout", "checkout", "worktree"]),
+  worktreeSlug: z.string().nullable(),
+  branch: z.string().nullable(),
+  diffStat: z.strictObject({ additions: z.number(), deletions: z.number() }).nullable(),
+});
+
 const StoredWorkspaceSchema = z.strictObject({
   id: z.string(),
   projectId: z.string(),
@@ -316,6 +332,11 @@ const StoredWorkspaceSchema = z.strictObject({
   // dropped them painted its row without its chips and stayed that way: the directory cursor is
   // current on reconnect, so the daemon has nothing newer to send back.
   labels: z.array(z.string()).optional(),
+  // COMPAT(workspaceMultiProject): absent on caches written before multi-project workspaces.
+  // Dropping it here made every cached workspace re-hydrate as single-project, because
+  // normalizeWorkspaceDescriptor then synthesizes the implicit member from the scalar fields.
+  members: z.array(StoredWorkspaceMemberSchema).optional(),
+  membersAuthoritative: z.boolean().optional(),
   status: z.enum(["needs_input", "failed", "running", "attention", "done"]),
   statusEnteredAt: IsoDateSchema.nullable(),
   activityAt: z.null(),
@@ -679,6 +700,14 @@ function deserializeAgent(serverId: string, stored: StoredAgent): Agent {
   };
 }
 
+// Rows written before members were cached lack them; only those synthesize the scalar member.
+function deserializeWorkspace(stored: StoredWorkspace): WorkspaceDescriptor {
+  return normalizeWorkspaceDescriptor({
+    ...stored,
+    membersAuthoritative: stored.members !== undefined,
+  });
+}
+
 function serializeWorkspace(workspace: WorkspaceDescriptor): StoredWorkspace {
   return {
     id: workspace.id,
@@ -695,6 +724,21 @@ function serializeWorkspace(workspace: WorkspaceDescriptor): StoredWorkspace {
     title: workspace.title ?? null,
     pinnedAt: workspace.pinnedAt ?? null,
     labels: workspace.labels,
+    membersAuthoritative: true,
+    members: workspace.members.map((member) => ({
+      projectId: member.projectId,
+      projectKey: member.projectKey,
+      projectKind: member.projectKind,
+      projectCustomIconRevision: member.projectCustomIconRevision,
+      projectDisplayName: member.projectDisplayName,
+      projectCustomName: member.projectCustomName,
+      projectRootPath: member.projectRootPath,
+      workspaceDirectory: member.workspaceDirectory,
+      workspaceKind: member.workspaceKind,
+      worktreeSlug: member.worktreeSlug,
+      branch: member.branch,
+      diffStat: member.diffStat ?? null,
+    })),
     status: workspace.status,
     statusEnteredAt: workspace.statusEnteredAt?.toISOString() ?? null,
     activityAt: null,
@@ -702,6 +746,7 @@ function serializeWorkspace(workspace: WorkspaceDescriptor): StoredWorkspace {
     diffStat: workspace.diffStat,
     scripts: workspace.scripts.map((script) => ({
       scriptName: script.scriptName,
+      ...(script.cwd !== undefined ? { cwd: script.cwd } : {}),
       type: script.type,
       hostname: script.hostname,
       port: script.port,
@@ -846,7 +891,7 @@ function applyDirectoryRow(
     case "workspace": {
       const stored = parseStoredPayload(StoredWorkspaceSchema, row.payload);
       if (stored.id !== row.id) throw new Error("Replica workspace row id mismatch");
-      result.workspaces.set(row.id, normalizeWorkspaceDescriptor(stored));
+      result.workspaces.set(row.id, deserializeWorkspace(stored));
       return;
     }
     case "project": {
@@ -921,25 +966,27 @@ export class ReplicaCache {
     try {
       const stored = parseStoredPayload(StoredWorkspaceSchema, workspaceRow.payload);
       if (stored.id !== workspaceRow.id) throw new Error("Replica workspace row id mismatch");
-      workspace = normalizeWorkspaceDescriptor(stored);
+      workspace = deserializeWorkspace(stored);
     } catch {
       await this.deleteInvalidRow(workspaceRow);
       return undefined;
     }
 
-    let project: ProjectDescriptor | undefined;
-    const projectRow = (await this.readRows(serverId, ["project"], [workspace.projectId]))[0];
-    if (projectRow) {
+    const projects: ProjectDescriptor[] = [];
+    const projectIds = [...new Set(workspace.members.map((member) => member.projectId))];
+    const projectRows =
+      projectIds.length > 0 ? await this.readRows(serverId, ["project"], projectIds) : [];
+    for (const projectRow of projectRows) {
       try {
         const stored = parseStoredPayload(StoredProjectSchema, projectRow.payload);
         if (stored.projectId !== projectRow.id) throw new Error("Replica project row id mismatch");
-        project = normalizeProjectDescriptor(stored);
+        projects.push(normalizeProjectDescriptor(stored));
       } catch {
         await this.deleteInvalidRow(projectRow);
       }
     }
 
-    return { workspace, ...(project ? { project } : {}) };
+    return { workspace, projects };
   }
 
   async readDirectory(serverId: string): Promise<CachedDirectory> {
