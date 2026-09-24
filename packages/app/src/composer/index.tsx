@@ -59,6 +59,7 @@ import {
   type ComposerKeyPressEvent,
   type MessageInputRef,
 } from "./input/input";
+import { useComposerPromptHistory } from "./prompt-history";
 import type { ImageAttachment, MessagePayload, TextReplacement } from "./types";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
 import type { DraftCommandConfig } from "@/hooks/use-agent-commands-query";
@@ -1417,6 +1418,12 @@ function ComposerContentImpl({
     [onChangeText],
   );
 
+  const promptHistory = useComposerPromptHistory({
+    serverId,
+    agentId,
+    replaceUserInput,
+  });
+
   const runClientSlashCommand = useCallback(
     (command: ClientSlashCommand): boolean => {
       if (command.execution !== "immediate" || !onClientSlashCommand) {
@@ -1657,6 +1664,7 @@ function ComposerContentImpl({
       outgoingAttachments: ComposerAttachment[],
       forceSend?: boolean,
     ) => {
+      promptHistory.recordSubmittedPrompt(outgoingMessage);
       const result = await submitAgentInput({
         message: outgoingMessage,
         attachments: outgoingAttachments,
@@ -1701,6 +1709,7 @@ function ComposerContentImpl({
       completeSubmit,
       hasExternalContent,
       isAgentRunning,
+      promptHistory,
       queueMessage,
       setSelectedAttachments,
       replaceUserInput,
@@ -1979,12 +1988,14 @@ function ComposerContentImpl({
         commands: pluginClientSlashCommands,
       });
       if (pluginSlashCommand && runPluginClientSlashCommand(pluginSlashCommand)) return;
+      promptHistory.recordSubmittedPrompt(payload.text);
       queueMessage(payload.text, outgoingAttachments);
     },
     [
       attachments,
       buildOutgoingAttachments,
       pluginClientSlashCommands,
+      promptHistory,
       queueMessage,
       runClientSlashCommand,
       runPluginClientSlashCommand,
@@ -1993,10 +2004,23 @@ function ComposerContentImpl({
 
   const hasSendableContent = hasText || selectedAttachments.length > 0;
 
-  // Handle keyboard navigation for command autocomplete.
+  // Handle keyboard navigation for command autocomplete and prompt history.
   const handleCommandKeyPress = useCallback(
-    (event: ComposerKeyPressEvent) => autocompleteRef.current?.onKeyPress(event) ?? false,
-    [],
+    (event: ComposerKeyPressEvent) => {
+      if (autocompleteRef.current?.onKeyPress(event)) {
+        return true;
+      }
+      return promptHistory.onKeyPress(event);
+    },
+    [promptHistory],
+  );
+
+  const handleComposerTextChange = useCallback(
+    (text: string) => {
+      promptHistory.onTextChange(text);
+      setUserInput(text);
+    },
+    [promptHistory, setUserInput],
   );
 
   const cancelButtonStyle = useMemo(
@@ -2441,7 +2465,7 @@ function ComposerContentImpl({
                 <StableMessageInput
                   ref={messageInputRef}
                   value={textSource.getSnapshot()}
-                  onChangeText={setUserInput}
+                  onChangeText={handleComposerTextChange}
                   onSubmit={handleSubmit}
                   hasExternalContent={hasExternalContent}
                   allowEmptySubmit={allowEmptySubmit}

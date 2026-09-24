@@ -103,6 +103,10 @@ export interface ComposerKeyPressEvent {
   key: string;
   preventDefault: () => void;
   input: ComposerInputSnapshot;
+  shiftKey?: boolean;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  altKey?: boolean;
 }
 
 export interface MessageInputProps {
@@ -199,6 +203,7 @@ type WebTextInputKeyPressEvent = NativeSyntheticEvent<
     metaKey?: boolean;
     ctrlKey?: boolean;
     shiftKey?: boolean;
+    altKey?: boolean;
     // Web-only: present on DOM KeyboardEvent during IME composition (CJK input).
     isComposing?: boolean;
     keyCode?: number;
@@ -404,6 +409,10 @@ function handleDesktopKeyPressImpl(
       key: event.nativeEvent.key,
       preventDefault: () => event.preventDefault(),
       input: ctx.input,
+      shiftKey: event.nativeEvent.shiftKey,
+      metaKey: event.nativeEvent.metaKey,
+      ctrlKey: event.nativeEvent.ctrlKey,
+      altKey: event.nativeEvent.altKey,
     });
     if (handled) return;
   }
