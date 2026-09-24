@@ -255,7 +255,12 @@ async function handleRequest(message: TerminalWorkerRequest): Promise<void> {
     }
 
     case "setActivity": {
-      await manager.setTerminalActivity(message.terminalId, message.state);
+      await manager.setTerminalActivity(
+        message.terminalId,
+        message.state,
+        message.attentionReason,
+        message.sessionId,
+      );
       sendToParent({ type: "response", requestId: message.requestId, ok: true });
       return;
     }

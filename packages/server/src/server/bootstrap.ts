@@ -277,13 +277,16 @@ function createTerminalActivityUrl(listenTarget: ListenTarget | null): string | 
 const TerminalActivityReportSchema = z.object({
   terminalId: z.string().min(1),
   token: z.string().min(1),
-  state: z.enum(["running", "idle", "needs-input"]),
+  state: z.enum(["running", "idle", "needs-input", "quota"]),
+  // The agent's own session id; absent from older CLIs and when the hook payload has none.
+  sessionId: z.string().optional(),
 });
 
 const TERMINAL_ACTIVITY_STATE_MAP = {
   running: "working",
   idle: "idle",
   "needs-input": "attention",
+  quota: "attention",
 } as const;
 
 const LOOPBACK_REMOTE_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
@@ -320,6 +323,9 @@ export function createTerminalActivityRouteHandler(
       const updated = await terminalManager.setTerminalActivity(
         parsed.data.terminalId,
         TERMINAL_ACTIVITY_STATE_MAP[parsed.data.state],
+        // quota is the sticky red attention; needs-input takes the tracker's default reason.
+        parsed.data.state === "quota" ? "quota" : undefined,
+        parsed.data.sessionId,
       );
       if (!updated) {
         res.status(403).json({ error: "Forbidden" });
@@ -654,10 +660,11 @@ export async function createPaseoDaemon(
   });
   let boundListenTarget: ListenTarget | null = null;
   let workspaceRegistry: FileBackedWorkspaceRegistry | null = null;
+  const terminalAgentHooks = applyTerminalAgentHookSetting({ store: daemonConfigStore, logger });
   const terminalManager = createConfiguredTerminalManager({
     getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
+    onCreateTerminal: terminalAgentHooks.ensureInstalled,
   });
-  applyTerminalAgentHookSetting({ store: daemonConfigStore, logger });
 
   const serviceProxyPublicBaseUrl = config.serviceProxy?.publicBaseUrl
     ? config.serviceProxy.publicBaseUrl

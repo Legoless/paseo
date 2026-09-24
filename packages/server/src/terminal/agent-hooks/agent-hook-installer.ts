@@ -5,9 +5,11 @@ import { writePrivateFileAtomicSync } from "../../server/private-files.js";
 
 export interface AgentHookEventDefinition {
   event: string;
+  // Run the hook in the background so the agent does not wait on the CLI's startup.
+  async?: boolean;
 }
 
-export type AgentHookActivityState = "running" | "idle" | "needs-input";
+export type AgentHookActivityState = "running" | "idle" | "needs-input" | "quota";
 
 export interface AgentHookActivityInput {
   isTTY?: boolean;
@@ -138,7 +140,8 @@ export function buildAgentHookShellCommand<TConfig>(
   event: AgentHookEventDefinition,
 ): string {
   const hookCommand = `"\${PASEO_HOOK_CLI:-paseo}" hooks ${shellToken(provider.id)} ${shellToken(event.event)}`;
-  return `if [ -n "$PASEO_TERMINAL_ID" ]; then ${hookCommand}; fi`;
+  // A missing or broken CLI must stay silent: agents print hook stderr and non-zero exits as errors.
+  return `if [ -n "$PASEO_TERMINAL_ID" ]; then ${hookCommand} 2>/dev/null || true; fi`;
 }
 
 export function buildAgentHookWindowsCommand<TConfig>(
@@ -146,7 +149,7 @@ export function buildAgentHookWindowsCommand<TConfig>(
   event: AgentHookEventDefinition,
 ): string {
   const hookArgs = `hooks ${windowsToken(provider.id)} ${windowsToken(event.event)}`;
-  return `if defined PASEO_TERMINAL_ID (if defined PASEO_HOOK_CLI ("%PASEO_HOOK_CLI%" ${hookArgs}) else (paseo ${hookArgs})) else (exit /b 0)`;
+  return `if defined PASEO_TERMINAL_ID (if defined PASEO_HOOK_CLI ("%PASEO_HOOK_CLI%" ${hookArgs} 2>nul || exit /b 0) else (paseo ${hookArgs} 2>nul || exit /b 0)) else (exit /b 0)`;
 }
 
 function installAgentHookPluginFile(

@@ -3,7 +3,11 @@ import { fork } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { assertAbsolutePath, isSameOrDescendantPath } from "../server/path-utils.js";
 import type { TerminalState } from "@getpaseo/protocol/messages";
-import type { TerminalActivity, TerminalActivityState } from "@getpaseo/protocol/terminal-activity";
+import type {
+  TerminalActivity,
+  TerminalActivityAttentionReason,
+  TerminalActivityState,
+} from "@getpaseo/protocol/terminal-activity";
 import { deriveTerminalActivityStatusBucket } from "@getpaseo/protocol/terminal-activity";
 import type {
   ClientMessage,
@@ -93,6 +97,7 @@ interface WorkerTerminalManagerOptions {
   requestTimeoutMs?: number;
   forkWorker?: () => TerminalWorkerProcess;
   getTerminalActivityUrl?: () => string | null;
+  onCreateTerminal?: () => void;
 }
 
 function createActivityToken(): string {
@@ -320,9 +325,19 @@ export function createWorkerTerminalManager(
       getActivity(): TerminalActivity | null {
         return record.activity;
       },
-      setActivity(state: TerminalActivityState): void {
+      setActivity(
+        state: TerminalActivityState,
+        attentionReason?: TerminalActivityAttentionReason,
+        sessionId?: string,
+      ): void {
         record.activity = { state, changedAt: Date.now() };
-        sendBestEffortRequest({ type: "setActivity", terminalId: record.info.id, state });
+        sendBestEffortRequest({
+          type: "setActivity",
+          terminalId: record.info.id,
+          state,
+          attentionReason,
+          sessionId,
+        });
       },
       clearActivityAttention(): boolean {
         if (record.activity?.attentionReason == null) {
@@ -696,6 +711,7 @@ export function createWorkerTerminalManager(
     async createTerminal(
       options: WorkerCreateTerminalOptions & { workspaceId: string },
     ): Promise<TerminalSession> {
+      managerOptions.onCreateTerminal?.();
       const terminalId = options.id ?? randomUUID();
       const activityToken = createActivityToken();
       const terminalActivityUrl = managerOptions.getTerminalActivityUrl?.() ?? null;
@@ -790,12 +806,17 @@ export function createWorkerTerminalManager(
       return true;
     },
 
-    async setTerminalActivity(id: string, state: TerminalActivityState): Promise<boolean> {
+    async setTerminalActivity(
+      id: string,
+      state: TerminalActivityState,
+      attentionReason?: TerminalActivityAttentionReason,
+      sessionId?: string,
+    ): Promise<boolean> {
       const record = recordsById.get(id);
       if (!record) {
         return false;
       }
-      await sendRequest({ type: "setActivity", terminalId: id, state });
+      await sendRequest({ type: "setActivity", terminalId: id, state, attentionReason, sessionId });
       return true;
     },
 

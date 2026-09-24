@@ -31,12 +31,11 @@ export const claudeSettingsFormat: AgentHookConfigFormat<ClaudeSettings> = {
     return `${JSON.stringify(config, null, 2)}\n`;
   },
   install(config, provider) {
-    const install = provider.install;
-    const hooks = normalizeHooks(config.hooks);
+    const marker = provider.install.hookMarker;
+    const hooks = removeAllPaseoHooks(config.hooks, marker);
     for (const event of provider.events) {
-      const userEntries = removePaseoHooks(hooks[event.event], install.hookMarker);
       hooks[event.event] = [
-        ...userEntries,
+        ...removePaseoHooks(hooks[event.event], marker),
         {
           matcher: "",
           hooks: [
@@ -44,6 +43,8 @@ export const claudeSettingsFormat: AgentHookConfigFormat<ClaudeSettings> = {
               type: "command",
               command: buildAgentHookShellCommand(provider, event),
               timeout: 10,
+              // Claude ignores keys it does not know, so older versions run the hook synchronously.
+              ...(event.async ? { async: true } : {}),
             },
           ],
         },
@@ -52,28 +53,12 @@ export const claudeSettingsFormat: AgentHookConfigFormat<ClaudeSettings> = {
     return { ...config, hooks };
   },
   uninstall(config, provider) {
-    const install = provider.install;
-    const hooks = normalizeHooks(config.hooks);
-    for (const event of provider.events) {
-      const entries = removePaseoHooks(hooks[event.event], install.hookMarker);
-      if (entries.length > 0) {
-        hooks[event.event] = entries;
-      } else {
-        delete hooks[event.event];
-      }
-    }
-    return { ...config, hooks };
+    return { ...config, hooks: removeAllPaseoHooks(config.hooks, provider.install.hookMarker) };
   },
   isInstalled(config, provider) {
     const install = provider.install;
     const hooks = normalizeHooks(config.hooks);
-    return provider.events.every((event) =>
-      normalizeMatchers(hooks[event.event]).some((entry) =>
-        normalizeCommandHooks(entry.hooks).some((hook) =>
-          commandContainsMarker(hook, install.hookMarker),
-        ),
-      ),
-    );
+    return provider.events.every((event) => hasPaseoHook(hooks[event.event], install.hookMarker));
   },
 };
 
@@ -93,6 +78,28 @@ function normalizeCommandHooks(value: unknown): ClaudeCommandHook[] {
     return [];
   }
   return value.filter(isRecord);
+}
+
+// Sweeps every event, not only the ones we install today, so an event we stop
+// installing (SessionEnd) is removed from configs written by older versions.
+function removeAllPaseoHooks(value: unknown, marker: string): Record<string, unknown> {
+  const hooks = normalizeHooks(value);
+  for (const [event, entries] of Object.entries(hooks)) {
+    if (!hasPaseoHook(entries, marker)) continue;
+    const kept = removePaseoHooks(entries, marker);
+    if (kept.length > 0) {
+      hooks[event] = kept;
+    } else {
+      delete hooks[event];
+    }
+  }
+  return hooks;
+}
+
+function hasPaseoHook(value: unknown, marker: string): boolean {
+  return normalizeMatchers(value).some((entry) =>
+    normalizeCommandHooks(entry.hooks).some((hook) => commandContainsMarker(hook, marker)),
+  );
 }
 
 function removePaseoHooks(value: unknown, marker: string): ClaudeHookMatcher[] {

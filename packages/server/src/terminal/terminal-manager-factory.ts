@@ -3,6 +3,8 @@ import { createWorkerTerminalManager } from "./worker-terminal-manager.js";
 
 export interface ConfiguredTerminalManagerOptions {
   getTerminalActivityUrl?: () => string | null;
+  // Runs before each terminal is created, in the daemon process.
+  onCreateTerminal?: () => void;
 }
 
 export function createConfiguredTerminalManager(

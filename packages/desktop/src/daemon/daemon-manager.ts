@@ -25,17 +25,17 @@ import {
   type AppUpdateCheckIntent,
   type AppReleaseChannel,
 } from "../features/auto-updater.js";
-import {
-  getBundledCliShimPath,
-  getCliInstallStatus,
-  installCli,
-} from "../integrations/cli-install/index.js";
+import { getCliInstallStatus, installCli } from "../integrations/cli-install/index.js";
 import {
   openLocalTransportSession,
   sendLocalTransportMessage,
   closeLocalTransportSession,
 } from "./local-transport.js";
-import { createNodeEntrypointInvocation, resolveDaemonRunnerEntrypoint } from "./runtime-paths.js";
+import {
+  createNodeEntrypointInvocation,
+  resolveDaemonCliPath,
+  resolveDaemonRunnerEntrypoint,
+} from "./runtime-paths.js";
 import { runExternalCliJsonCommand, runExternalCliTextCommand } from "./cli/external.js";
 import {
   createDesktopSettingsCommandHandlers,
@@ -317,7 +317,7 @@ async function startDaemon(): Promise<DesktopDaemonStatus> {
       ...invocation,
       env: {
         ...invocation.env,
-        PASEO_CLI: getBundledCliShimPath(),
+        PASEO_CLI: resolveDaemonCliPath(),
       },
       // Managed launches strip daemon setting env (including PASEO_LISTEN) so
       // the parent shell cannot leak listen/web-ui. Re-apply after that strip.

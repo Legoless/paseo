@@ -200,6 +200,16 @@ export function migrateProviderSettings(
   return ProviderOverridesSchema.parse(migrated);
 }
 
+// A Paseo terminal's hook identity, set per terminal by the terminal manager. A
+// daemon started from inside a Paseo pane inherits that pane's values, and any
+// agent it spawns would then post its hook activity into that pane.
+export const TERMINAL_HOOK_IDENTITY_ENV_VARS = [
+  "PASEO_TERMINAL_ID",
+  "PASEO_ACTIVITY_TOKEN",
+  "PASEO_TERMINAL_ACTIVITY_URL",
+  "PASEO_HOOK_CLI",
+] as const;
+
 // Env vars that indicate a running Claude Code session. If the daemon itself is
 // launched from inside Claude Code (e.g. by a Paseo agent), these leak into
 // child processes and cause "cannot be launched inside another session" errors.
@@ -208,6 +218,7 @@ const PARENT_SESSION_ENV_VARS = [
   "CLAUDE_CODE_ENTRYPOINT",
   "CLAUDE_CODE_SSE_PORT",
   "CLAUDE_AGENT_SDK_VERSION",
+  ...TERMINAL_HOOK_IDENTITY_ENV_VARS,
 ];
 
 export interface ProviderEnvOptions {

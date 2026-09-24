@@ -9,7 +9,11 @@ import { captureTerminalLines, type CaptureTerminalLinesResult } from "./termina
 import { randomBytes, randomUUID } from "node:crypto";
 import { resolve, sep } from "node:path";
 import { assertAbsolutePath, isSameOrDescendantPath } from "../server/path-utils.js";
-import type { TerminalActivity, TerminalActivityState } from "@getpaseo/protocol/terminal-activity";
+import type {
+  TerminalActivity,
+  TerminalActivityAttentionReason,
+  TerminalActivityState,
+} from "@getpaseo/protocol/terminal-activity";
 import { deriveTerminalActivityStatusBucket } from "@getpaseo/protocol/terminal-activity";
 
 export interface TerminalListItem {
@@ -74,7 +78,12 @@ export interface TerminalManager {
   ): Promise<TerminalStateSnapshot | null>;
   setTerminalTitle(id: string, title: string): boolean;
   setTerminalWorkspaceId(id: string, workspaceId: string): boolean;
-  setTerminalActivity(id: string, state: TerminalActivityState): Promise<boolean>;
+  setTerminalActivity(
+    id: string,
+    state: TerminalActivityState,
+    attentionReason?: TerminalActivityAttentionReason,
+    sessionId?: string,
+  ): Promise<boolean>;
   clearTerminalAttention(id: string): Promise<boolean>;
   killTerminal(id: string): void;
   killTerminalAndWait(
@@ -419,13 +428,18 @@ export function createTerminalManager(
       return true;
     },
 
-    async setTerminalActivity(id: string, state: TerminalActivityState): Promise<boolean> {
+    async setTerminalActivity(
+      id: string,
+      state: TerminalActivityState,
+      attentionReason?: TerminalActivityAttentionReason,
+      sessionId?: string,
+    ): Promise<boolean> {
       const session = terminalsById.get(id);
       if (!session) {
         return false;
       }
 
-      session.setActivity(state);
+      session.setActivity(state, attentionReason, sessionId);
       return true;
     },
 
