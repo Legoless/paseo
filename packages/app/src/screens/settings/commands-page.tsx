@@ -218,6 +218,15 @@ function CommandEditor({
   const setTitle = useCallback((value: string) => model.set("title", value), [model]);
   const setText = useCallback((value: string) => model.set("text", value), [model]);
   const setSubmit = useCallback((value: boolean) => model.set("submit", value), [model]);
+  const toggleSubmit = useCallback(() => {
+    if (!model.getState().pending) {
+      model.set("submit", !model.getState().command.submit);
+    }
+  }, [model]);
+  const submitAccessibilityState = useMemo(
+    () => ({ checked: state.command.submit, disabled: state.pending }),
+    [state.command.submit, state.pending],
+  );
   const setShortcut = useCallback(
     (value: string | undefined) => model.set("shortcut", value),
     [model],
@@ -266,7 +275,14 @@ function CommandEditor({
             testID="command-text"
           />
         </Field>
-        <View style={styles.toggleRow}>
+        <Pressable
+          style={styles.toggleRow}
+          onPress={toggleSubmit}
+          disabled={state.pending}
+          accessibilityRole="checkbox"
+          accessibilityState={submitAccessibilityState}
+          accessibilityLabel={t("settings.commands.submit")}
+        >
           <Text style={settingsStyles.rowTitle}>{t("settings.commands.submit")}</Text>
           <Switch
             value={state.command.submit}
@@ -275,7 +291,7 @@ function CommandEditor({
             accessibilityLabel={t("settings.commands.submit")}
             testID="command-submit-toggle"
           />
-        </View>
+        </Pressable>
         {isNative ? null : (
           <ShortcutField
             size={size}

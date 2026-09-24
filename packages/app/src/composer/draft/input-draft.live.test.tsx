@@ -273,6 +273,49 @@ describe("useAgentInputDraft live contract", () => {
     expect(latest.current?.textReplacement.text).toBe("run the tests");
   });
 
+  it("clears text in a mounted composer when clearDraftInput is called", async () => {
+    const latest: { current: ReturnType<typeof useAgentInputDraft> | null } = { current: null };
+    function Probe() {
+      latest.current = useAgentInputDraft({
+        draftKey: "draft:clear-mounted",
+        composer: { initialServerId: "host-1", isVisible: true, lockedWorkingDir: "/repo" },
+      });
+      return null;
+    }
+    const container = document.getElementById("root");
+    if (!container) {
+      throw new Error("Missing root container");
+    }
+    const root = createTestRoot(container);
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <Probe />
+        </QueryClientProvider>,
+      );
+    });
+    await expect.poll(() => latest.current?.isHydrated).toBe(true);
+
+    await act(async () => {
+      await useDraftStore
+        .getState()
+        .replaceDraftText({ draftKey: "draft:clear-mounted", text: "initial text" });
+    });
+    expect(latest.current?.textReplacement.text).toBe("initial text");
+
+    const prevReplacement = latest.current?.textReplacement;
+
+    await act(async () => {
+      useDraftStore
+        .getState()
+        .clearDraftInput({ draftKey: "draft:clear-mounted", lifecycle: "sent" });
+    });
+
+    expect(latest.current?.textReplacement).not.toBe(prevReplacement);
+    expect(latest.current?.textReplacement.text).toBe("");
+    expect(latest.current?.textSource.getSnapshot()).toBe("");
+  });
+
   it("migrates legacy image drafts to image attachments on hydration", async () => {
     let latest: ReturnType<typeof useAgentInputDraft> | null = null;
     const image: AttachmentMetadata = {

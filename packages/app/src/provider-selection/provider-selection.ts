@@ -337,7 +337,7 @@ export function resolveSubmissionReadiness(input: {
     availableModels: readonly unknown[];
     isModelLoading: boolean;
   };
-  autoSubmitConfig: { provider: string; model: string | null } | null;
+  autoSubmitConfig: { provider: string | null; model: string | null } | null;
   workspaceDirectory: string | null;
   hasClient: boolean;
 }): ProviderSelectionReadiness {

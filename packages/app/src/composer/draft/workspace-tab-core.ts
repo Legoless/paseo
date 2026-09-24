@@ -1,7 +1,7 @@
 import { resolveSubmissionReadiness } from "@/provider-selection/provider-selection";
 
 export interface WorkspaceDraftAutoSubmitConfig {
-  provider: string;
+  provider: string | null;
   model: string | null;
 }
 

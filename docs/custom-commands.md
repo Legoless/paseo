@@ -70,9 +70,9 @@ keyboard shortcut, or a header button (mobile, or desktop without pane splits), 
 pane's open tab. Any other kind of tab (browser, file, changes, and so on) is a toast.
 
 **Chat tab.** With `submit: true` the message is sent through the same path the app uses to drain
-queued messages — the mounted composer is never touched, and the draft is cleared. With
-`submit: false` the text replaces the composer's draft. A draft tab (no agent yet) always takes the
-second path, whatever `submit` says — there is nothing to send to yet.
+queued messages — the mounted composer is never touched, and the draft is cleared. On a draft tab
+(no agent yet), `submit: true` creates the agent and starts the first turn using the tab's chosen
+provider and model. With `submit: false`, the text replaces the composer's draft.
 
 **Terminal tab.** The text is typed at the prompt; `submit: true` appends the carriage return, the
 same as pressing Enter.
