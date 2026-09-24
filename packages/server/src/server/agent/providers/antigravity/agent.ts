@@ -63,6 +63,7 @@ import { streamAgyTranscriptHistory } from "./transcript.js";
 import type { AgyStreamInputMessage } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+const PROCESS_EXIT_GRACE_MS = 5_000;
 
 export const ANTIGRAVITY_CAPABILITIES: AgentCapabilityFlags = {
   supportsStreaming: true,
@@ -185,6 +186,8 @@ export class AntigravityAgentSession implements AgentSession {
   private imageDir: string | null = null;
   private activeTurnId: string | null = null;
   private isClosed = false;
+  // A process being replaced; the next one resumes the same conversation once it has exited.
+  private exitingChild: Promise<void> | null = null;
 
   constructor(private readonly options: AntigravitySessionOptions) {
     this.capabilities = options.capabilities;
@@ -226,6 +229,7 @@ export class AntigravityAgentSession implements AgentSession {
   }
 
   private async spawnProcess(): Promise<ChildProcess | null> {
+    await this.exitingChild;
     if (this.isClosed) return null;
     const launch = await resolveProviderLaunch({
       defaultBinary: "agy",
@@ -386,7 +390,7 @@ export class AntigravityAgentSession implements AgentSession {
     }));
   }
 
-  private terminateCurrentProcess(): void {
+  private terminateCurrentProcess(signal: NodeJS.Signals = "SIGTERM"): void {
     if (!this.child) return;
     const oldChild = this.child;
     this.child = null;
@@ -397,7 +401,10 @@ export class AntigravityAgentSession implements AgentSession {
       oldChild.stdin?.end();
     } catch {}
     if (oldChild.exitCode === null) {
-      oldChild.kill("SIGTERM");
+      const exited = new Promise<void>((resolve) => oldChild.once("exit", () => resolve()));
+      const forceKill = setTimeout(() => oldChild.kill("SIGKILL"), PROCESS_EXIT_GRACE_MS);
+      this.exitingChild = exited.then(() => clearTimeout(forceKill));
+      oldChild.kill(signal);
     }
   }
 
@@ -487,9 +494,10 @@ export class AntigravityAgentSession implements AgentSession {
   }
 
   async interrupt(): Promise<void> {
-    if (this.child && this.child.exitCode === null) {
-      this.child.kill("SIGINT");
-    }
+    // agy aborts the turn on SIGINT, reports it as an "interrupted" ERROR result, and exits.
+    // Detach it first: that result must not land on the next turn, which resumes the
+    // conversation in a fresh process.
+    this.terminateCurrentProcess("SIGINT");
     if (this.activeTurnId) {
       this.emit({
         type: "turn_canceled",
