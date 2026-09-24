@@ -9,6 +9,7 @@ import { test } from "../support/fixtures";
 import { gotoWorkspace } from "../support/helpers/launcher";
 import { seedCorruptedWorkspaceLayout } from "../support/helpers/workspace-layout";
 import {
+  ensureExplorerSidebar,
   openChangesTreePanel,
   waitForWorkspaceTabsVisible,
 } from "../support/helpers/workspace-tabs";
@@ -154,6 +155,7 @@ test.describe("explorer pane tab placement", () => {
       await expect(mainTabRow(page).first().locator('[data-testid^="workspace-tab-"]')).toHaveCount(
         1,
       );
+      await ensureExplorerSidebar(page);
       await testInfo.attach("before-drag", {
         body: await page.screenshot(),
         contentType: "image/png",

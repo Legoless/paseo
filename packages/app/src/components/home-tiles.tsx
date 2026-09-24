@@ -4,20 +4,14 @@ import { View, Text, Pressable } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useRouter, type Href } from "expo-router";
 import { FolderOpen, Inbox, LayoutGrid, Plug, Smartphone, SquarePen } from "lucide-react-native";
-import { ImportSessionSheet } from "@/components/import-session-sheet";
 import { PairDeviceModal } from "@/desktop/components/pair-device-modal";
 import { useCreateProjectlessWorkspace } from "@/hooks/use-create-projectless-workspace";
+import { useImportSession } from "@/hooks/use-import-session";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
-import { useOpenProject } from "@/hooks/use-open-project";
 import { useHostChooser } from "@/hosts/host-chooser";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import type { Theme } from "@/styles/theme";
-import {
-  buildHostAgentDetailRoute,
-  buildNewWorkspaceRoute,
-  buildSettingsHostSectionRoute,
-} from "@/utils/host-routes";
+import { buildNewWorkspaceRoute, buildSettingsHostSectionRoute } from "@/utils/host-routes";
 
 /**
  * The ways to start work, shared by the home screen and by a workspace with
@@ -36,11 +30,8 @@ export function HomeTiles({ onAddAgent }: { onAddAgent?: () => void }) {
   const createProjectlessWorkspace = useCreateProjectlessWorkspace();
   const chooseHost = useHostChooser();
   const localServerId = useLocalDaemonServerId();
-  const [importServerId, setImportServerId] = useState<string | null>(null);
-  const importClient = useHostRuntimeClient(importServerId ?? "");
-  const openImportedProject = useOpenProject(importServerId);
+  const importSession = useImportSession();
   const [isPairDeviceOpen, setIsPairDeviceOpen] = useState(false);
-  const [isImportSheetOpen, setIsImportSheetOpen] = useState(false);
 
   const handleOpenPicker = useCallback(() => {
     void openProjectPicker();
@@ -56,30 +47,6 @@ export function HomeTiles({ onAddAgent }: { onAddAgent?: () => void }) {
 
   const handleOpenPairDevice = useCallback(() => setIsPairDeviceOpen(true), []);
   const handleClosePairDevice = useCallback(() => setIsPairDeviceOpen(false), []);
-
-  const handleOpenImportSession = useCallback(() => {
-    chooseHost({
-      title: "Import from host",
-      onChooseHost: (serverId) => {
-        setImportServerId(serverId);
-        setIsImportSheetOpen(true);
-      },
-    });
-  }, [chooseHost]);
-  const handleCloseImportSession = useCallback(() => setIsImportSheetOpen(false), []);
-
-  const handleImported = useCallback(
-    (agent: { id: string; cwd: string }) => {
-      if (!importServerId) return;
-      void (async () => {
-        const result = await openImportedProject(agent.cwd);
-        if (result.ok) {
-          router.push(buildHostAgentDetailRoute(importServerId, agent.id) as Href);
-        }
-      })();
-    },
-    [importServerId, openImportedProject, router],
-  );
 
   const handleOpenProviders = useCallback(() => {
     chooseHost({
@@ -122,7 +89,7 @@ export function HomeTiles({ onAddAgent }: { onAddAgent?: () => void }) {
           icon={Inbox}
           title={t("openProject.tiles.importSession.title")}
           description={t("openProject.tiles.importSession.description")}
-          onPress={handleOpenImportSession}
+          onPress={importSession.open}
           testID="open-project-import-session"
         />
         <HomeTile
@@ -148,13 +115,7 @@ export function HomeTiles({ onAddAgent }: { onAddAgent?: () => void }) {
         onClose={handleClosePairDevice}
         testID="open-project-pair-device-modal"
       />
-      <ImportSessionSheet
-        visible={isImportSheetOpen}
-        client={importClient}
-        serverId={importServerId}
-        onClose={handleCloseImportSession}
-        onImported={handleImported}
-      />
+      {importSession.sheet}
     </>
   );
 }

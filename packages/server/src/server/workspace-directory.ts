@@ -228,21 +228,16 @@ export class WorkspaceDirectory {
     includeGitData: boolean;
     workspaceIds?: Iterable<string>;
   }): Promise<Map<string, WorkspaceDescriptorPayload>> {
-    const [
-      agents,
-      providerSubagentActivity,
-      persistedWorkspaces,
-      persistedProjects,
-      terminalContributions,
-    ] = await Promise.all([
-      this.deps.listAgentPayloads(),
-      this.deps.listProviderSubagentActivity(),
-      this.deps.workspaceRegistry.list(),
-      this.deps.projectRegistry.list(),
-      this.deps.listTerminalActivityContributions(),
-    ]);
+    const [agents, providerSubagentActivity, persistedWorkspaces, terminalContributions] =
+      await Promise.all([
+        this.deps.listAgentPayloads(),
+        this.deps.listProviderSubagentActivity(),
+        this.deps.workspaceRegistry.list(),
+        this.deps.listTerminalActivityContributions(),
+      ]);
 
-    const activeRecords = activeWorkspaceRecords(persistedWorkspaces, persistedProjects);
+    // Placement lives in memberships; an archived project never hides a live workspace.
+    const activeRecords = persistedWorkspaces.filter((workspace) => !workspace.archivedAt);
     const descriptorsByWorkspaceId = new Map<string, WorkspaceDescriptorPayload>();
     const workspaceIds = options.workspaceIds ? new Set(options.workspaceIds) : null;
     const activeWorkspaceIds = new Set(activeRecords.map((workspace) => workspace.workspaceId));

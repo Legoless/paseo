@@ -98,6 +98,7 @@ function buildHarness() {
   const payloadById = new Map<string, AgentSnapshotPayload>();
   const queuedPayloadBuilds: Promise<AgentSnapshotPayload>[] = [];
   const projectByWorkspaceId = new Map<string, ProjectPlacementPayload | null>();
+  const queuedProjectResolutions: Promise<ProjectPlacementPayload | null>[] = [];
   let providerVisible: (provider: string) => boolean = () => true;
   let buildAgentPayloadError: Error | null = null;
   let projectResolutionError: Error | null = null;
@@ -132,6 +133,8 @@ function buildHarness() {
     },
     isProviderVisibleToClient: (provider) => providerVisible(provider),
     buildProjectPlacementForAgent: async ({ workspaceId }) => {
+      const queuedProject = queuedProjectResolutions.shift();
+      if (queuedProject) return queuedProject;
       if (projectResolutionError) throw projectResolutionError;
       return projectByWorkspaceId.get(workspaceId) ?? null;
     },
@@ -179,6 +182,9 @@ function buildHarness() {
     },
     queuePayloadBuilds(...payloads: Promise<AgentSnapshotPayload>[]) {
       queuedPayloadBuilds.push(...payloads);
+    },
+    queueProjectResolutions(...projects: Promise<ProjectPlacementPayload | null>[]) {
+      queuedProjectResolutions.push(...projects);
     },
     agentUpdates(): AgentUpdatePayload[] {
       return emitted
@@ -506,6 +512,26 @@ describe("emitStoredRecord", () => {
 
     expect(payload.id).toBe("a");
     expect(h.agentUpdates()).toEqual([]);
+  });
+
+  test("emits stored snapshots for one agent in call order", async () => {
+    const h = buildHarness();
+    h.service.beginSubscription({ subscriptionId: "sub", filter: {} });
+    h.service.flushBootstrapped("sub");
+    const heldProject = deferred<ProjectPlacementPayload | null>();
+    h.queueProjectResolutions(heldProject.promise);
+
+    h.register(makeAgentPayload({ id: "a", workspaceId: "ws-1", labels: { stage: "old" } }));
+    const first = h.service.emitStoredRecord(h.stored("a"));
+    h.register(makeAgentPayload({ id: "a", workspaceId: "ws-1", labels: { stage: "new" } }));
+    const second = h.service.emitStoredRecord(h.stored("a"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    heldProject.resolve(makeProject());
+    await Promise.all([first, second]);
+
+    expect(
+      h.agentUpdates().map((update) => update.kind === "upsert" && update.agent.labels.stage),
+    ).toEqual(["old", "new"]);
   });
 
   test("serializes and logs stored projection failures", async () => {

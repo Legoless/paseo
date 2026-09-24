@@ -363,7 +363,7 @@ export class DirectorySync {
     if (this.workspaceRevision !== revision) return;
     const session = useSessionStore.getState().sessions[this.serverId];
     if (!session) return;
-    this.workspaces.commitCachedWorkspace(cached.workspace, cached.project ? [cached.project] : []);
+    this.workspaces.commitCachedWorkspace(cached.workspace, cached.projects);
   }
 
   private loadCachedDirectory(): Promise<void> {

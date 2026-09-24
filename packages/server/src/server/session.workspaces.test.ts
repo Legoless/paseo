@@ -1172,6 +1172,8 @@ function createMultiMemberAgentIntentHarness(input: {
   const emitted: SessionOutboundMessage[] = [];
   const session = asTestSession(
     new Session({
+      messageReceipts: createMessageReceiptsStub(),
+      creationService: createTestCreationService(),
       clientId: "test-client",
       serverId: "test-server",
       permissions: OWNER_PERMISSIONS,
@@ -10169,6 +10171,14 @@ test("agent.workspace.move.request re-parents an agent whose project the target 
   addTargetWorkspaceToMemberRegistries(registries, { cwd: MEMBER_CWD });
   registries.apply(session);
   await activateWorkspaceUpdatesSubscription(session);
+  // The bootstrap already emitted both descriptors and the stubbed move leaves them unchanged,
+  // so dedupe suppresses the workspace_update frames; assert the fan-out itself.
+  const emittedWorkspaceIds: string[][] = [];
+  const realEmit = session.emitWorkspaceUpdatesForWorkspaceIds.bind(session);
+  session.emitWorkspaceUpdatesForWorkspaceIds = async (ids: string[], ...rest: unknown[]) => {
+    emittedWorkspaceIds.push(ids);
+    return realEmit(ids, ...rest);
+  };
 
   await session.handleMessage({
     type: "agent.workspace.move.request",
@@ -10192,11 +10202,7 @@ test("agent.workspace.move.request re-parents an agent whose project the target 
     expect.objectContaining({ projectId: "proj-3", cwd: MEMBER_CWD }),
   ]);
 
-  const updatedWorkspaceIds = filterByType(emitted, "workspace_update").map((update) =>
-    update.payload.kind === "upsert" ? update.payload.workspace.id : null,
-  );
-  expect(updatedWorkspaceIds).toContain("ws-1");
-  expect(updatedWorkspaceIds).toContain("ws-2");
+  expect(emittedWorkspaceIds).toEqual([["ws-1", "ws-2"]]);
 });
 
 test("agent.workspace.move.request refuses a target that does not hold the agent's project", async () => {

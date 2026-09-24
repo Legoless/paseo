@@ -66,10 +66,16 @@ async function markAsRead(page: Page, workspaceId: string) {
   await expectStatus(page, workspaceId, "done");
 }
 
+// The workspace-grouped sidebar shows read state on the workspace's agent rows, not on the
+// workspace row: unread means one of them shows attention, read means none does.
 async function expectStatus(page: Page, workspaceId: string, status: "done" | "attention") {
-  await expect(
-    workspaceRow(page, workspaceId).getByTestId(`workspace-status-indicator-${status}`),
-  ).toBeVisible();
+  const agents = page.getByTestId(`sidebar-member-list-${getServerId()}:${workspaceId}`);
+  if (status === "attention") {
+    await expect(agents.getByTestId("sidebar-agent-status-attention").first()).toBeVisible();
+    return;
+  }
+  await expect(agents.getByTestId("sidebar-agent-status-attention")).toHaveCount(0);
+  await expect(agents.getByTestId("sidebar-agent-status-done").first()).toBeVisible();
 }
 
 async function markBackgroundWorkspaceAndReopen(page: Page, workspaceId: string) {

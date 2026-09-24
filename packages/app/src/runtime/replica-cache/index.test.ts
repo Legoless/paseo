@@ -275,6 +275,126 @@ describe("ReplicaCache", () => {
     expect(restoredTimeline).toEqual(timeline());
   });
 
+  it("keeps every workspace member across a cache round-trip", async () => {
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    const multiProject = normalizeWorkspaceDescriptor({
+      ...workspacePayload(),
+      members: [
+        {
+          projectId: "project-1",
+          projectDisplayName: "Raceline",
+          projectCustomName: null,
+          projectRootPath: "/repo/raceline",
+          workspaceDirectory: "/repo/raceline",
+          workspaceKind: "local_checkout",
+          worktreeSlug: null,
+          branch: null,
+        },
+        {
+          projectId: "project-2",
+          projectDisplayName: "Celestine",
+          projectCustomName: null,
+          projectRootPath: "/repo/celestine",
+          workspaceDirectory: "/repo/celestine",
+          workspaceKind: "local_checkout",
+          worktreeSlug: null,
+          branch: null,
+        },
+      ],
+      scripts: [
+        {
+          scriptName: "dev",
+          cwd: "/repo/celestine",
+          type: "service",
+          hostname: "localhost",
+          port: 3000,
+          proxyUrl: null,
+          lifecycle: "running",
+          health: null,
+          exitCode: null,
+          terminalId: null,
+        },
+      ],
+    });
+    commitDirectory(writer, SERVER_ID, {
+      agents: new Map(),
+      workspaces: new Map([[multiProject.id, multiProject]]),
+      projects: new Map(
+        multiProject.members.map((member) => [
+          member.projectId,
+          normalizeProjectDescriptor({
+            ...member,
+            projectKey: member.projectKey ?? undefined,
+            projectKind: "git",
+          }),
+        ]),
+      ),
+      checkpoint: {},
+    });
+    await writer.flush();
+
+    const restored = (await createCache(storage).readDirectory(SERVER_ID)).workspaces.get(
+      "workspace-1",
+    );
+    // A dropped `members` re-hydrates as the single synthesized member, which is how every
+    // multi-project workspace silently collapsed to its primary project after a reload.
+    expect(restored?.members.map((m) => m.workspaceDirectory)).toEqual([
+      "/repo/raceline",
+      "/repo/celestine",
+    ]);
+    // Multi-root scripts are keyed by cwd; a dropped cwd duplicates them on the next status.
+    expect(restored?.scripts.map((script) => script.cwd)).toEqual(["/repo/celestine"]);
+    expect(
+      (await createCache(storage).readWorkspace(SERVER_ID, multiProject.id))?.projects.map(
+        (project) => project.projectId,
+      ),
+    ).toEqual(["project-1", "project-2"]);
+  });
+
+  it("keeps an empty workspace empty without reading a placeholder project", async () => {
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    const empty = normalizeWorkspaceDescriptor({
+      ...workspacePayload(),
+      members: [],
+      membersAuthoritative: true,
+    });
+    commitDirectory(writer, SERVER_ID, {
+      agents: new Map(),
+      workspaces: new Map([[empty.id, empty]]),
+      projects: new Map(),
+      checkpoint: {},
+    });
+    await writer.flush();
+
+    const reader = createCache(storage);
+    const restored = await reader.readWorkspace(SERVER_ID, empty.id);
+    expect(restored?.workspace.members).toEqual([]);
+    expect(restored?.projects).toEqual([]);
+    expect(storage.reads).toEqual([{ serverId: SERVER_ID, kinds: ["workspace"], ids: [empty.id] }]);
+    expect((await reader.readDirectory(SERVER_ID)).workspaces.get(empty.id)?.members).toEqual([]);
+  });
+
+  it("reads workspace rows cached before members were stored", async () => {
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    commitDirectory(writer, SERVER_ID, directory());
+    await writer.flush();
+    const key = `${SERVER_ID}:workspace:workspace-1`;
+    const row = storage.rows.get(key)!;
+    const {
+      members: _members,
+      membersAuthoritative: _authoritative,
+      ...legacy
+    } = JSON.parse(row.payload) as Record<string, unknown>;
+    storage.rows.set(key, { ...row, payload: JSON.stringify(legacy) });
+
+    const restored = await createCache(storage).readWorkspace(SERVER_ID, "workspace-1");
+    expect(restored?.workspace.members.map((member) => member.projectId)).toEqual(["project-1"]);
+    expect(restored?.projects.map((project) => project.projectId)).toEqual(["project-1"]);
+  });
+
   it("preserves pending timeline updates across directory baseline replacement", async () => {
     const storage = new MemoryStorage();
     const writer = createCache(storage);
@@ -581,7 +701,7 @@ describe("ReplicaCache", () => {
     const restored = await reader.readWorkspace(SERVER_ID, "workspace-1");
 
     expect(restored?.workspace.id).toBe("workspace-1");
-    expect(restored?.project?.projectId).toBe("project-1");
+    expect(restored?.projects.map((project) => project.projectId)).toEqual(["project-1"]);
     expect(storage.reads).toEqual([
       { serverId: SERVER_ID, kinds: ["workspace"], ids: ["workspace-1"] },
       { serverId: SERVER_ID, kinds: ["project"], ids: ["project-1"] },

@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { TFunction } from "i18next";
-import { SquarePen } from "lucide-react-native";
+import { SquarePen, X } from "lucide-react-native";
 import React, {
   memo,
   type ReactNode,
@@ -15,7 +15,7 @@ import React, {
   useSyncExternalStore,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { StyleSheet as RNStyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet as RNStyleSheet, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import invariant from "tiny-invariant";
 import { shallow, useShallow } from "zustand/shallow";
@@ -1377,6 +1377,11 @@ function TimelineSyncErrorCallout({
   onRetry: () => void;
 }) {
   const { t } = useTranslation();
+  // Mounted only while the sync error shows, so a dismissal lasts until the error clears and the
+  // next error brings the callout back.
+  const [isDismissed, setIsDismissed] = useState(false);
+  const handleDismiss = useCallback(() => setIsDismissed(true), []);
+  if (isDismissed) return null;
   return (
     <View style={styles.timelineSyncCalloutRail}>
       <View style={styles.timelineSyncCalloutContent}>
@@ -1384,15 +1389,27 @@ function TimelineSyncErrorCallout({
           <Text style={styles.timelineSyncCalloutText}>
             {t("agentPanel.states.timelineSyncFailed")}
           </Text>
-          <Button
-            size="sm"
-            variant="secondary"
-            onPress={onRetry}
-            disabled={isRetrying}
-            testID="agent-timeline-sync-retry"
-          >
-            {isRetrying ? t("agentPanel.states.timelineSyncRetrying") : t("common.actions.retry")}
-          </Button>
+          <View style={styles.timelineSyncCalloutActions}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onPress={onRetry}
+              disabled={isRetrying}
+              testID="agent-timeline-sync-retry"
+            >
+              {isRetrying ? t("agentPanel.states.timelineSyncRetrying") : t("common.actions.retry")}
+            </Button>
+            <Pressable
+              onPress={handleDismiss}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={t("common.actions.dismiss")}
+              testID="agent-timeline-sync-dismiss"
+              style={styles.timelineSyncCalloutDismissButton}
+            >
+              <ThemedX size={14} uniProps={foregroundMutedColorMapping} />
+            </Pressable>
+          </View>
         </View>
       </View>
     </View>
@@ -1758,6 +1775,7 @@ function AgentSessionUnavailableState({
 }
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
+const ThemedX = withUnistyles(X);
 
 const foregroundMutedColorMapping = (theme: Theme) => ({
   color: theme.colors.foregroundMuted,

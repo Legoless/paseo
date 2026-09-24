@@ -1173,3 +1173,67 @@ test("disposing a view releases its pending observation before bootstrap complet
   await Promise.resolve();
   world.expectNoPendingFetch();
 });
+
+test("evictAgent cancels catch up and clears visibility error state immediately", async () => {
+  const world = new TimelineWorld();
+  world.sync.replaceVisibleAgentIds("workspace", ["agent-a"]);
+  world.sync.setConnected(true);
+  const membership = await world.nextMembership();
+  membership.succeed();
+  const catchUp = await world.nextFetch("agent-a");
+  catchUp.fail("Agent closed");
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("error"));
+  expect(world.sync.getAgentTimelineError("agent-a")).toBe("Agent closed");
+
+  world.sync.evictAgent("agent-a");
+  expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("pending");
+  expect(world.sync.getAgentTimelineError("agent-a")).toBeNull();
+});
+
+test("a membership failure after an agent caught up does not strand it in error", async () => {
+  const world = new TimelineWorld();
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("workspace", ["agent-a"]);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("agent-a")).respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready"));
+
+  world.sync.replaceVisibleAgentIds("workspace", ["agent-a", "agent-b"]);
+  const failed = await world.nextMembership();
+  failed.fail("Request timed out");
+  const retryMembership = await world.nextRetry();
+  expect({
+    a: world.sync.getAgentTimelineStatus("agent-a"),
+    b: world.sync.getAgentTimelineStatus("agent-b"),
+  }).toEqual({ a: "ready", b: "error" });
+
+  retryMembership();
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("agent-b")).respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("agent-b")).toBe("ready"));
+
+  expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready");
+  world.expectNoPendingFetch();
+});
+
+test("a manual retry on a caught-up agent after a membership failure leaves it ready", async () => {
+  const world = new TimelineWorld();
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("workspace", ["agent-a"]);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("agent-a")).respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready"));
+
+  world.sync.replaceVisibleAgentIds("workspace", ["agent-a", "agent-b"]);
+  (await world.nextMembership()).fail("Request timed out");
+  await world.nextRetry();
+
+  world.sync.retryVisibleAgentTimeline("agent-a");
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("agent-b")).respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("agent-b")).toBe("ready"));
+
+  expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready");
+  expect(world.sync.getAgentTimelineError("agent-a")).toBeNull();
+  world.expectNoPendingFetch();
+});
