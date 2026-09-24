@@ -107,7 +107,8 @@ export function isNeedsInputScreen(lines: string[]): boolean {
 
 const IDLE_PROMPT_PATTERNS = {
   claude: [/^❯$/],
-  codex: [/^(?:codex\s*)?›$/i],
+  // Codex keeps its composer (`› ` + placeholder or draft) on the cursor line; `› 1.` is a menu row.
+  codex: [/^(?:codex\s*)?›(?:\s+(?!\d+\.\s)\S.*)?$/i],
   grok: [/^(?:grok\s*)?>$/i],
   antigravity: [/^>$/],
   opencode: [/^[>❯]$/],
@@ -136,6 +137,18 @@ export function isAntigravityBusyScreen(lines: string[]): boolean {
   );
 }
 
+// Codex keeps its composer up while a turn runs, with a status line directly above it:
+// "• Working (12s • esc to interrupt)". The header can change and a narrow pane truncates
+// the hint, so match either. Only that line counts, so a reply or diff quoting it does not.
+const CODEX_RUNNING_STATUS = /\(\d+[hms] [^)]*esc to interrupt\)(?:\s*·.*)?$|^• Working \(\d/;
+
+export function isCodexBusyScreen(lines: string[]): boolean {
+  const stripped = lines.map((line) => stripAnsi(line).trim());
+  const composer = stripped.findLastIndex((line) => line.startsWith("›"));
+  const status = stripped.slice(0, Math.max(composer, 0)).findLast((line) => line.length > 0);
+  return status !== undefined && CODEX_RUNNING_STATUS.test(status);
+}
+
 export function isIdleAgentScreen(
   lines: string[],
   cursorLine: string,
@@ -146,6 +159,9 @@ export function isIdleAgentScreen(
       return false;
     }
     return isIdlePromptLine(cursorLine, agent);
+  }
+  if (agent === "codex" && isCodexBusyScreen(lines)) {
+    return false;
   }
   if (agent !== "cursor") {
     return isIdlePromptLine(cursorLine, agent);
@@ -321,6 +337,9 @@ export class PtyActivityScanner {
   private initialLaunch = false;
   private expectsCommandTitle = false;
   private unresolvedWorkingStillness = 0;
+  // Spinner frames the agent drew before it handled an interrupt must not restart the turn.
+  // A bounded window, so a turn the agent starts on its own later still lights.
+  private interruptedAt: number | null = null;
   private stillnessTimer: NodeJS.Timeout | null = null;
   private lastOutputAt = 0;
   private readonly options: PtyActivityScannerOptions;
@@ -379,6 +398,7 @@ export class PtyActivityScanner {
   }
 
   feedInput(input: string): void {
+    this.interruptedAt = null;
     if (!this.activeAgent) return;
 
     if (input === "\r" || input === "\n") {
@@ -388,6 +408,7 @@ export class PtyActivityScanner {
   }
 
   handleInterrupt(): void {
+    this.interruptedAt = Date.now();
     this.clearStillnessTimer();
     this.currentActivity = null;
     this.unresolvedWorkingStillness = 0;
@@ -408,6 +429,7 @@ export class PtyActivityScanner {
 
     if (
       !this.initialLaunch &&
+      !this.isInsideInterruptWindow() &&
       this.currentActivity !== "working" &&
       ((this.activeAgent === "claude" && CLAUDE_BUSY_TITLE_REGEX.test(chunk)) ||
         (BRAILLE_SPINNER_REGEX.test(chunk) && !this.options.getActivity().attentionReason))
@@ -416,6 +438,10 @@ export class PtyActivityScanner {
     }
 
     this.scheduleStillnessCheck();
+  }
+
+  private isInsideInterruptWindow(): boolean {
+    return this.interruptedAt !== null && Date.now() - this.interruptedAt < this.stillnessMs;
   }
 
   private setWorking(): void {
@@ -459,11 +485,19 @@ export class PtyActivityScanner {
   private onStillness(): void {
     if (!this.activeAgent) return;
 
+    // Hooks write the tracker directly. Follow it, so a hook's working can still settle and a
+    // hook's finish or approval is not cleared as a hung turn.
+    if (this.options.getActivity().state === "working") {
+      this.currentActivity = "working";
+    } else if (this.currentActivity === "working") {
+      this.currentActivity = null;
+    }
+
     const lines = this.options.readLastLines(15);
 
     if (
-      this.activeAgent === "antigravity" &&
-      isAntigravityBusyScreen(lines) &&
+      ((this.activeAgent === "antigravity" && isAntigravityBusyScreen(lines)) ||
+        (this.activeAgent === "codex" && isCodexBusyScreen(lines))) &&
       !isSpendLimitScreen(lines)
     ) {
       this.unresolvedWorkingStillness = 0;

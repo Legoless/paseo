@@ -366,7 +366,8 @@ export class WorkspaceDirectory {
   // keeping the highest-priority bucket. A record's owner IS its `workspaceId`;
   // status never fans out to same-cwd siblings. A subagent in another workspace
   // is a root for that workspace. Same-workspace descendants contribute only
-  // running activity to the nearest ancestor in that workspace.
+  // running activity (a running turn or live background work) to the nearest
+  // ancestor in that workspace.
   private applyAgentBucketContributions(params: {
     activeAgents: AgentSnapshotPayload[];
     descriptorsByWorkspaceId: Map<string, WorkspaceDescriptorPayload>;
@@ -380,13 +381,14 @@ export class WorkspaceDirectory {
         continue;
       }
       const isWorkspaceRoot = workspaceAgent.id === agent.id;
-      if (!isWorkspaceRoot && agent.status !== "running") {
+      if (!isWorkspaceRoot && agent.status !== "running" && !agent.backgroundWorkCount) {
         continue;
       }
       const bucket = isWorkspaceRoot
         ? deriveAgentStateBucket({
             status: agent.status,
             pendingPermissionCount: agent.pendingPermissions?.length ?? 0,
+            backgroundWorkCount: agent.backgroundWorkCount,
             requiresAttention: agent.requiresAttention,
             attentionReason: agent.attentionReason ?? null,
           })
@@ -536,6 +538,7 @@ export class WorkspaceDirectory {
         const derived = deriveAgentStateBucket({
           status: agent.status,
           pendingPermissionCount: agent.pendingPermissions?.length ?? 0,
+          backgroundWorkCount: agent.backgroundWorkCount,
           requiresAttention: agent.requiresAttention,
           attentionReason: agent.attentionReason ?? null,
         });

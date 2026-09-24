@@ -332,6 +332,7 @@ function useAgentPanelDescriptor(
         title: agent?.title ?? null,
         status: agent?.status ?? null,
         pendingPermissionCount: agent?.pendingPermissions.length ?? 0,
+        backgroundWorkCount: agent?.backgroundWorkCount,
         requiresAttention: agent?.requiresAttention ?? false,
         attentionReason: agent?.attentionReason ?? null,
         isTurnActive: selectAgentTurnPresentation(session, target.agentId).isActive,
@@ -352,6 +353,7 @@ function useAgentPanelDescriptor(
       ? deriveSidebarStateBucket({
           status: descriptorState.isTurnActive ? "running" : descriptorState.status,
           pendingPermissionCount: descriptorState.pendingPermissionCount,
+          backgroundWorkCount: descriptorState.backgroundWorkCount,
           requiresAttention: descriptorState.requiresAttention,
           attentionReason: descriptorState.attentionReason,
         })

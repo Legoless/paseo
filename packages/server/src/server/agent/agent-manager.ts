@@ -446,6 +446,8 @@ interface ManagedAgentBase {
   features?: AgentFeature[];
   currentModeId: string | null;
   pendingPermissions: Map<string, AgentPermissionRequest>;
+  // Live provider background work; ephemeral, never persisted.
+  backgroundWorkCount?: number;
   bufferedPermissionResolutions: Map<
     string,
     Extract<AgentStreamEvent, { type: "permission_resolved" }>
@@ -4168,6 +4170,7 @@ export class AgentManager {
       activeTurnId: null,
       activeTurnStartedAt: null,
       pendingPermissions: new Map(),
+      backgroundWorkCount: 0,
       bufferedPermissionResolutions: new Map(),
       inFlightPermissionResponses: new Set(),
       pendingReplacement: false,
@@ -4767,6 +4770,11 @@ export class AgentManager {
         }
         flags.shouldDispatchEvent = false;
         this.emitState(agent);
+        return undefined;
+      case "background_work_changed":
+        agent.backgroundWorkCount = event.count;
+        flags.shouldDispatchEvent = false;
+        this.emitState(agent, { persist: false });
         return undefined;
       case "model_changed":
         agent.runtimeInfo = event.runtimeInfo;

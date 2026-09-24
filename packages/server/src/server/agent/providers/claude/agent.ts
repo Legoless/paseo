@@ -2114,6 +2114,7 @@ class ClaudeAgentSession implements AgentSession {
   private readonly subscribers = new Set<(event: AgentStreamEvent) => void>();
   private readonly timelineAssembler = new TimelineAssembler();
   private readonly taskState = new ClaudeTaskState();
+  private backgroundWorkCount = 0;
   private readonly taskProtocolSource = new ClaudeTaskProtocolSource({
     getToolInput: (toolUseId) => this.toolUseCache.get(toolUseId)?.input ?? null,
     readWorkflowResult: readClaudeWorkflowResultFile,
@@ -3817,11 +3818,18 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   private failRunningRuntimeTasks(): void {
-    this.dispatchEvents(
-      foldSubagentObservations(this.taskProtocolSource.failRunningTasks()).map(
-        (event): AgentStreamEvent => ({ type: "provider_subagent", provider: "claude", event }),
-      ),
+    const events = foldSubagentObservations(this.taskProtocolSource.failRunningTasks()).map(
+      (event): AgentStreamEvent => ({ type: "provider_subagent", provider: "claude", event }),
     );
+    // The background set is per CLI process: it dies with this one and a new one starts empty.
+    this.appendBackgroundWorkEvent(0, events);
+    this.dispatchEvents(events);
+  }
+
+  private appendBackgroundWorkEvent(count: number, events: AgentStreamEvent[]): void {
+    if (count === this.backgroundWorkCount) return;
+    this.backgroundWorkCount = count;
+    events.push({ type: "background_work_changed", provider: "claude", count });
   }
 
   private startQueryPump(): void {
@@ -4054,22 +4062,25 @@ class ClaudeAgentSession implements AgentSession {
       suppressAssistantText: true,
       suppressReasoning: true,
     });
-    const assistantTimelineEvents = readClaudeParentToolUseId(message)
-      ? []
-      : this.timelineAssembler
-          .consume({
-            message,
-            runId: turnId,
-            messageIdHint,
-          })
-          .map(
-            (item) =>
-              ({
-                type: "timeline",
-                item,
-                provider: "claude",
-              }) satisfies AgentStreamEvent,
-          );
+    // An API error arrives as a synthetic assistant frame with `error` set. When it ends the turn,
+    // the result fails the turn with its text, so the frame is not shown as a reply.
+    const assistantTimelineEvents =
+      readClaudeParentToolUseId(message) || (message.type === "assistant" && message.error)
+        ? []
+        : this.timelineAssembler
+            .consume({
+              message,
+              runId: turnId,
+              messageIdHint,
+            })
+            .map(
+              (item) =>
+                ({
+                  type: "timeline",
+                  item,
+                  provider: "claude",
+                }) satisfies AgentStreamEvent,
+            );
 
     return [...messageEvents, ...assistantTimelineEvents];
   }
@@ -4435,6 +4446,13 @@ class ClaudeAgentSession implements AgentSession {
       this.appendTaskNotificationEvents(message, events);
       return;
     }
+    if (message.subtype === "background_tasks_changed") {
+      // Level signal with REPLACE semantics, also sent after the turn's result. Ambient tasks
+      // (monitors, housekeeping) are not activity per the CLI; SDK typings omit `ambient`.
+      const count = message.tasks.filter((task) => toObjectRecord(task)?.ambient !== true).length;
+      this.appendBackgroundWorkEvent(count, events);
+      return;
+    }
     if (message.subtype === "task_progress") {
       return;
     }
@@ -4586,7 +4604,7 @@ class ClaudeAgentSession implements AgentSession {
     events: AgentStreamEvent[],
   ): void {
     const usage = this.convertUsage(message, message.modelUsage);
-    if (message.subtype === "success") {
+    if (message.subtype === "success" && !message.is_error) {
       events.push(...this.sidechainTracker.finishAll("completed"));
       // Built-in slash commands (e.g. /voice, /usage, "Unknown command: …")
       // run client-side in the Claude CLI with no model turn — output_tokens
@@ -4609,11 +4627,19 @@ class ClaudeAgentSession implements AgentSession {
       events.push({ type: "turn_completed", provider: "claude", usage });
       return;
     }
+    events.push(...this.sidechainTracker.finishAll("failed"));
+    // A success result with is_error means the turn ended on an API error (usage limit, auth,
+    // overload); `result` holds the CLI's error text.
+    if (message.subtype === "success") {
+      const failure = this.buildTurnFailedEvent(message.result);
+      const status = message.api_error_status;
+      events.push(status ? { ...failure, code: String(status) } : failure);
+      return;
+    }
     const errorMessage =
       "errors" in message && Array.isArray(message.errors) && message.errors.length > 0
         ? message.errors.join("\n")
         : "Claude run failed";
-    events.push(...this.sidechainTracker.finishAll("failed"));
     events.push(this.buildTurnFailedEvent(errorMessage));
   }
 

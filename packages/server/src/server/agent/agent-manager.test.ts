@@ -5091,10 +5091,14 @@ test("session config drift events update state through the stream channel", asyn
     { workspaceId: undefined },
   );
   const streams: AgentStreamEvent[] = [];
+  const states: ManagedAgent[] = [];
   manager.subscribe(
     (event) => {
       if (event.type === "agent_stream") {
         streams.push(event.event);
+      }
+      if (event.type === "agent_state") {
+        states.push(event.agent);
       }
     },
     { agentId: snapshot.id, replayState: false },
@@ -5125,6 +5129,7 @@ test("session config drift events update state through the stream channel", asyn
     provider: "codex",
     thinkingOptionId: "high",
   });
+  capturedSession?.pushEvent({ type: "background_work_changed", provider: "codex", count: 2 });
   await manager.flush();
 
   const agent = manager.getAgent(snapshot.id);
@@ -5139,6 +5144,16 @@ test("session config drift events update state through the stream channel", asyn
     modeId: "build",
     thinkingOptionId: "high",
   });
+  expect(toAgentPayload(manager.getAgent(snapshot.id)!).backgroundWorkCount).toBe(2);
+  // Clients only learn the count from an agent_state emitted for the change itself.
+  expect(toAgentPayload(states.at(-1)!).backgroundWorkCount).toBe(2);
+
+  const statesBeforeEmpty = states.length;
+  capturedSession?.pushEvent({ type: "background_work_changed", provider: "codex", count: 0 });
+  await manager.flush();
+  expect(toAgentPayload(manager.getAgent(snapshot.id)!)).not.toHaveProperty("backgroundWorkCount");
+  expect(states.length).toBeGreaterThan(statesBeforeEmpty);
+  expect(toAgentPayload(states.at(-1)!)).not.toHaveProperty("backgroundWorkCount");
   expect(streams.map((event) => event.type)).toEqual([]);
 });
 

@@ -65,7 +65,7 @@ import {
 import { openWorkspacePullRequest } from "@/workspace-tabs/open-supporting-view";
 import { type ExplorerCheckoutContext } from "@/stores/explorer-checkout-context";
 import { traceInstant } from "@/performance/native-trace";
-import { useSessionStore, type WorkspaceDescriptor } from "@/stores/session-store";
+import { useSessionStore, type Agent, type WorkspaceDescriptor } from "@/stores/session-store";
 import {
   canDismissPaneInLayout,
   collectAllTabs,
@@ -258,6 +258,11 @@ function getWorkspaceScripts(
   workspaceDescriptor: WorkspaceDescriptor | null | undefined,
 ): WorkspaceDescriptor["scripts"] {
   return workspaceDescriptor?.scripts ?? EMPTY_WORKSPACE_SCRIPTS;
+}
+
+// Archiving kills the agent's background shells too, so live background work counts as running.
+function isAgentWorking(agent: Agent | null): boolean {
+  return agent?.status === "running" || (agent?.backgroundWorkCount ?? 0) > 0;
 }
 
 function getWorkspaceMemberCount(workspace: WorkspaceDescriptor | null): number {
@@ -2690,7 +2695,7 @@ function WorkspaceScreenContent({
         const agent =
           useSessionStore.getState().sessions[normalizedServerId]?.agents?.get(agentId) ?? null;
         let closePolicy = resolveCloseAgentTabPolicy(agent);
-        const isRunning = agent?.status === "running";
+        const isRunning = isAgentWorking(agent);
 
         if (isRunning && closePolicy.kind === "archive-on-close") {
           const confirmed = await confirmDialog({

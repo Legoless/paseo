@@ -48,6 +48,19 @@ describe("normalizeAgentSnapshot", () => {
     });
   });
 
+  it("round-trips live background work and omits an empty count", () => {
+    const busy = { ...createSnapshot(), backgroundWorkCount: 2 };
+    const quiet = { ...createSnapshot(), backgroundWorkCount: 0 };
+
+    expect(projectAgentSnapshot(normalizeAgentSnapshot(busy, "server-1")).backgroundWorkCount).toBe(
+      2,
+    );
+    expect(normalizeAgentSnapshot(quiet, "server-1")).not.toHaveProperty("backgroundWorkCount");
+    expect(projectAgentSnapshot(normalizeAgentSnapshot(quiet, "server-1"))).not.toHaveProperty(
+      "backgroundWorkCount",
+    );
+  });
+
   it("normalizes identified and legacy active turns at the snapshot boundary", () => {
     const startedAt = "2026-07-31T12:00:00.000Z";
     expect(

@@ -231,6 +231,9 @@ const StoredAgentSnapshotSchema = z.strictObject({
   updatedAt: IsoDateSchema,
   lastUserMessageAt: IsoDateSchema.nullable(),
   status: AgentStatusSchema,
+  // Cached because the agents cursor resumes from this row: the daemon resends an agent only when
+  // it changes, so a dropped count left a busy agent showing done after an app restart.
+  backgroundWorkCount: z.number().int().nonnegative().optional(),
   activeTurn: z
     .strictObject({
       turnId: z.string(),
@@ -589,6 +592,12 @@ function serializeAgentTurn(agent: Agent): NonNullable<StoredAgent["turn"]> {
   };
 }
 
+function serializeBackgroundWork(
+  agent: Agent,
+): Pick<StoredAgent["snapshot"], "backgroundWorkCount"> {
+  return agent.backgroundWorkCount ? { backgroundWorkCount: agent.backgroundWorkCount } : {};
+}
+
 function serializeAgent(agent: Agent): StoredAgent {
   const snapshot = {
     id: agent.id,
@@ -601,6 +610,7 @@ function serializeAgent(agent: Agent): StoredAgent {
     updatedAt: agent.updatedAt.toISOString(),
     lastUserMessageAt: agent.lastUserMessageAt?.toISOString() ?? null,
     status: agent.status,
+    ...serializeBackgroundWork(agent),
     ...(agent.turn.phase === "open" && agent.turn.turnId
       ? {
           activeTurn: {

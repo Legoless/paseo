@@ -247,6 +247,7 @@ function createAgentRow(
     statusBucket: deriveSidebarStateBucket({
       status: agent.status,
       pendingPermissionCount: agent.pendingPermissions.length,
+      backgroundWorkCount: agent.backgroundWorkCount,
       requiresAttention: agent.requiresAttention,
       attentionReason: agent.attentionReason,
     }),

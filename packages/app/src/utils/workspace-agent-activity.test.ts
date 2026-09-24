@@ -12,6 +12,7 @@ function agent(input: {
   requiresAttention?: boolean;
   attentionReason?: Agent["attentionReason"];
   pendingPermissionCount?: number;
+  backgroundWorkCount?: number;
   archivedAt?: string | null;
   parentAgentId?: string | null;
 }): Agent {
@@ -51,6 +52,7 @@ function agent(input: {
       kind: "tool",
       input: {},
     })),
+    ...(input.backgroundWorkCount ? { backgroundWorkCount: input.backgroundWorkCount } : {}),
     persistence: null,
     title: null,
     cwd: "/repo",
@@ -99,6 +101,24 @@ describe("workspace agent activity index", () => {
 
     expect(result.get("workspace-open")?.status).toBe("running");
     expect(result.get("workspace-error")?.status).toBe("failed");
+  });
+
+  it("buckets an idle agent with live background work as running", () => {
+    const index = buildWorkspaceAgentActivityIndex(
+      new Map([
+        [
+          "busy",
+          agent({
+            id: "busy",
+            workspaceId: "workspace-busy",
+            backgroundWorkCount: 1,
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          }),
+        ],
+      ]),
+    );
+
+    expect(index.get("workspace-busy")?.status).toBe("running");
   });
 
   it("keeps the latest active root agent for each workspace", () => {

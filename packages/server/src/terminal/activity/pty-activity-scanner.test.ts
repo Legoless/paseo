@@ -4,6 +4,7 @@ import {
   detectAgentFromOutput,
   detectAgentFromTitle,
   isAntigravityBusyScreen,
+  isCodexBusyScreen,
   isIdleAgentScreen,
   isIdlePromptLine,
   isNeedsInputScreen,
@@ -253,6 +254,12 @@ describe("isIdlePromptLine", () => {
     expect(isIdlePromptLine("codex ›", "codex")).toBe(true);
   });
 
+  it("detects Codex's composer with its placeholder or a draft", () => {
+    expect(isIdlePromptLine("› Ask Codex to do anything", "codex")).toBe(true);
+    expect(isIdlePromptLine("› fix the flaky test", "codex")).toBe(true);
+    expect(isIdlePromptLine("› 1. Yes, proceed (y)", "codex")).toBe(false);
+  });
+
   it("detects Grok prompt (grok> or >)", () => {
     expect(isIdlePromptLine("grok>", "grok")).toBe(true);
     expect(isIdlePromptLine(">", "grok")).toBe(true);
@@ -292,6 +299,44 @@ describe("isIdleAgentScreen", () => {
         "cursor",
       ),
     ).toBe(false);
+  });
+
+  it("does not treat Codex's composer as idle while its status line shows a running turn", () => {
+    const busy = [
+      "• Working (12s • esc to interrupt)",
+      " ",
+      "› Ask Codex to do anything",
+      "  GPT-6-Sol low · weekly 69% left",
+    ];
+    const finished = [
+      "─ Worked for 48m 54s ─",
+      "• Press esc to interrupt a running turn.",
+      "› Ask Codex to do anything",
+      "  GPT-6-Sol low · weekly 69% left",
+    ];
+
+    expect(isCodexBusyScreen(busy)).toBe(true);
+    expect(isIdleAgentScreen(busy, "› Ask Codex to do anything", "codex")).toBe(false);
+    expect(isCodexBusyScreen(finished)).toBe(false);
+    expect(isIdleAgentScreen(finished, "› Ask Codex to do anything", "codex")).toBe(true);
+  });
+
+  it("reads only the status line above Codex's composer", () => {
+    expect(
+      isCodexBusyScreen([
+        "• Planning the fix (1m 02s • esc to interrupt) · Running hooks",
+        "› queued follow-up",
+      ]),
+    ).toBe(true);
+    // A finished reply that quotes the status line, higher up or inline, is not a running turn.
+    expect(
+      isCodexBusyScreen([
+        '+      "• Working (12s • esc to interrupt)",',
+        "• Added the check. It matches `• Working (12s • esc to interrupt)` lines.",
+        "› Ask Codex to do anything",
+      ]),
+    ).toBe(false);
+    expect(isCodexBusyScreen(["• Working (12s • esc to interrupt)"])).toBe(false);
   });
 
   it("prefers Cursor's approval prompt over a stale empty composer", () => {
@@ -477,6 +522,198 @@ describe("PtyActivityScanner — full lifecycle", () => {
       state: "idle",
       attentionReason: "finished",
     });
+  });
+
+  it("finishes a Codex turn at its placeholder composer", () => {
+    const tracker = new TerminalActivityTracker();
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => [
+        "• DONE",
+        "› Ask Codex to do anything",
+        "  GPT-6-Sol low · weekly 69% left",
+      ],
+      readCursorLine: () => "› Ask Codex to do anything",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("codex");
+    scanner.feedInput("\r");
+    scanner.feedOutput("• DONE");
+    vi.advanceTimersByTime(1500);
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("keeps a Codex turn working while its status line shows above the composer", () => {
+    const tracker = new TerminalActivityTracker();
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => [
+        "• Working (12s • esc to interrupt)",
+        " ",
+        "› Ask Codex to do anything",
+        "  GPT-6-Sol low · weekly 69% left",
+      ],
+      readCursorLine: () => "› Ask Codex to do anything",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("codex");
+    scanner.feedInput("\r");
+    scanner.feedOutput("• Working (12s • esc to interrupt)");
+    vi.advanceTimersByTime(2500);
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("does not finish an interrupted Codex turn on a late spinner frame", () => {
+    const tracker = new TerminalActivityTracker();
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => [
+        "■ Conversation interrupted - tell the model what to do differently.",
+        "› Ask Codex to do anything",
+      ],
+      readCursorLine: () => "› Ask Codex to do anything",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("codex");
+    scanner.feedInput("\r");
+    tracker.interrupt();
+    scanner.handleInterrupt();
+    // Codex keeps animating its title until it processes the Esc.
+    scanner.feedOutput("\x1b]0;⠹ Run ls\x07");
+    vi.advanceTimersByTime(1500);
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+
+    scanner.feedInput("\r");
+    expect(tracker.getSnapshot().state).toBe("working");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("ignores Claude's late busy title after an interrupt but lights a later turn", () => {
+    const tracker = new TerminalActivityTracker();
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => ["⎿ Interrupted · What should Claude do instead?", "❯"],
+      readCursorLine: () => "❯",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("claude");
+    scanner.feedInput("\r");
+    tracker.interrupt();
+    scanner.handleInterrupt();
+    scanner.feedOutput("\x1b]0;◐ Fixing the test\x07");
+    vi.advanceTimersByTime(1500);
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+
+    // A background task finishing later starts a turn with no keystroke.
+    vi.advanceTimersByTime(5000);
+    scanner.feedOutput("\x1b]0;◑ Checking the render\x07");
+    expect(tracker.getSnapshot().state).toBe("working");
+    scanner.feedOutput("\x1b]0;✳ Claude Code\x07");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("keeps a hook-reported approval when the screen settles without a prompt", () => {
+    const tracker = new TerminalActivityTracker();
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => ["$ rm -rf build"],
+      readCursorLine: () => "$ rm -rf build",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("codex");
+    scanner.feedInput("\r");
+    tracker.set("attention");
+    scanner.feedOutput("$ rm -rf build");
+    vi.advanceTimersByTime(2000);
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+  });
+
+  it("keeps a hook-reported finish when the screen settles without a prompt", () => {
+    const tracker = new TerminalActivityTracker();
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => ["─ Worked for 48m 54s ─"],
+      readCursorLine: () => "",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("codex");
+    scanner.feedInput("\r");
+    tracker.set("idle");
+    scanner.feedOutput("─ Worked for 48m 54s ─");
+    vi.advanceTimersByTime(1500);
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("settles working that a hook reports after the turn ended", () => {
+    const tracker = new TerminalActivityTracker();
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => ["• Completed `/root/sleep_then_ls`", "› Ask Codex to do anything"],
+      readCursorLine: () => "› Ask Codex to do anything",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("codex");
+    scanner.feedInput("\r");
+    scanner.feedOutput("• DONE");
+    vi.advanceTimersByTime(500);
+    expect(tracker.clearAttention()).toBe(true);
+
+    // A subagent that outlived the turn runs tool hooks, and Codex sends no Stop for it.
+    tracker.set("working");
+    scanner.feedOutput("• Completed `/root/sleep_then_ls`");
+    vi.advanceTimersByTime(500);
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("clears hook-reported working that never reaches a prompt", () => {
+    const tracker = new TerminalActivityTracker();
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => ["still going"],
+      readCursorLine: () => "still going",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("codex");
+    tracker.set("working");
+    scanner.feedOutput("still going");
+    vi.advanceTimersByTime(1000);
+    expect(tracker.getSnapshot().state).toBe("working");
+
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot().state).toBeNull();
   });
 
   it("uses shell command boundaries without treating a working directory as an agent", () => {
