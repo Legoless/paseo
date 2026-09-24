@@ -1,9 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   COMPOSITOR_RECOVERY_COOLDOWN_MS,
   CompositorWatchdog,
   type CompositorWatchdogTarget,
+  PROBE_ABANDON_MS,
+  PROBE_RESPONSE_TIMEOUT_MS,
   shouldRecoverFromFrameStall,
 } from "./watchdog-targets.js";
 
@@ -13,6 +15,8 @@ class FakeTarget implements CompositorWatchdogTarget {
   public producedFrame = false;
   public visibilityState = "visible";
   public executeCount = 0;
+  // When set, the probe answers with this promise instead of right away.
+  public response: Promise<unknown> | null = null;
 
   public constructor(public readonly id: string) {}
 
@@ -26,7 +30,9 @@ class FakeTarget implements CompositorWatchdogTarget {
 
   public async executeJavaScript(): Promise<unknown> {
     this.executeCount += 1;
-    return { producedFrame: this.producedFrame, visibilityState: this.visibilityState };
+    return (
+      this.response ?? { producedFrame: this.producedFrame, visibilityState: this.visibilityState }
+    );
   }
 }
 
@@ -167,6 +173,114 @@ describe("compositor-watchdog targets", () => {
 
     expect(target.executeCount).toBe(0);
     expect(recover).not.toHaveBeenCalled();
+  });
+
+  describe("unanswered probes", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function probePass(watchdog: CompositorWatchdog): Promise<void> {
+      const pass = watchdog.probeOnce();
+      await vi.advanceTimersByTimeAsync(PROBE_RESPONSE_TIMEOUT_MS);
+      await pass;
+    }
+
+    it("ignores a hung target without re-probing it and keeps probing the others", async () => {
+      const { watchdog, recover } = createWatchdog();
+      const hung = new FakeTarget("main-window");
+      hung.response = new Promise(() => {});
+      const stalled = new FakeTarget("terminal-guest:1");
+      watchdog.registerTarget(hung);
+      watchdog.registerTarget(stalled);
+
+      for (let i = 0; i < 3; i += 1) {
+        await probePass(watchdog);
+      }
+
+      expect(hung.executeCount).toBe(1);
+      expect(stalled.executeCount).toBe(3);
+      expect(recover).toHaveBeenCalledTimes(1);
+      expect(recover).toHaveBeenCalledWith({ targetId: "terminal-guest:1", attempt: 1 });
+    });
+
+    it("does not start a pass while the previous one is still waiting", async () => {
+      const { watchdog } = createWatchdog();
+      const hung = new FakeTarget("main-window");
+      hung.response = new Promise(() => {});
+      const other = new FakeTarget("terminal-guest:1");
+      watchdog.registerTarget(hung);
+      watchdog.registerTarget(other);
+
+      const first = watchdog.probeOnce();
+      await watchdog.probeOnce();
+      expect(other.executeCount).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(PROBE_RESPONSE_TIMEOUT_MS);
+      await first;
+      expect(other.executeCount).toBe(1);
+    });
+
+    it("treats a rejected probe as no signal that breaks the stall streak", async () => {
+      const { watchdog, recover } = createWatchdog();
+      const target = new FakeTarget("main-window");
+      watchdog.registerTarget(target);
+
+      await probePass(watchdog);
+      await probePass(watchdog);
+      target.response = Promise.reject(new Error("Render frame was disposed"));
+      await probePass(watchdog);
+      target.response = null;
+      await probePass(watchdog);
+      await probePass(watchdog);
+      expect(recover).not.toHaveBeenCalled();
+
+      await probePass(watchdog);
+      expect(recover).toHaveBeenCalledTimes(1);
+    });
+
+    it("re-probes a target once its late probe settles", async () => {
+      const { watchdog } = createWatchdog();
+      const target = new FakeTarget("main-window");
+      let failProbe: (error: Error) => void = () => {};
+      target.response = new Promise((_, reject) => {
+        failProbe = reject;
+      });
+      watchdog.registerTarget(target);
+
+      await probePass(watchdog);
+      await probePass(watchdog);
+      expect(target.executeCount).toBe(1);
+
+      failProbe(new Error("Render frame was disposed"));
+      await vi.advanceTimersByTimeAsync(0);
+      target.response = null;
+      await probePass(watchdog);
+      expect(target.executeCount).toBe(2);
+    });
+
+    it("abandons a probe that never settles and probes the reloaded renderer again", async () => {
+      const { watchdog } = createWatchdog(Date.now);
+      const target = new FakeTarget("main-window");
+      // A probe sent to a renderer that then dies never settles.
+      target.response = new Promise(() => {});
+      watchdog.registerTarget(target);
+
+      await probePass(watchdog);
+      await probePass(watchdog);
+      expect(target.executeCount).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(PROBE_ABANDON_MS);
+      target.response = null;
+      await probePass(watchdog);
+      expect(target.executeCount).toBe(2);
+      await probePass(watchdog);
+      expect(target.executeCount).toBe(3);
+    });
   });
 
   it("keeps the pure state machine exported for the main window", () => {

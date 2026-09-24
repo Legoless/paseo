@@ -8,6 +8,8 @@ export interface OwnedDesktopWindow<TAgentTarget> {
   restore(): void;
   show(): void;
   focus(): void;
+  isCrashed(): boolean;
+  reload(): void;
   sendAgent(target: TAgentTarget): void;
 }
 
@@ -92,7 +94,16 @@ export function createDesktopWindowOwner<TAgentTarget>(
       if (deliverable) window.sendAgent(deliverable);
     },
     async restoreWhenActivated() {
-      if (port.windows().length === 0) await owner.openPrimary();
+      const windows = port.windows();
+      if (windows.length === 0) {
+        await owner.openPrimary();
+        return;
+      }
+      // A window whose renderer died and ran out of automatic reloads
+      // (setupRendererRecovery) stays blank; activating the app retries it.
+      for (const window of windows) {
+        if (window.isCrashed()) window.reload();
+      }
     },
     takePendingProject: (webContentsId) => pendingProjects.take(webContentsId),
   };

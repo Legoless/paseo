@@ -303,13 +303,38 @@ this. It polls the renderer for frame production every couple of seconds and,
 after a sustained stall while the window is visible and unlocked, restarts the
 GPU process so Chromium rebuilds the display link. The probe is skipped while
 the screen is locked or the window is hidden or minimized, since a window
-legitimately stops producing frames then.
+legitimately stops producing frames then. A probe the renderer does not answer
+within two seconds, or that fails, is ignored rather than counted, and it
+resets the stall count: a hung or dead renderer is not a compositor stall, and
+restarting the GPU while the renderer is busy blanks the window instead of
+fixing it. An unanswered probe is not re-sent until it settles, so a hung
+renderer does not pile up probes or hold up the terminal guests. In Electron,
+`executeJavaScript` on a dead frame or across a reload never settles (it only
+logs "Render frame was disposed"), so the watchdog abandons a probe after 30
+seconds and does not probe a crashed renderer at all.
 
 The watchdog deliberately leaves background throttling **enabled**. Calling
 `webContents.setBackgroundThrottling(false)` would keep the compositor producing
 frames non-stop, pinning ProMotion displays at 120Hz forever and draining the
 battery while the app is idle — so do not re-add it. The probe's visibility
 guards already prevent throttling from causing a false stall.
+
+### Desktop renderer recovery and main.log
+
+A renderer that dies (crash, OOM, or a stray `kill`/`pkill` that matches Electron
+helpers) leaves the window showing only its background color. Electron does not
+reload it for you. `setupRendererRecovery`
+(`packages/desktop/src/window/window-manager.ts`) reloads the main window's
+renderer, and stops after 3 reloads in 5 minutes so a renderer that dies on load
+does not loop. After that, on macOS clicking the dock icon reloads it
+(`restoreWhenActivated`); elsewhere use View → Reload. Hangs (`unresponsive`) are only logged: recovering one
+means killing the renderer and losing its state.
+
+The desktop main process logs to `~/Library/Logs/<app name>/main.log` on macOS
+(electron-log, rotated at 10 MB to `main.old.log`). Main-process `console.*`
+output, renderer console output, and every `render-process-gone` and
+`child-process-gone` (GPU, network service) with its reason and exit code land
+there. Check it first when a desktop window is blank or frozen.
 
 ### Daemon logs
 

@@ -63,6 +63,11 @@ export function createWebSocketTransportFactory(factory: WebSocketFactory): Daem
         const suppressEarlyCloseError = bindTemporaryEarlyCloseErrorHandler(ws);
         try {
           ws.close(code, reason);
+        } catch {
+          // Browsers throw InvalidAccessError for codes other than 1000 and 3000-4999,
+          // such as our 1001. Close without a code so the old socket does not stay
+          // attached to its daemon session.
+          ws.close();
         } finally {
           if (typeof ws.on !== "function" && typeof ws.addEventListener !== "function") {
             suppressEarlyCloseError();

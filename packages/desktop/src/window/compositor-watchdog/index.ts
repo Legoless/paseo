@@ -64,7 +64,8 @@ function mainWindowTarget(win: BrowserWindow): CompositorWatchdogTarget {
   return {
     id: MAIN_WINDOW_TARGET_ID,
     isDestroyed: () => win.isDestroyed(),
-    isProbeEligible: () => win.isVisible() && !win.isMinimized(),
+    // A crashed renderer cannot answer; setupRendererRecovery reloads it.
+    isProbeEligible: () => win.isVisible() && !win.isMinimized() && !win.webContents.isCrashed(),
     executeJavaScript: (source) => win.webContents.executeJavaScript(source),
   };
 }
@@ -118,7 +119,10 @@ export function registerTerminalGuestCompositorWatchdogTarget(input: {
     id: `${TERMINAL_GUEST_TARGET_PREFIX}${contents.id}`,
     isDestroyed: () => contents.isDestroyed(),
     isProbeEligible: () =>
-      !hostWindow.isDestroyed() && hostWindow.isVisible() && !hostWindow.isMinimized(),
+      !contents.isCrashed() &&
+      !hostWindow.isDestroyed() &&
+      hostWindow.isVisible() &&
+      !hostWindow.isMinimized(),
     executeJavaScript: (source) => contents.executeJavaScript(source),
   });
 }

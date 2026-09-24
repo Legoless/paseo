@@ -9,6 +9,8 @@ function harness() {
   const windows: OwnedDesktopWindow<Target>[] = [];
   const launches: Array<{ initialRoute: string | null; restoreWindowState: boolean }> = [];
   const sent: Target[] = [];
+  const crashed = new Set<number>();
+  const reloads: number[] = [];
   let nextId = 1;
   let focused: OwnedDesktopWindow<Target> | null = null;
   let closeWindow = (_id: number) => {};
@@ -28,6 +30,8 @@ function harness() {
         restore: () => {},
         show: () => {},
         focus: () => {},
+        isCrashed: () => crashed.has(id),
+        reload: () => reloads.push(id),
         sendAgent: (target) => sent.push(target),
       };
       windows.push(window);
@@ -44,6 +48,8 @@ function harness() {
     launches,
     sent,
     windows,
+    crashed,
+    reloads,
     setFocused: (window: OwnedDesktopWindow<Target>) => {
       focused = window;
     },
@@ -78,5 +84,29 @@ describe("desktop window owner", () => {
     await h.owner.openAdditional({ pendingProjectPath: "/project/a" });
     h.close(1);
     expect(h.owner.takePendingProject(1)).toBeNull();
+  });
+
+  it("opens a primary window on activation when none exist", async () => {
+    const h = harness();
+    await h.owner.restoreWhenActivated();
+    expect(h.launches).toEqual([{ initialRoute: null, restoreWindowState: true }]);
+  });
+
+  it("reloads only the windows whose renderer crashed on activation", async () => {
+    const h = harness();
+    await h.owner.openPrimary();
+    await h.owner.openAdditional();
+    h.crashed.add(2);
+    await h.owner.restoreWhenActivated();
+    expect(h.reloads).toEqual([2]);
+    expect(h.launches).toHaveLength(2);
+  });
+
+  it("leaves healthy windows alone on activation", async () => {
+    const h = harness();
+    await h.owner.openPrimary();
+    await h.owner.restoreWhenActivated();
+    expect(h.reloads).toEqual([]);
+    expect(h.launches).toHaveLength(1);
   });
 });

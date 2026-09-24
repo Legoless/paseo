@@ -8,6 +8,12 @@ export const FRAME_PROBE_INTERVAL_MS = 2000;
 const FRAME_PROBE_DEADLINE_MS = 300;
 // Consecutive stalled probes before the watchdog restarts the GPU process (~6 s).
 const FRAME_STALL_CHECKS_TO_RECOVER = 3;
+// A probe the renderer has not answered within this window is ignored. A hung
+// renderer main thread never answers, and restarting the GPU cannot fix it.
+export const PROBE_RESPONSE_TIMEOUT_MS = 2_000;
+// executeJavaScript on a dead frame, or across a reload, never settles in Electron (it only
+// logs "Render frame was disposed"), so a probe still unanswered after this is abandoned.
+export const PROBE_ABANDON_MS = 30_000;
 // Minimum gap between GPU-process restarts.
 export const COMPOSITOR_RECOVERY_COOLDOWN_MS = 60_000;
 // Grace period for Chromium to relaunch the GPU process before probing resumes.
@@ -73,7 +79,12 @@ interface TargetState {
   target: CompositorWatchdogTarget;
   stalledChecks: number;
   consecutiveRecoveries: number;
+  // An unanswered probe is not re-issued until it settles or is abandoned; calls would
+  // queue up behind a hung renderer.
+  pendingProbe: { sentAt: number } | null;
 }
+
+type FrameProbeResult = { producedFrame?: unknown; visibilityState?: unknown } | null;
 
 /**
  * Probes registered targets for frame production and, on a sustained stall,
@@ -88,6 +99,7 @@ export class CompositorWatchdog {
   private recovering = false;
   private lastRecoveryAt = 0;
   private screenLocked = false;
+  private probing = false;
   private timer: ReturnType<typeof setInterval> | null = null;
 
   public constructor(options: CompositorWatchdogOptions) {
@@ -102,7 +114,12 @@ export class CompositorWatchdog {
       existing.target = target;
       return;
     }
-    this.targets.set(target.id, { target, stalledChecks: 0, consecutiveRecoveries: 0 });
+    this.targets.set(target.id, {
+      target,
+      stalledChecks: 0,
+      consecutiveRecoveries: 0,
+      pendingProbe: null,
+    });
   }
 
   public unregisterTarget(id: string): void {
@@ -137,11 +154,17 @@ export class CompositorWatchdog {
   }
 
   public async probeOnce(): Promise<void> {
-    if (this.recovering) {
+    // The interval fires regardless of how long a pass takes; never overlap passes.
+    if (this.recovering || this.probing) {
       return;
     }
-    for (const state of Array.from(this.targets.values())) {
-      await this.probeTarget(state);
+    this.probing = true;
+    try {
+      for (const state of Array.from(this.targets.values())) {
+        await this.probeTarget(state);
+      }
+    } finally {
+      this.probing = false;
     }
   }
 
@@ -162,15 +185,31 @@ export class CompositorWatchdog {
       return;
     }
 
-    let result: { producedFrame?: unknown; visibilityState?: unknown } | null;
-    try {
-      result = (await target.executeJavaScript(FRAME_PROBE_SOURCE)) as {
-        producedFrame?: unknown;
-        visibilityState?: unknown;
-      } | null;
-    } catch {
+    if (state.pendingProbe && this.now() - state.pendingProbe.sentAt < PROBE_ABANDON_MS) {
       return;
     }
+
+    // An unanswered or failed probe (hung, busy, or dead renderer) resolves to
+    // null and resets the streak like a hidden document: only answered probes
+    // show a compositor stall, and a GPU restart while the renderer is busy is
+    // itself what blanks the window.
+    const probe = { sentAt: this.now() };
+    state.pendingProbe = probe;
+    let responseTimer: ReturnType<typeof setTimeout> | undefined;
+    const answered = Promise.resolve()
+      .then(() => target.executeJavaScript(FRAME_PROBE_SOURCE) as Promise<FrameProbeResult>)
+      .catch(() => null)
+      .finally(() => {
+        // An abandoned probe that settles late must not clear the one that replaced it.
+        if (state.pendingProbe === probe) {
+          state.pendingProbe = null;
+        }
+      });
+    const unanswered = new Promise<null>((resolve) => {
+      responseTimer = setTimeout(() => resolve(null), PROBE_RESPONSE_TIMEOUT_MS);
+    });
+    const result = await Promise.race([answered, unanswered]);
+    clearTimeout(responseTimer);
     if (!result || result.visibilityState !== "visible") {
       state.stalledChecks = 0;
       return;
