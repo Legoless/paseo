@@ -8,8 +8,15 @@ Tests prove behavior, not structure. Every test should answer: "what user-visibl
 
 Run `npm run check:merge` against the complete merged tree. It rebuilds workspace declarations,
 runs formatting, lint, and typecheck, then runs the existing focused suites for saved layouts,
-pane retention, agent resume, and desktop connection origins. A clean conflict resolution and
+pane retention, agent resume, desktop connection origins, composer text replacement, and the
+daemon loading `commands.json` and pane layouts at startup. A clean conflict resolution and
 successful typecheck do not prove that these behaviors still work together.
+
+Resolving a conflicted file by taking one side drops the other side's additions without any error,
+and typecheck stays green when the dropped code was a whole function and its only call. That is how
+the startup loaders and the composer subscription above were lost. After resolving, diff the fork's
+additions (`git diff <merge-base> <fork parent> -- <file>`) against the result for every file you
+took whole.
 
 The Git hooks run this check before automatic merge commits and before committing resolved
 conflicts. The index and working tree must agree before and after the check, so unstaged fixes
