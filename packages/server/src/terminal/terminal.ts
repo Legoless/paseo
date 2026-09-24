@@ -13,7 +13,11 @@ import type { TerminalCell, TerminalState } from "@getpaseo/protocol/messages";
 import { TerminalInputModeTracker } from "@getpaseo/protocol/terminal-input-mode";
 import { TerminalActivityTracker } from "./activity/terminal-activity-tracker.js";
 import { PtyActivityScanner } from "./activity/pty-activity-scanner.js";
-import type { TerminalActivity, TerminalActivityState } from "@getpaseo/protocol/terminal-activity";
+import type {
+  TerminalActivity,
+  TerminalActivityAttentionReason,
+  TerminalActivityState,
+} from "@getpaseo/protocol/terminal-activity";
 
 const { Terminal } = xterm;
 const require = createRequire(import.meta.url);
@@ -91,7 +95,11 @@ export interface TerminalSession {
   getReplayPreamble(): string;
   getTitle(): string | undefined;
   getActivity(): TerminalActivity | null;
-  setActivity(state: TerminalActivityState): void;
+  setActivity(
+    state: TerminalActivityState,
+    attentionReason?: TerminalActivityAttentionReason,
+    sessionId?: string,
+  ): void;
   clearActivityAttention(): boolean;
   setTitle(title: string): void;
   getExitInfo(): TerminalExitInfo | null;
@@ -1489,8 +1497,12 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     return toTerminalActivity(activityTracker.getSnapshot());
   }
 
-  function setActivity(state: TerminalActivityState): void {
-    activityTracker.set(state);
+  function setActivity(
+    state: TerminalActivityState,
+    attentionReason?: TerminalActivityAttentionReason,
+    sessionId?: string,
+  ): void {
+    activityTracker.set(state, attentionReason, sessionId);
   }
 
   function clearActivityAttention(): boolean {

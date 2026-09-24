@@ -38,17 +38,32 @@ export async function runHooksCommand(
   const target = resolveTarget(runtime.env);
   if (!target) return;
 
+  // Read stdin once: the provider maps the payload and the post carries its session id.
+  // Never write to stdout; agents inject a hook's stdout into the model's context.
+  const raw = runtime.input.isTTY ? null : await readInput(runtime.input);
   const state = await resolveHookActivity({
     provider: agent,
     event,
     input: {
       isTTY: runtime.input.isTTY,
-      read: () => readInput(runtime.input),
+      read: async () => raw,
     },
   });
   if (!state) return;
 
-  await postActivity(target, state, runtime.fetch);
+  await postActivity(target, state, readSessionId(raw), runtime.fetch);
+}
+
+function readSessionId(raw: string | null): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const payload = JSON.parse(raw) as { session_id?: unknown } | null;
+    return typeof payload?.session_id === "string" && payload.session_id
+      ? payload.session_id
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function resolveTarget(env: HookEnvironment) {
@@ -92,6 +107,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null
 async function postActivity(
   target: { terminalId: string; token: string; url: string },
   state: AgentHookActivityState,
+  sessionId: string | undefined,
   send: typeof fetch,
 ): Promise<void> {
   const controller = new AbortController();
@@ -105,6 +121,7 @@ async function postActivity(
         terminalId: target.terminalId,
         token: target.token,
         state,
+        sessionId,
       }),
       signal: controller.signal,
     });

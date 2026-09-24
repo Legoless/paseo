@@ -1,10 +1,13 @@
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveNodeExecPath } from "./runtime-paths";
+import { resolveDaemonCliPath, resolveNodeExecPath } from "./runtime-paths";
+import { CLI_BIN_NAME } from "../variant";
 
 const mocks = vi.hoisted(() => ({
   existsSync: vi.fn(),
   app: {
     isPackaged: true,
+    getPath: () => "/Applications/Paseo.app/Contents/MacOS/Paseo",
   },
 }));
 
@@ -68,5 +71,17 @@ describe("runtime-paths", () => {
     expect(resolveNodeExecPath()).toBe(
       "/Applications/Paseo.app/Contents/Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper",
     );
+  });
+
+  it("hands a packaged daemon the bundled CLI shim", () => {
+    expect(resolveDaemonCliPath()).toBe(
+      path.join("/Applications/Paseo.app/Contents/Resources/bin", CLI_BIN_NAME),
+    );
+  });
+
+  it("hands an unpackaged daemon the workspace CLI, since dev Electron has no bundled shim", () => {
+    mocks.app.isPackaged = false;
+
+    expect(resolveDaemonCliPath()).toBe(path.resolve(__dirname, "../../../cli/bin/paseo"));
   });
 });

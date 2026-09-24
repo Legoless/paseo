@@ -6,8 +6,14 @@ import { resolvePaseoHome } from "./paseo-home.js";
 import { createRootLogger } from "./logger.js";
 import type { DaemonLifecycleIntent } from "./bootstrap.js";
 import { getProcessDiagnostics } from "./process-diagnostics.js";
+import { TERMINAL_HOOK_IDENTITY_ENV_VARS } from "./agent/provider-launch-config.js";
 
 process.title = "Paseo Daemon";
+
+// A daemon started from inside a Paseo pane inherits that pane's hook identity.
+// Drop it so nothing the daemon spawns (agents, scripts, services) posts activity
+// into that pane; the daemon's own terminals set their own values.
+for (const key of TERMINAL_HOOK_IDENTITY_ENV_VARS) delete process.env[key];
 
 type SupervisorLifecycleMessage =
   | {

@@ -57,7 +57,7 @@ async function runHook(agent: string, event: string, input = ttyInput()) {
   return fetch;
 }
 
-function expectPostedState(fetch: RecordingFetch, state: string) {
+function expectPostedState(fetch: RecordingFetch, state: string, sessionId?: string) {
   expect(fetch.calls).toEqual([
     {
       url: hookEnv.PASEO_TERMINAL_ACTIVITY_URL,
@@ -68,6 +68,7 @@ function expectPostedState(fetch: RecordingFetch, state: string) {
           terminalId: hookEnv.PASEO_TERMINAL_ID,
           token: hookEnv.PASEO_ACTIVITY_TOKEN,
           state,
+          sessionId,
         }),
         signal: expect.any(AbortSignal),
       },
@@ -85,14 +86,65 @@ describe("runHooksCommand", () => {
   });
 
   it.each([
-    [claudeProvider.events[0].event, "running"],
-    [claudeProvider.events[1].event, "idle"],
-    [claudeProvider.events[2].event, "idle"],
-    [claudeProvider.events[3].event, "idle"],
+    ["UserPromptSubmit", "running"],
+    ["Stop", "idle"],
+    ["StopFailure", "idle"],
   ])("maps Claude %s to %s", async (event, state) => {
     const send = await runHook(claudeProvider.id, event);
 
     expectPostedState(send, state);
+  });
+
+  it("ignores Claude SessionEnd", async () => {
+    const send = await runHook(claudeProvider.id, "SessionEnd", inputFrom("{}"));
+
+    expect(send.calls).toEqual([]);
+  });
+
+  it("keeps a Claude turn running while a background task runs", async () => {
+    const running = await runHook(
+      claudeProvider.id,
+      "Stop",
+      inputFrom(JSON.stringify({ background_tasks: [{ type: "shell", status: "running" }] })),
+    );
+    const finished = await runHook(
+      claudeProvider.id,
+      "Stop",
+      inputFrom(JSON.stringify({ background_tasks: [{ type: "shell", status: "completed" }] })),
+    );
+
+    expectPostedState(running, "running");
+    expectPostedState(finished, "idle");
+  });
+
+  it.each([
+    ["rate_limit", "quota"],
+    ["billing_error", "quota"],
+    ["server_error", "idle"],
+  ])("maps Claude StopFailure %s to %s", async (error, state) => {
+    const send = await runHook(
+      claudeProvider.id,
+      "StopFailure",
+      inputFrom(JSON.stringify({ error })),
+    );
+
+    expectPostedState(send, state);
+  });
+
+  it("posts the agent session id from the hook payload", async () => {
+    const claude = await runHook(
+      claudeProvider.id,
+      "UserPromptSubmit",
+      inputFrom(JSON.stringify({ session_id: "claude-session", prompt: "hi" })),
+    );
+    const codex = await runHook(
+      codexProvider.id,
+      "Stop",
+      inputFrom(JSON.stringify({ session_id: "codex-session" })),
+    );
+
+    expectPostedState(claude, "running", "claude-session");
+    expectPostedState(codex, "idle", "codex-session");
   });
 
   it.each([
@@ -119,22 +171,28 @@ describe("runHooksCommand", () => {
     expectPostedState(send, state);
   });
 
-  it("maps Claude idle prompt notifications to needs-input", async () => {
+  it.each([
+    "permission_prompt",
+    "elicitation_dialog",
+    "elicitation_url_dialog",
+    "worker_permission_prompt",
+    "agent_needs_input",
+  ])("maps Claude %s notifications to needs-input", async (notificationType) => {
     const send = await runHook(
       claudeProvider.id,
-      claudeProvider.events[4].event,
-      inputFrom('{"hook_event_name":"Notification","notification_type":"idle_prompt"}'),
+      "Notification",
+      inputFrom(JSON.stringify({ notification_type: notificationType })),
     );
 
     expectPostedState(send, "needs-input");
   });
 
-  it.each(["permission_prompt", "elicitation_prompt", "elicitation_response", "auth_success"])(
+  it.each(["idle_prompt", "auth_success", "elicitation_response", "agent_completed"])(
     "ignores Claude %s notifications",
     async (notificationType) => {
       const send = await runHook(
         claudeProvider.id,
-        claudeProvider.events[4].event,
+        "Notification",
         inputFrom(JSON.stringify({ notification_type: notificationType })),
       );
 

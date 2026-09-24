@@ -149,18 +149,36 @@ export function isCodexBusyScreen(lines: string[]): boolean {
   return status !== undefined && CODEX_RUNNING_STATUS.test(status);
 }
 
+// After a turn Claude prints "✻ Baked for 6s · done 12:03 PM" above its composer, and
+// appends " · 1 shell still running" (shells, monitors, local agents, …) while background
+// work outlives the turn, or shows "✻ Waiting for 1 background agent to finish" instead.
+// Only the last line above the composer counts, or the one before a right-aligned notice
+// ("✘ Auto-update failed"), so a reply or an older turn line does not.
+// ponytail: a pane narrower than the line wraps it and reads as idle; join wrapped rows if that bites.
+const CLAUDE_BACKGROUND_STATUS =
+  /^✻ (?:.+ · \d+ [^·]+ still running|Waiting for \d+ .+ to finish)$/;
+
+export function isClaudeBusyScreen(lines: string[]): boolean {
+  return dropComposerBlock(lines.map((line) => stripAnsi(line).trim()))
+    .filter((line) => line.length > 0)
+    .slice(-2)
+    .some((line) => CLAUDE_BACKGROUND_STATUS.test(line));
+}
+
+// Agents that keep their idle-looking composer up while work still runs.
+function isAgentBusyScreen(lines: string[], agent: KnownAgentName): boolean {
+  if (agent === "antigravity") return isAntigravityBusyScreen(lines);
+  if (agent === "codex") return isCodexBusyScreen(lines);
+  if (agent === "claude") return isClaudeBusyScreen(lines);
+  return false;
+}
+
 export function isIdleAgentScreen(
   lines: string[],
   cursorLine: string,
   agent: KnownAgentName,
 ): boolean {
-  if (agent === "antigravity") {
-    if (isAntigravityBusyScreen(lines)) {
-      return false;
-    }
-    return isIdlePromptLine(cursorLine, agent);
-  }
-  if (agent === "codex" && isCodexBusyScreen(lines)) {
+  if (isAgentBusyScreen(lines, agent)) {
     return false;
   }
   if (agent !== "cursor") {
@@ -430,9 +448,16 @@ export class PtyActivityScanner {
     if (
       !this.initialLaunch &&
       !this.isInsideInterruptWindow() &&
-      this.currentActivity !== "working" &&
-      ((this.activeAgent === "claude" && CLAUDE_BUSY_TITLE_REGEX.test(chunk)) ||
-        (BRAILLE_SPINNER_REGEX.test(chunk) && !this.options.getActivity().attentionReason))
+      ((this.activeAgent === "claude" &&
+        CLAUDE_BUSY_TITLE_REGEX.test(chunk) &&
+        // A busy title means no dialog is open, so it also undoes a needs-input hook that
+        // landed after the user answered (Claude sends it ~6s after the dialog opens). A
+        // hook's finish is left alone: the title still spins while slower Stop hooks run.
+        (this.currentActivity !== "working" ||
+          this.options.getActivity().attentionReason === "needs_input")) ||
+        (this.currentActivity !== "working" &&
+          BRAILLE_SPINNER_REGEX.test(chunk) &&
+          !this.options.getActivity().attentionReason))
     ) {
       this.setWorking();
     }
@@ -445,7 +470,10 @@ export class PtyActivityScanner {
   }
 
   private setWorking(): void {
-    if (this.currentActivity === "working") return;
+    // Hooks write the tracker directly, so the scanner's own "working" can be stale.
+    if (this.currentActivity === "working" && this.options.getActivity().state === "working") {
+      return;
+    }
     this.currentActivity = "working";
     this.unresolvedWorkingStillness = 0;
     this.options.setActivity("working");
@@ -495,11 +523,7 @@ export class PtyActivityScanner {
 
     const lines = this.options.readLastLines(15);
 
-    if (
-      ((this.activeAgent === "antigravity" && isAntigravityBusyScreen(lines)) ||
-        (this.activeAgent === "codex" && isCodexBusyScreen(lines))) &&
-      !isSpendLimitScreen(lines)
-    ) {
+    if (isAgentBusyScreen(lines, this.activeAgent) && !isSpendLimitScreen(lines)) {
       this.unresolvedWorkingStillness = 0;
       if (this.currentActivity !== "working") {
         this.currentActivity = "working";

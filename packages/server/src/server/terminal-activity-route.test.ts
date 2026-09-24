@@ -119,6 +119,44 @@ it("accepts terminalId and token reports through the route into the tracker", as
   expect(session.getActivity()?.state).toBe("working");
 });
 
+it("accepts quota and sessionId reports and ignores a nested session's idle", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "terminal-activity-route-"));
+  temporaryDirs.push(cwd);
+  const envPath = join(cwd, "activity-env.json");
+  manager = createTerminalManager({
+    getTerminalActivityUrl: () => "http://127.0.0.1:6767/api/terminal-activity",
+  });
+  const session = await manager.createTerminal({
+    cwd,
+    command: process.execPath,
+    args: [
+      "-e",
+      `require("node:fs").writeFileSync(${JSON.stringify(envPath)}, JSON.stringify({ terminalId: process.env.PASEO_TERMINAL_ID, token: process.env.PASEO_ACTIVITY_TOKEN })); setInterval(() => {}, 1000);`,
+    ],
+  });
+  await waitForCondition(() => existsSync(envPath), 10000);
+  const env = JSON.parse(readFileSync(envPath, "utf8")) as { terminalId: string; token: string };
+  const handler = createTerminalActivityRouteHandler(manager);
+  const post = async (body: Record<string, unknown>): Promise<number> => {
+    const response = createMockResponse();
+    await handler(
+      createMockRequest({ body: { terminalId: env.terminalId, token: env.token, ...body } }),
+      response as unknown as express.Response,
+      () => undefined,
+    );
+    return response.statusCode;
+  };
+
+  expect(await post({ state: "running", sessionId: "outer" })).toBe(204);
+  expect(await post({ state: "idle", sessionId: "nested" })).toBe(204);
+  expect(session.getActivity()).toMatchObject({ state: "working" });
+
+  expect(await post({ state: "quota", sessionId: "outer" })).toBe(204);
+  expect(session.getActivity()).toMatchObject({ state: "idle", attentionReason: "quota" });
+
+  expect(await post({ state: "done" })).toBe(400);
+});
+
 it("rejects non-loopback activity reports before token handling", async () => {
   manager = createTerminalManager();
   const response = createMockResponse();

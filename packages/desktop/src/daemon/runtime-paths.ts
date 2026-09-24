@@ -14,8 +14,10 @@ import {
   resolvePackagedAsarPath,
   type PackageInfo,
 } from "./package-paths.js";
+import { getBundledCliShimPath } from "../integrations/cli-install/paths.js";
 
 const SERVER_PACKAGE_NAME = "@getpaseo/server";
+const CLI_BIN_ENTRY = "@getpaseo/cli/bin/paseo";
 
 const esmRequire = createRequire(__filename);
 
@@ -72,6 +74,14 @@ export function resolveDaemonRunnerEntrypoint(): NodeEntrypointSpec {
     }),
     execArgv: ["--import", "tsx"],
   };
+}
+
+// The daemon hands this to its terminals as PASEO_CLI, and they run agent hooks
+// through it. An unpackaged Electron has no bundled shim, so use the workspace
+// CLI. Always set explicitly: a dev app launched from a Paseo pane would
+// otherwise inherit that pane's PASEO_CLI.
+export function resolveDaemonCliPath(): string {
+  return app.isPackaged ? getBundledCliShimPath() : esmRequire.resolve(CLI_BIN_ENTRY);
 }
 
 export function resolveNodeExecPath(): string {

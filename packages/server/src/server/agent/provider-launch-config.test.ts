@@ -265,6 +265,24 @@ describe("createProviderEnv", () => {
     expect(env.CLAUDE_AGENT_SDK_VERSION).toBeUndefined();
     expect(env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING).toBe("true");
   });
+
+  test("strips a parent Paseo terminal's hook identity", () => {
+    const base = {
+      PATH: "/usr/bin",
+      PASEO_TERMINAL_ID: "pane-a",
+      PASEO_ACTIVITY_TOKEN: "token",
+      PASEO_TERMINAL_ACTIVITY_URL: "http://127.0.0.1:6767/api/terminal-activity",
+      PASEO_HOOK_CLI: "/usr/local/bin/paseo",
+    };
+
+    const env = createProviderEnv({ baseEnv: base });
+
+    expect(env.PATH).toBe("/usr/bin");
+    expect(env.PASEO_TERMINAL_ID).toBeUndefined();
+    expect(env.PASEO_ACTIVITY_TOKEN).toBeUndefined();
+    expect(env.PASEO_TERMINAL_ACTIVITY_URL).toBeUndefined();
+    expect(env.PASEO_HOOK_CLI).toBeUndefined();
+  });
 });
 
 describe("ProviderOverrideSchema", () => {

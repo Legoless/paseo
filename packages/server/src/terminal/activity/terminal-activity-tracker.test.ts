@@ -91,6 +91,101 @@ describe("TerminalActivityTracker — clearAttention", () => {
   });
 });
 
+describe("TerminalActivityTracker — hook session ownership", () => {
+  it("ignores a nested session's reports until the owning session finishes", () => {
+    const tracker = new TerminalActivityTracker();
+
+    tracker.set("working", undefined, "outer");
+    tracker.set("working", undefined, "nested");
+    tracker.set("idle", undefined, "nested");
+    tracker.set("attention", undefined, "nested");
+    tracker.set("attention", "quota", "nested");
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    tracker.set("idle", undefined, "outer");
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("takes ownership when a session confirms a turn the scanner already started", () => {
+    const tracker = new TerminalActivityTracker();
+
+    tracker.set("working");
+    tracker.set("working", undefined, "outer");
+    tracker.set("idle", undefined, "nested");
+
+    expect(tracker.getSnapshot().state).toBe("working");
+  });
+
+  it("applies reports without a session id as before", () => {
+    const tracker = new TerminalActivityTracker();
+
+    tracker.set("working", undefined, "outer");
+    tracker.set("idle");
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("lets a new session own the next turn after a finish", () => {
+    const tracker = new TerminalActivityTracker();
+
+    tracker.set("working", undefined, "first");
+    tracker.set("idle", undefined, "first");
+    tracker.set("working", undefined, "second");
+    tracker.set("idle", undefined, "first");
+
+    expect(tracker.getSnapshot().state).toBe("working");
+
+    tracker.set("idle", undefined, "second");
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("lets a new session own the next turn after an interrupt or quota", () => {
+    const tracker = new TerminalActivityTracker();
+
+    tracker.set("working", undefined, "first");
+    tracker.interrupt();
+    tracker.set("working", undefined, "second");
+    tracker.set("attention", "quota", "second");
+    tracker.set("working", undefined, "third");
+    tracker.set("idle", undefined, "third");
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("lets a new session own a turn started after the owner's needs_input", () => {
+    const tracker = new TerminalActivityTracker();
+
+    tracker.set("working", undefined, "outer");
+    tracker.set("attention", undefined, "outer");
+    // Esc dismissed the approval and /clear started a new Claude session.
+    tracker.set("working", undefined, "cleared");
+    tracker.set("idle", undefined, "cleared");
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("keeps ownership across the owner's needs_input", () => {
+    const tracker = new TerminalActivityTracker();
+
+    tracker.set("working", undefined, "outer");
+    tracker.set("attention", undefined, "outer");
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+
+    tracker.set("working");
+    tracker.set("idle", undefined, "nested");
+
+    expect(tracker.getSnapshot().state).toBe("working");
+
+    tracker.set("idle", undefined, "outer");
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+});
+
 describe("TerminalActivityTracker — onChange listener", () => {
   it("fires when state changes", () => {
     const tracker = new TerminalActivityTracker();

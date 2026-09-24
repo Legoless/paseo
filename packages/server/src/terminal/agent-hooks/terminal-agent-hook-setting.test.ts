@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DaemonConfigStore } from "../../server/daemon-config-store.js";
+import { registeredAgentHooksAreInstalled } from "./provider-registry.js";
 import { applyTerminalAgentHookSetting } from "./terminal-agent-hook-setting.js";
 
 const temporaryDirs: string[] = [];
@@ -93,6 +94,44 @@ describe("applyTerminalAgentHookSetting", () => {
     expect(existsSync(paths.opencode)).toBe(true);
 
     store.patch({ enableTerminalAgentHooks: false });
+    expect(existsSync(paths.opencode)).toBe(false);
+  });
+
+  it("reinstalls hooks another daemon removed while this daemon's setting stays on", () => {
+    const root = createTempDir("paseo-hook-setting-");
+    const install = createInstallEnv(root);
+    const paths = hookPaths(root);
+    const warnings: string[] = [];
+    const logger = {
+      warn: (_bindings: Record<string, unknown>, message: string) => warnings.push(message),
+    };
+    const store = createStore(createTempDir("paseo-hook-setting-home-"), true);
+    const otherDaemon = createStore(createTempDir("paseo-hook-setting-home-"), true);
+
+    const setting = applyTerminalAgentHookSetting({ store, logger, install });
+    applyTerminalAgentHookSetting({ store: otherDaemon, install });
+    otherDaemon.patch({ enableTerminalAgentHooks: false });
+    expect(registeredAgentHooksAreInstalled(install)).toBe(false);
+    expect(existsSync(paths.opencode)).toBe(false);
+
+    setting.ensureInstalled();
+    expect(registeredAgentHooksAreInstalled(install)).toBe(true);
+    expect(warnings).toHaveLength(1);
+
+    setting.ensureInstalled();
+    expect(warnings).toHaveLength(1);
+  });
+
+  it("does not reinstall hooks while this daemon's setting is off", () => {
+    const root = createTempDir("paseo-hook-setting-");
+    const install = createInstallEnv(root);
+    const store = createStore(createTempDir("paseo-hook-setting-home-"), false);
+
+    applyTerminalAgentHookSetting({ store, install }).ensureInstalled();
+
+    const paths = hookPaths(root);
+    expect(existsSync(paths.claude)).toBe(false);
+    expect(existsSync(paths.codex)).toBe(false);
     expect(existsSync(paths.opencode)).toBe(false);
   });
 });

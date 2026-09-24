@@ -4,6 +4,7 @@ import {
   detectAgentFromOutput,
   detectAgentFromTitle,
   isAntigravityBusyScreen,
+  isClaudeBusyScreen,
   isCodexBusyScreen,
   isIdleAgentScreen,
   isIdlePromptLine,
@@ -339,6 +340,56 @@ describe("isIdleAgentScreen", () => {
     expect(isCodexBusyScreen(["• Working (12s • esc to interrupt)"])).toBe(false);
   });
 
+  it("does not treat Claude's composer as idle while its background work still runs", () => {
+    const composer = ["─".repeat(40), "❯ ", "─".repeat(40), "  ⏸ manual mode on · 1 shell"];
+    const shell = ["⏺ STARTED", "", "✻ Baked for 6s · done 12:03 PM · 1 shell still running", ""];
+    const agents = ["⏺ Launched both.", "", "✻ Waiting for 2 background agents to finish", ""];
+    const finished = ["⏺ Done.", "", "✻ Cogitated for 2s · done 12:04 PM", ""];
+
+    expect(isClaudeBusyScreen([...shell, ...composer])).toBe(true);
+    expect(isClaudeBusyScreen([...agents, ...composer])).toBe(true);
+    expect(
+      isClaudeBusyScreen([
+        ...shell,
+        "                        ✘ Auto-update failed · Run claude doctor",
+        ...composer,
+      ]),
+    ).toBe(true);
+    expect(isIdleAgentScreen([...shell, ...composer], "❯ ", "claude")).toBe(false);
+    expect(isClaudeBusyScreen([...finished, ...composer])).toBe(false);
+    expect(isIdleAgentScreen([...finished, ...composer], "❯ ", "claude")).toBe(true);
+  });
+
+  it("reads only Claude's turn line above the composer", () => {
+    const composer = ["─".repeat(40), "❯ ", "─".repeat(40)];
+    // A reply that mentions the status in prose is not a running background task.
+    expect(
+      isClaudeBusyScreen([
+        "⏺ The dev server is started; 1 shell still running",
+        "  in the background · 1 shell still running",
+        ...composer,
+      ]),
+    ).toBe(false);
+    // An older turn's line is stale once a later turn finished below it.
+    expect(
+      isClaudeBusyScreen([
+        "✻ Baked for 6s · done 12:03 PM · 1 shell still running",
+        "⏺ Done.",
+        "✻ Cogitated for 2s · done 12:04 PM",
+        ...composer,
+      ]),
+    ).toBe(false);
+    // The composer's own draft is not Claude's output.
+    expect(
+      isClaudeBusyScreen([
+        "✻ Cogitated for 2s · done 12:04 PM",
+        "─".repeat(40),
+        "❯ ✻ Baked for 6s · done 12:03 PM · 1 shell still running",
+        "─".repeat(40),
+      ]),
+    ).toBe(false);
+  });
+
   it("prefers Cursor's approval prompt over a stale empty composer", () => {
     expect(
       isIdleAgentScreen(
@@ -479,6 +530,99 @@ describe("PtyActivityScanner — full lifecycle", () => {
     scanner.feedOutput("\x1b]0;✳ Claude Code\x07");
 
     expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+  });
+
+  it("returns Claude to working when a late needs-input hook lands after the answer", () => {
+    const tracker = new TerminalActivityTracker();
+    let screenLines = ["Do you want to proceed?", "❯ 1. Yes", "  2. No"];
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screenLines,
+      readCursorLine: () => screenLines.at(-1) ?? "",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("claude");
+    scanner.feedInput("\r");
+    scanner.feedOutput("\x1b]0;✳ Claude Code\x07Do you want to proceed?");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+
+    scanner.feedInput("1");
+    scanner.feedOutput("\x1b]0;◐ Claude Code\x07✻ Levitating… (1s)");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    // Claude's permission_prompt Notification fires ~6s after the dialog opened.
+    tracker.set("attention");
+    scanner.feedOutput("\x1b]0;◑ Claude Code\x07✻ Levitating… (2s)");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    screenLines = ["⏺ Done.", "❯"];
+    scanner.feedOutput("\x1b]0;✳ Claude Code\x07❯ ");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("keeps a Stop hook's finish while Claude's title still spins for slower Stop hooks", () => {
+    const tracker = new TerminalActivityTracker();
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => ["⏺ Done.", "❯"],
+      readCursorLine: () => "❯",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("claude");
+    scanner.feedInput("\r");
+    scanner.feedOutput("\x1b]0;◐ Claude Code\x07✻ Ebbing… (running Stop hooks… 1/7)");
+    tracker.set("idle");
+    scanner.feedOutput("\x1b]0;◑ Claude Code\x07✻ Ebbing… (running Stop hooks… 2/7)");
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("keeps Claude working while background work outlives the turn", () => {
+    const tracker = new TerminalActivityTracker();
+    const composer = ["─".repeat(40), "❯ ", "─".repeat(40), "  ⏸ manual mode on · 1 shell"];
+    let screenLines = [
+      "⏺ STARTED",
+      "",
+      "✻ Baked for 6s · done 12:03 PM · 1 shell still running",
+      "",
+      ...composer,
+    ];
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screenLines,
+      readCursorLine: () => "❯ ",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("claude");
+    scanner.feedInput("\r");
+    scanner.feedOutput(
+      "\x1b]0;✳ Claude Code\x07✻ Baked for 6s · done 12:03 PM · 1 shell still running",
+    );
+    vi.advanceTimersByTime(5000);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    // The shell's completion notification runs a short turn that ends on a plain turn line.
+    screenLines = [
+      "⏺ The sleep finished.",
+      "",
+      "✻ Cogitated for 2s · done 12:04 PM",
+      "",
+      ...composer,
+    ];
+    scanner.feedOutput("✻ Cogitated for 2s · done 12:04 PM");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
   });
 
   it("tracks Codex approval and completion", () => {

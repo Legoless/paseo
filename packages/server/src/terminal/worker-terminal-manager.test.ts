@@ -572,6 +572,25 @@ it("injects parent-minted terminal activity env through the worker", async () =>
   expect(env.path?.split(delimiter)[0]).toBe(paseoCliBinDir);
 });
 
+it("runs onCreateTerminal before asking the worker for the terminal", async () => {
+  const worker = new FakeTerminalWorker();
+  const createRequestsSentBeforeHook: number[] = [];
+  manager = createWorkerTerminalManager({
+    requestTimeoutMs: 5,
+    forkWorker: () => worker,
+    onCreateTerminal: () => {
+      createRequestsSentBeforeHook.push(
+        worker.sentMessages.filter((message) => message.type === "createTerminal").length,
+      );
+    },
+  });
+
+  await expect(manager.createTerminal({ cwd: "/tmp", workspaceId: "ws-test" })).rejects.toThrow();
+
+  expect(createRequestsSentBeforeHook).toEqual([0]);
+  expect(worker.sentMessages.some((message) => message.type === "createTerminal")).toBe(true);
+});
+
 it("starts the default shell through the worker and accepts quoted commands", async () => {
   manager = createWorkerTerminalManager();
   const cwd = mkdtempSync(join(tmpdir(), "worker-terminal-manager-shell-"));
@@ -794,12 +813,14 @@ it("sets terminal activity through a worker request", async () => {
     state: createTerminalState(),
   });
 
-  const result = manager.setTerminalActivity("terminal-a", "attention");
+  const result = manager.setTerminalActivity("terminal-a", "attention", "quota", "session-a");
   const request = worker.sentMessages.find((message) => message.type === "setActivity");
   expect(request).toMatchObject({
     type: "setActivity",
     terminalId: "terminal-a",
     state: "attention",
+    attentionReason: "quota",
+    sessionId: "session-a",
   });
   if (!request) {
     throw new Error("setActivity request not sent");
