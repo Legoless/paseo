@@ -39,11 +39,17 @@ export type CommandTabTarget =
   | { kind: "terminal"; tabId: string; terminalId: string }
   | { kind: "chat"; tabId: string; draftKey: string; agentId: string | null };
 
-function resolveFocusedTab(layout: WorkspaceLayout | undefined): CommandTab | null {
+// The pane the workspace screen shows: an unfocused layout (a workspace marked unread) still
+// displays its restore pane.
+function resolveFocusedTab(
+  layout: WorkspaceLayout | undefined,
+  restorePaneId: string | null | undefined,
+): CommandTab | null {
   if (!layout) {
     return null;
   }
-  const focusedTabId = findPaneById(layout.root, layout.focusedPaneId)?.focusedTabId;
+  const paneId = layout.focusedPaneId ?? restorePaneId;
+  const focusedTabId = findPaneById(layout.root, paneId)?.focusedTabId;
   return collectAllTabs(layout.root).find((tab) => tab.tabId === focusedTabId) ?? null;
 }
 
@@ -54,9 +60,10 @@ function resolveFocusedTab(layout: WorkspaceLayout | undefined): CommandTab | nu
 export function resolveCommandTabTarget(input: {
   serverId: string;
   layout: WorkspaceLayout | undefined;
+  restorePaneId?: string | null;
   paneTab: RunCustomCommandInput["paneTab"];
 }): CommandTabTarget | null {
-  const tab = input.paneTab ?? resolveFocusedTab(input.layout);
+  const tab = input.paneTab ?? resolveFocusedTab(input.layout, input.restorePaneId);
   switch (tab?.target.kind) {
     case "terminal":
       return { kind: "terminal", tabId: tab.tabId, terminalId: tab.target.terminalId };
@@ -91,6 +98,7 @@ export async function runCustomCommand(input: RunCustomCommandInput): Promise<vo
     ? resolveCommandTabTarget({
         serverId,
         layout: layoutStore.layoutByWorkspace[workspaceKey],
+        restorePaneId: layoutStore.focusRestorationByWorkspace[workspaceKey]?.restorePaneId,
         paneTab: input.paneTab,
       })
     : null;

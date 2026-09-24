@@ -17,6 +17,7 @@ import {
   getWorkspaceIndexJumpModifierKey,
 } from "@/keyboard/keyboard-shortcuts";
 import { buildCommandBindings } from "@/commands/custom-commands-model";
+import { useCustomCommandsSync } from "@/commands/use-custom-commands-sync";
 import { selectMergedCustomCommands, useCustomCommandsStore } from "@/stores/custom-commands-store";
 import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selection-store";
 import { resolveKeyboardFocusScope } from "@/keyboard/focus-scope";
@@ -97,6 +98,10 @@ export function useKeyboardShortcuts({
     activeWorkspaceSelection?.serverId ?? null,
     activeWorkspaceSelection?.workspaceId ?? null,
   );
+  useCustomCommandsSync({
+    serverId: activeWorkspaceSelection?.serverId ?? null,
+    cwd: activeWorkspaceCwd,
+  });
   const activeWorkspaceCommands = useStoreWithEqualityFn(
     useCustomCommandsStore,
     (state) =>

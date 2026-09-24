@@ -2069,6 +2069,8 @@ export const ptBR = {
       recordShortcut: "Clique para gravar um atalho",
       clearShortcut: "Limpar",
       recordingHint: "Esc cancela. Delete limpa o atalho.",
+      shortcutHint: "Segure Ctrl, Alt ou Cmd, ou pressione uma tecla F.",
+      shortcutInUse: "O Paseo já usa este atalho, então ele não executará este comando.",
       deleteTitle: "Excluir {{name}}?",
       deleteMessage: "Este comando será removido deste host.",
       updateHost: "Atualize este host para editar comandos",

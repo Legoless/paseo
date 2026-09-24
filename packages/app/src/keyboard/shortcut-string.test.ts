@@ -41,6 +41,15 @@ describe("keyboardEventToComboString", () => {
     expect(keyboardEventToComboString(keyboardEvent({ key: "'", code: "Quote" }))).toBe("'");
   });
 
+  it("records a letter as the layout types it, and Alt letters by physical key", () => {
+    expect(
+      keyboardEventToComboString(keyboardEvent({ key: "a", code: "KeyQ", metaKey: true })),
+    ).toBe("Cmd+A");
+    expect(
+      keyboardEventToComboString(keyboardEvent({ key: "œ", code: "KeyQ", altKey: true })),
+    ).toBe("Alt+Q");
+  });
+
   it("still returns null for modifier-only presses", () => {
     expect(keyboardEventToComboString(keyboardEvent({ code: "ShiftLeft" }))).toBeNull();
   });

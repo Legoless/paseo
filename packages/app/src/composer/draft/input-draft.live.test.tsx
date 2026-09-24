@@ -6,6 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { useDraftStore } from "@/stores/draft-store";
 import type { AttachmentMetadata, ComposerAttachment } from "@/attachments/types";
 import { createWorkspaceFileAttachment } from "@/attachments/workspace-file";
+import { useAgentInputDraft } from "./input-draft";
 
 const { asyncStorage } = vi.hoisted(() => ({
   asyncStorage: new Map<string, string>(),
@@ -126,16 +127,13 @@ afterEach(async () => {
   });
 });
 
-let useAgentInputDraft: typeof import("./input-draft").useAgentInputDraft;
 type DraftRecordForTest = ReturnType<typeof useDraftStore.getState>["drafts"][string];
 
-beforeAll(async () => {
+beforeAll(() => {
   Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
     value: true,
     configurable: true,
   });
-
-  ({ useAgentInputDraft } = await import("./input-draft"));
 });
 
 describe("useAgentInputDraft live contract", () => {
@@ -241,6 +239,38 @@ describe("useAgentInputDraft live contract", () => {
 
     expect(getLatest().textSource.getSnapshot()).toBe("hello world");
     expect(getLatest().attachments).toEqual([{ kind: "image", metadata: image }]);
+  });
+
+  it("shows text a custom command writes into the draft of a mounted composer", async () => {
+    const latest: { current: ReturnType<typeof useAgentInputDraft> | null } = { current: null };
+    function Probe() {
+      latest.current = useAgentInputDraft({
+        draftKey: "draft:command",
+        composer: { initialServerId: "host-1", isVisible: true, lockedWorkingDir: "/repo" },
+      });
+      return null;
+    }
+    const container = document.getElementById("root");
+    if (!container) {
+      throw new Error("Missing root container");
+    }
+    const root = createTestRoot(container);
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <Probe />
+        </QueryClientProvider>,
+      );
+    });
+    await expect.poll(() => latest.current?.isHydrated).toBe(true);
+
+    await act(async () => {
+      await useDraftStore
+        .getState()
+        .replaceDraftText({ draftKey: "draft:command", text: "run the tests" });
+    });
+
+    expect(latest.current?.textReplacement.text).toBe("run the tests");
   });
 
   it("migrates legacy image drafts to image attachments on hydration", async () => {

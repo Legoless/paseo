@@ -257,7 +257,12 @@ export function keyboardEventToComboString(event: KeyboardEvent): string | null 
   if (event.shiftKey) parts.push("Shift");
   if (event.metaKey) parts.push("Cmd");
 
-  const humanKey = CODE_TO_KEY[event.code];
+  // The matcher is key-first for letters, so a letter follows the layout: AZERTY Cmd+A records A,
+  // not the physical Q. Option rewrites event.key on macOS, and Alt combos match by code, so they
+  // keep the physical key.
+  const layoutLetter =
+    !event.altKey && /^[a-z]$/i.test(event.key) ? event.key.toUpperCase() : undefined;
+  const humanKey = layoutLetter ?? CODE_TO_KEY[event.code];
   if (humanKey) {
     parts.push(humanKey);
   } else {

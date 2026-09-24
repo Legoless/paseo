@@ -2057,6 +2057,9 @@ export const ja = {
       recordShortcut: "クリックしてショートカットを記録",
       clearShortcut: "クリア",
       recordingHint: "Escでキャンセル、Deleteでショートカットを削除します。",
+      shortcutHint:
+        "Ctrl、Alt、Cmd のいずれかを押しながら入力するか、ファンクションキーを押してください。",
+      shortcutInUse: "このショートカットは Paseo で使用中のため、このコマンドは実行されません。",
       deleteTitle: "{{name}} を削除しますか？",
       deleteMessage: "このコマンドはこのホストから削除されます。",
       updateHost: "コマンドを編集するにはホストを更新してください",

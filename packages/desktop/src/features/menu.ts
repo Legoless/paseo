@@ -64,12 +64,15 @@ export function reloadActiveBrowserOrWindow({
   win.webContents.reload();
 }
 
+// Accelerators here (including the roles' defaults) are mirrored by DESKTOP_MENU_COMBOS in
+// packages/app/src/commands/custom-commands-model.ts, which flags custom command shortcuts the
+// menu would take. Change both together.
 function buildApplicationMenuTemplate(
   options: ApplicationMenuOptions,
   capturing: boolean,
 ): Electron.MenuItemConstructorOptions[] {
   const isMac = process.platform === "darwin";
-  const zoomEnabled = !capturing;
+  const viewAcceleratorsEnabled = !capturing;
 
   return [
     ...(isMac
@@ -120,7 +123,7 @@ function buildApplicationMenuTemplate(
         {
           label: "Zoom In",
           accelerator: "CmdOrCtrl+=",
-          enabled: zoomEnabled,
+          enabled: viewAcceleratorsEnabled,
           click: withBrowserWindow((win) => {
             win.webContents.setZoomLevel(win.webContents.getZoomLevel() + 0.5);
           }),
@@ -128,7 +131,7 @@ function buildApplicationMenuTemplate(
         {
           label: "Zoom Out",
           accelerator: "CmdOrCtrl+-",
-          enabled: zoomEnabled,
+          enabled: viewAcceleratorsEnabled,
           click: withBrowserWindow((win) => {
             win.webContents.setZoomLevel(win.webContents.getZoomLevel() - 0.5);
           }),
@@ -136,7 +139,7 @@ function buildApplicationMenuTemplate(
         {
           label: "Actual Size",
           accelerator: "CmdOrCtrl+0",
-          enabled: zoomEnabled,
+          enabled: viewAcceleratorsEnabled,
           click: withBrowserWindow((win) => {
             win.webContents.setZoomLevel(0);
           }),
@@ -145,6 +148,7 @@ function buildApplicationMenuTemplate(
         {
           label: "Reload",
           accelerator: "CmdOrCtrl+R",
+          enabled: viewAcceleratorsEnabled,
           click: withBrowserWindow((win) => {
             reloadActiveBrowserOrWindow({
               win,
@@ -155,6 +159,7 @@ function buildApplicationMenuTemplate(
         {
           label: "Force Reload",
           accelerator: "CmdOrCtrl+Shift+R",
+          enabled: viewAcceleratorsEnabled,
           click: withBrowserWindow((win) => {
             reloadActiveBrowserOrWindow({
               win,
@@ -228,8 +233,8 @@ export function setupApplicationMenu(options: ApplicationMenuOptions): void {
     contextMenu.popup({ window: win });
   });
 
-  // Disable the zoom accelerators while capturing a shortcut so combos like
-  // Cmd+- / Cmd+= reach the renderer instead of zooming the window.
+  // Disable the View menu's zoom and reload accelerators while capturing a shortcut so combos
+  // like Cmd+- or Cmd+Shift+R reach the renderer instead of zooming or reloading the window.
   ipcMain.handle("paseo:menu:set-capturing-shortcut", (_event, capturing?: boolean) => {
     capturingShortcut = capturing === true;
     rebuildApplicationMenu();
