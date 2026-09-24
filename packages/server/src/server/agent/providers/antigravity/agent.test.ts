@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import pino from "pino";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AgentStreamEvent } from "../../agent-sdk-types.js";
 import { AntigravityAgentClient, buildAgySpawnArgs, parseAgyModelsOutput } from "./agent.js";
 import { AntigravityStreamDecoder } from "./stream-decoder.js";
@@ -660,6 +660,78 @@ describe("AntigravityAgentClient", () => {
       const completedEvent = events.find((e) => e.type === "turn_completed");
       expect(completedEvent).toBeDefined();
 
+      await session.close();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("starts a prompt sent over a running turn in a fresh process", async () => {
+    const tmpDir = mkdtempSync(path.join(tmpdir(), "agy-replace-"));
+    const mockScript = path.join(tmpDir, "mock-agy.cjs");
+    const spawnLog = path.join(tmpDir, "spawns.log");
+    // Like agy: a background command holds the turn open, and SIGINT reports the abort as an
+    // ERROR result, then exits.
+    writeFileSync(
+      mockScript,
+      `
+      const fs = require("node:fs");
+      fs.appendFileSync(${JSON.stringify(spawnLog)}, JSON.stringify(process.argv.slice(2)) + "\\n");
+      const out = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
+      let interrupted = false;
+      process.on("SIGINT", () => {
+        interrupted = true;
+        process.stderr.write("error: interrupted\\n");
+        out({ event: "result", result: { conversation_id: "conv-bg", status: "ERROR", response: "", error: "interrupted" } });
+        setTimeout(() => process.exit(1), 50);
+      });
+      process.stdin.setEncoding("utf8");
+      out({ event: "init", conversation_id: "conv-bg", init: { cwd: process.cwd(), tools: [] } });
+      process.stdin.on("data", (chunk) => {
+        if (interrupted) return;
+        if (chunk.includes("background")) {
+          out({ event: "step_update", step_update: { conversation_id: "conv-bg", step_index: 1, state: "ACTIVE", step_type: "tool", tool_name: "run_command" } });
+          return;
+        }
+        out({ event: "step_update", step_update: { conversation_id: "conv-bg", step_index: 1, state: "DONE", step_type: "agent_response", text_delta: "PONG" } });
+        out({ event: "result", result: { conversation_id: "conv-bg", status: "SUCCESS", response: "PONG" } });
+      });
+      `,
+    );
+
+    try {
+      const client = new AntigravityAgentClient({
+        logger: pino({ level: "silent" }),
+        runtimeSettings: {
+          command: { mode: "replace", argv: [process.execPath, mockScript] },
+        },
+      });
+      const session = await client.createSession({
+        cwd: tmpDir,
+        provider: "antigravity",
+        modeId: "bypass",
+      });
+      const events: AgentStreamEvent[] = [];
+      session.subscribe((event) => events.push(event));
+
+      await session.startTurn("run pull.sh in the background");
+      await vi.waitFor(() =>
+        expect(events).toContainEqual(expect.objectContaining({ type: "timeline" })),
+      );
+      await session.interrupt();
+      const { turnId } = await session.startTurn("How far is this?");
+      const endsSecondTurn = (e: AgentStreamEvent) =>
+        (e.type === "turn_completed" || e.type === "turn_failed") && e.turnId === turnId;
+      await vi.waitFor(() =>
+        expect(events.find(endsSecondTurn)).toMatchObject({ type: "turn_completed" }),
+      );
+
+      const spawns = readFileSync(spawnLog, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(spawns).toHaveLength(2);
+      expect(spawns[1]).toEqual(expect.arrayContaining(["--conversation", "conv-bg"]));
       await session.close();
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
