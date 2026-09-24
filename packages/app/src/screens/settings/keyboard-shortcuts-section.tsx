@@ -31,6 +31,7 @@ import {
   buildCommandBindings,
   shortcutKeysForCommandBinding,
 } from "@/commands/custom-commands-model";
+import { useCustomCommandsSync } from "@/commands/use-custom-commands-sync";
 import { selectMergedCustomCommands, useCustomCommandsStore } from "@/stores/custom-commands-store";
 import { useLastWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selection-store";
@@ -357,6 +358,10 @@ export function KeyboardShortcutsSection() {
     lastWorkspaceSelection?.serverId ?? null,
     lastWorkspaceSelection?.workspaceId ?? null,
   );
+  useCustomCommandsSync({
+    serverId: lastWorkspaceSelection?.serverId ?? null,
+    cwd: lastWorkspaceCwd,
+  });
   const workspaceCommands = useStoreWithEqualityFn(
     useCustomCommandsStore,
     (state) =>

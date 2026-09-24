@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
-import { useCallback, useEffect, useMemo, type ComponentProps, type ReactElement } from "react";
+import { useCallback, useMemo, type ComponentProps, type ReactElement } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Folder, Globe, SquareSlash } from "lucide-react-native";
@@ -20,10 +20,7 @@ import { Shortcut } from "@/components/ui/shortcut";
 import { buttonControlHeight, HEADER_CONTROL_HEIGHT } from "@/components/ui/control-geometry";
 import { extraMutedIconColorMapping } from "@/components/ui/icon-color";
 import { useToast } from "@/contexts/toast-context";
-import { useFetchQuery } from "@/data/query";
-import { useDaemonConfig } from "@/hooks/use-daemon-config";
 import { useKeyboardShortcutOverrides } from "@/hooks/use-keyboard-shortcut-overrides";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
 import {
   selectGlobalCommandsEntry,
@@ -36,6 +33,7 @@ import {
   shortcutKeysForCommandBinding,
 } from "@/commands/custom-commands-model";
 import { runCustomCommand } from "@/commands/run-custom-command";
+import { customCommandsQueryKey, useCustomCommandsSync } from "@/commands/use-custom-commands-sync";
 import { useCustomCommandsSupported } from "@/commands/use-custom-commands-supported";
 import { applyShortcutOverrides, type ParsedShortcutBinding } from "@/keyboard/keyboard-shortcuts";
 import { getShortcutOs } from "@/utils/shortcut-platform";
@@ -64,10 +62,6 @@ const GHOST_TRIGGER_ICON_SIZE = 16;
 const mutedColorMapping = (theme: Theme) => ({
   color: theme.colors.foregroundMuted,
 });
-
-function customCommandsQueryKey(serverId: string, cwd: string | null) {
-  return ["custom-commands", "project", serverId, cwd] as const;
-}
 
 const commandLeadingIcon = <ThemedSquareSlash size={14} uniProps={mutedColorMapping} />;
 
@@ -179,57 +173,9 @@ export function WorkspaceCommandsButton({
   const supported = useCustomCommandsSupported(serverId);
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
   const queryClient = useQueryClient();
-  const runtimeClient = useHostRuntimeClient(serverId);
-  const isConnected = useHostRuntimeIsConnected(serverId);
-  const { config } = useDaemonConfig(supported ? serverId : null);
   const { overrides } = useKeyboardShortcutOverrides();
 
-  // Freshness is pull-driven: the daemon watches neither file, so the read happens on mount
-  // and each time the menu opens (an invalidation below) — never on a timer.
-  const projectQuery = useFetchQuery({
-    queryKey: customCommandsQueryKey(serverId, cwd),
-    dataShape: "value",
-    staleTimeMs: 60_000,
-    enabled: supported && !!runtimeClient && isConnected && !!cwd,
-    queryFn: async () => {
-      if (!runtimeClient || !cwd) {
-        throw new Error(t("common.errors.daemonClientUnavailable"));
-      }
-      return await runtimeClient.listProjectCommands(cwd);
-    },
-  });
-
-  const setProjectCommands = useCustomCommandsStore((state) => state.setProjectCommands);
-  const setGlobalCommands = useCustomCommandsStore((state) => state.setGlobalCommands);
-
-  // Mirror both command sources into the store so the global keyboard handler and the
-  // settings page resolve the same commands without fetching. Outlives this component on
-  // purpose: hiding the button must not unbind the shortcuts it advertised.
-  const projectData = projectQuery.data;
-  useEffect(() => {
-    if (!projectData || !cwd) {
-      return;
-    }
-    setProjectCommands({
-      serverId,
-      cwd,
-      project: projectData.commands,
-      projectError: projectData.error,
-      sourcePath: projectData.sourcePath,
-    });
-  }, [projectData, serverId, cwd, setProjectCommands]);
-
-  const globalCommands = useMemo(() => config?.customCommands ?? [], [config?.customCommands]);
-  const globalCommandErrors = useMemo(
-    () => config?.customCommandErrors ?? [],
-    [config?.customCommandErrors],
-  );
-  useEffect(() => {
-    if (!supported) {
-      return;
-    }
-    setGlobalCommands({ serverId, global: globalCommands, globalErrors: globalCommandErrors });
-  }, [supported, serverId, globalCommands, globalCommandErrors, setGlobalCommands]);
+  useCustomCommandsSync({ serverId, cwd });
 
   const projectEntry = useCustomCommandsStore((state) =>
     selectProjectCommandsEntry(state, serverId, cwd),

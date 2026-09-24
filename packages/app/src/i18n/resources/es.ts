@@ -2085,6 +2085,8 @@ export const es = {
       recordShortcut: "Haz clic para grabar un atajo",
       clearShortcut: "Borrar",
       recordingHint: "Esc cancela. Suprimir borra el atajo.",
+      shortcutHint: "Mantén Ctrl, Alt o Cmd, o pulsa una tecla F.",
+      shortcutInUse: "Paseo ya usa este atajo, así que no ejecutará este comando.",
       deleteTitle: "¿Eliminar {{name}}?",
       deleteMessage: "Este comando se eliminará de este host.",
       updateHost: "Actualiza este host para editar comandos",

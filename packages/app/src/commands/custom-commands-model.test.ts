@@ -5,6 +5,7 @@ import { parseBindingChord, type ParsedShortcutBinding } from "@/keyboard/keyboa
 import {
   buildCommandBindings,
   findCommandComboConflicts,
+  isCommandComboTaken,
   shortcutKeysForCommandBinding,
 } from "./custom-commands-model";
 
@@ -118,14 +119,43 @@ describe("findCommandComboConflicts", () => {
 
   it("skips built-ins that do not apply to this platform", () => {
     const commandBindings = buildCommandBindings([
-      command({ id: "run-tests", shortcut: "Cmd+Shift+R" }),
+      command({ id: "run-tests", shortcut: "Cmd+Shift+T" }),
     ]);
     const conflicts = findCommandComboConflicts({
       commandBindings,
       platform,
-      defaults: [builtIn("non-mac-only", "Cmd+Shift+R", { mac: false })],
+      defaults: [builtIn("non-mac-only", "Cmd+Shift+T", { mac: false })],
     });
     expect(conflicts.size).toBe(0);
+  });
+
+  it("marks combos the desktop menu owns only in the desktop app", () => {
+    const commandBindings = buildCommandBindings([
+      command({ id: "reload", shortcut: "Shift+Mod+R" }),
+    ]);
+    expect(findCommandComboConflicts({ commandBindings, platform, defaults: [] }).size).toBe(1);
+    expect(
+      findCommandComboConflicts({
+        commandBindings,
+        platform: { isMac: true, isDesktop: false },
+        defaults: [],
+      }).size,
+    ).toBe(0);
+  });
+
+  it("treats Cmd and Mod as one key on a Mac and as different keys elsewhere", () => {
+    const defaults = [builtIn("built-in", "Mod+Shift+T")];
+    expect(isCommandComboTaken("Cmd+Shift+T", platform, defaults)).toBe(true);
+    expect(isCommandComboTaken("Cmd+Shift+T", { isMac: false, isDesktop: true }, defaults)).toBe(
+      false,
+    );
+    expect(isCommandComboTaken("Ctrl+Shift+T", { isMac: false, isDesktop: true }, defaults)).toBe(
+      true,
+    );
+  });
+
+  it("does not report an unparseable combo as taken", () => {
+    expect(isCommandComboTaken("Hyper+Q", platform, [])).toBe(false);
   });
 });
 

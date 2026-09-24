@@ -2015,6 +2015,8 @@ export const zhCN = {
       recordShortcut: "点击录制快捷键",
       clearShortcut: "清除",
       recordingHint: "按 Esc 取消，按 Delete 清除快捷键。",
+      shortcutHint: "按住 Ctrl、Alt 或 Cmd，或按 F 功能键。",
+      shortcutInUse: "Paseo 已在使用此快捷键，因此不会运行此命令。",
       deleteTitle: "删除 {{name}}？",
       deleteMessage: "此命令将从此主机中移除。",
       updateHost: "更新此主机以编辑命令",

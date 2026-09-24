@@ -2070,6 +2070,8 @@ export const ru = {
       recordShortcut: "Нажмите, чтобы записать сочетание клавиш",
       clearShortcut: "Очистить",
       recordingHint: "Esc — отмена. Delete — удалить сочетание.",
+      shortcutHint: "Удерживайте Ctrl, Alt или Cmd либо нажмите клавишу F.",
+      shortcutInUse: "Paseo уже использует это сочетание, поэтому команда не запустится.",
       deleteTitle: "Удалить {{name}}?",
       deleteMessage: "Команда будет удалена с этого хоста.",
       updateHost: "Обновите хост для редактирования команд",

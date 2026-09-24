@@ -69,6 +69,21 @@ describe("resolveCommandTabTarget", () => {
     });
   });
 
+  it("uses the pane the screen still shows when no pane is focused", () => {
+    const layout = {
+      ...layoutFocusedOn({ kind: "terminal", terminalId: "term-1" }),
+      focusedPaneId: null,
+    };
+    expect(
+      resolveCommandTabTarget({
+        serverId: "server-1",
+        layout,
+        restorePaneId: "pane-1",
+        paneTab: null,
+      }),
+    ).toEqual({ kind: "terminal", tabId: "focused-tab", terminalId: "term-1" });
+  });
+
   it("takes no command in a browser tab", () => {
     expect(
       resolveCommandTabTarget({

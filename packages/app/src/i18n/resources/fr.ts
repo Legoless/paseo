@@ -2092,6 +2092,8 @@ export const fr = {
       recordShortcut: "Cliquez pour enregistrer un raccourci",
       clearShortcut: "Effacer",
       recordingHint: "Échap annule. Suppr efface le raccourci.",
+      shortcutHint: "Maintenez Ctrl, Alt ou Cmd, ou appuyez sur une touche F.",
+      shortcutInUse: "Paseo utilise déjà ce raccourci : il n’exécutera pas cette commande.",
       deleteTitle: "Supprimer {{name}} ?",
       deleteMessage: "Cette commande sera supprimée de cet hôte.",
       updateHost: "Mettez cet hôte à jour pour modifier les commandes",

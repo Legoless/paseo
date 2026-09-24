@@ -11,18 +11,28 @@ import { Field, FormTextInput } from "@/components/ui/form-field";
 import { Shortcut } from "@/components/ui/shortcut";
 import { Switch } from "@/components/ui/switch";
 import { createControlGeometry, type FieldControlSize } from "@/components/ui/control-geometry";
-import { useIsCompactFormFactor } from "@/constants/layout";
+import { getIsElectronRuntime, useIsCompactFormFactor } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
 import { openCommandForm } from "@/commands/command-form-model";
+import {
+  buildCommandBindings,
+  findCommandComboConflicts,
+  isCommandComboTaken,
+  shortcutKeysForCommandBinding,
+  USER_COMMAND_BINDING_PREFIX,
+} from "@/commands/custom-commands-model";
 import { daemonConfigQueryKey } from "@/data/daemon-config";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
+import { useKeyboardShortcutOverrides } from "@/hooks/use-keyboard-shortcut-overrides";
 import {
   chordStringToShortcutKeys,
   comboStringToShortcutKeys,
   heldModifiersFromEvent,
   keyboardEventToComboString,
 } from "@/keyboard/shortcut-string";
+import { applyShortcutOverrides, type ParsedShortcutBinding } from "@/keyboard/keyboard-shortcuts";
 import { useShortcutRecording } from "@/keyboard/use-shortcut-recording";
+import { getShortcutOs } from "@/utils/shortcut-platform";
 import { useHostFeature } from "@/runtime/host-features";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useCustomCommandsStore } from "@/stores/custom-commands-store";
@@ -32,13 +42,43 @@ import { SettingsSection } from "@/components/settings";
 
 const EMPTY_COMMANDS: CustomCommand[] = [];
 
+function useShortcutPlatform() {
+  return useMemo(
+    () => ({ isMac: getShortcutOs() === "mac", isDesktop: getIsElectronRuntime() }),
+    [],
+  );
+}
+
 function isBareKey(event: KeyboardEvent): boolean {
   return !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
 }
 
+/** A combo that fires from a text field without typing into it: Cmd, Ctrl or Alt, or an F-key. */
+function isShortcutCombo(event: KeyboardEvent, combo: string): boolean {
+  return (
+    event.metaKey ||
+    event.ctrlKey ||
+    event.altKey ||
+    /^F\d{1,2}$/.test(combo.split("+").at(-1) ?? "")
+  );
+}
+
 /**
- * Click to record, then press the combo. Esc cancels, Delete or Backspace clears; the first full
- * combo is kept. Multi-step chords are bound under Settings → Shortcuts.
+ * Commands live on the host and every client binds them, so the platform's primary modifier is
+ * saved as Mod: Cmd on a Mac, Ctrl elsewhere. Settings → Shortcuts overrides stay per client.
+ */
+function toPortableCombo(combo: string): string {
+  const primary = getShortcutOs() === "mac" ? "Cmd" : "Ctrl";
+  return combo
+    .split("+")
+    .map((part) => (part === primary ? "Mod" : part))
+    .join("+");
+}
+
+/**
+ * Click to record, then press the combo. Esc, Tab or leaving the field cancels, Delete or Backspace
+ * clears; the first combo with Cmd, Ctrl, Alt or an F-key is kept. Multi-step chords are bound
+ * under Settings → Shortcuts.
  */
 function ShortcutField({
   size,
@@ -67,7 +107,7 @@ function ShortcutField({
   const clear = useCallback(() => onChange(undefined), [onChange]);
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
-      if (isBareKey(event) && event.key === "Escape") {
+      if (isBareKey(event) && (event.key === "Escape" || event.key === "Tab")) {
         stop();
         return;
       }
@@ -77,20 +117,28 @@ function ShortcutField({
         return;
       }
       const combo = keyboardEventToComboString(event);
-      if (combo === null) {
+      if (combo === null || !isShortcutCombo(event, combo)) {
         setHeldModifiers(heldModifiersFromEvent(event));
         return;
       }
-      onChange(combo);
+      onChange(toPortableCombo(combo));
       stop();
     },
     [onChange, stop],
   );
   useShortcutRecording(recording ? handleKeyDown : null);
-  const accessibilityState = useMemo(
-    () => ({ selected: recording, disabled }),
-    [recording, disabled],
+  const platform = useShortcutPlatform();
+  const taken = useMemo(
+    () => (value ? isCommandComboTaken(value, platform) : false),
+    [value, platform],
   );
+
+  let shortcutError: string | null = null;
+  if (!recording && !valid) {
+    shortcutError = t("settings.commands.invalidShortcut");
+  } else if (!recording && taken) {
+    shortcutError = t("settings.commands.shortcutInUse");
+  }
 
   let content: ReactElement;
   if (recording && heldModifiers) {
@@ -110,16 +158,20 @@ function ShortcutField({
   return (
     <Field
       label={t("settings.commands.shortcut")}
-      hint={recording ? t("settings.commands.recordingHint") : undefined}
-      error={valid || recording ? null : t("settings.commands.invalidShortcut")}
+      hint={t(recording ? "settings.commands.recordingHint" : "settings.commands.shortcutHint")}
+      error={shortcutError}
     >
       <View style={styles.recorderRow}>
         <Pressable
           onPress={toggle}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel={t("settings.commands.shortcut")}
-          accessibilityState={accessibilityState}
+          accessibilityLabel={
+            recording
+              ? t("settings.shortcuts.capturePrompt")
+              : `${t("settings.commands.shortcut")}: ${value ?? t("settings.commands.recordShortcut")}`
+          }
+          onBlur={stop}
           testID="command-shortcut"
           style={[
             styles.recorder,
@@ -256,11 +308,16 @@ function CommandEditor({
 
 function CommandRow({
   command,
+  binding,
+  conflicted,
   pending,
   onEdit,
   onDelete,
 }: {
   command: CustomCommand;
+  /** The binding after Settings → Shortcuts overrides, which is what actually fires. */
+  binding: ParsedShortcutBinding | undefined;
+  conflicted: boolean;
   pending: boolean;
   onEdit: (command: CustomCommand) => void;
   onDelete: (command: CustomCommand) => void;
@@ -268,6 +325,13 @@ function CommandRow({
   const { t } = useTranslation();
   const edit = useCallback(() => onEdit(command), [onEdit, command]);
   const remove = useCallback(() => onDelete(command), [onDelete, command]);
+  const keys = binding ? shortcutKeysForCommandBinding(binding) : null;
+  let shortcut: ReactElement | null = null;
+  if (conflicted) {
+    shortcut = <Text style={styles.rowConflict}>{t("workspace.commands.shortcutTaken")}</Text>;
+  } else if (keys) {
+    shortcut = <Shortcut chord={keys} style={styles.rowShortcut} />;
+  }
   return (
     <View style={settingsStyles.row} testID={`settings-command-${command.id}`}>
       <View style={settingsStyles.rowContent}>
@@ -275,7 +339,7 @@ function CommandRow({
         <Text style={settingsStyles.rowHint} numberOfLines={2}>
           {command.text}
         </Text>
-        {command.shortcut ? <Shortcut chord={chordStringToShortcutKeys(command.shortcut)} /> : null}
+        {shortcut}
       </View>
       <View style={styles.actions}>
         <Button size="sm" variant="outline" onPress={edit} disabled={pending}>
@@ -297,6 +361,27 @@ export function HostCommandsPage({ serverId }: { serverId: string }) {
   const { config, isLoading } = useDaemonConfig(serverId);
   const queryClient = useQueryClient();
   const commands = config?.customCommands ?? EMPTY_COMMANDS;
+  const { overrides } = useKeyboardShortcutOverrides();
+  const platform = useShortcutPlatform();
+  const bindings = useMemo(
+    () => applyShortcutOverrides(buildCommandBindings(commands), overrides),
+    [commands, overrides],
+  );
+  const bindingByCommandId = useMemo(
+    () =>
+      new Map(
+        bindings.flatMap((binding) =>
+          binding.payload?.type === "user-command"
+            ? [[binding.payload.commandId, binding] as const]
+            : [],
+        ),
+      ),
+    [bindings],
+  );
+  const conflicts = useMemo(
+    () => findCommandComboConflicts({ commandBindings: bindings, platform }),
+    [bindings, platform],
+  );
   const [editor, setEditor] = useState<{
     command: CustomCommand;
     commands: CustomCommand[];
@@ -307,7 +392,8 @@ export function HostCommandsPage({ serverId }: { serverId: string }) {
     (command: CustomCommand) => setEditor({ command, commands }),
     [commands],
   );
-  // COMPAT(customCommandTarget): `target` is unused by this app; older apps and daemons require it.
+  // COMPAT(customCommandTarget): added in v0.9.2, remove after 2027-03-23. `target` is unused by
+  // this app; older apps and daemons require it.
   const add = useCallback(
     () =>
       openEditor({ id: crypto.randomUUID(), title: "", text: "", target: "agent", submit: true }),
@@ -425,6 +511,8 @@ export function HostCommandsPage({ serverId }: { serverId: string }) {
           <CommandRow
             key={command.id}
             command={command}
+            binding={bindingByCommandId.get(command.id)}
+            conflicted={conflicts.has(USER_COMMAND_BINDING_PREFIX + command.id)}
             pending={pending || !connected}
             onEdit={openEditor}
             onDelete={remove}
@@ -468,6 +556,8 @@ const styles = StyleSheet.create((theme) => {
     recorderRest: geometry.controlRest,
     recorderRecording: geometry.controlActive,
     recorderDisabled: geometry.controlDisabled,
+    rowShortcut: { alignSelf: "flex-start" },
+    rowConflict: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
     recorderPlaceholder: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.base },
   };
 });

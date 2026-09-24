@@ -5,8 +5,8 @@ import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
 
 /**
  * Hands every key to `onKeyDown` while a shortcut is being recorded; pass null when not recording.
- * App shortcuts and the top overlay stand down (`capturingShortcut`), and Electron's zoom
- * accelerators are suppressed so combos like Cmd+- record instead of zooming the window.
+ * App shortcuts and the top overlay stand down (`capturingShortcut`), and Electron's zoom and
+ * reload accelerators are suppressed so combos like Cmd+- or Cmd+Shift+R record instead.
  * Keep `onKeyDown` stable: a new function restarts the recording session.
  */
 export function useShortcutRecording(onKeyDown: ((event: KeyboardEvent) => void) | null): void {

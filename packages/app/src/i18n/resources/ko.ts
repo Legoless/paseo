@@ -2048,6 +2048,8 @@ export const ko = {
       recordShortcut: "클릭하여 단축키 기록",
       clearShortcut: "지우기",
       recordingHint: "Esc는 취소, Delete는 단축키를 지웁니다.",
+      shortcutHint: "Ctrl, Alt 또는 Cmd를 누른 채로 입력하거나 F 키를 누르세요.",
+      shortcutInUse: "Paseo에서 이미 사용 중인 단축키라 이 명령이 실행되지 않습니다.",
       deleteTitle: "{{name}}을(를) 삭제할까요?",
       deleteMessage: "이 호스트에서 명령이 제거됩니다.",
       updateHost: "명령을 편집하려면 이 호스트를 업데이트하세요",

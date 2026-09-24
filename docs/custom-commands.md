@@ -10,14 +10,17 @@ The control sits next to the Git actions: in each pane's project tray, in the wo
 desktop without pane splits, and in the compact header cluster on mobile. Use the tray’s ellipsis
 menu (left or right click) to show or hide **Commands**, alongside Branch, Editor, and Git. An
 enabled control stays visible even when no commands exist; **Manage commands…** opens
-**Settings → Host → Commands** for that host.
+**Settings → Host → Commands** for that host. Hiding the control does not unbind shortcuts: the
+keyboard hook loads the active workspace's commands itself (`useCustomCommandsSync`).
 
 ## Editing commands
 
 Use **Settings → Host → Commands** to add, edit, or delete global commands. Set the name, text,
 whether to submit immediately, and an optional keyboard shortcut. To set the shortcut, click the
-field and press the combo: Esc cancels, Delete or Backspace clears. The field keeps one combo; bind a
-multi-step chord under **Settings → Shortcuts**. The field is hidden on mobile, which has no
+field and press a combo with Cmd, Ctrl or Alt, or an F-key; other keys are typing and are ignored.
+Esc, Tab or clicking away cancels; Delete or Backspace clears. The primary modifier is saved as
+`Mod` (Cmd on a Mac, Ctrl elsewhere) because every client of the host binds the same file. The field
+keeps one combo; bind a multi-step chord under **Settings → Shortcuts**. The field is hidden on mobile, which has no
 shortcuts. These commands are available across the host’s projects. Project-specific commands remain
 file-authored.
 
@@ -50,8 +53,9 @@ $PASEO_HOME/commands.json                  # global, every project
 - `title` and `text` are required. Everything else has a default.
 - `id` — optional. Derived from the title when omitted: lowercase, non-alphanumeric runs become one
   dash. A title with no letters or numbers fails the file; give that entry an explicit `id`.
-- `target` — ignored. The app from v0.9.2 runs a command in whichever tab it starts from; the daemon
-  still reads and serves the field because older apps require it.
+- `target` — not read by the app from v0.9.2, which runs a command in whichever tab it starts from.
+  Older apps still require it, so the daemon keeps validating it: when present it must be
+  `"agent"` or `"terminal"`.
 - `submit` — default `true`. With `false`, the text waits for you to send it.
 - `shortcut` — an app-side key combo like `"Cmd+Shift+R"` (`Cmd`/`Ctrl`/`Alt`/`Shift`/`Mod` plus a
   key). The daemon treats it as opaque text; a combo that cannot parse degrades to no shortcut.
@@ -77,11 +81,15 @@ same as pressing Enter.
 
 Command shortcuts fire globally on desktop and web, including while a terminal or text field is
 focused — that is the point of them. They bind as `user-command.<id>` and sit after the built-ins in
-the matcher, which takes the first match: a combo a built-in already owns never fires, and the menu
-marks the row "Shortcut in use" instead of letting you discover that.
+the matcher, which takes the first match: a combo a built-in already owns never fires. In the desktop
+app the Electron application menu also takes its combos (Reload, Copy, New Window, …) before the page
+sees them; `DESKTOP_MENU_COMBOS` in `packages/app/src/commands/custom-commands-model.ts` mirrors
+`packages/desktop/src/features/menu.ts`, so update both together. The commands menu and the Settings
+list mark such a command "Shortcut in use", and the editor warns as soon as you record one.
 
 Rebind or unassign under **Settings → Shortcuts → Commands**; overrides are the same per-binding
-record the built-ins use. Mobile has no keyboard shortcuts — the menu is the only surface there.
+record the built-ins use, and the Settings list shows the shortcut after overrides. Mobile has no
+keyboard shortcuts — the menu is the only surface there.
 
 ## Refresh model
 

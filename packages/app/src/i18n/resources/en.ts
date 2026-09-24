@@ -2062,6 +2062,8 @@ export const en = {
       recordShortcut: "Click to record a shortcut",
       clearShortcut: "Clear",
       recordingHint: "Esc cancels. Delete clears the shortcut.",
+      shortcutHint: "Hold Ctrl, Alt or Cmd, or press an F-key.",
+      shortcutInUse: "Paseo already uses this shortcut, so it won’t run this command.",
       deleteTitle: "Delete {{name}}?",
       deleteMessage: "This command will be removed from this host.",
       updateHost: "Update this host to edit commands",

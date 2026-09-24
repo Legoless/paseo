@@ -61,12 +61,16 @@ test("enables empty commands from the tray, manages commands in settings and run
     await expect(page.getByTestId("command-save")).toBeDisabled();
     await page.getByTestId("command-name").fill("Write marker");
     await page.getByTestId("command-text").fill("printf commands-ok > command-result.txt");
-    await page.getByTestId("command-target-terminal").click();
+    await page.getByTestId("command-shortcut").click();
+    await page.keyboard.press("k");
+    await page.keyboard.press("Meta+Alt+K");
     await page.screenshot({ path: testInfo.outputPath("command-editor.png") });
     await page.getByTestId("command-save").click();
     await expect(page.getByTestId("command-editor")).toHaveCount(0);
     const saved = JSON.parse(await readFile(commandsPath, "utf8")).commands[0];
-    expect(saved).toMatchObject({ title: "Write marker", target: "terminal", submit: true });
+    // A bare key is typing, so only the modified combo is kept, and the desktop runtime here
+    // reports macOS, so Cmd is saved as the portable Mod.
+    expect(saved).toMatchObject({ title: "Write marker", submit: true, shortcut: "Alt+Mod+K" });
     const row = page.getByTestId(`settings-command-${saved.id}`);
     await row.getByRole("button", { name: "Edit", exact: true }).click();
     await expect(page.getByTestId("command-name")).toHaveValue("Write marker");
