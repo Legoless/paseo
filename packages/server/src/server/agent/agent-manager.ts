@@ -1,4 +1,5 @@
 import { projectTimelineRows } from "./timeline-projection.js";
+import { buildAgentForkContextAttachment } from "./activity-curator.js";
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
 import type { PluginSessionOpenRequest } from "@getpaseo/plugin/server";
@@ -5693,6 +5694,7 @@ export class AgentManager {
         PASEO_AGENT_ID: agentId,
         PASEO_AGENT_CWD: cwd,
       },
+      readChatHistory: () => this.readChatHistoryForRecovery(agentId, cwd),
     };
     if (
       this.paseoToolsEnabled &&
@@ -5706,6 +5708,26 @@ export class AgentManager {
       });
     }
     return context;
+  }
+
+  // For a provider that lost its native session and continues in a new one: the same
+  // transcript "carry the conversation" builds, read from this agent's own timeline.
+  private readChatHistoryForRecovery(agentId: string, cwd: string): string | null {
+    try {
+      const timeline = this.timelineStore.fetch(agentId, { direction: "tail", limit: 0 });
+      const history = buildAgentForkContextAttachment({
+        rows: timeline.rows,
+        agentTitle: this.agents.get(agentId)?.config.title ?? null,
+        cwd,
+      });
+      return history.itemCount > 0 ? history.attachment.text : null;
+    } catch (error) {
+      this.logger.warn(
+        { err: error, agentId },
+        "Failed to read chat history for a replacement provider session",
+      );
+      return null;
+    }
   }
 
   private resolveProviderLaunchConfig(

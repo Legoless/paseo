@@ -2743,12 +2743,69 @@ test("createAgent passes daemon launch env through the provider launch context",
     model: "gpt-5.4",
   });
   expect(client.lastLaunchContext).toEqual({
+    readChatHistory: expect.any(Function),
     agentId: snapshot.id,
     env: {
       PASEO_AGENT_ID: snapshot.id,
       PASEO_AGENT_CWD: workdir,
     },
   });
+});
+
+test("launch context reads the agent's own chat history for a replacement session", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-history-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+
+  // Echoes the turn like a real provider, so the timeline has a conversation to carry.
+  class ConversationSession extends TestAgentSession {
+    async startTurn(): Promise<{ turnId: string }> {
+      const turnId = "turn-history";
+      setTimeout(() => {
+        this.pushEvent({ type: "turn_started", provider: "codex", turnId });
+        this.pushEvent({
+          type: "timeline",
+          provider: "codex",
+          turnId,
+          item: { type: "user_message", text: "remember the plankar drive" },
+        });
+        this.pushEvent({
+          type: "timeline",
+          provider: "codex",
+          turnId,
+          item: { type: "assistant_message", text: "All cars are at 400km." },
+        });
+        this.pushEvent({ type: "turn_completed", provider: "codex", turnId });
+      }, 0);
+      return { turnId };
+    }
+  }
+
+  class CaptureClient extends TestAgentClient {
+    lastLaunchContext: AgentLaunchContext | undefined;
+
+    async createSession(
+      config: AgentSessionConfig,
+      launchContext?: AgentLaunchContext,
+    ): Promise<AgentSession> {
+      this.lastLaunchContext = launchContext;
+      return new ConversationSession(config);
+    }
+  }
+
+  const client = new CaptureClient();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+
+  expect(client.lastLaunchContext?.readChatHistory?.()).toBeNull();
+
+  await manager.runAgent(snapshot.id, "remember the plankar drive");
+
+  const history = client.lastLaunchContext?.readChatHistory?.();
+  expect(history).toContain("<chat-history-summary>");
+  expect(history).toContain("remember the plankar drive");
+  expect(history).toContain("All cars are at 400km.");
 });
 
 test("createAgent passes persistSession to provider create options", async () => {
@@ -4074,6 +4131,7 @@ test("resumeAgentFromPersistence keeps metadata config, applies overrides, and p
   });
   expect(client.lastResumeOverrides).not.toHaveProperty("modeId");
   expect(client.lastResumeLaunchContext).toEqual({
+    readChatHistory: expect.any(Function),
     agentId: resumed.id,
     env: {
       PASEO_AGENT_ID: resumed.id,
@@ -4182,6 +4240,7 @@ test("importProviderSession imports the selected session without listing and pub
   expect(client.listCalls).toBe(0);
   expect(client.importInput).toEqual({ providerHandleId: "thread-selected", cwd: workdir });
   expect(client.importLaunchContext).toEqual({
+    readChatHistory: expect.any(Function),
     agentId: imported.id,
     env: {
       PASEO_AGENT_ID: imported.id,
@@ -4285,6 +4344,7 @@ test("reloadAgentSession passes daemon launch env through the provider launch co
   );
 
   expect(client.lastCreateLaunchContext).toEqual({
+    readChatHistory: expect.any(Function),
     agentId: snapshot.id,
     env: {
       PASEO_AGENT_ID: snapshot.id,
@@ -4297,6 +4357,7 @@ test("reloadAgentSession passes daemon launch env through the provider launch co
   });
 
   expect(client.lastResumeLaunchContext).toEqual({
+    readChatHistory: expect.any(Function),
     agentId: snapshot.id,
     env: {
       PASEO_AGENT_ID: snapshot.id,

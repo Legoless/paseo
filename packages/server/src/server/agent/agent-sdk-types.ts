@@ -642,6 +642,11 @@ export interface AgentLaunchContext {
    * AgentSessionConfig; providers may adapt it to their native tool surface.
    */
   paseoTools?: PaseoToolCatalog;
+  /**
+   * This agent's Paseo chat history as a transcript, for a provider that lost its native
+   * session and has to continue in a new one. Null when there is nothing to carry.
+   */
+  readChatHistory?: () => string | null;
 }
 
 export interface AgentCreateSessionOptions {
