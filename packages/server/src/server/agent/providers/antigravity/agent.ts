@@ -49,6 +49,7 @@ import {
 } from "../diagnostic-utils.js";
 import { spawnProcess } from "../../../../utils/spawn.js";
 import { applyAgyWorkspaceMcpOverlay, type AgyMcpOverlay } from "./mcp.js";
+import { sanitizeAgyConversationMedia } from "./media.js";
 import {
   ANTIGRAVITY_EFFORT_OPTIONS,
   normalizeAntigravityEffort,
@@ -186,6 +187,9 @@ export class AntigravityAgentSession implements AgentSession {
   private imageDir: string | null = null;
   private activeTurnId: string | null = null;
   private isClosed = false;
+  private needsProcessRecycle = false;
+  private lastTurnHadFatalSessionError = false;
+  private fatalSessionRetryAttempted = false;
   // A process being replaced; the next one resumes the same conversation once it has exited.
   private exitingChild: Promise<void> | null = null;
 
@@ -207,6 +211,9 @@ export class AntigravityAgentSession implements AgentSession {
       (event) => this.emit(event),
       (id) => {
         this.conversationId = id;
+      },
+      () => {
+        this.needsProcessRecycle = true;
       },
     );
     void this.ensureProcess();
@@ -231,6 +238,9 @@ export class AntigravityAgentSession implements AgentSession {
   private async spawnProcess(): Promise<ChildProcess | null> {
     await this.exitingChild;
     if (this.isClosed) return null;
+    if (this.conversationId) {
+      sanitizeAgyConversationMedia(this.conversationId, this.options.homeDir);
+    }
     const launch = await resolveProviderLaunch({
       defaultBinary: "agy",
       commandConfig: this.options.runtimeSettings?.command,
@@ -291,7 +301,7 @@ export class AntigravityAgentSession implements AgentSession {
 
     child.on("close", (code, signal) => {
       this.decoder.flush(this.activeTurnId ?? undefined);
-      if (this.activeTurnId && code !== 0 && !this.isClosed) {
+      if (this.activeTurnId && !this.isClosed) {
         const errorMsg =
           stderrBuffer.trim() ||
           `Antigravity process exited with ${signal ? `signal ${signal}` : `code ${code}`}`;
@@ -329,7 +339,25 @@ export class AntigravityAgentSession implements AgentSession {
     if (this.isClosed) {
       throw new Error("Cannot start turn on closed Antigravity session");
     }
-    if (!this.child || this.child.exitCode !== null) {
+
+    if (this.lastTurnHadFatalSessionError) {
+      if (this.conversationId) {
+        sanitizeAgyConversationMedia(this.conversationId, this.options.homeDir);
+      }
+      if (this.fatalSessionRetryAttempted) {
+        this.conversationId = null;
+        this.lastTurnHadFatalSessionError = false;
+        this.fatalSessionRetryAttempted = false;
+        this.terminateCurrentProcess();
+      } else {
+        this.fatalSessionRetryAttempted = true;
+        this.terminateCurrentProcess();
+      }
+    }
+
+    if (this.needsProcessRecycle || !this.child || this.child.exitCode !== null) {
+      this.needsProcessRecycle = false;
+      this.terminateCurrentProcess();
       await this.ensureProcess();
     }
     const turnId = randomUUID();
@@ -555,6 +583,21 @@ export class AntigravityAgentSession implements AgentSession {
     ) {
       if (this.activeTurnId && "turnId" in event && event.turnId === this.activeTurnId) {
         this.activeTurnId = null;
+      }
+      if (event.type === "turn_failed") {
+        if (
+          event.error.includes("INVALID_ARGUMENT") ||
+          (event.error.includes("400") && event.error.toLowerCase().includes("invalid"))
+        ) {
+          this.lastTurnHadFatalSessionError = true;
+        }
+      } else if (event.type === "turn_completed") {
+        this.lastTurnHadFatalSessionError = false;
+        this.fatalSessionRetryAttempted = false;
+      }
+      if (this.needsProcessRecycle || event.type === "turn_failed") {
+        this.needsProcessRecycle = false;
+        this.terminateCurrentProcess();
       }
     }
   }

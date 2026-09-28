@@ -408,6 +408,56 @@ describe("AntigravityStreamDecoder", () => {
     ]);
   });
 
+  it("completes a turn when quota exhausted error was retried and response was delivered", () => {
+    const events: AgentStreamEvent[] = [];
+    let recycled = false;
+    const decoder = new AntigravityStreamDecoder(
+      "antigravity",
+      (event) => events.push(event),
+      undefined,
+      () => {
+        recycled = true;
+      },
+    );
+
+    decoder.write(
+      JSON.stringify({
+        event: "result",
+        result: {
+          conversation_id: "conv-1",
+          status: "ERROR",
+          response: "TL;DR: The Audi RS3 Sedan redesign is fully finished.",
+          error:
+            "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h24m38s.",
+        },
+      }) + "\n",
+      "turn-1",
+    );
+
+    expect(events.map((event) => event.type)).toEqual(["timeline", "turn_completed"]);
+    expect(recycled).toBe(true);
+  });
+
+  it("completes a turn when sticky INVALID_ARGUMENT error is reported on result with response", () => {
+    const events: AgentStreamEvent[] = [];
+    const decoder = new AntigravityStreamDecoder("antigravity", (event) => events.push(event));
+
+    decoder.write(
+      JSON.stringify({
+        event: "result",
+        result: {
+          conversation_id: "conv-1",
+          status: "ERROR",
+          response: "The nearest circuit Automotodrom Grobnik was selected.",
+          error: "INVALID_ARGUMENT (code 400): Request contains an invalid argument.",
+        },
+      }) + "\n",
+      "turn-1",
+    );
+
+    expect(events.map((event) => event.type)).toEqual(["timeline", "turn_completed"]);
+  });
+
   it("surfaces denied_actions as permission cards and cancels interrupted turns", () => {
     const events: AgentStreamEvent[] = [];
     const decoder = new AntigravityStreamDecoder("antigravity", (event) => events.push(event));
@@ -870,6 +920,236 @@ describe("AntigravityAgentClient", () => {
       expect(written.mcpServers.paseo).toEqual({ serverUrl: "http://127.0.0.1:9/mcp" });
       await session.close();
       expect(() => readFileSync(path.join(tmpDir, ".agents", "mcp_config.json"))).toThrow();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sanitizes conversation media when resuming an agy conversation", async () => {
+    const homeDir = mkdtempSync(path.join(tmpdir(), "agy-home-media-"));
+    const conversationId = "conv-media-corrupt";
+    const mediaDir = path.join(
+      homeDir,
+      ".gemini",
+      "antigravity-cli",
+      "brain",
+      conversationId,
+      ".tempmediaStorage",
+    );
+    mkdirSync(mediaDir, { recursive: true });
+    const corruptPng = Buffer.concat([
+      Buffer.from("[Warning] Multiple displays were found\n"),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from("dummy image content"),
+    ]);
+    const imagePath = path.join(mediaDir, "media_test.png");
+    writeFileSync(imagePath, corruptPng);
+
+    const mockScript = path.join(homeDir, "mock-agy.cjs");
+    writeFileSync(mockScript, "process.stdin.resume();\n");
+
+    try {
+      const client = new AntigravityAgentClient({
+        logger: pino({ level: "silent" }),
+        homeDir,
+        runtimeSettings: {
+          command: { mode: "replace", argv: [process.execPath, mockScript] },
+        },
+      });
+      const session = await client.resumeSession({
+        provider: "antigravity",
+        sessionId: conversationId,
+        nativeHandle: conversationId,
+      });
+
+      const sanitized = readFileSync(imagePath);
+      expect(sanitized.subarray(0, 8)).toEqual(
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
+
+      await session.close();
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("recycles child process after an ERROR result with delivered response", async () => {
+    const tmpDir = mkdtempSync(path.join(tmpdir(), "agy-recycle-"));
+    const mockScript = path.join(tmpDir, "mock-agy.cjs");
+    const spawnLog = path.join(tmpDir, "spawns.log");
+    writeFileSync(
+      mockScript,
+      `
+      const fs = require("node:fs");
+      fs.appendFileSync(${JSON.stringify(spawnLog)}, "spawn\\n");
+      const out = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
+      process.stdin.setEncoding("utf8");
+      out({ event: "init", conversation_id: "conv-recycle", init: { cwd: process.cwd(), tools: [] } });
+      process.stdin.on("data", (chunk) => {
+        if (chunk.includes("turn 1")) {
+          out({
+            event: "result",
+            result: {
+              conversation_id: "conv-recycle",
+              status: "ERROR",
+              response: "Result for turn 1",
+              error: "Individual quota reached. Resets in 1h."
+            }
+          });
+        } else {
+          out({
+            event: "result",
+            result: {
+              conversation_id: "conv-recycle",
+              status: "SUCCESS",
+              response: "Result for turn 2"
+            }
+          });
+        }
+      });
+      `,
+    );
+
+    try {
+      const client = new AntigravityAgentClient({
+        logger: pino({ level: "silent" }),
+        runtimeSettings: {
+          command: { mode: "replace", argv: [process.execPath, mockScript] },
+        },
+      });
+      const session = await client.createSession({
+        cwd: tmpDir,
+        provider: "antigravity",
+      });
+
+      const res1 = await session.run("turn 1");
+      expect(res1.finalText).toBe("Result for turn 1");
+
+      const res2 = await session.run("turn 2");
+      expect(res2.finalText).toBe("Result for turn 2");
+
+      const spawns = readFileSync(spawnLog, "utf8").trim().split("\n");
+      expect(spawns).toHaveLength(2);
+
+      await session.close();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to a fresh conversation if repeated fatal INVALID_ARGUMENT errors occur", async () => {
+    const tmpDir = mkdtempSync(path.join(tmpdir(), "agy-fatal-"));
+    const mockScript = path.join(tmpDir, "mock-agy.cjs");
+    const spawnLog = path.join(tmpDir, "spawns.log");
+    writeFileSync(
+      mockScript,
+      `
+      const fs = require("node:fs");
+      const args = process.argv.slice(2);
+      fs.appendFileSync(${JSON.stringify(spawnLog)}, JSON.stringify(args) + "\\n");
+      const out = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
+      const isInitialConv = args.includes("conv-fatal");
+      process.stdin.setEncoding("utf8");
+      out({ event: "init", conversation_id: isInitialConv ? "conv-fatal" : "conv-fresh", init: { cwd: process.cwd(), tools: [] } });
+      process.stdin.on("data", () => {
+        if (isInitialConv) {
+          out({
+            event: "result",
+            result: {
+              conversation_id: "conv-fatal",
+              status: "ERROR",
+              response: "",
+              error: "INVALID_ARGUMENT (code 400): Request contains an invalid argument."
+            }
+          });
+        } else {
+          out({
+            event: "result",
+            result: {
+              conversation_id: "conv-fresh",
+              status: "SUCCESS",
+              response: "Recovered in fresh session"
+            }
+          });
+        }
+      });
+      `,
+    );
+
+    try {
+      const client = new AntigravityAgentClient({
+        logger: pino({ level: "silent" }),
+        runtimeSettings: {
+          command: { mode: "replace", argv: [process.execPath, mockScript] },
+        },
+      });
+      const session = await client.resumeSession({
+        provider: "antigravity",
+        sessionId: "conv-fatal",
+        nativeHandle: "conv-fatal",
+      });
+
+      // First turn fails with INVALID_ARGUMENT
+      await expect(session.run("turn 1")).rejects.toThrow("INVALID_ARGUMENT");
+
+      // Second turn also fails with INVALID_ARGUMENT (retry attempted with sanitization)
+      await expect(session.run("turn 2")).rejects.toThrow("INVALID_ARGUMENT");
+
+      // Third turn detects repeated fatal failure and starts a fresh conversation
+      const res3 = await session.run("turn 3");
+      expect(res3.finalText).toBe("Recovered in fresh session");
+      expect(session.id).toBe("conv-fresh");
+
+      const spawns = readFileSync(spawnLog, "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l));
+      expect(spawns).toHaveLength(3);
+      // First two spawns targeted the bricked conversation
+      expect(spawns[0]).toContain("conv-fatal");
+      expect(spawns[1]).toContain("conv-fatal");
+      // Third spawn dropped the bricked conversation arg
+      expect(spawns[2]).not.toContain("conv-fatal");
+
+      await session.close();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails turn if child process exits unexpectedly with code 0 without a result event", async () => {
+    const tmpDir = mkdtempSync(path.join(tmpdir(), "agy-exit0-"));
+    const mockScript = path.join(tmpDir, "mock-agy.cjs");
+    writeFileSync(
+      mockScript,
+      `
+      process.stdin.setEncoding("utf8");
+      process.stdout.write(JSON.stringify({
+        event: "init",
+        conversation_id: "conv-exit0",
+        init: { cwd: process.cwd(), tools: [] }
+      }) + "\\n");
+      process.stdin.on("data", () => {
+        // Exits prematurely with code 0 without sending result event
+        process.exit(0);
+      });
+      `,
+    );
+
+    try {
+      const client = new AntigravityAgentClient({
+        logger: pino({ level: "silent" }),
+        runtimeSettings: {
+          command: { mode: "replace", argv: [process.execPath, mockScript] },
+        },
+      });
+      const session = await client.createSession({
+        cwd: tmpDir,
+        provider: "antigravity",
+      });
+
+      await expect(session.run("turn")).rejects.toThrow(/Antigravity process exited with code 0/);
+      await session.close();
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
