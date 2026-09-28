@@ -458,6 +458,7 @@ type SessionConnection = ReconnectableSessionConnection | PluginSessionConnectio
 interface SocketSessionOptions {
   clientId: string;
   appVersion: string | null;
+  clientType?: WSHelloMessage["clientType"] | null;
   clientCapabilities: Record<string, unknown> | null;
   permissions: readonly DaemonPermission[];
   connectionLogger: pino.Logger;
@@ -1350,18 +1351,28 @@ export class VoiceAssistantWebSocketServer {
     ws: WebSocketLike;
     clientId: string;
     appVersion: string | null;
+    clientType?: WSHelloMessage["clientType"] | null;
     clientCapabilities: Record<string, unknown> | null;
     connectionLogger: pino.Logger;
     lifecycle: { kind: "reconnectable" } | { kind: "ephemeral-plugin"; pluginId: string };
     admission: SessionAdmission;
   }): SessionConnection {
-    const { ws, clientId, appVersion, clientCapabilities, connectionLogger, lifecycle, admission } =
-      params;
+    const {
+      ws,
+      clientId,
+      appVersion,
+      clientType,
+      clientCapabilities,
+      connectionLogger,
+      lifecycle,
+      admission,
+    } = params;
     let connection: SessionConnection | null = null;
 
     const session = this.createSocketSession({
       clientId,
       appVersion,
+      clientType,
       clientCapabilities,
       permissions: admission.permissions,
       connectionLogger,
@@ -1436,6 +1447,7 @@ export class VoiceAssistantWebSocketServer {
       browserToolsBroker: this.browserToolsBroker,
       clientId: options.clientId,
       appVersion: options.appVersion,
+      clientType: options.clientType ?? null,
       clientCapabilities: options.clientCapabilities,
       permissions: options.permissions,
       onMessage: options.onMessage,
@@ -1604,6 +1616,7 @@ export class VoiceAssistantWebSocketServer {
       ws,
       clientId,
       appVersion: message.appVersion ?? null,
+      clientType: message.clientType,
       clientCapabilities: message.capabilities ?? null,
       connectionLogger,
       lifecycle: pluginId ? { kind: "ephemeral-plugin", pluginId } : { kind: "reconnectable" },

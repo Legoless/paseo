@@ -560,6 +560,7 @@ class CreateAgentTestClient implements AgentClient {
 function createSessionForWorkspaceTests(
   options: {
     appVersion?: string | null;
+    clientType?: SessionOptions["clientType"];
     onMessage?: (message: SessionOutboundMessage) => void;
     onWorkspaceRecovered?: SessionOptions["onWorkspaceRecovered"];
     workspaceGitService?: ReturnType<typeof createNoopWorkspaceGitService>;
@@ -666,6 +667,7 @@ function createSessionForWorkspaceTests(
       clientId: "test-client",
       permissions: OWNER_PERMISSIONS,
       appVersion: options.appVersion ?? null,
+      clientType: options.clientType ?? null,
       onMessage: options.onMessage ?? vi.fn(),
       onWorkspaceRecovered: options.onWorkspaceRecovered,
       logger: asSessionLogger(logger),
@@ -9318,6 +9320,156 @@ test("workspace.title.set.request stores the title and emits an updated descript
       title: "Payments work",
     },
   });
+});
+
+test("workspace.title.set.request from a hub connection cannot overwrite a user-set title", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({
+      clientType: "hub",
+      onMessage: (message) => emitted.push(message),
+    }),
+  );
+
+  const workspace = {
+    ...createPersistedWorkspaceRecord({
+      workspaceId: "ws-1",
+      displayName: "main",
+      createdAt: "2026-03-01T12:00:00.000Z",
+      updatedAt: "2026-03-01T12:00:00.000Z",
+      members: [
+        {
+          projectId: "proj-1",
+          cwd: REPO_CWD,
+          kind: "local_checkout",
+          displayName: "main",
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
+    }),
+    title: "Payments work",
+    titleSetByUser: true,
+  };
+  const workspaces = new Map([[workspace.workspaceId, workspace]]);
+  session.workspaceRegistry.list = async () => Array.from(workspaces.values());
+  session.workspaceRegistry.get = async (id: string) => workspaces.get(id) ?? null;
+  session.workspaceRegistry.update = async (id, updater) => {
+    const existing = workspaces.get(id);
+    if (!existing) return null;
+    const updated = updater(existing);
+    workspaces.set(id, updated);
+    return updated;
+  };
+
+  await session.handleMessage({
+    type: "workspace.title.set.request",
+    workspaceId: workspace.workspaceId,
+    title: "Hub rename",
+    requestId: "req-title-hub",
+  });
+
+  const response = findByType(emitted, "workspace.title.set.response");
+  expect(response?.payload).toEqual({
+    requestId: "req-title-hub",
+    workspaceId: workspace.workspaceId,
+    accepted: false,
+    title: null,
+    error: "Workspace title was set by the user",
+  });
+  const record = workspaces.get(workspace.workspaceId);
+  expect(record?.title).toBe("Payments work");
+  expect(record?.titleSetByUser).toBe(true);
+});
+
+test("workspace.title.set.request from a hub connection titles an automatic workspace without the user flag", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const session = asTestSession(
+    createSessionForWorkspaceTests({
+      clientType: "hub",
+      onMessage: (message) => emitted.push(message),
+    }),
+  );
+
+  const workspace = createPersistedWorkspaceRecord({
+    workspaceId: "ws-1",
+    displayName: "main",
+    createdAt: "2026-03-01T12:00:00.000Z",
+    updatedAt: "2026-03-01T12:00:00.000Z",
+    members: [
+      {
+        projectId: "proj-1",
+        cwd: REPO_CWD,
+        kind: "local_checkout",
+        displayName: "main",
+        branch: null,
+        worktreeRoot: null,
+        baseBranch: null,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      },
+    ],
+  });
+  const workspaces = new Map([[workspace.workspaceId, workspace]]);
+  session.workspaceRegistry.list = async () => Array.from(workspaces.values());
+  session.workspaceRegistry.get = async (id: string) => workspaces.get(id) ?? null;
+  session.workspaceRegistry.update = async (id, updater) => {
+    const existing = workspaces.get(id);
+    if (!existing) return null;
+    const updated = updater(existing);
+    workspaces.set(id, updated);
+    return updated;
+  };
+
+  await session.handleMessage({
+    type: "workspace.title.set.request",
+    workspaceId: workspace.workspaceId,
+    title: "Execution name",
+    requestId: "req-title-hub-auto",
+  });
+
+  const response = findByType(emitted, "workspace.title.set.response");
+  expect(response?.payload.accepted).toBe(true);
+  const record = workspaces.get(workspace.workspaceId);
+  expect(record?.title).toBe("Execution name");
+  // A machine-chosen name must not be marked user-set: the auto-namer may still refine it.
+  expect(record?.titleSetByUser).not.toBe(true);
+});
+
+test("update_agent_request writes titles as the user from app connections and as the agent elsewhere", async () => {
+  for (const [clientType, expectedOrigin] of [
+    [null, "user"],
+    ["mobile", "user"],
+    ["browser", "user"],
+    ["cli", "agent"],
+    ["mcp", "agent"],
+    ["hub", "agent"],
+  ] as const) {
+    const updateAgentMetadata = vi.fn(async () => {});
+    const session = asTestSession(
+      createSessionForWorkspaceTests({
+        clientType,
+        agentManager: { updateAgentMetadata },
+        onMessage: () => {},
+      }),
+    );
+
+    await session.handleMessage({
+      type: "update_agent_request",
+      agentId: "agent-1",
+      name: "New name",
+      requestId: "req-update-1",
+    });
+
+    expect(updateAgentMetadata).toHaveBeenCalledWith(
+      "agent-1",
+      { title: "New name" },
+      expectedOrigin,
+    );
+  }
 });
 
 test("workspace.pin.set.request stores the pin timestamp and emits an updated descriptor", async () => {

@@ -6,6 +6,7 @@ import { relative } from "node:path";
 import { isAbsolute } from "node:path";
 import { CreationService } from "./creation/index.js";
 import type { CreationSnapshot, AgentCreateRequest } from "@getpaseo/protocol/messages";
+import type { WSHelloMessage } from "@getpaseo/protocol/messages";
 import type { MessageReceipts } from "./message-receipts/index.js";
 import equal from "fast-deep-equal";
 import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
@@ -100,6 +101,7 @@ import { buildTimelinePromptIndex } from "./agent/timeline-prompt-index.js";
 import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import type {
   AgentManagerEvent,
+  AgentMetadataOrigin,
   AgentTimelineCursor,
   AgentTimelineFetchDirection,
   AgentTimelineFetchResult,
@@ -435,6 +437,7 @@ export interface SessionOptions {
   clientId: string;
   permissions: readonly DaemonPermission[];
   appVersion?: string | null;
+  clientType?: WSHelloMessage["clientType"] | null;
   clientCapabilities?: Record<string, unknown> | null;
   onMessage: (msg: SessionOutboundMessage) => void;
   onMessageToSource?: (source: object, msg: SessionOutboundMessage) => void;
@@ -686,6 +689,7 @@ export class Session {
   private readonly clientId: string;
   private readonly authorization: SessionAuthorization;
   private appVersion: string | null;
+  private readonly clientType: SessionOptions["clientType"];
   private clientCapabilities: ReadonlySet<ClientCapability>;
   private readonly sessionId: string;
   private readonly onMessage: (msg: SessionOutboundMessage) => void;
@@ -847,6 +851,7 @@ export class Session {
     this.clientId = clientId;
     this.authorization = new SessionAuthorization(permissions);
     this.appVersion = appVersion ?? null;
+    this.clientType = options.clientType;
     this.clientCapabilities = parseClientCapabilities(clientCapabilities);
     this.sessionId = uuidv4();
     this.onMessage = onMessage;
@@ -3431,6 +3436,24 @@ export class Session {
     };
   }
 
+  /**
+   * Only the app UI (mobile/browser) writes titles as a person. CLI, MCP and Hub
+   * connections demote to "agent" origin, so an agent shelling out to the paseo
+   * CLI can no longer overwrite — or forge the user-set flag on — a name a person
+   * chose. clientType is self-declared in the hello, so a determined caller can
+   * still claim "mobile"; real principal separation remains the ponytail.
+   */
+  private metadataWriteOrigin(): AgentMetadataOrigin {
+    switch (this.clientType) {
+      case "cli":
+      case "mcp":
+      case "hub":
+        return "agent";
+      default:
+        return "user";
+    }
+  }
+
   private async handleUpdateAgentRequest(
     agentId: string,
     name: string | undefined,
@@ -3451,11 +3474,9 @@ export class Session {
       const result = await updateAgentCommand(
         { agentManager: this.agentManager },
         // The client RPC is the rename modal and `paseo agent update --name`.
-        // ponytail: route stands in for identity — every socket is admitted as
-        // the owner, so an agent that shells out to the CLI still counts as a
-        // user here. Needs real principal separation to close, which does not
-        // exist yet; this covers the agent naming its own tab, which is the bug.
-        { agentId, name, labels, origin: "user" },
+        // App connections write as the person; CLI/MCP/Hub connections write as
+        // the agent, so a user rename always wins over them.
+        { agentId, name, labels, origin: this.metadataWriteOrigin() },
       );
 
       if (!result.accepted) {
@@ -3744,14 +3765,35 @@ export class Session {
       const trimmed = title?.trim() ?? "";
       const nextTitle = trimmed.length === 0 ? null : trimmed;
       const updatedAt = new Date().toISOString();
-      const updated = await this.workspaceRegistry.update(workspaceId, (existing) => ({
-        ...existing,
-        title: nextTitle,
-        // Clearing the field is the user asking for the derived name back, which hands the
-        // workspace to the auto-namer again.
-        ...(nextTitle ? { titleSetByUser: true } : { titleSetByUser: false }),
-        updatedAt,
-      }));
+      const origin = this.metadataWriteOrigin();
+      if (origin !== "user") {
+        // Hub titling its executions, the CLI, MCP: these may name a workspace that
+        // still carries an automatic title, but never overwrite a name the person
+        // chose, and never forge or clear the user-set flag.
+        const existing = await this.workspaceRegistry.get(workspaceId);
+        if (existing?.titleSetByUser) {
+          this.emit({
+            type: "workspace.title.set.response",
+            payload: {
+              requestId,
+              workspaceId,
+              accepted: false,
+              title: null,
+              error: "Workspace title was set by the user",
+            },
+          });
+          return;
+        }
+      }
+      const updated = await this.workspaceRegistry.update(workspaceId, (existing) => {
+        const next = { ...existing, title: nextTitle, updatedAt };
+        if (origin === "user") {
+          // Clearing the field is the user asking for the derived name back, which hands the
+          // workspace to the auto-namer again. Non-user origins leave the flag untouched.
+          next.titleSetByUser = nextTitle !== null;
+        }
+        return next;
+      });
       if (!updated) {
         this.emit({
           type: "workspace.title.set.response",
