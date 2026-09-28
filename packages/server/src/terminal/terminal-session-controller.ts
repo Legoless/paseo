@@ -409,7 +409,7 @@ export class TerminalSessionController {
           payload: {
             cwd: subscription.cwd,
             workspaceId: subscription.workspaceId,
-            terminals: terminals.map((terminal) => this.toTerminalInfo(terminal)),
+            terminals: terminals.map((terminal) => this.toTerminalInfo(terminal, true)),
             ...(requestId ? { requestId } : {}),
           },
         });
