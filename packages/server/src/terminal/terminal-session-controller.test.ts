@@ -518,8 +518,20 @@ describe("terminal-session-controller subdirectory aggregation", () => {
         payload: {
           cwd: rootCwd,
           terminals: [
-            { id: "root-term", name: "Terminal 1", workspaceId: "ws-test", activity: null },
-            { id: "subdir-term", name: "Mobile", workspaceId: "ws-test", activity: null },
+            {
+              id: "root-term",
+              name: "Terminal 1",
+              cwd: rootCwd,
+              workspaceId: "ws-test",
+              activity: null,
+            },
+            {
+              id: "subdir-term",
+              name: "Mobile",
+              cwd: subdirCwd,
+              workspaceId: "ws-test",
+              activity: null,
+            },
           ],
         },
       },
@@ -692,7 +704,7 @@ describe("terminal-session-controller workspace-scoped subscriptions", () => {
         type: "terminals_changed",
         payload: {
           cwd,
-          terminals: [{ id: "a", name: "A", workspaceId: "ws-a", activity: null }],
+          terminals: [{ id: "a", name: "A", cwd, workspaceId: "ws-a", activity: null }],
         },
       },
     ]);
@@ -782,10 +794,17 @@ describe("terminal-session-controller whole-workspace subscriptions", () => {
         payload: {
           cwd: "",
           terminals: [
-            { id: "apps", name: "Apps", workspaceId: "ws-multi", activity: null },
+            {
+              id: "apps",
+              name: "Apps",
+              cwd: "/work/apps",
+              workspaceId: "ws-multi",
+              activity: null,
+            },
             {
               id: "mesh",
               name: "Mesh",
+              cwd: "/work/mesh",
               workspaceId: "ws-multi",
               activity: { state: "working", attentionReason: null, changedAt: 1 },
             },
