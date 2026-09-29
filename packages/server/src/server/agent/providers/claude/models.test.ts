@@ -8,6 +8,8 @@ import { createTestLogger } from "../../../../test-utils/test-logger.js";
 import { ClaudeAgentClient } from "./agent.js";
 import type { ClaudeOptions, ClaudeQueryFactory } from "./query.js";
 import {
+  CLAUDE_ULTRACODE_FLAG_MIN_VERSION,
+  claudeCodeVersionAtLeast,
   claudeModelCapability,
   discoverClaudeModels,
   findClaudeModel,
@@ -371,6 +373,94 @@ it("isolates session capabilities by workspace scope and refreshes only that sco
 describe("parseClaudeCodeVersion", () => {
   it("prefers the Claude Code version over a wrapper banner", () => {
     expect(parseClaudeCodeVersion("wrapper 1.0.0\n2.1.219 (Claude Code)")).toEqual([2, 1, 219]);
+  });
+});
+
+describe("claudeCodeVersionAtLeast", () => {
+  it("evaluates version thresholds correctly", () => {
+    expect(claudeCodeVersionAtLeast("2.1.284", CLAUDE_ULTRACODE_FLAG_MIN_VERSION)).toBe(true);
+    expect(claudeCodeVersionAtLeast("2.1.285", CLAUDE_ULTRACODE_FLAG_MIN_VERSION)).toBe(true);
+    expect(claudeCodeVersionAtLeast("2.2.0", CLAUDE_ULTRACODE_FLAG_MIN_VERSION)).toBe(true);
+    expect(claudeCodeVersionAtLeast("3.0.0", CLAUDE_ULTRACODE_FLAG_MIN_VERSION)).toBe(true);
+    expect(claudeCodeVersionAtLeast("2.1.283", CLAUDE_ULTRACODE_FLAG_MIN_VERSION)).toBe(false);
+    expect(claudeCodeVersionAtLeast("2.0.999", CLAUDE_ULTRACODE_FLAG_MIN_VERSION)).toBe(false);
+    expect(claudeCodeVersionAtLeast("1.9.0", CLAUDE_ULTRACODE_FLAG_MIN_VERSION)).toBe(false);
+    expect(claudeCodeVersionAtLeast(null, CLAUDE_ULTRACODE_FLAG_MIN_VERSION)).toBe(false);
+    expect(claudeCodeVersionAtLeast(undefined, CLAUDE_ULTRACODE_FLAG_MIN_VERSION)).toBe(false);
+    expect(claudeCodeVersionAtLeast("invalid", CLAUDE_ULTRACODE_FLAG_MIN_VERSION)).toBe(false);
+  });
+});
+
+describe("version-aware ultracode mapping", () => {
+  it("omits ultracode thinking option for Claude Code 2.1.284+", () => {
+    const [model] = mapClaudeModels([futureModel], { claudeCodeVersion: "2.1.284" });
+    expect(model?.thinkingOptions?.map((option) => option.id)).toEqual(["low", "xhigh"]);
+    expect(model?.metadata?.claudeCodeVersion).toBe("2.1.284");
+  });
+
+  it("retains ultracode thinking option for Claude Code < 2.1.284", () => {
+    const [model] = mapClaudeModels([futureModel], { claudeCodeVersion: "2.1.283" });
+    expect(model?.thinkingOptions?.map((option) => option.id)).toEqual([
+      "low",
+      "xhigh",
+      "ultracode",
+    ]);
+    expect(model?.metadata?.claudeCodeVersion).toBe("2.1.283");
+  });
+
+  it("retains ultracode thinking option when version is unversioned or absent", () => {
+    const [model] = mapClaudeModels([futureModel]);
+    expect(model?.thinkingOptions?.map((option) => option.id)).toEqual([
+      "low",
+      "xhigh",
+      "ultracode",
+    ]);
+    expect(model?.metadata?.claudeCodeVersion).toBeNull();
+  });
+});
+
+describe("catalog host facts", () => {
+  const refresh = { scope: "global" as const, force: true };
+
+  it("re-probes the Claude Code version on every catalog refresh", async () => {
+    const resolveVersion = vi
+      .fn<(signal?: AbortSignal) => Promise<string>>()
+      .mockRejectedValueOnce(new Error("claude --version timed out"))
+      .mockResolvedValueOnce("2.1.283")
+      .mockResolvedValueOnce("2.1.284")
+      .mockRejectedValueOnce(new Error("claude --version timed out"));
+    const client = new ClaudeAgentClient({
+      logger: createTestLogger(),
+      configDir: await configDirectory(),
+      resolveBinary: async () => "/test/claude",
+      queryFactory: probeFactory().queryFactory,
+      resolveVersion,
+    });
+    const thinkingIds = async () =>
+      (await client.fetchCatalog(refresh)).models[0]?.thinkingOptions?.map((option) => option.id);
+
+    await expect(thinkingIds()).resolves.toContain("ultracode");
+    await expect(thinkingIds()).resolves.toContain("ultracode");
+    await expect(thinkingIds()).resolves.not.toContain("ultracode");
+    // A failed probe keeps the last known version.
+    await expect(thinkingIds()).resolves.not.toContain("ultracode");
+  });
+
+  it("records the settings.json ultracode value with the catalog", async () => {
+    const client = new ClaudeAgentClient({
+      logger: createTestLogger(),
+      configDir: await configDirectory({ ultracode: true }),
+      resolveBinary: async () => "/test/claude",
+      queryFactory: probeFactory().queryFactory,
+      resolveVersion: async () => "2.1.284",
+    });
+
+    const [model] = (await client.fetchCatalog(refresh)).models;
+
+    expect(model?.metadata).toMatchObject({
+      claudeCodeVersion: "2.1.284",
+      settingsUltracode: true,
+    });
   });
 });
 

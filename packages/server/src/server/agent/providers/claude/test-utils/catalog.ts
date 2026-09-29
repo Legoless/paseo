@@ -1,5 +1,5 @@
 import { ClaudeAgentClient } from "../agent.js";
-import { mapClaudeModels } from "../models.js";
+import { mapClaudeModels, type ClaudeCatalogFacts } from "../models.js";
 
 // Session tests inject catalog facts independently of discovery, so their query
 // factories model conversation processes only.
@@ -21,22 +21,25 @@ const fixtures = [
 ];
 
 export class TestClaudeAgentClient extends ClaudeAgentClient {
-  constructor(options: ConstructorParameters<typeof ClaudeAgentClient>[0]) {
+  constructor(options: ConstructorParameters<typeof ClaudeAgentClient>[0] & ClaudeCatalogFacts) {
     super(options);
     this.setModelCatalog(
       fixtures.map((fixture) => {
-        const model = mapClaudeModels([
-          {
-            value: fixture.id,
-            displayName: fixture.id,
-            description: "Runtime facts supplied by the session test",
-            supportsEffort: true,
-            supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
-            supportsAdaptiveThinking: true,
-            supportsFastMode: fixture.fast,
-            supportsAutoMode: true,
-          },
-        ])[0]!;
+        const model = mapClaudeModels(
+          [
+            {
+              value: fixture.id,
+              displayName: fixture.id,
+              description: "Runtime facts supplied by the session test",
+              supportsEffort: true,
+              supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
+              supportsAdaptiveThinking: true,
+              supportsFastMode: fixture.fast,
+              supportsAutoMode: true,
+            },
+          ],
+          options,
+        )[0]!;
         if (fixture.off) model.thinkingOptions?.unshift({ id: "off", label: "Off" });
         if (fixture.context) model.contextWindowMaxTokens = fixture.context;
         return model;
