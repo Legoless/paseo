@@ -210,16 +210,38 @@ export const TERMINAL_HOOK_IDENTITY_ENV_VARS = [
   "PASEO_HOOK_CLI",
 ] as const;
 
-// Env vars that indicate a running Claude Code session. If the daemon itself is
-// launched from inside Claude Code (e.g. by a Paseo agent), these leak into
-// child processes and cause "cannot be launched inside another session" errors.
-const PARENT_SESSION_ENV_VARS = [
+// What Claude Code sets for the processes it spawns. A daemon launched from inside a Claude Code
+// session (an agent, or a terminal running claude) inherits it, and every terminal and agent it
+// starts then looks like a child of that session: "cannot be launched inside another session"
+// errors, transcript saving off, the parent's effort, the parent's messaging socket.
+export const CLAUDE_SESSION_ENV_VARS = [
   "CLAUDECODE",
   "CLAUDE_CODE_ENTRYPOINT",
   "CLAUDE_CODE_SSE_PORT",
   "CLAUDE_AGENT_SDK_VERSION",
-  ...TERMINAL_HOOK_IDENTITY_ENV_VARS,
-];
+  "CLAUDE_CODE_SESSION_ID",
+  "CLAUDE_CODE_CHILD_SESSION",
+  "CLAUDE_CODE_SESSION_ATTENDED",
+  "CLAUDE_CODE_MESSAGING_SOCKET",
+  "CLAUDE_CODE_MESSAGING_TOKEN",
+  "CLAUDE_CODE_EXECPATH",
+  "CLAUDE_CODE_INVOKED_SKILLS",
+  "CLAUDE_PID",
+  "CLAUDE_EFFORT",
+  "AI_AGENT",
+] as const;
+
+const PARENT_SESSION_ENV_VARS = [...CLAUDE_SESSION_ENV_VARS, ...TERMINAL_HOOK_IDENTITY_ENV_VARS];
+
+/** Undo what a parent Claude Code session injected into this process's environment. */
+export function stripInheritedClaudeSessionEnv(env: ProcessEnvRecord): void {
+  // Claude Code sets GIT_EDITOR=true for its tool shells; only drop it when that is its source,
+  // so an editor the user configured survives.
+  if (env.CLAUDECODE !== undefined && env.GIT_EDITOR === "true") {
+    delete env.GIT_EDITOR;
+  }
+  for (const key of CLAUDE_SESSION_ENV_VARS) delete env[key];
+}
 
 export interface ProviderEnvOptions {
   baseEnv?: ProcessEnvRecord;
