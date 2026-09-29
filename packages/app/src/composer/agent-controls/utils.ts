@@ -141,6 +141,18 @@ function resolveThinkingDisplay(
   return unknownThinkingLabel;
 }
 
+/** "Default" still runs at some level; name the provider's own default so it is not opaque. */
+export function formatDefaultThinkingLabel(
+  defaultLabel: string,
+  thinkingOptions: readonly { id: string; label: string }[] | undefined,
+  providerDefaultThinkingOptionId: string | undefined,
+): string {
+  const providerDefault = thinkingOptions?.find(
+    (option) => option.id === providerDefaultThinkingOptionId,
+  );
+  return providerDefault ? `${defaultLabel} · ${providerDefault.label}` : defaultLabel;
+}
+
 export function resolveAgentModelSelection(input: {
   models: AgentModelDefinition[] | null;
   runtimeModelId: string | null | undefined;

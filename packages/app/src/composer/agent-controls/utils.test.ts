@@ -6,6 +6,7 @@ import {
   resolveEffectiveComposerThinkingOptionId,
 } from "@/provider-selection/provider-selection";
 import {
+  formatDefaultThinkingLabel,
   getFeatureHighlightColor,
   getFeatureTooltip,
   getAgentControlHintKey,
@@ -56,6 +57,22 @@ describe("normalizeModelId", () => {
   it("returns trimmed model ids", () => {
     expect(normalizeModelId(" gpt-5.1-codex ")).toBe("gpt-5.1-codex");
     expect(normalizeModelId(" default ")).toBe("default");
+  });
+});
+
+describe("formatDefaultThinkingLabel", () => {
+  const options = [
+    { id: "high", label: "High" },
+    { id: "xhigh", label: "Extra high" },
+  ];
+
+  it("names the level the provider applies when no thinking option is chosen", () => {
+    expect(formatDefaultThinkingLabel("Default", options, "xhigh")).toBe("Default · Extra high");
+  });
+
+  it("stays plain when the provider default is unknown or not offered", () => {
+    expect(formatDefaultThinkingLabel("Default", options, undefined)).toBe("Default");
+    expect(formatDefaultThinkingLabel("Default", options, "medium")).toBe("Default");
   });
 });
 

@@ -35,8 +35,11 @@ export function claudeCodeVersionAtLeast(
   return true;
 }
 
+/** A discovered model and the effort Claude runs it at when Paseo sends none. */
+export type ClaudeDiscoveredModel = ModelInfo & { appliedEffort?: string };
+
 export function mapClaudeModels(
-  models: readonly ModelInfo[],
+  models: readonly ClaudeDiscoveredModel[],
   facts?: ClaudeCatalogFacts,
 ): AgentModelDefinition[] {
   const isFlag = claudeCodeVersionAtLeast(
@@ -77,6 +80,13 @@ export function mapClaudeModels(
           label: "Ultra Code",
         });
       }
+      const appliedEffort = model.appliedEffort;
+      if (
+        appliedEffort &&
+        definition.thinkingOptions.some((option) => option.id === appliedEffort)
+      ) {
+        definition.providerDefaultThinkingOptionId = appliedEffort;
+      }
     } else if (model.supportsEffort === false) {
       definition.thinkingOptions = [];
     }
@@ -114,7 +124,7 @@ export async function discoverClaudeModels(input: {
   configDir?: string;
   queryFactory?: ClaudeQueryFactory;
   signal?: AbortSignal;
-}): Promise<ModelInfo[]> {
+}): Promise<ClaudeDiscoveredModel[]> {
   input.signal?.throwIfAborted();
   const controller = new AbortController();
   const abort = () => controller.abort(input.signal?.reason);
@@ -129,12 +139,25 @@ export async function discoverClaudeModels(input: {
   const onAbort = () =>
     rejectAbort?.(controller.signal.reason ?? new Error("Claude model discovery aborted"));
   controller.signal.addEventListener("abort", onAbort, { once: true });
+  // An ended prompt makes the CLI exit after its first control request; discovery also reads
+  // each model's applied settings, so the input stays open until discovery is done.
+  let releasePrompt = (): void => {};
+  const promptHeldOpen = new Promise<void>((resolve) => {
+    releasePrompt = resolve;
+  });
   try {
     const binary = await input.resolveBinary();
     input.signal?.throwIfAborted();
     probe = claudeQuery(
       {
-        prompt: (async function* empty() {})(),
+        prompt: {
+          [Symbol.asyncIterator]: () => ({
+            next: async (): Promise<IteratorReturnResult<undefined>> => {
+              await promptHeldOpen;
+              return { done: true, value: undefined };
+            },
+          }),
+        },
         options: {
           cwd: input.cwd,
           sessionId: randomUUID(),
@@ -160,12 +183,14 @@ export async function discoverClaudeModels(input: {
         },
       },
     );
-    return await withTimeout(
+    const models = await withTimeout(
       Promise.race([probe.supportedModels(), aborted]),
       10_000,
       "Claude model discovery timed out",
     );
+    return await readAppliedEfforts(probe, models, aborted, input.signal);
   } finally {
+    releasePrompt();
     input.signal?.removeEventListener("abort", abort);
     controller.signal.removeEventListener("abort", onAbort);
     try {
@@ -178,10 +203,61 @@ export async function discoverClaudeModels(input: {
   }
 }
 
+// Claude resolves the effort it runs without an explicit one from the user's settings, per model
+// (modelSettings, organization caps). Ask the CLI rather than re-implement that resolution.
+// getSettings is not in the SDK typings yet, so a CLI without it leaves "Default" unlabeled.
+async function readAppliedEfforts(
+  probe: ReturnType<typeof claudeQuery>,
+  models: ModelInfo[],
+  aborted: Promise<never>,
+  signal?: AbortSignal,
+): Promise<ClaudeDiscoveredModel[]> {
+  const getSettings = (probe as unknown as { getSettings?: () => Promise<unknown> }).getSettings;
+  if (typeof getSettings !== "function") return models;
+  const discovered: ClaudeDiscoveredModel[] = [...models];
+  // ponytail: switching to a full model id takes 1-5 s (the CLI validates it) while aliases
+  // resolve in milliseconds, so aliases go first and slow ids past the budget stay unlabeled.
+  // Background probing into a per-client cache would label them too.
+  const order = models
+    .map((model, index) => ({ model, index }))
+    .sort(
+      (a, b) =>
+        Number(a.model.value.startsWith("claude-")) - Number(b.model.value.startsWith("claude-")),
+    );
+  const probeAll = async (): Promise<void> => {
+    for (const { model, index } of order) {
+      if (!model.supportedEffortLevels?.length || model.supportsEffort === false) continue;
+      try {
+        await probe.setModel(model.value === "default" ? undefined : model.value);
+        const appliedEffort = readAppliedEffort(await getSettings.call(probe));
+        if (appliedEffort) discovered[index] = { ...model, appliedEffort };
+      } catch {
+        // This model stays unlabeled; the rest still get theirs.
+      }
+    }
+  };
+  try {
+    await withTimeout(
+      Promise.race([probeAll(), aborted]),
+      2_000,
+      "Claude applied effort probe timed out",
+    );
+  } catch {
+    signal?.throwIfAborted();
+  }
+  return [...discovered];
+}
+
+function readAppliedEffort(settings: unknown): string | undefined {
+  if (!isRecord(settings) || !isRecord(settings.applied)) return undefined;
+  const effort = settings.applied.effort;
+  return typeof effort === "string" ? effort : undefined;
+}
+
 export async function getClaudeModelsWithSettings(
   logger: Logger,
   configDir: string | undefined,
-  nativeModels: readonly ModelInfo[],
+  nativeModels: readonly ClaudeDiscoveredModel[],
   options?: { claudeCodeVersion?: string | null },
 ): Promise<AgentModelDefinition[]> {
   const settings = await readClaudeSettings(logger, configDir);
