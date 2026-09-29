@@ -1,6 +1,4 @@
-import { createAssistantMarkdownParser } from "./assistant-markdown-parser";
-
-const markdownRenderer = createAssistantMarkdownParser();
+import { assistantMarkdownParser } from "./assistant-markdown-parser";
 
 type ClipboardMimeType = "text/plain" | "text/html";
 
@@ -22,7 +20,7 @@ export interface MarkdownClipboardEnvironment {
 export function createMarkdownClipboardContent(markdown: string): MarkdownClipboardContent {
   return {
     plainText: markdown,
-    html: `<meta charset="utf-8">${markdownRenderer.render(markdown)}`,
+    html: `<meta charset="utf-8">${assistantMarkdownParser.render(markdown)}`,
   };
 }
 
@@ -50,14 +48,14 @@ export function createCodeClipboardContent(
   code: string,
   options: CodeClipboardOptions,
 ): MarkdownClipboardContent {
-  const escapedCode = markdownRenderer.utils.escapeHtml(code);
+  const escapedCode = assistantMarkdownParser.utils.escapeHtml(code);
   if (!options.block) {
     return { plainText: code, html: `<meta charset="utf-8">${escapedCode}` };
   }
 
   const language = options.language?.trim();
   const className = language
-    ? ` class="language-${markdownRenderer.utils.escapeHtml(language)}"`
+    ? ` class="language-${assistantMarkdownParser.utils.escapeHtml(language)}"`
     : "";
   return {
     plainText: code,

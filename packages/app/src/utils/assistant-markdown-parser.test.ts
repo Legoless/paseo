@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createAssistantMarkdownParser } from "./assistant-markdown-parser";
+import {
+  assistantMarkdownParser,
+  streamingAssistantMarkdownParser,
+} from "./assistant-markdown-parser";
 
-describe("createAssistantMarkdownParser", () => {
+describe("assistant markdown parsers", () => {
   it("keeps bold text bold through every partial closing marker", () => {
-    const parser = createAssistantMarkdownParser({ streaming: true });
+    const parser = streamingAssistantMarkdownParser;
 
     for (const source of ["**bold", "**bold*", "**bold**"]) {
       expect(parser.renderInline(source)).toBe("<strong>bold</strong>");
@@ -11,7 +14,7 @@ describe("createAssistantMarkdownParser", () => {
   });
 
   it("shows the growing link label and only links a complete destination", () => {
-    const parser = createAssistantMarkdownParser({ streaming: true });
+    const parser = streamingAssistantMarkdownParser;
     const source = "[docs](https://example.com/path)";
     for (let length = 1; length < source.length; length++) {
       expect(parser.renderInline(source.slice(0, length))).toBe(
@@ -30,7 +33,7 @@ describe("createAssistantMarkdownParser", () => {
     ["`", "code"],
     ["``", "code"],
   ])("keeps %s formatting stable as text and closing markers arrive", (marker, tag) => {
-    const parser = createAssistantMarkdownParser({ streaming: true });
+    const parser = streamingAssistantMarkdownParser;
     for (let length = 1; length <= 4; length++) {
       expect(parser.renderInline(marker + "text".slice(0, length))).toBe(
         `<${tag}>${"text".slice(0, length)}</${tag}>`,
@@ -44,7 +47,7 @@ describe("createAssistantMarkdownParser", () => {
   });
 
   it("keeps combined and nested emphasis stable through closing markers", () => {
-    const parser = createAssistantMarkdownParser({ streaming: true });
+    const parser = streamingAssistantMarkdownParser;
     for (const closing of ["", "*", "**", "***"]) {
       expect(parser.renderInline("***both" + closing)).toBe("<em><strong>both</strong></em>");
     }
@@ -59,9 +62,7 @@ describe("createAssistantMarkdownParser", () => {
   it.each(["*", "**", "***", "_", "__", "~~", "`", "``"])(
     "hides an opening %s while waiting for its text",
     (marker) => {
-      expect(
-        createAssistantMarkdownParser({ streaming: true }).renderInline("hello " + marker),
-      ).toBe("hello ");
+      expect(streamingAssistantMarkdownParser.renderInline("hello " + marker)).toBe("hello ");
     },
   );
 
@@ -71,22 +72,22 @@ describe("createAssistantMarkdownParser", () => {
     "[docs](<https://example.com/a(b)>)",
     "[docs](file:///tmp/example.ts)",
   ])("waits for the entire destination of %s", (source) => {
-    const parser = createAssistantMarkdownParser({ streaming: true });
+    const parser = streamingAssistantMarkdownParser;
     for (let length = 6; length < source.length; length++) {
       expect(parser.renderInline(source.slice(0, length))).toBe("docs");
     }
-    expect(parser.renderInline(source)).toBe(createAssistantMarkdownParser().renderInline(source));
+    expect(parser.renderInline(source)).toBe(assistantMarkdownParser.renderInline(source));
   });
 
   it("preserves formatting in incomplete labels and around incomplete links", () => {
-    const parser = createAssistantMarkdownParser({ streaming: true });
+    const parser = streamingAssistantMarkdownParser;
     expect(parser.renderInline("[**bold")).toBe("<strong>bold</strong>");
     expect(parser.renderInline("[**bold**](https://exam")).toBe("<strong>bold</strong>");
     expect(parser.renderInline("**see [docs](https://exam")).toBe("<strong>see docs</strong>");
   });
 
   it("does not auto-link a URL label before the destination is complete", () => {
-    const parser = createAssistantMarkdownParser({ streaming: true });
+    const parser = streamingAssistantMarkdownParser;
     expect(parser.renderInline("Read [example.com](https://exam")).toBe("Read example.com");
     expect(parser.renderInline("Read [example.com](https://example.org)")).toBe(
       'Read <a href="https://example.org">example.com</a>',
@@ -106,8 +107,8 @@ describe("createAssistantMarkdownParser", () => {
     "$$price",
     "20~25",
   ])("preserves literal and complete inline text: %s", (source) => {
-    expect(createAssistantMarkdownParser({ streaming: true }).renderInline(source)).toBe(
-      createAssistantMarkdownParser().renderInline(source),
+    expect(streamingAssistantMarkdownParser.renderInline(source)).toBe(
+      assistantMarkdownParser.renderInline(source),
     );
   });
 
@@ -118,19 +119,19 @@ describe("createAssistantMarkdownParser", () => {
     "**earlier\n\nplain tail",
     "- **earlier\n- plain tail",
   ])("leaves literal code and earlier blocks alone: %s", (source) => {
-    expect(createAssistantMarkdownParser({ streaming: true }).render(source)).toBe(
-      createAssistantMarkdownParser().render(source),
+    expect(streamingAssistantMarkdownParser.render(source)).toBe(
+      assistantMarkdownParser.render(source),
     );
   });
 
   it("completes inline formatting inside the final list item", () => {
-    expect(createAssistantMarkdownParser({ streaming: true }).render("- first\n- **bold")).toBe(
+    expect(streamingAssistantMarkdownParser.render("- first\n- **bold")).toBe(
       "<ul>\n<li>first</li>\n<li><strong>bold</strong></li>\n</ul>\n",
     );
   });
 
   it("hides incomplete images until their source is complete", () => {
-    const parser = createAssistantMarkdownParser({ streaming: true });
+    const parser = streamingAssistantMarkdownParser;
     expect(parser.renderInline("before ![alt](https://exam")).toBe("before ");
     expect(parser.renderInline("before ![alt](https://example.com/image.png)")).toBe(
       'before <img src="https://example.com/image.png" alt="alt">',
@@ -138,13 +139,13 @@ describe("createAssistantMarkdownParser", () => {
   });
 
   it("keeps ordinary parsing for completed messages", () => {
-    const parser = createAssistantMarkdownParser();
+    const parser = assistantMarkdownParser;
     expect(parser.renderInline("**unfinished")).toBe("**unfinished");
     expect(parser.renderInline("[unfinished")).toBe("[unfinished");
   });
 
   it("renders agent text verbatim", () => {
-    const parser = createAssistantMarkdownParser();
+    const parser = assistantMarkdownParser;
 
     // The reported bug, plus the substitutions that share its cause.
     expect(parser.renderInline("(c) (C) (r) (tm) (p)")).toBe("(c) (C) (r) (tm) (p)");
@@ -156,13 +157,13 @@ describe("createAssistantMarkdownParser", () => {
   });
 
   it("allows file:// links, unlike every other parser", () => {
-    const parser = createAssistantMarkdownParser();
+    const parser = assistantMarkdownParser;
 
     expect(parser.render("[open](file:///tmp/a.ts)")).toContain('href="file:///tmp/a.ts"');
   });
 
   it("still rejects javascript: links", () => {
-    const parser = createAssistantMarkdownParser();
+    const parser = assistantMarkdownParser;
 
     expect(parser.render("[x](javascript:alert(1))")).not.toContain("href");
   });

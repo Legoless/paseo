@@ -71,7 +71,10 @@ import type { MarkdownPhase } from "@/components/markdown/fence/types";
 import { splitMarkdownBlocks } from "@/utils/split-markdown-blocks";
 import { useRevealedText } from "@/hooks/use-revealed-text";
 import { colorMarkdownLinkChildren } from "@/components/markdown/link-children";
-import { createAssistantMarkdownParser } from "@/utils/assistant-markdown-parser";
+import {
+  assistantMarkdownParser,
+  streamingAssistantMarkdownParser,
+} from "@/utils/assistant-markdown-parser";
 import { formatDuration, formatMessageTimestamp } from "@/utils/time";
 import { writeMarkdownToRichClipboard } from "@/utils/rich-clipboard";
 import { getDefaultMarkdownClipboardEnvironment } from "@/utils/rich-clipboard-default-environment";
@@ -1488,11 +1491,6 @@ export const AssistantMessage = memo(function AssistantMessage({
   phase,
 }: AssistantMessageProps) {
   const { t } = useTranslation();
-  const markdownParser = useMemo(createAssistantMarkdownParser, []);
-  const streamingMarkdownParser = useMemo(
-    () => createAssistantMarkdownParser({ streaming: true }),
-    [],
-  );
   const renderedMessage = useMemo(
     () =>
       renderFullContent ? { text: message, capped: false } : capAssistantMessageForRender(message),
@@ -1785,7 +1783,7 @@ export const AssistantMessage = memo(function AssistantMessage({
           );
         }
 
-        const inlineCodeLinkUrl = getInlineCodeAutoLinkUrl(markdownParser, content);
+        const inlineCodeLinkUrl = getInlineCodeAutoLinkUrl(assistantMarkdownParser, content);
         if (inlineCodeLinkUrl) {
           const source = getInlineCodeAutoLinkSource({
             href: inlineCodeLinkUrl,
@@ -1940,7 +1938,7 @@ export const AssistantMessage = memo(function AssistantMessage({
         );
       },
     };
-  }, [client, fileLinkActions, markdownParser, occurrenceKey, phase, serverId, workspaceRoot]);
+  }, [client, fileLinkActions, occurrenceKey, phase, serverId, workspaceRoot]);
 
   const blocks = useMemo(() => splitMarkdownBlocks(revealedMessage), [revealedMessage]);
   const keyedBlocks = useMemo(
@@ -1983,8 +1981,8 @@ export const AssistantMessage = memo(function AssistantMessage({
             rules={markdownRules}
             parser={
               phase === "streaming" && index === keyedBlocks.length - 1
-                ? streamingMarkdownParser
-                : markdownParser
+                ? streamingAssistantMarkdownParser
+                : assistantMarkdownParser
             }
             onLinkPress={handleMarkdownLinkPress}
           />
