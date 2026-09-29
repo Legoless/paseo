@@ -446,6 +446,40 @@ describe("catalog host facts", () => {
     await expect(thinkingIds()).resolves.not.toContain("ultracode");
   });
 
+  it("records the effort Claude applies to each model when none is chosen", async () => {
+    const applied: Record<string, string> = { default: "xhigh", sonnet: "low", haiku: "medium" };
+    let current = "default";
+    const discovered = [
+      { ...futureModel, value: "default", resolvedModel: undefined },
+      { ...futureModel, value: "sonnet", resolvedModel: undefined },
+      { ...futureModel, value: "haiku", resolvedModel: undefined },
+    ];
+    const probe = {
+      supportedModels: vi.fn(async () => discovered),
+      setModel: vi.fn(async (model?: string) => {
+        current = model ?? "default";
+      }),
+      getSettings: vi.fn(async () => ({ applied: { effort: applied[current] } })),
+      close: vi.fn(),
+    };
+    const client = new ClaudeAgentClient({
+      logger: createTestLogger(),
+      configDir: await configDirectory(),
+      resolveBinary: async () => "/test/claude",
+      queryFactory: vi.fn(() => probe as unknown as Query),
+      resolveVersion: async () => "2.1.284",
+    });
+
+    const { models } = await client.fetchCatalog(refresh);
+
+    // haiku runs at "medium", which it does not offer, so it stays unlabeled.
+    expect(models.map((model) => [model.id, model.providerDefaultThinkingOptionId])).toEqual([
+      ["default", "xhigh"],
+      ["sonnet", "low"],
+      ["haiku", undefined],
+    ]);
+  });
+
   it("records the settings.json ultracode value with the catalog", async () => {
     const client = new ClaudeAgentClient({
       logger: createTestLogger(),

@@ -89,6 +89,8 @@ export interface AgentModelDefinition {
   contextWindowMaxTokens?: number;
   thinkingOptions?: AgentSelectOption[];
   defaultThinkingOptionId?: string;
+  /** Display only: the thinking option the provider itself applies when none is chosen. */
+  providerDefaultThinkingOptionId?: string;
 }
 
 export interface AgentSelectOption {

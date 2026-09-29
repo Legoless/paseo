@@ -69,6 +69,7 @@ import type {
 } from "@getpaseo/protocol/agent-types";
 import type { AgentProviderDefinition } from "@getpaseo/protocol/provider-manifest";
 import {
+  formatDefaultThinkingLabel,
   getFeatureHighlightColor,
   getFeatureTooltip,
   getAgentControlHintKey,
@@ -128,6 +129,7 @@ interface ControlledAgentControlsProps {
   onSelectProviderAndModel?: (provider: string, modelId: string) => void;
   thinkingOptions?: AgentControlOption[];
   selectedThinkingOptionId?: string;
+  providerDefaultThinkingOptionId?: string;
   onSelectThinkingOption?: (thinkingOptionId: string) => void;
   disabled?: boolean;
   isModelLoading?: boolean;
@@ -498,6 +500,7 @@ function ControlledAgentControls({
   onSelectProviderAndModel,
   thinkingOptions,
   selectedThinkingOptionId,
+  providerDefaultThinkingOptionId,
   onSelectThinkingOption,
   disabled = false,
   isModelLoading = false,
@@ -553,7 +556,11 @@ function ControlledAgentControls({
   const displayThinking = findOptionLabel(
     formattedThinkingOptions,
     selectedThinkingOptionId,
-    t("providerSelection.defaultModel"),
+    formatDefaultThinkingLabel(
+      t("providerSelection.defaultModel"),
+      formattedThinkingOptions,
+      providerDefaultThinkingOptionId,
+    ),
   );
 
   const hasAnyControl = resolveHasAnyControl({
@@ -1930,6 +1937,9 @@ export const AgentControls = memo(function AgentControls({
         onEditAgentProfile={profileActions.edit}
         thinkingOptions={thinkingOptions.length > 0 ? thinkingOptions : undefined}
         selectedThinkingOptionId={modelSelection.selectedThinkingId ?? undefined}
+        providerDefaultThinkingOptionId={
+          modelSelection.selectedModel?.providerDefaultThinkingOptionId
+        }
         onSelectThinkingOption={handleSelectThinkingOption}
         features={agent.features}
         onSetFeature={handleSetFeature}
@@ -2072,6 +2082,7 @@ export function DraftAgentControls({
         onEditAgentProfile={profileActions.edit}
         thinkingOptions={mappedThinkingOptions.length > 0 ? mappedThinkingOptions : undefined}
         selectedThinkingOptionId={effectiveSelectedThinkingOption}
+        providerDefaultThinkingOptionId={selectedModelDefinition?.providerDefaultThinkingOptionId}
         onSelectThinkingOption={onSelectThinkingOption}
         features={features}
         onSetFeature={onSetFeature}
