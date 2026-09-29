@@ -7,6 +7,7 @@ import type {
 
 export const PLAN_MODE_FEATURE_ID = "plan_mode";
 export const FAST_MODE_FEATURE_ID = "fast_mode";
+export const ULTRACODE_FEATURE_ID = "ultracode";
 
 export function filterAgentModesForModel(
   modes: AgentMode[],

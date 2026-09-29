@@ -2,7 +2,11 @@ import type { AgentFeature, AgentModelDefinition } from "@getpaseo/protocol/agen
 import { normalizeAgentModelDefinition } from "@getpaseo/protocol/agent-types";
 import { i18n } from "@/i18n/i18next";
 import { formatThinkingOptionLabel } from "@/agent-controls/labels";
-import { FAST_MODE_FEATURE_ID, PLAN_MODE_FEATURE_ID } from "@/agent-controls/policy";
+import {
+  FAST_MODE_FEATURE_ID,
+  PLAN_MODE_FEATURE_ID,
+  ULTRACODE_FEATURE_ID,
+} from "@/agent-controls/policy";
 
 export type ExplainedAgentControl = "mode" | "model" | "thinking";
 export type FeatureHighlightColor = "blue" | "default" | "green" | "yellow";
@@ -43,6 +47,7 @@ export function getFeatureHighlightColor(featureId: string): FeatureHighlightCol
     case "auto_accept":
       return "green";
     case PLAN_MODE_FEATURE_ID:
+    case ULTRACODE_FEATURE_ID:
       return "blue";
     default:
       return "default";

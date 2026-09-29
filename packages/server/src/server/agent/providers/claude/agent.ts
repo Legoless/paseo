@@ -60,7 +60,12 @@ import {
   parseClaudeWorkflowRun,
 } from "./subagents/workflow-replay-source.js";
 import { readClaudeWorkflowResultFile } from "./subagents/workflow-output.js";
-import { buildClaudeFeatures, claudeModelSupportsFastMode } from "./feature-definitions.js";
+import {
+  buildClaudeFeatures,
+  claudeModelSupportsFastMode,
+  claudeModelSupportsUltracode,
+  resolveClaudeUltracode,
+} from "./feature-definitions.js";
 import {
   buildBinaryDiagnosticRows,
   buildCommandResolutionDiagnosticRows,
@@ -404,6 +409,7 @@ interface ClaudeAgentClientOptions {
   runtimeSettings?: ProviderRuntimeSettings;
   queryFactory?: ClaudeQueryFactory;
   resolveBinary?: () => Promise<string>;
+  resolveVersion?: (signal?: AbortSignal) => Promise<string>;
   configDir?: string;
 }
 
@@ -467,14 +473,25 @@ function isClaudeThinkingEffort(value: string | null | undefined): value is Clau
   );
 }
 
+function claudeThinkingOptionAvailable(
+  model: AgentModelDefinition | undefined,
+  thinkingOptionId: string,
+): boolean {
+  const options = model?.thinkingOptions;
+  if (options?.some((option) => option.id === thinkingOptionId)) return true;
+  if (options === undefined && isClaudeThinkingEffort(thinkingOptionId)) return true;
+  // COMPAT(claudeUltracodeThinking): see resolveClaudeUltracode.
+  return (
+    thinkingOptionId === CLAUDE_ULTRACODE_THINKING_OPTION_ID && claudeModelSupportsUltracode(model)
+  );
+}
+
 function assertClaudeThinkingOptionSupported(
   model: AgentModelDefinition | undefined,
   thinkingOptionId: string | null | undefined,
 ): void {
   if (!thinkingOptionId || thinkingOptionId === "default") return;
-  const options = model?.thinkingOptions;
-  if (options?.some((option) => option.id === thinkingOptionId)) return;
-  if (options === undefined && isClaudeThinkingEffort(thinkingOptionId)) return;
+  if (claudeThinkingOptionAvailable(model, thinkingOptionId)) return;
   throw new Error(
     `Thinking option '${thinkingOptionId}' is not available for model '${model?.id ?? "default"}'`,
   );
@@ -1507,6 +1524,8 @@ export class ClaudeAgentClient implements AgentClient {
   private readonly runtimeSettings?: ProviderRuntimeSettings;
   private readonly queryFactory?: ClaudeQueryFactory;
   private readonly resolveBinary: () => Promise<string>;
+  private readonly resolveVersionFn?: (signal?: AbortSignal) => Promise<string>;
+  private lastClaudeCodeVersion: string | null = null;
   private readonly modelCatalogs = new Map<string, AgentModelDefinition[]>();
   private suppliedModelCatalog: AgentModelDefinition[] | null = null;
   private readonly configDir?: string;
@@ -1517,7 +1536,22 @@ export class ClaudeAgentClient implements AgentClient {
     this.runtimeSettings = options.runtimeSettings;
     this.queryFactory = options.queryFactory;
     this.resolveBinary = options.resolveBinary ?? (() => resolveClaudeBinary(this.runtimeSettings));
+    this.resolveVersionFn = options.resolveVersion;
     this.configDir = options.configDir ?? this.runtimeSettings?.env?.CLAUDE_CONFIG_DIR;
+  }
+
+  // Probed with every catalog so an in-place Claude Code update applies on the next refresh; a
+  // failed probe keeps the last known version rather than dropping ultracode to legacy mode.
+  private async probeClaudeCodeVersion(signal?: AbortSignal): Promise<string | null> {
+    try {
+      this.lastClaudeCodeVersion = this.resolveVersionFn
+        ? await this.resolveVersionFn(signal)
+        : await resolveClaudeCodeVersion(this.runtimeSettings, signal, this.resolveBinary);
+    } catch (error) {
+      signal?.throwIfAborted();
+      this.logger.warn({ err: error }, "Failed to resolve Claude Code version");
+    }
+    return this.lastClaudeCodeVersion;
   }
 
   setModelCatalog(models: AgentModelDefinition[], options?: FetchCatalogOptions): void {
@@ -1610,6 +1644,9 @@ export class ClaudeAgentClient implements AgentClient {
     options: FetchCatalogOptions,
     context?: ProviderRefreshContext,
   ): Promise<ProviderCatalog> {
+    const version = await runProviderRefreshActivity(context, "version", () =>
+      this.probeClaudeCodeVersion(context?.signal),
+    );
     const nativeModels = await runProviderRefreshActivity(context, "models", () =>
       discoverClaudeModels({
         cwd: options.scope === "workspace" ? options.cwd : os.homedir(),
@@ -1621,7 +1658,9 @@ export class ClaudeAgentClient implements AgentClient {
       }),
     );
     const models = await runProviderRefreshActivity(context, "settings", () =>
-      getClaudeModelsWithSettings(this.logger, this.configDir, nativeModels),
+      getClaudeModelsWithSettings(this.logger, this.configDir, nativeModels, {
+        claudeCodeVersion: version,
+      }),
     );
     return {
       models,
@@ -1651,7 +1690,7 @@ export class ClaudeAgentClient implements AgentClient {
     await this.ensureModelCatalog(config.cwd);
     return buildClaudeFeatures({
       model: findClaudeModel(this.getModelCatalog(config.cwd), config.model),
-      fastModeEnabled: config.featureValues?.fast_mode === true,
+      config,
     });
   }
 
@@ -1755,16 +1794,13 @@ async function resolveClaudeBinary(runtimeSettings?: ProviderRuntimeSettings): P
 export async function resolveClaudeCodeVersion(
   runtimeSettings?: ProviderRuntimeSettings,
   signal?: AbortSignal,
+  resolveBinary?: () => Promise<string>,
 ): Promise<string> {
   const launch = await resolveProviderLaunch({
     commandConfig: runtimeSettings?.command,
     defaultBinary: "claude",
   });
-  const availability = await checkProviderLaunchAvailable(launch);
-  if (!availability.available) {
-    throw new Error("Claude binary not found while resolving Claude Code version");
-  }
-  const executable = availability.resolvedPath ?? launch.command;
+  const executable = await (resolveBinary ?? (() => resolveClaudeBinary(runtimeSettings)))();
   const { stdout, stderr } = await execCommand(executable, [...launch.args, "--version"], {
     ...createProviderEnvSpec({ runtimeSettings }),
     timeout: 5_000,
@@ -2204,10 +2240,7 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   get features(): AgentFeature[] {
-    return buildClaudeFeatures({
-      model: this.modelDefinition,
-      fastModeEnabled: this.config.featureValues?.fast_mode === true,
-    });
+    return buildClaudeFeatures({ model: this.modelDefinition, config: this.config });
   }
 
   async getRuntimeInfo(): Promise<AgentRuntimeInfo> {
@@ -2530,6 +2563,12 @@ class ClaudeAgentSession implements AgentSession {
     ) {
       await this.applyFastModeFeature(false, activeQuery);
     }
+    // Claude keeps ultracode across models but only runs it on capable ones; resend Paseo's
+    // choice so a capable model does not pick up a settings.json value instead.
+    const ultracode = resolveClaudeUltracode(this.modelDefinition, this.config);
+    if (ultracode !== null && claudeModelSupportsUltracode(this.modelDefinition)) {
+      await activeQuery.applyFlagSettings({ ultracode });
+    }
     this.contextUsage.setInitialContextWindowMaxTokens(
       this.modelDefinition?.contextWindowMaxTokens,
     );
@@ -2542,9 +2581,7 @@ class ClaudeAgentSession implements AgentSession {
 
   private reconcileThinkingOptionForModel(): void {
     const id = this.config.thinkingOptionId;
-    const options = this.modelDefinition?.thinkingOptions;
-    if (!id || options?.some((option) => option.id === id)) return;
-    if (options === undefined && isClaudeThinkingEffort(id)) return;
+    if (!id || claudeThinkingOptionAvailable(this.modelDefinition, id)) return;
     this.config.thinkingOptionId = undefined;
     this.queryRestartNeeded = true;
     this.pushEvent({ type: "thinking_option_changed", provider: "claude", thinkingOptionId: null });
@@ -2569,18 +2606,32 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   async setFeature(featureId: string, value: unknown): Promise<void> {
-    if (featureId !== "fast_mode") {
-      throw new Error(`Unknown Claude feature: ${featureId}`);
+    if (featureId === "fast_mode") {
+      const enabled = Boolean(value);
+      if (enabled && !claudeModelSupportsFastMode(this.modelDefinition)) {
+        throw new Error(
+          `Claude fast mode is not available for model '${this.config.model ?? "default"}'`,
+        );
+      }
+      await this.applyFastModeFeature(enabled);
+      return;
     }
 
-    const enabled = Boolean(value);
-    if (enabled && !claudeModelSupportsFastMode(this.modelDefinition)) {
-      throw new Error(
-        `Claude fast mode is not available for model '${this.config.model ?? "default"}'`,
-      );
+    if (featureId === "ultracode") {
+      if (typeof value !== "boolean") {
+        throw new Error("Claude ultra code must be set to true or false");
+      }
+      const enabled = value;
+      if (enabled && !claudeModelSupportsUltracode(this.modelDefinition)) {
+        throw new Error(
+          `Claude ultra code is not available for model '${this.config.model ?? "default"}'`,
+        );
+      }
+      await this.applyUltracodeFeature(enabled);
+      return;
     }
 
-    await this.applyFastModeFeature(enabled);
+    throw new Error(`Unknown Claude feature: ${featureId}`);
   }
 
   private async applyFastModeFeature(enabled: boolean, query?: Query): Promise<void> {
@@ -2592,6 +2643,15 @@ class ClaudeAgentSession implements AgentSession {
     if (activeQuery) {
       await activeQuery.applyFlagSettings({ fastMode: enabled });
     }
+    this.cachedRuntimeInfo = null;
+  }
+
+  private async applyUltracodeFeature(enabled: boolean): Promise<void> {
+    this.config.featureValues = {
+      ...this.config.featureValues,
+      ultracode: enabled,
+    };
+    await this.query?.applyFlagSettings({ ultracode: enabled });
     this.cachedRuntimeInfo = null;
   }
 
@@ -3318,7 +3378,6 @@ class ClaudeAgentSession implements AgentSession {
   private resolveThinkingConfig(): {
     thinking: ClaudeOptions["thinking"];
     effort: ClaudeOptions["effort"];
-    ultracode: boolean;
   } {
     const thinkingOptionId =
       this.config.thinkingOptionId && this.config.thinkingOptionId !== "default"
@@ -3326,7 +3385,7 @@ class ClaudeAgentSession implements AgentSession {
         : undefined;
     assertClaudeThinkingOptionSupported(this.modelDefinition, thinkingOptionId);
     if (thinkingOptionId === CLAUDE_DISABLED_THINKING_OPTION_ID) {
-      return { thinking: { type: "disabled" }, effort: undefined, ultracode: false };
+      return { thinking: { type: "disabled" }, effort: undefined };
     }
     if (thinkingOptionId === CLAUDE_ULTRACODE_THINKING_OPTION_ID) {
       return {
@@ -3334,7 +3393,6 @@ class ClaudeAgentSession implements AgentSession {
           ? { type: "adaptive" }
           : undefined,
         effort: "xhigh",
-        ultracode: true,
       };
     }
     if (thinkingOptionId) {
@@ -3344,10 +3402,9 @@ class ClaudeAgentSession implements AgentSession {
           : undefined,
         // The native catalog may advertise values ahead of the bundled SDK types.
         effort: thinkingOptionId as ClaudeOptions["effort"],
-        ultracode: false,
       };
     }
-    return { thinking: undefined, effort: undefined, ultracode: false };
+    return { thinking: undefined, effort: undefined };
   }
 
   private buildAppendedSystemPrompt(): string {
@@ -3365,13 +3422,13 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   private async buildOptions(): Promise<ClaudeOptions> {
-    const { thinking, effort, ultracode } = this.resolveThinkingConfig();
+    const { thinking, effort } = this.resolveThinkingConfig();
     const appendedSystemPrompt = this.buildAppendedSystemPrompt();
     const providerOptions = applyClaudeToolPolicy(
       this.config.providerOptions,
       this.config.toolPolicy,
     );
-    const settingsOptions = this.buildSettingsOptions(providerOptions, { ultracode });
+    const settingsOptions = this.buildSettingsOptions(providerOptions);
     const sdkEnv = this.buildSdkEnv();
     assertClaudeModeCanRun(this.currentMode, sdkEnv, this.modelDefinition);
 
@@ -3460,16 +3517,16 @@ class ClaudeAgentSession implements AgentSession {
 
   private buildSettingsOptions(
     providerOptions: ClaudeProviderOptions,
-    input: { ultracode: boolean },
   ): Pick<ClaudeOptions, "settings"> | Record<string, never> {
     const fastMode = this.resolveFastModeSetting();
-    if (fastMode === null && !input.ultracode) {
+    const ultracode = resolveClaudeUltracode(this.modelDefinition, this.config);
+    if (fastMode === null && ultracode === null) {
       return {};
     }
     return {
       settings: mergeClaudeSettings(providerOptions.settings, {
         ...(fastMode === null ? {} : { fastMode }),
-        ...(input.ultracode ? { ultracode: true } : {}),
+        ...(ultracode === null ? {} : { ultracode }),
       }),
     };
   }

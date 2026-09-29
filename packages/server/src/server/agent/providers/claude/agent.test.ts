@@ -846,6 +846,257 @@ describe("ClaudeAgentSession features", () => {
     await session.close();
   });
 
+  const ultracodeFlagCli = { claudeCodeVersion: "2.1.284" };
+  const noXhighModel = {
+    value: "claude-no-xhigh",
+    displayName: "No xhigh",
+    description: "Model without xhigh effort",
+    supportsEffort: true,
+    supportedEffortLevels: ["low", "medium", "high"],
+  } satisfies ModelInfo;
+
+  async function startQuery(session: unknown): Promise<void> {
+    await (session as { ensureQuery(): Promise<unknown> }).ensureQuery();
+  }
+
+  function ultracodeValue(session: { features?: { id: string; value: unknown }[] }): unknown {
+    return session.features?.find((feature) => feature.id === "ultracode")?.value;
+  }
+
+  test("offers Ultra Code as a toggle only on Claude Code >= 2.1.284", async () => {
+    const config = { provider: "claude" as const, cwd: process.cwd(), model: "claude-opus-4-8" };
+    const client = new ClaudeAgentClient({ logger, ...ultracodeFlagCli });
+    await expect(client.listFeatures(config)).resolves.toEqual([
+      expect.objectContaining({ id: "fast_mode", value: false }),
+      expect.objectContaining({
+        id: "ultracode",
+        type: "toggle",
+        label: "Ultra Code",
+        value: false,
+      }),
+    ]);
+
+    const legacyClient = new ClaudeAgentClient({ logger, claudeCodeVersion: "2.1.283" });
+    await expect(legacyClient.listFeatures(config)).resolves.toEqual([
+      expect.objectContaining({ id: "fast_mode", value: false }),
+    ]);
+  });
+
+  test("launches ultracode at the chosen effort on Claude Code >= 2.1.284", async () => {
+    const { queryFactory } = createQueryMock();
+    const client = new ClaudeAgentClient({ logger, queryFactory, ...ultracodeFlagCli });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: "claude-opus-4-8",
+      thinkingOptionId: "medium",
+      featureValues: { ultracode: true },
+    });
+
+    await startQuery(session);
+
+    expect(queryFactory.mock.calls[0]?.[0].options).toMatchObject({
+      effort: "medium",
+      settings: { ultracode: true },
+    });
+    await session.close();
+  });
+
+  test("leaves ultracode to Claude settings until the user picks a value", async () => {
+    const { queryFactory, queryMock } = createQueryMock();
+    const client = new ClaudeAgentClient({
+      logger,
+      queryFactory,
+      ...ultracodeFlagCli,
+      settingsUltracode: true,
+    });
+    const untouched = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: "claude-opus-4-8",
+    });
+    const turnedOff = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: "claude-opus-4-8",
+      featureValues: { ultracode: false },
+    });
+
+    await startQuery(untouched);
+    await startQuery(turnedOff);
+
+    expect(ultracodeValue(untouched)).toBe(true);
+    expect(queryFactory.mock.calls[0]?.[0].options.settings).not.toHaveProperty("ultracode");
+    expect(queryMock.applyFlagSettings).not.toHaveBeenCalledWith(
+      expect.objectContaining({ ultracode: expect.anything() }),
+    );
+    expect(ultracodeValue(turnedOff)).toBe(false);
+    expect(queryFactory.mock.calls[1]?.[0].options.settings).toMatchObject({ ultracode: false });
+    await untouched.close();
+    await turnedOff.close();
+  });
+
+  test("toggles ultracode on the running query without a restart", async () => {
+    const { queryFactory, queryMock } = createQueryMock();
+    const client = new ClaudeAgentClient({ logger, queryFactory, ...ultracodeFlagCli });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: "claude-opus-4-8",
+    });
+
+    await startQuery(session);
+    await session.setFeature?.("ultracode", true);
+    expect(queryMock.applyFlagSettings).toHaveBeenLastCalledWith({ ultracode: true });
+    await session.setFeature?.("ultracode", false);
+    expect(queryMock.applyFlagSettings).toHaveBeenLastCalledWith({ ultracode: false });
+
+    expect(queryFactory).toHaveBeenCalledTimes(1);
+    await session.close();
+  });
+
+  test("runs a saved ultracode thinking option as xhigh plus ultracode on Claude Code >= 2.1.284", async () => {
+    const { queryFactory } = createQueryMock();
+    const client = new ClaudeAgentClient({ logger, queryFactory, ...ultracodeFlagCli });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: "claude-opus-4-8",
+      thinkingOptionId: "ultracode",
+    });
+
+    await startQuery(session);
+
+    expect(ultracodeValue(session)).toBe(true);
+    expect(queryFactory.mock.calls[0]?.[0].options).toMatchObject({
+      effort: "xhigh",
+      settings: { ultracode: true },
+    });
+    await session.close();
+  });
+
+  test("keeps ultracode off after resuming a saved ultracode agent the user turned off", async () => {
+    const { queryFactory } = createQueryMock();
+    const client = new ClaudeAgentClient({ logger, queryFactory, ...ultracodeFlagCli });
+    const session = await client.resumeSession(
+      { provider: "claude", sessionId: "persisted-session", metadata: { cwd: process.cwd() } },
+      {
+        cwd: process.cwd(),
+        model: "claude-opus-4-8",
+        thinkingOptionId: "ultracode",
+        featureValues: { ultracode: false },
+      },
+    );
+
+    await startQuery(session);
+
+    expect(ultracodeValue(session)).toBe(false);
+    expect(queryFactory.mock.calls[0]?.[0].options).toMatchObject({
+      effort: "xhigh",
+      settings: { ultracode: false },
+    });
+    await session.close();
+  });
+
+  function flagCatalogClient(queryFactory?: ReturnType<typeof createQueryMock>["queryFactory"]) {
+    const client = new ClaudeAgentClient({ logger, queryFactory, ...ultracodeFlagCli });
+    client.setModelCatalog(
+      mapClaudeModels(
+        [
+          {
+            value: "claude-opus-4-8",
+            displayName: "Claude Opus 4.8",
+            description: "Test model",
+            supportsEffort: true,
+            supportedEffortLevels: ["low", "medium", "high", "xhigh"],
+          },
+          noXhighModel,
+        ],
+        ultracodeFlagCli,
+      ),
+    );
+    return client;
+  }
+
+  test("accepts the ultracode thinking option from older clients on Claude Code >= 2.1.284", async () => {
+    const client = flagCatalogClient();
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: "claude-opus-4-8",
+    });
+    const noXhigh = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: noXhighModel.value,
+    });
+
+    await expect(session.setThinkingOption?.("ultracode")).resolves.toBeUndefined();
+    expect(ultracodeValue(session)).toBe(true);
+    await expect(noXhigh.setThinkingOption?.("ultracode")).rejects.toThrow(
+      "Thinking option 'ultracode' is not available",
+    );
+    await session.close();
+    await noXhigh.close();
+  });
+
+  test("only rejects turning ultracode on where it is unavailable", async () => {
+    const session = await flagCatalogClient().createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: noXhighModel.value,
+    });
+
+    await expect(session.setFeature?.("ultracode", false)).resolves.toBeUndefined();
+    await expect(session.setFeature?.("ultracode", true)).rejects.toThrow(
+      "Claude ultra code is not available",
+    );
+    await expect(session.setFeature?.("ultracode", "false")).rejects.toThrow(
+      "must be set to true or false",
+    );
+    await session.close();
+  });
+
+  test("keeps an explicit ultracode off when the host looks older than 2.1.284", async () => {
+    const { queryFactory } = createQueryMock();
+    const client = new ClaudeAgentClient({ logger, queryFactory, claudeCodeVersion: null });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: "claude-opus-4-8",
+      thinkingOptionId: "ultracode",
+      featureValues: { ultracode: false },
+    });
+
+    await startQuery(session);
+
+    expect(queryFactory.mock.calls[0]?.[0].options).toMatchObject({
+      effort: "xhigh",
+      settings: { ultracode: false },
+    });
+    await session.close();
+  });
+
+  test("keeps the ultracode choice across a switch to a model without it", async () => {
+    const { queryFactory, queryMock } = createQueryMock();
+    const session = await flagCatalogClient(queryFactory).createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: "claude-opus-4-8",
+      featureValues: { ultracode: true },
+    });
+    await startQuery(session);
+
+    await session.setModel(noXhighModel.value);
+    expect(ultracodeValue(session)).toBeUndefined();
+    expect(queryMock.applyFlagSettings).not.toHaveBeenCalledWith({ ultracode: false });
+
+    await session.setModel("claude-opus-4-8");
+    expect(queryMock.applyFlagSettings).toHaveBeenLastCalledWith({ ultracode: true });
+    expect(ultracodeValue(session)).toBe(true);
+    await session.close();
+  });
+
   async function captureSdkUserMessage(prompt: AgentPromptInput): Promise<SDKUserMessage> {
     const { queryFactory, queryMock } = createQueryMock();
     let resolveSent: ((message: SDKUserMessage) => void) | null = null;

@@ -13,8 +13,36 @@ import { claudeQuery, type ClaudeQueryFactory } from "./query.js";
 
 export const CLAUDE_DISABLED_THINKING_OPTION_ID = "off";
 export const CLAUDE_ULTRACODE_THINKING_OPTION_ID = "ultracode";
+export const CLAUDE_ULTRACODE_FLAG_MIN_VERSION: readonly [number, number, number] = [2, 1, 284];
 
-export function mapClaudeModels(models: readonly ModelInfo[]): AgentModelDefinition[] {
+/** Host facts discovered with a catalog; every session reads them from its model. */
+export interface ClaudeCatalogFacts {
+  claudeCodeVersion?: string | null;
+  /** `ultracode` from the user's Claude settings.json, which applies when Paseo sends none. */
+  settingsUltracode?: boolean;
+}
+
+export function claudeCodeVersionAtLeast(
+  version: string | null | undefined,
+  min: readonly [number, number, number],
+): boolean {
+  const parsed = version ? parseClaudeCodeVersion(version) : null;
+  if (!parsed) return false;
+  for (let i = 0; i < 3; i += 1) {
+    if (parsed[i] > min[i]) return true;
+    if (parsed[i] < min[i]) return false;
+  }
+  return true;
+}
+
+export function mapClaudeModels(
+  models: readonly ModelInfo[],
+  facts?: ClaudeCatalogFacts,
+): AgentModelDefinition[] {
+  const isFlag = claudeCodeVersionAtLeast(
+    facts?.claudeCodeVersion,
+    CLAUDE_ULTRACODE_FLAG_MIN_VERSION,
+  );
   return models.map((model) => {
     if (
       typeof model.value !== "string" ||
@@ -30,6 +58,8 @@ export function mapClaudeModels(models: readonly ModelInfo[]): AgentModelDefinit
       metadata: {
         claude: model,
         unsupportedModeIds: model.supportsAutoMode === true ? [] : ["auto"],
+        claudeCodeVersion: facts?.claudeCodeVersion ?? null,
+        settingsUltracode: facts?.settingsUltracode === true,
       },
       ...(model.value === "default" ? { isDefault: true } : {}),
       ...(model.resolvedModel && model.resolvedModel !== model.value
@@ -41,7 +71,7 @@ export function mapClaudeModels(models: readonly ModelInfo[]): AgentModelDefinit
         id,
         label: id === "xhigh" ? "Extra High" : id.charAt(0).toUpperCase() + id.slice(1),
       }));
-      if (model.supportedEffortLevels.includes("xhigh")) {
+      if (!isFlag && model.supportedEffortLevels.includes("xhigh")) {
         definition.thinkingOptions.push({
           id: CLAUDE_ULTRACODE_THINKING_OPTION_ID,
           label: "Ultra Code",
@@ -152,30 +182,38 @@ export async function getClaudeModelsWithSettings(
   logger: Logger,
   configDir: string | undefined,
   nativeModels: readonly ModelInfo[],
+  options?: { claudeCodeVersion?: string | null },
 ): Promise<AgentModelDefinition[]> {
-  const models = mapClaudeModels(nativeModels);
-  for (const model of await readClaudeSettingsModels(logger, configDir)) {
+  const settings = await readClaudeSettings(logger, configDir);
+  const models = mapClaudeModels(nativeModels, {
+    claudeCodeVersion: options?.claudeCodeVersion,
+    settingsUltracode: settings?.ultracode === true,
+  });
+  for (const model of claudeSettingsModels(settings)) {
     if (!findClaudeModel(models, model.id)) models.push(model);
   }
   return models;
 }
 
-async function readClaudeSettingsModels(
+async function readClaudeSettings(
   logger: Logger,
   configDir?: string,
-): Promise<AgentModelDefinition[]> {
+): Promise<Record<string, unknown> | null> {
   const settingsPath = path.join(
     configDir ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude"),
     "settings.json",
   );
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(await fs.readFile(settingsPath, "utf8"));
+    const parsed: unknown = JSON.parse(await fs.readFile(settingsPath, "utf8"));
+    return isRecord(parsed) ? parsed : null;
   } catch (error) {
-    logger.debug({ err: error, settingsPath }, "Failed to read Claude settings models");
-    return [];
+    logger.debug({ err: error, settingsPath }, "Failed to read Claude settings");
+    return null;
   }
-  if (!isRecord(parsed)) return [];
+}
+
+function claudeSettingsModels(parsed: Record<string, unknown> | null): AgentModelDefinition[] {
+  if (!parsed) return [];
   const models: AgentModelDefinition[] = [];
   addSettingsModel(models, parsed.model, "model");
   if (isRecord(parsed.env)) {
