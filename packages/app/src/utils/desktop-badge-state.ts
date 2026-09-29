@@ -1,19 +1,24 @@
+import type { AgentStateBucketInput } from "@getpaseo/protocol/agent-state-bucket";
+import { deriveSidebarStateBucket, type SidebarStateBucket } from "@/utils/sidebar-agent-state";
+
 /**
  * Attention accounting shared by the dock badge and the web favicon.
  *
- * Workspace status is not usable here: the daemon reports every workspace as
- * "done" (see `describeWorkspaceRecord` in packages/server/src/server/session.ts),
- * so a workspace-derived count is always zero. Agents carry the real signal —
- * `requiresAttention` is set for the "finished", "error" and "permission"
- * reasons, and pending permissions are counted separately for older daemons.
+ * The badge counts agents by the same bucket the tabs, sidebar and pane glow colour them with, so
+ * every counted agent has an orange, red or green mark somewhere: waiting on a permission, an
+ * error the user has not seen, or a finish the user has not seen. A running agent is counted
+ * once it stops, not while its loader shows.
  */
-export interface DesktopBadgeAgent {
-  requiresAttention?: boolean;
-  pendingPermissionCount?: number;
-}
+export type DesktopBadgeAgent = AgentStateBucketInput;
+
+const BADGE_BUCKETS: ReadonlySet<SidebarStateBucket> = new Set([
+  "needs_input",
+  "failed",
+  "attention",
+]);
 
 export function isAgentActionableForDesktopBadge(agent: DesktopBadgeAgent): boolean {
-  return agent.requiresAttention === true || (agent.pendingPermissionCount ?? 0) > 0;
+  return BADGE_BUCKETS.has(deriveSidebarStateBucket(agent));
 }
 
 export function deriveDockBadgeCountFromAgents(

@@ -5,30 +5,69 @@ import {
 } from "./desktop-badge-state";
 
 describe("desktop-badge-state", () => {
-  it("treats finished, failed and permission-blocked agents as actionable", () => {
-    expect(isAgentActionableForDesktopBadge({ requiresAttention: true })).toBe(true);
-    expect(isAgentActionableForDesktopBadge({ pendingPermissionCount: 2 })).toBe(true);
+  it("counts agents waiting on a permission, an unseen error or an unseen finish", () => {
+    expect(isAgentActionableForDesktopBadge({ status: "idle", pendingPermissionCount: 2 })).toBe(
+      true,
+    );
+    expect(
+      isAgentActionableForDesktopBadge({
+        status: "error",
+        requiresAttention: true,
+        attentionReason: "error",
+      }),
+    ).toBe(true);
+    expect(
+      isAgentActionableForDesktopBadge({
+        status: "idle",
+        requiresAttention: true,
+        attentionReason: "finished",
+      }),
+    ).toBe(true);
   });
 
-  it("ignores agents that are working or already seen", () => {
-    expect(isAgentActionableForDesktopBadge({})).toBe(false);
-    expect(isAgentActionableForDesktopBadge({ requiresAttention: false })).toBe(false);
+  it("ignores agents that are seen, idle or still working", () => {
+    expect(isAgentActionableForDesktopBadge({ status: "idle" })).toBe(false);
+    expect(isAgentActionableForDesktopBadge({ status: "error", requiresAttention: false })).toBe(
+      false,
+    );
     expect(
-      isAgentActionableForDesktopBadge({ requiresAttention: false, pendingPermissionCount: 0 }),
+      isAgentActionableForDesktopBadge({
+        status: "running",
+        requiresAttention: true,
+        attentionReason: "finished",
+      }),
+    ).toBe(false);
+    expect(
+      isAgentActionableForDesktopBadge({
+        status: "idle",
+        backgroundWorkCount: 1,
+        requiresAttention: true,
+        attentionReason: "finished",
+      }),
     ).toBe(false);
   });
 
   it("returns undefined when no agent needs attention", () => {
-    expect(deriveDockBadgeCountFromAgents([{}, { requiresAttention: false }])).toBeUndefined();
+    expect(
+      deriveDockBadgeCountFromAgents([
+        { status: "idle" },
+        { status: "error", requiresAttention: false },
+      ]),
+    ).toBeUndefined();
   });
 
   it("counts each actionable agent once", () => {
     expect(
       deriveDockBadgeCountFromAgents([
-        {},
-        { requiresAttention: true },
-        { requiresAttention: false, pendingPermissionCount: 1 },
-        { requiresAttention: true, pendingPermissionCount: 3 },
+        { status: "idle" },
+        { status: "idle", requiresAttention: true, attentionReason: "finished" },
+        { status: "idle", pendingPermissionCount: 1 },
+        {
+          status: "error",
+          requiresAttention: true,
+          attentionReason: "error",
+          pendingPermissionCount: 3,
+        },
       ]),
     ).toBe(3);
   });
