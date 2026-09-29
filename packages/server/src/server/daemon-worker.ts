@@ -6,7 +6,10 @@ import { resolvePaseoHome } from "./paseo-home.js";
 import { createRootLogger } from "./logger.js";
 import type { DaemonLifecycleIntent } from "./bootstrap.js";
 import { getProcessDiagnostics } from "./process-diagnostics.js";
-import { TERMINAL_HOOK_IDENTITY_ENV_VARS } from "./agent/provider-launch-config.js";
+import {
+  stripInheritedClaudeSessionEnv,
+  TERMINAL_HOOK_IDENTITY_ENV_VARS,
+} from "./agent/provider-launch-config.js";
 
 process.title = "Paseo Daemon";
 
@@ -14,6 +17,9 @@ process.title = "Paseo Daemon";
 // Drop it so nothing the daemon spawns (agents, scripts, services) posts activity
 // into that pane; the daemon's own terminals set their own values.
 for (const key of TERMINAL_HOOK_IDENTITY_ENV_VARS) delete process.env[key];
+// A daemon started from inside Claude Code (an agent, or `open` run from a claude terminal)
+// would otherwise hand that session's identity to every terminal and agent it starts.
+stripInheritedClaudeSessionEnv(process.env);
 
 type SupervisorLifecycleMessage =
   | {

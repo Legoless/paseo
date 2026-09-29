@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   checkProviderLaunchAvailable,
   createProviderEnv,
+  stripInheritedClaudeSessionEnv,
   migrateProviderSettings,
   ProviderOverrideSchema,
   resolveProviderLaunch,
@@ -282,6 +283,42 @@ describe("createProviderEnv", () => {
     expect(env.PASEO_ACTIVITY_TOKEN).toBeUndefined();
     expect(env.PASEO_TERMINAL_ACTIVITY_URL).toBeUndefined();
     expect(env.PASEO_HOOK_CLI).toBeUndefined();
+  });
+});
+
+describe("stripInheritedClaudeSessionEnv", () => {
+  test("removes a parent Claude Code session's identity and injected git editor", () => {
+    const env: Record<string, string | undefined> = {
+      PATH: "/usr/bin",
+      CLAUDECODE: "1",
+      CLAUDE_CODE_CHILD_SESSION: "1",
+      CLAUDE_CODE_SESSION_ID: "b67397df",
+      CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/cc-socks/1.sock",
+      CLAUDE_EFFORT: "xhigh",
+      AI_AGENT: "claude-code_2-1-284_agent",
+      GIT_EDITOR: "true",
+      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1",
+      CLAUDE_CONFIG_DIR: "/Users/me/.claude",
+    };
+
+    stripInheritedClaudeSessionEnv(env);
+
+    expect(env).toEqual({
+      PATH: "/usr/bin",
+      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1",
+      CLAUDE_CONFIG_DIR: "/Users/me/.claude",
+    });
+  });
+
+  test("keeps a git editor the user configured", () => {
+    const fromClaude: Record<string, string | undefined> = { CLAUDECODE: "1", GIT_EDITOR: "vim" };
+    const withoutClaude: Record<string, string | undefined> = { GIT_EDITOR: "true" };
+
+    stripInheritedClaudeSessionEnv(fromClaude);
+    stripInheritedClaudeSessionEnv(withoutClaude);
+
+    expect(fromClaude).toEqual({ GIT_EDITOR: "vim" });
+    expect(withoutClaude).toEqual({ GIT_EDITOR: "true" });
   });
 });
 
