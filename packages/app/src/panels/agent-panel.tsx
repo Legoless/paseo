@@ -58,6 +58,10 @@ import { useArchiveAgent } from "@/hooks/use-archive-agent";
 import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import { reconcileMissingAgentStateWithPresentAgent } from "@/panels/agent-panel-load-state";
 import { TimelineSyncStatus } from "@/timeline/sync-status";
+import {
+  timelineSyncDismissalKey,
+  useTimelineSyncDismissalStore,
+} from "@/stores/timeline-sync-dismissal-store";
 import { usePaneContext, usePaneFocus } from "@/panels/pane-context";
 import { definePanel, type PanelDescriptor } from "@/panels/panel-registry";
 import { RenderProfile } from "@/utils/render-profiler";
@@ -1309,7 +1313,11 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       {streamContent}
 
       {showHistorySyncError ? (
-        <TimelineSyncErrorCallout isRetrying={isRetryingHistorySync} onRetry={retryTimelineSync} />
+        <TimelineSyncErrorCallout
+          dismissalKey={timelineSyncDismissalKey(serverId, agentId)}
+          isRetrying={isRetryingHistorySync}
+          onRetry={retryTimelineSync}
+        />
       ) : null}
     </View>
   );
@@ -1370,17 +1378,20 @@ function ChatSurface({
 }
 
 function TimelineSyncErrorCallout({
+  dismissalKey,
   isRetrying,
   onRetry,
 }: {
+  dismissalKey: string;
   isRetrying: boolean;
   onRetry: () => void;
 }) {
   const { t } = useTranslation();
-  // Mounted only while the sync error shows, so a dismissal lasts until the error clears and the
-  // next error brings the callout back.
-  const [isDismissed, setIsDismissed] = useState(false);
-  const handleDismiss = useCallback(() => setIsDismissed(true), []);
+  const isDismissed = useTimelineSyncDismissalStore((state) =>
+    state.dismissedAgentKeys.includes(dismissalKey),
+  );
+  const dismiss = useTimelineSyncDismissalStore((state) => state.dismiss);
+  const handleDismiss = useCallback(() => dismiss(dismissalKey), [dismiss, dismissalKey]);
   if (isDismissed) return null;
   return (
     <View style={styles.timelineSyncCalloutRail}>
