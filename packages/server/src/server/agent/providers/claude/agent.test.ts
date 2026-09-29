@@ -882,6 +882,26 @@ describe("ClaudeAgentSession features", () => {
     ]);
   });
 
+  test("sends the first turn after a thinking change on a session with no query yet", async () => {
+    const { queryFactory } = createQueryMock();
+    const client = new ClaudeAgentClient({ logger, queryFactory });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: "claude-opus-4-8",
+    });
+    const events: Array<{ type: string }> = [];
+    session.subscribe((event) => events.push(event));
+
+    await session.setThinkingOption?.("high");
+    await session.startTurn("hello");
+
+    expect(events.find((event) => event.type === "turn_failed")).toBeUndefined();
+    expect(queryFactory).toHaveBeenCalledTimes(1);
+    expect(queryFactory.mock.calls[0]?.[0].options.effort).toBe("high");
+    await session.close();
+  });
+
   test("launches ultracode at the chosen effort on Claude Code >= 2.1.284", async () => {
     const { queryFactory } = createQueryMock();
     const client = new ClaudeAgentClient({ logger, queryFactory, ...ultracodeFlagCli });
