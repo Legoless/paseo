@@ -98,6 +98,8 @@ interface WorkerTerminalManagerOptions {
   forkWorker?: () => TerminalWorkerProcess;
   getTerminalActivityUrl?: () => string | null;
   onCreateTerminal?: () => void;
+  /** Where the worker saves terminals created with `persist`. Without it nothing is saved. */
+  recordsDirectory?: string;
 }
 
 function createActivityToken(): string {
@@ -144,8 +146,9 @@ function cloneTerminalInfo(info: RequiredWorkerTerminalInfo): RequiredWorkerTerm
   };
 }
 
-function forkTerminalWorker(): TerminalWorkerProcess {
-  return fork(fileURLToPath(resolveWorkerUrl()), [], {
+function forkTerminalWorker(recordsDirectory: string | undefined): TerminalWorkerProcess {
+  // An argument rather than env: the worker's env is what every shell it spawns inherits.
+  return fork(fileURLToPath(resolveWorkerUrl()), recordsDirectory ? [recordsDirectory] : [], {
     execArgv: resolveWorkerExecArgv(),
     serialization: "advanced",
     stdio: ["ignore", "ignore", "inherit", "ipc"],
@@ -155,7 +158,9 @@ function forkTerminalWorker(): TerminalWorkerProcess {
 export function createWorkerTerminalManager(
   managerOptions: WorkerTerminalManagerOptions = {},
 ): TerminalManager {
-  const worker = managerOptions.forkWorker ? managerOptions.forkWorker() : forkTerminalWorker();
+  const worker = managerOptions.forkWorker
+    ? managerOptions.forkWorker()
+    : forkTerminalWorker(managerOptions.recordsDirectory);
   const requestTimeoutMs = managerOptions.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   const pendingRequests = new Map<string, PendingRequest>();
   const recordsById = new Map<string, WorkerTerminalRecord>();
@@ -796,9 +801,10 @@ export function createWorkerTerminalManager(
       if (!record) {
         return false;
       }
-      // The parent-side mirror is the only place terminal ownership lives; the
-      // worker process never reads workspaceId back.
+      // The parent-side mirror is where live ownership is read. The worker only keeps a copy for
+      // the terminal's saved record.
       record.info = { ...record.info, workspaceId };
+      sendBestEffortRequest({ type: "setWorkspaceId", terminalId: id, workspaceId });
       emitTerminalsChanged({
         cwd: record.info.cwd,
         terminals: listTerminalItemsForCwd(record.info.cwd),
@@ -863,11 +869,12 @@ export function createWorkerTerminalManager(
       return Array.from(terminalIdsByCwd.keys());
     },
 
-    killAll(): void {
-      void sendRequest({ type: "killAll" })
-        .catch(() => {
-          // no-op
-        })
+    killAll(): Promise<void> {
+      const done = sendRequest({ type: "killAll" })
+        .then(
+          () => undefined,
+          () => undefined,
+        )
         .finally(() => {
           if (worker.connected) {
             worker.disconnect();
@@ -881,6 +888,7 @@ export function createWorkerTerminalManager(
       for (const terminalId of Array.from(recordsById.keys())) {
         removeRecord(terminalId);
       }
+      return done;
     },
 
     subscribeTerminalsChanged(listener: TerminalsChangedListener): () => void {
@@ -909,5 +917,5 @@ export function createWorkerTerminalManager(
 }
 
 export function terminateWorkerTerminalManager(manager: TerminalManager): void {
-  manager.killAll();
+  void manager.killAll();
 }

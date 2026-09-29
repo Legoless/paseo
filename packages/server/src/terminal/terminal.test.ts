@@ -1295,6 +1295,127 @@ describe("terminal activity interruption", () => {
   });
 });
 
+describe("terminal restore", () => {
+  // What zsh's shell integration prints at its first prompt: the pane can see commands end.
+  const FIRST_PROMPT = 'process.stdout.write("\\x1b]633;A\\x07");';
+  const CLAUDE_BANNER_SCRIPT = [
+    'process.stdout.write("Claude Code v2.1.284\\r\\n");',
+    "process.stdin.setRawMode(true);",
+    "process.stdin.resume();",
+  ].join(" ");
+  const CLAUDE_SCREEN_SCRIPT = [
+    FIRST_PROMPT,
+    'process.stdout.write("Claude Code v2.1.284\\r\\n");',
+    "process.stdin.setRawMode(true);",
+    'process.stdin.on("data", (chunk) => {',
+    '  if (chunk.toString() === "a") process.stdout.write("\\x1b]633;D;143\\x07killed\\r\\n");',
+    '  if (chunk.toString() === "b") process.stdout.write("\\x1b]633;D;0\\x07ended\\r\\n");',
+    "});",
+  ].join(" ");
+
+  it("seeds restored scrollback above the new process's output", async () => {
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: ["-e", 'process.stdout.write("live-output\\r\\n"); setInterval(() => {}, 1000);'],
+        restore: { seed: "old-output\r\n-- Session restored --\r\n" },
+      }),
+    );
+
+    await waitForState(session, (state) => getLines(state).join("\n").includes("live-output"));
+    const text = getLines(session.getState()).join("\n");
+    expect(text.indexOf("old-output")).toBeLessThan(text.indexOf("Session restored"));
+    expect(text.indexOf("Session restored")).toBeLessThan(text.indexOf("live-output"));
+    expect(session.getActivity()).toBeNull();
+  });
+
+  it("types the resume command into the restored shell and keeps it as the target", async () => {
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: [
+          "-e",
+          `${FIRST_PROMPT} process.stdin.on("data", (chunk) => process.stdout.write("got:" + JSON.stringify(chunk.toString())));`,
+        ],
+        restore: { resume: { agent: "claude", sessionId: "sess-1" } },
+      }),
+    );
+
+    await waitForState(session, (state) =>
+      getLines(state).join("\n").includes("claude --resume sess-1"),
+    );
+    expect(session.getResumeTarget?.()).toEqual({ agent: "claude", sessionId: "sess-1" });
+  });
+
+  it("tracks the owning agent session until the agent's command finishes", async () => {
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: ["-e", CLAUDE_SCREEN_SCRIPT],
+      }),
+    );
+    await waitForState(session, (state) => getLines(state).join("\n").includes("Claude Code"));
+
+    session.setActivity("working", undefined, "sess-outer");
+    // A nested `claude -p` inside the turn reports its own session; it is not the pane's agent.
+    session.setActivity("working", undefined, "sess-nested");
+    session.setActivity("idle", undefined, "sess-outer");
+    expect(session.getResumeTarget?.()).toEqual({ agent: "claude", sessionId: "sess-outer" });
+
+    // Killed by SIGTERM (a reboot): still resumable.
+    session.send({ type: "input", data: "a" });
+    await waitForState(session, (state) => getLines(state).join("\n").includes("killed"));
+    expect(session.getResumeTarget?.()).toEqual({ agent: "claude", sessionId: "sess-outer" });
+
+    session.send({ type: "input", data: "b" });
+    await waitForState(session, (state) => getLines(state).join("\n").includes("ended"));
+    expect(session.getResumeTarget?.()).toBeNull();
+  });
+
+  it("offers no resume target when nothing would show the agent quitting", async () => {
+    // A shell without Paseo's integration (bash, fish, cmd) never reports the agent's exit.
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: ["-e", CLAUDE_BANNER_SCRIPT],
+      }),
+    );
+    await waitForState(session, (state) => getLines(state).join("\n").includes("Claude Code"));
+
+    session.setActivity("working", undefined, "sess-1");
+
+    expect(session.getResumeTarget?.()).toBeNull();
+  });
+
+  it("offers a resume target when the agent is the terminal's own process", async () => {
+    const binDir = mkdtempSync(join(tmpdir(), "terminal-restore-agent-"));
+    temporaryDirs.push(binDir);
+    const fakeClaude = join(binDir, "claude");
+    writeFileSync(fakeClaude, `#!${process.execPath}\n${CLAUDE_BANNER_SCRIPT}\n`);
+    chmodSync(fakeClaude, 0o755);
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        command: fakeClaude,
+      }),
+    );
+    await waitForState(session, (state) => getLines(state).join("\n").includes("Claude Code"));
+
+    session.setActivity("working", undefined, "sess-1");
+
+    expect(session.getResumeTarget?.()).toEqual({ agent: "claude", sessionId: "sess-1" });
+  });
+});
+
 describe("terminal pty activity scanning", () => {
   it("tracks activity without launching a real provider", async () => {
     const session = trackSession(

@@ -12,6 +12,7 @@ import type {
   TerminalActivityState,
 } from "@getpaseo/protocol/terminal-activity";
 import type { CaptureTerminalLinesResult } from "./terminal-capture.js";
+import type { TerminalRestoreInput } from "./terminal-persistence.js";
 
 export interface WorkerTerminalInfo {
   id: string;
@@ -35,6 +36,8 @@ export interface WorkerCreateTerminalOptions {
   cols?: number;
   activityToken?: string;
   activityUrl?: string | null;
+  persist?: boolean;
+  restore?: TerminalRestoreInput;
 }
 
 export interface WorkerKillAndWaitOptions {
@@ -72,6 +75,12 @@ export type TerminalWorkerRequest =
       requestId: string;
       terminalId: string;
       title: string;
+    }
+  | {
+      type: "setWorkspaceId";
+      requestId: string;
+      terminalId: string;
+      workspaceId: string;
     }
   | {
       type: "killTerminal";

@@ -5,6 +5,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createWorkerTerminalManager } from "./worker-terminal-manager.js";
+import { restorePersistedTerminals, writeTerminalRecord } from "./terminal-persistence.js";
+import { createTestLogger } from "../test-utils/test-logger.js";
 import type {
   TerminalActivityTransitionEvent,
   TerminalManager,
@@ -150,7 +152,7 @@ afterEach(async () => {
         .catch(() => {}),
     ),
   );
-  manager?.killAll();
+  await manager?.killAll();
   manager = null;
   while (temporaryDirs.length > 0) {
     const dir = temporaryDirs.pop();
@@ -158,6 +160,166 @@ afterEach(async () => {
       await removeTemporaryDir(dir);
     }
   }
+});
+
+function terminalRecordPath(directory: string, terminalId: string): string {
+  return join(directory, `${encodeURIComponent(terminalId)}.json`);
+}
+
+async function renderedTerminalText(terminals: TerminalManager, id: string): Promise<string> {
+  const snapshot = await terminals.getTerminalState(id);
+  return snapshot ? getRenderedTextFromState(snapshot.state) : "";
+}
+
+it("brings a saved terminal back with its id, title and scrollback after a restart", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "worker-terminal-manager-restore-"));
+  const recordsDirectory = mkdtempSync(join(tmpdir(), "worker-terminal-records-"));
+  temporaryDirs.push(cwd, recordsDirectory);
+  const previousDaemon = createWorkerTerminalManager({ recordsDirectory });
+  const session = await previousDaemon.createTerminal({
+    workspaceId: "ws-test",
+    cwd,
+    persist: true,
+    ...nodeTerminalCommand(
+      'process.stdout.write("restore-marker\\r\\n"); setInterval(() => {}, 1000);',
+    ),
+  });
+  await waitForCondition(
+    async () => (await renderedTerminalText(previousDaemon, session.id)).includes("restore-marker"),
+    10000,
+  );
+  previousDaemon.setTerminalTitle(session.id, "My build");
+  await previousDaemon.killAll();
+
+  expect(
+    JSON.parse(readFileSync(terminalRecordPath(recordsDirectory, session.id), "utf8")),
+  ).toMatchObject({
+    id: session.id,
+    workspaceId: "ws-test",
+    title: "My build",
+    scrollback: expect.stringContaining("restore-marker"),
+  });
+
+  manager = createWorkerTerminalManager({ recordsDirectory });
+  await restorePersistedTerminals({
+    directory: recordsDirectory,
+    terminalManager: manager,
+    activeWorkspaceIds: new Set(["ws-test"]),
+    logger: createTestLogger(),
+  });
+  const restored = manager.getTerminal(session.id);
+  expect(restored).toBeDefined();
+  trackTerminal(restored!);
+  expect(restored!.getTitle()).toBe("My build");
+  const restoredManager = manager;
+  await waitForCondition(async () => {
+    const text = await renderedTerminalText(restoredManager, session.id);
+    return text.includes("restore-marker") && text.includes("Session restored");
+  }, 10000);
+});
+
+it("drops saved terminals whose workspace is gone", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "worker-terminal-manager-restore-gone-"));
+  const recordsDirectory = mkdtempSync(join(tmpdir(), "worker-terminal-records-"));
+  temporaryDirs.push(cwd, recordsDirectory);
+  const previousDaemon = createWorkerTerminalManager({ recordsDirectory });
+  const session = await previousDaemon.createTerminal({
+    workspaceId: "ws-archived",
+    cwd,
+    persist: true,
+    ...nodeTerminalCommand("setInterval(() => {}, 1000);"),
+  });
+  await previousDaemon.killAll();
+
+  manager = createWorkerTerminalManager({ recordsDirectory });
+  await restorePersistedTerminals({
+    directory: recordsDirectory,
+    terminalManager: manager,
+    activeWorkspaceIds: new Set(["ws-test"]),
+    logger: createTestLogger(),
+  });
+
+  expect(manager.getTerminal(session.id)).toBeUndefined();
+  expect(existsSync(terminalRecordPath(recordsDirectory, session.id))).toBe(false);
+});
+
+it("keeps a saved terminal only while it can still come back", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "worker-terminal-manager-records-"));
+  const recordsDirectory = mkdtempSync(join(tmpdir(), "worker-terminal-records-"));
+  temporaryDirs.push(cwd, recordsDirectory);
+  manager = createWorkerTerminalManager({ recordsDirectory });
+  const terminals = manager;
+  const idle = nodeTerminalCommand("setInterval(() => {}, 1000);");
+  const closed = await terminals.createTerminal({
+    workspaceId: "ws-test",
+    cwd,
+    persist: true,
+    ...idle,
+  });
+  const exited = await terminals.createTerminal({
+    workspaceId: "ws-test",
+    cwd,
+    persist: true,
+    ...nodeTerminalCommand('process.stdin.on("data", () => process.exit(0));'),
+  });
+  const signalled = await terminals.createTerminal({
+    workspaceId: "ws-test",
+    cwd,
+    persist: true,
+    ...nodeTerminalCommand('process.stdin.on("data", () => process.kill(process.pid, "SIGTERM"));'),
+  });
+  const unsaved = trackTerminal(
+    await terminals.createTerminal({ workspaceId: "ws-test", cwd, ...idle }),
+  );
+  const recordOf = (id: string) => terminalRecordPath(recordsDirectory, id);
+
+  expect(existsSync(recordOf(closed.id))).toBe(true);
+  expect(existsSync(recordOf(unsaved.id))).toBe(false);
+
+  terminals.setTerminalWorkspaceId(closed.id, "ws-moved");
+  await waitForCondition(
+    () => readFileSync(recordOf(closed.id), "utf8").includes("ws-moved"),
+    5000,
+  );
+
+  await terminals.killTerminalAndWait(closed.id);
+  expect(existsSync(recordOf(closed.id))).toBe(false);
+
+  exited.send({ type: "input", data: "x\r" });
+  await waitForCondition(() => !existsSync(recordOf(exited.id)), 10000);
+
+  // A signal Paseo did not send may be a reboot: the record waits for shutdown, then goes.
+  signalled.send({ type: "input", data: "x\r" });
+  await waitForCondition(() => terminals.getTerminal(signalled.id) === undefined, 10000);
+  expect(existsSync(recordOf(signalled.id))).toBe(true);
+  await waitForCondition(() => !existsSync(recordOf(signalled.id)), 10000);
+});
+
+it("keeps saved terminals when the worker cannot restore them", async () => {
+  const recordsDirectory = mkdtempSync(join(tmpdir(), "worker-terminal-records-"));
+  temporaryDirs.push(recordsDirectory);
+  writeTerminalRecord(recordsDirectory, {
+    version: 1,
+    id: "term-kept",
+    workspaceId: "ws-test",
+    cwd: recordsDirectory,
+    name: "Terminal 1",
+    rows: 24,
+    cols: 80,
+    savedAt: new Date().toISOString(),
+  });
+  const worker = new FakeTerminalWorker();
+  worker.connected = false;
+  manager = createWorkerTerminalManager({ forkWorker: () => worker });
+
+  await restorePersistedTerminals({
+    directory: recordsDirectory,
+    terminalManager: manager,
+    activeWorkspaceIds: new Set(["ws-test"]),
+    logger: createTestLogger(),
+  });
+
+  expect(existsSync(terminalRecordPath(recordsDirectory, "term-kept"))).toBe(true);
 });
 
 it("creates a terminal through the worker and streams output", async () => {
