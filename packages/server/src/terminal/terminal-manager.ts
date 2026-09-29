@@ -15,6 +15,7 @@ import type {
   TerminalActivityState,
 } from "@getpaseo/protocol/terminal-activity";
 import { deriveTerminalActivityStatusBucket } from "@getpaseo/protocol/terminal-activity";
+import type { TerminalRestoreInput } from "./terminal-persistence.js";
 
 export interface TerminalListItem {
   id: string;
@@ -68,6 +69,9 @@ export interface TerminalManager {
     cols?: number;
     activityToken?: string;
     activityUrl?: string | null;
+    /** Saved to `$PASEO_HOME/terminals/` and brought back after a daemon restart or reboot. */
+    persist?: boolean;
+    restore?: TerminalRestoreInput;
   }): Promise<TerminalSession>;
   registerCwdEnv(options: { cwd: string; env: Record<string, string> }): void;
   validateTerminalActivityToken(terminalId: string, token: string): "valid" | "unknown" | "invalid";
@@ -95,7 +99,8 @@ export interface TerminalManager {
     options?: { start?: number; end?: number; stripAnsi?: boolean },
   ): Promise<CaptureTerminalLinesResult>;
   listDirectories(): string[];
-  killAll(): void;
+  /** Resolves once saved terminals are written, so the next daemon reads complete records. */
+  killAll(): Promise<void>;
   subscribeTerminalsChanged(listener: TerminalsChangedListener): () => void;
   subscribeTerminalActivity(listener: TerminalActivityListener): () => void;
   subscribeTerminalWorkspaceContributionChanged(
@@ -331,6 +336,7 @@ export function createTerminalManager(
       cols?: number;
       activityToken?: string;
       activityUrl?: string | null;
+      restore?: TerminalRestoreInput;
     }): Promise<TerminalSession> {
       assertAbsolutePath(options.cwd);
 
@@ -365,6 +371,7 @@ export function createTerminalManager(
             ...(options.rows !== undefined ? { rows: options.rows } : {}),
             ...(options.cols !== undefined ? { cols: options.cols } : {}),
             ...(mergedEnv ? { env: mergedEnv } : {}),
+            ...(options.restore ? { restore: options.restore } : {}),
             activityEnv,
           }),
         );
@@ -489,7 +496,7 @@ export function createTerminalManager(
       return Array.from(terminalsByCwd.keys());
     },
 
-    killAll(): void {
+    async killAll(): Promise<void> {
       for (const id of Array.from(terminalsById.keys())) {
         removeSessionById(id, { kill: true });
       }

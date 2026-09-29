@@ -67,6 +67,10 @@ export class TerminalActivityTracker {
     this.setState(null, null);
   }
 
+  getOwnerSessionId(): string | null {
+    return this.ownerSessionId;
+  }
+
   clearAttention(): boolean {
     if (!this.attentionReason) {
       return false;

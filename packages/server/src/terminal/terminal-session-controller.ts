@@ -595,6 +595,9 @@ export class TerminalSessionController {
         args: msg.args,
         rows: msg.size?.rows,
         cols: msg.size?.cols,
+        // Only terminals the user opens come back after a restart. Scripts, setup and agent
+        // terminals re-run commands, which a restore never does.
+        persist: true,
       });
       this.emit({
         type: "create_terminal_response",

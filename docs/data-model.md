@@ -47,6 +47,8 @@ $PASEO_HOME/
 │       └── {agentId}.json               # One file per agent
 ├── schedules/
 │   └── {scheduleId}.json                # One file per schedule
+├── terminals/
+│   └── {terminalId}.json                # One file per terminal the user opened; restored on start
 ├── layouts/
 │   └── {stem}.json                      # One hand-authored pane layout per file; stem is its id
 ├── projects/
@@ -162,9 +164,20 @@ Each agent is stored as a separate JSON file, grouped by project directory.
 
 ---
 
-## Runtime-only Terminal Sessions
+## Terminal Records
 
-Terminals are live daemon state, not persisted JSON records. A terminal carries a `workspaceId` while it is running; workspace-scoped terminal lists include only terminals with the matching `workspaceId`. Legacy live terminals without an owner remain visible to unscoped terminal reads but contribute to no workspace status.
+**Path:** `$PASEO_HOME/terminals/{terminalId}.json`
+
+A running terminal is a live PTY in the daemon's terminal worker. It carries a `workspaceId`; workspace-scoped terminal lists include only terminals with the matching `workspaceId`. Legacy live terminals without an owner remain visible to unscoped terminal reads but contribute to no workspace status.
+
+Terminals the user opens (`create_terminal_request`) also get a record, so they come back after the daemon or the machine restarts, the way cmux and Orca restore panes. Script, worktree-setup and agent (MCP) terminals get none: a restore never re-runs a command. The record holds the terminal's id, `workspaceId`, `cwd`, `name`, a title only if the user typed one, the size, and one of two things:
+
+- `resume`, `{ agent: "claude" | "codex", sessionId }`: the agent session running in the pane, taken from the hook session the activity tracker accepted as the turn owner (see [terminal-activity.md](terminal-activity.md#hook-reporting)). It is only kept while the agent's exit would be seen: in a zsh pane, whose shell integration reports each command's end, or when the agent is the terminal's own process. Command-finished clears it unless the status is 129 or 143 (SIGHUP, SIGTERM). A bash, fish or cmd pane without integration never records one, so a quit agent is not resumed.
+- `scrollback`: the normal screen as ANSI, at most 400,000 characters. A pane left in a full-screen app saves none. This is terminal output on disk, secrets included; the file is private (0600).
+
+The terminal worker is the only writer, because it holds the screens, sees every exit, and outlives a crashed daemon. It writes on create, on a rename, on a workspace move, when the resume target changes, and on shutdown: the `killAll` request, IPC disconnect, and SIGTERM, SIGINT or SIGHUP. It deletes the record on a kill request (tab close, workspace archive) and when the process exits without a signal (the user typed `exit`). An exit by a signal Paseo did not send keeps the record for five seconds: a reboot reaches the worker within that time and shutdown keeps it; otherwise it was a crash the user saw, and the record goes. Interactive shells ignore SIGTERM, so on a reboot it is the worker's own signal handler that saves them. Scrollback is only as fresh as the last write, so a SIGKILL or power loss restores the tab with older scrollback, or none.
+
+On start the daemon restores records before it accepts connections. The first terminal list then has the old ids, and the app keeps their tabs instead of pruning them. Each terminal comes back with the same id, in its saved cwd, as a fresh login shell. A `resume` pane gets ` claude --resume <id>` or ` codex resume <id>` typed into it. A plain pane gets its scrollback above the first prompt, under a "Session restored" line. Records whose workspace is gone or archived, whose cwd no longer exists, or that no longer parse are deleted. Env registered for a worktree cwd is in memory only, so a restored shell gets the same env as any terminal opened after a restart.
 
 Terminal activity contributes to the workspace status bucket **per `workspaceId`**: a working terminal drives `running` onto the workspace it carries only. Same-`cwd` siblings are untouched; terminal visibility is likewise `workspaceId`-scoped.
 

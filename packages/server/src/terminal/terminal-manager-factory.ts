@@ -5,6 +5,7 @@ export interface ConfiguredTerminalManagerOptions {
   getTerminalActivityUrl?: () => string | null;
   // Runs before each terminal is created, in the daemon process.
   onCreateTerminal?: () => void;
+  recordsDirectory?: string;
 }
 
 export function createConfiguredTerminalManager(

@@ -368,6 +368,10 @@ export class PtyActivityScanner {
     this.stillnessMs = options.stillnessMs ?? 1200;
   }
 
+  getActiveAgent(): KnownAgentName | null {
+    return this.activeAgent;
+  }
+
   handleInitialCommand(command: string | undefined): void {
     if (!command) return;
     const detected = detectAgentFromCommand(command);

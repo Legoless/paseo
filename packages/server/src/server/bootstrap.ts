@@ -170,6 +170,10 @@ import { setupAutoArchiveOnMerge } from "./auto-archive-on-merge/index.js";
 import { wrapSessionMessage, type SessionOutboundMessage } from "./messages.js";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { createConfiguredTerminalManager } from "../terminal/terminal-manager-factory.js";
+import {
+  restorePersistedTerminals,
+  TERMINAL_RECORDS_DIRNAME,
+} from "../terminal/terminal-persistence.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
 import { loadOrCreateDaemonKeyPair } from "./daemon-keypair.js";
 import { createRelayRuntime, type RelayRuntime } from "./relay-runtime.js";
@@ -692,9 +696,11 @@ export async function createPaseoDaemon(
   let boundListenTarget: ListenTarget | null = null;
   let workspaceRegistry: FileBackedWorkspaceRegistry | null = null;
   const terminalAgentHooks = applyTerminalAgentHookSetting({ store: daemonConfigStore, logger });
+  const terminalRecordsDirectory = path.join(config.paseoHome, TERMINAL_RECORDS_DIRNAME);
   const terminalManager = createConfiguredTerminalManager({
     getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
     onCreateTerminal: terminalAgentHooks.ensureInstalled,
+    recordsDirectory: terminalRecordsDirectory,
   });
 
   const serviceProxyPublicBaseUrl = config.serviceProxy?.publicBaseUrl
@@ -1784,6 +1790,19 @@ export async function createPaseoDaemon(
             );
             pluginRuntime.bindPaseoSessionHost(wsServer);
             await pluginRuntime.start();
+            // After the listen target is bound, so restored shells get hook env; before clients
+            // connect, so the first terminal list already has the old ids and their tabs stay.
+            try {
+              const activeWorkspaces = await listActiveWorkspacesExternal();
+              await restorePersistedTerminals({
+                directory: terminalRecordsDirectory,
+                terminalManager,
+                activeWorkspaceIds: new Set(activeWorkspaces.map((ws) => ws.workspaceId)),
+                logger,
+              });
+            } catch (error) {
+              logger.warn({ err: error }, "Failed to restore terminals");
+            }
             wsServer.beginAcceptingConnections();
             relayRuntime = createRelayRuntime({
               config: {
@@ -1854,7 +1873,7 @@ export async function createPaseoDaemon(
     detachAgentStoragePersistence();
     await agentStorage.flush().catch(() => undefined);
     await agentProviderRuntime.shutdown();
-    terminalManager.killAll();
+    await terminalManager.killAll();
     await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await relayRuntime?.stop().catch(() => undefined);

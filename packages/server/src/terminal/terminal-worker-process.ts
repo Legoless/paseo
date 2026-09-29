@@ -1,6 +1,11 @@
 import { createTerminalManager } from "./terminal-manager.js";
 import { captureTerminalLines } from "./terminal-capture.js";
 import { TerminalOutputCoalescer } from "./terminal-output-coalescer.js";
+import {
+  deleteTerminalRecord,
+  renderRestoreScrollback,
+  writeTerminalRecord,
+} from "./terminal-persistence.js";
 import type { TerminalSession, TerminalStateSnapshotOptions } from "./terminal.js";
 import type {
   TerminalWorkerRequest,
@@ -15,6 +20,24 @@ const manager = createTerminalManager();
 const unsubscribeByTerminalId = new Map<string, Array<() => void>>();
 const outputCoalescerByTerminalId = new Map<string, TerminalOutputCoalescer>();
 let ipcClosing = false;
+
+// This process owns every terminal record (see terminal-persistence.ts): it holds the screens and
+// sees each exit, and it outlives a daemon that crashed. The parent passes the directory as argv.
+const recordsDirectory = process.argv[2] ?? null;
+
+interface SavedTerminal {
+  workspaceId: string;
+  // Only a title the user typed; the session's own title also follows the shell.
+  title?: string;
+  resumeKey: string;
+}
+
+const savedTerminalById = new Map<string, SavedTerminal>();
+// How long a terminal killed by a signal keeps its record: a reboot reaches this process within
+// moments of its shells, and shutdown then keeps the record; a crash the user watched drops it.
+const SIGNAL_EXIT_GRACE_MS = 5000;
+// Set once shutdown has saved every terminal, so the exits that follow do not delete the records.
+let shuttingDown = false;
 
 interface InFlightTerminalCreateRequest {
   requestId: string;
@@ -70,6 +93,79 @@ function toTerminalInfo(session: TerminalSession): WorkerTerminalInfo {
     ...(session.getTitle() ? { title: session.getTitle() } : {}),
     activity: session.getActivity(),
   };
+}
+
+function resumeKeyOf(session: TerminalSession): string {
+  return JSON.stringify(session.getResumeTarget?.() ?? null);
+}
+
+function saveTerminal(session: TerminalSession): void {
+  const saved = savedTerminalById.get(session.id);
+  if (!recordsDirectory || !saved) {
+    return;
+  }
+  const resume = session.getResumeTarget?.() ?? null;
+  const state = resume ? null : (session.getRestoreState?.() ?? null);
+  try {
+    writeTerminalRecord(recordsDirectory, {
+      version: 1,
+      id: session.id,
+      workspaceId: saved.workspaceId,
+      cwd: session.cwd,
+      name: session.name,
+      ...(saved.title ? { title: saved.title } : {}),
+      ...session.getSize(),
+      savedAt: new Date().toISOString(),
+      ...(resume ? { resume } : {}),
+      ...(state ? { scrollback: renderRestoreScrollback(state) } : {}),
+    });
+    saved.resumeKey = JSON.stringify(resume);
+  } catch (error) {
+    console.error("Failed to save terminal record:", error);
+  }
+}
+
+function saveTerminalIfResumeChanged(session: TerminalSession | undefined): void {
+  const saved = session ? savedTerminalById.get(session.id) : undefined;
+  if (session && saved && saved.resumeKey !== resumeKeyOf(session)) {
+    saveTerminal(session);
+  }
+}
+
+function forgetTerminal(terminalId: string): void {
+  if (!savedTerminalById.delete(terminalId) || !recordsDirectory) {
+    return;
+  }
+  try {
+    deleteTerminalRecord(recordsDirectory, terminalId);
+  } catch (error) {
+    console.error("Failed to delete terminal record:", error);
+  }
+}
+
+function updateSavedTerminal(
+  terminalId: string,
+  change: Partial<Pick<SavedTerminal, "workspaceId" | "title">>,
+): void {
+  const saved = savedTerminalById.get(terminalId);
+  const session = manager.getTerminal(terminalId);
+  if (saved && session) {
+    Object.assign(saved, change);
+    saveTerminal(session);
+  }
+}
+
+function saveAllTerminalsForShutdown(): void {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  for (const terminalId of savedTerminalById.keys()) {
+    const session = manager.getTerminal(terminalId);
+    if (session) {
+      saveTerminal(session);
+    }
+  }
 }
 
 function terminalWorkerErrorMessage(error: unknown): string {
@@ -152,6 +248,20 @@ function watchTerminal(session: TerminalSession): void {
     { initialSnapshot: "ready" },
   );
   const unsubscribeExit = session.onExit((info) => {
+    if (!shuttingDown && savedTerminalById.has(session.id)) {
+      // Typing `exit`, or quitting a profile's agent, ends the terminal for good. A signal Paseo
+      // did not send may be the machine going down, so the record waits to see if shutdown follows.
+      if (info.signal !== null) {
+        saveTerminal(session);
+        setTimeout(() => {
+          if (!shuttingDown) {
+            forgetTerminal(session.id);
+          }
+        }, SIGNAL_EXIT_GRACE_MS).unref();
+      } else {
+        forgetTerminal(session.id);
+      }
+    }
     outputCoalescer.flush();
     clearTerminalSubscriptions(session.id);
     sendToParent({
@@ -169,6 +279,7 @@ function watchTerminal(session: TerminalSession): void {
     });
   });
   const unsubscribeCommandFinished = session.onCommandFinished((info) => {
+    saveTerminalIfResumeChanged(session);
     outputCoalescer.flush();
     sendToParent({
       type: "terminalCommandFinished",
@@ -217,6 +328,14 @@ async function handleCreateTerminalRequest(message: TerminalCreateRequest): Prom
       return;
     }
     watchTerminal(session);
+    if (message.options.persist && recordsDirectory) {
+      savedTerminalById.set(session.id, {
+        workspaceId,
+        ...(message.options.title?.trim() ? { title: message.options.title.trim() } : {}),
+        resumeKey: "",
+      });
+      saveTerminal(session);
+    }
     const initialSnapshot = session.getStateSnapshot();
     sendToParent({
       type: "terminalCreated",
@@ -261,6 +380,7 @@ async function handleRequest(message: TerminalWorkerRequest): Promise<void> {
         message.attentionReason,
         message.sessionId,
       );
+      saveTerminalIfResumeChanged(manager.getTerminal(message.terminalId));
       sendToParent({ type: "response", requestId: message.requestId, ok: true });
       return;
     }
@@ -272,12 +392,21 @@ async function handleRequest(message: TerminalWorkerRequest): Promise<void> {
     }
 
     case "setTitle": {
-      manager.setTerminalTitle(message.terminalId, message.title);
+      if (manager.setTerminalTitle(message.terminalId, message.title)) {
+        updateSavedTerminal(message.terminalId, { title: message.title.trim() });
+      }
+      sendToParent({ type: "response", requestId: message.requestId, ok: true });
+      return;
+    }
+
+    case "setWorkspaceId": {
+      updateSavedTerminal(message.terminalId, { workspaceId: message.workspaceId });
       sendToParent({ type: "response", requestId: message.requestId, ok: true });
       return;
     }
 
     case "killTerminal": {
+      forgetTerminal(message.terminalId);
       manager.killTerminal(message.terminalId);
       // Removal is owned by session.onExit -> terminalExit; the parent mirror
       // clears contribution and emits terminalsChanged from that single path.
@@ -287,6 +416,7 @@ async function handleRequest(message: TerminalWorkerRequest): Promise<void> {
     }
 
     case "killTerminalAndWait": {
+      forgetTerminal(message.terminalId);
       await manager.killTerminalAndWait(message.terminalId, message.options);
       clearTerminalSubscriptions(message.terminalId);
       sendToParent({ type: "response", requestId: message.requestId, ok: true });
@@ -327,7 +457,8 @@ async function handleRequest(message: TerminalWorkerRequest): Promise<void> {
     }
 
     case "killAll": {
-      manager.killAll();
+      saveAllTerminalsForShutdown();
+      void manager.killAll();
       for (const terminalId of Array.from(unsubscribeByTerminalId.keys())) {
         clearTerminalSubscriptions(terminalId);
       }
@@ -357,5 +488,15 @@ process.on("message", (message: TerminalWorkerRequest) => {
 
 process.once("disconnect", () => {
   ipcClosing = true;
-  manager.killAll();
+  saveAllTerminalsForShutdown();
+  void manager.killAll();
 });
+
+// A reboot or logout signals this process directly, maybe before the daemon asks it to stop.
+for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+  process.once(signal, () => {
+    saveAllTerminalsForShutdown();
+    void manager.killAll();
+    process.exit(0);
+  });
+}

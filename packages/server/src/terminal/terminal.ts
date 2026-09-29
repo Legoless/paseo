@@ -12,7 +12,13 @@ import { findExecutable } from "../executable-resolution/executable-resolution.j
 import type { TerminalCell, TerminalState } from "@getpaseo/protocol/messages";
 import { TerminalInputModeTracker } from "@getpaseo/protocol/terminal-input-mode";
 import { TerminalActivityTracker } from "./activity/terminal-activity-tracker.js";
-import { PtyActivityScanner } from "./activity/pty-activity-scanner.js";
+import { detectAgentFromCommand, PtyActivityScanner } from "./activity/pty-activity-scanner.js";
+import {
+  buildTerminalResumeInput,
+  toTerminalResumeTarget,
+  type TerminalRestoreInput,
+  type TerminalResumeTarget,
+} from "./terminal-persistence.js";
 import type {
   TerminalActivity,
   TerminalActivityAttentionReason,
@@ -103,6 +109,10 @@ export interface TerminalSession {
   clearActivityAttention(): boolean;
   setTitle(title: string): void;
   getExitInfo(): TerminalExitInfo | null;
+  // Only the process that owns the PTY can answer these; the daemon-side mirror leaves them out.
+  getResumeTarget?(): TerminalResumeTarget | null;
+  /** The screen a restore seeds from. Null while a full-screen app holds the alternate screen. */
+  getRestoreState?(): TerminalState | null;
   kill(): void;
   killAndWait(options?: { gracefulTimeoutMs?: number; forceTimeoutMs?: number }): Promise<void>;
 }
@@ -137,6 +147,7 @@ export interface CreateTerminalOptions {
   title?: string;
   command?: string;
   args?: string[];
+  restore?: TerminalRestoreInput;
 }
 
 function toTerminalActivity(snapshot: {
@@ -920,6 +931,30 @@ function extractLastOutputLinesFromText(text: string, limit: number): string[] {
   return lines.slice(-limit);
 }
 
+// Straight into the emulator, not through the scanner: old output must not read as activity.
+async function seedRestoredScreen(
+  terminal: TerminalType,
+  restore: TerminalRestoreInput | undefined,
+): Promise<void> {
+  const seed = restore?.seed;
+  if (seed) {
+    await new Promise<void>((resolve) => terminal.write(seed, resolve));
+  }
+}
+
+/** Types a restored agent's resume command and returns it as the terminal's resume target. */
+function resumeRestoredAgent(
+  ptyProcess: pty.IPty,
+  restore: TerminalRestoreInput | undefined,
+): TerminalResumeTarget | null {
+  const target = restore?.resume ?? null;
+  if (target) {
+    // The tty holds it until the shell reads its first line, like cmux's initial input.
+    ptyProcess.write(buildTerminalResumeInput(target));
+  }
+  return target;
+}
+
 export async function createTerminal(options: CreateTerminalOptions): Promise<TerminalSession> {
   const {
     cwd,
@@ -981,6 +1016,12 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     readCursorLine: () => extractCursorLine(terminal),
   });
   activityScanner.handleInitialCommand(command ? [command, ...args].join(" ") : undefined);
+  let resumeTarget: TerminalResumeTarget | null = null;
+  // An agent is only worth resuming while its exit would be seen: the shell integration reports
+  // each command's end (zsh only, marked by its first prompt), or the agent is the pty's own process.
+  let shellReportsCommands = false;
+  const commandAgent = detectAgentFromCommand(command);
+  await seedRestoredScreen(terminal, options.restore);
 
   ensureNodePtySpawnHelperExecutableForCurrentPlatform();
 
@@ -1117,6 +1158,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   }
 
   const disposeCommandLifecycleSubscription = terminal.parser.registerOscHandler(633, (data) => {
+    shellReportsCommands = true;
     if (data === "B") {
       activityScanner.handleCommandStarted();
       return true;
@@ -1127,6 +1169,11 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     }
 
     activityScanner.handleCommandFinished();
+    // The agent quitting leaves nothing to resume. 129 and 143 are SIGHUP and SIGTERM, the
+    // machine going down, which is exactly when the target has to survive.
+    if (commandFinished.exitCode !== 129 && commandFinished.exitCode !== 143) {
+      resumeTarget = null;
+    }
 
     for (const listener of Array.from(commandFinishedListeners)) {
       try {
@@ -1503,6 +1550,26 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     sessionId?: string,
   ): void {
     activityTracker.set(state, attentionReason, sessionId);
+    // The pane's agent is the hook session the tracker accepted as the turn owner. A nested
+    // `claude -p` reporting from inside it is rejected there, so it never becomes the target.
+    if (sessionId && activityTracker.getOwnerSessionId() === sessionId) {
+      resumeTarget =
+        toTerminalResumeTarget(activityScanner.getActiveAgent(), sessionId) ?? resumeTarget;
+    }
+  }
+
+  function getResumeTarget(): TerminalResumeTarget | null {
+    const exitVisible = shellReportsCommands || resumeTarget?.agent === commandAgent;
+    return exitVisible ? resumeTarget : null;
+  }
+
+  function getRestoreState(): TerminalState | null {
+    // ponytail: a pane left in vim or less restores without scrollback. Reading the normal
+    // buffer under an active alternate one needs the extract helpers to take a buffer.
+    if (disposed || terminal.buffer.active.type !== "normal") {
+      return null;
+    }
+    return getState({ includeWrapFlags: true });
   }
 
   function clearActivityAttention(): boolean {
@@ -1596,6 +1663,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
 
   // Small delay to let shell initialize
   await new Promise((resolve) => setTimeout(resolve, 50));
+  resumeTarget = resumeRestoredAgent(ptyProcess, options.restore);
 
   return {
     id,
@@ -1618,6 +1686,8 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     clearActivityAttention,
     setTitle,
     getExitInfo,
+    getResumeTarget,
+    getRestoreState,
     kill,
     killAndWait,
   };
