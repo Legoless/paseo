@@ -15,6 +15,7 @@ import {
   splitWebVirtualizedHistory,
   type IndexedStreamItem,
 } from "./web-virtualization";
+import { MAX_MOUNTED_TURN_REWIND } from "./history-window";
 
 function createTimestamp(seed: number): Date {
   return new Date(`2026-01-01T00:00:${seed.toString().padStart(2, "0")}.000Z`);
@@ -96,6 +97,24 @@ describe("findMountedWindowStart", () => {
         minMountedCount: 50,
       }),
     ).toBe(39);
+  });
+
+  it("starts mid-turn instead of mounting a turn longer than the rewind cap", () => {
+    const items: StreamItem[] = [userMessage("u0", 0)];
+    for (let index = 1; index <= MAX_MOUNTED_TURN_REWIND * 10; index += 1) {
+      items.push(assistantMessage(`a${index}`, index));
+    }
+
+    expect(findMountedWindowStart({ items, minMountedCount: 20 })).toBe(items.length - 20);
+  });
+
+  it("still rewinds to a user boundary within the rewind cap", () => {
+    const items: StreamItem[] = [assistantMessage("a0", 0), userMessage("u1", 1)];
+    for (let index = 2; index < MAX_MOUNTED_TURN_REWIND; index += 1) {
+      items.push(assistantMessage(`a${index}`, index));
+    }
+
+    expect(findMountedWindowStart({ items, minMountedCount: 20 })).toBe(1);
   });
 });
 
