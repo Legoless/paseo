@@ -1,4 +1,4 @@
-import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
+import { STATUS_BUCKET_ORDER, type SidebarStateBucket } from "@/utils/sidebar-agent-state";
 
 export type PaneStatusGlowBucket = Exclude<SidebarStateBucket, "done">;
 
@@ -32,4 +32,29 @@ export function resolvePaneStatusGlowBucket(
     return null;
   }
   return bucket;
+}
+
+export interface PaneTabStatus {
+  bucket: SidebarStateBucket | null;
+  active: boolean;
+}
+
+const UNREAD_BUCKETS: ReadonlySet<SidebarStateBucket> = new Set([
+  "needs_input",
+  "failed",
+  "attention",
+]);
+
+/**
+ * The pane shows its active tab's state, unless a tab behind it holds something the user has not
+ * seen: the badge counts that agent, so the pane it sits in has to light up. What the user must act
+ * on outranks what is still moving on its own.
+ */
+export function resolvePaneStatusBucket(tabs: readonly PaneTabStatus[]): SidebarStateBucket | null {
+  const buckets = new Set(
+    tabs.flatMap(({ bucket, active }) =>
+      bucket && (active || UNREAD_BUCKETS.has(bucket)) ? [bucket] : [],
+    ),
+  );
+  return STATUS_BUCKET_ORDER.find((bucket) => buckets.has(bucket)) ?? null;
 }

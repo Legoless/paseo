@@ -38,9 +38,11 @@ export function buildSubagentRowPresentationData(row: SubagentRow): SubagentRowP
     label: label ?? "",
     subtitle: subtitle ?? "",
     titleState: label ? "ready" : "loading",
+    // The track reports lifecycle, not what the user has read: an errored child stays failed
+    // until it is archived, and no other child state raises attention of its own.
     statusBucket: deriveSidebarStateBucket({
       status,
-      requiresAttention: false,
+      requiresAttention: status === "error",
     }),
   };
 }

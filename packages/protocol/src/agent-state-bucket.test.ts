@@ -88,7 +88,30 @@ describe("deriveAgentStateBucket", () => {
     expect(
       deriveAgentStateBucket({ status: "idle", pendingPermissionCount: 1, backgroundWorkCount: 2 }),
     ).toBe("needs_input");
-    expect(deriveAgentStateBucket({ status: "error", backgroundWorkCount: 2 })).toBe("failed");
+    expect(
+      deriveAgentStateBucket({ status: "error", requiresAttention: true, backgroundWorkCount: 2 }),
+    ).toBe("failed");
+  });
+
+  it("stops showing an error as failed once the user has seen it", () => {
+    expect(
+      deriveAgentStateBucket({
+        status: "error",
+        requiresAttention: true,
+        attentionReason: "error",
+      }),
+    ).toBe("failed");
+    expect(deriveAgentStateBucket({ status: "error", requiresAttention: false })).toBe("done");
+  });
+
+  it("shows an unseen error even when attention was first raised for finishing", () => {
+    expect(
+      deriveAgentStateBucket({
+        status: "error",
+        requiresAttention: true,
+        attentionReason: "finished",
+      }),
+    ).toBe("failed");
   });
 });
 

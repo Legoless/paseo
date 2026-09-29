@@ -25,7 +25,9 @@ export function deriveAgentStateBucket(input: AgentStateBucketInput): WorkspaceS
   if ((input.pendingPermissionCount ?? 0) > 0 || input.attentionReason === "permission") {
     return "needs_input";
   }
-  if (input.status === "error" || input.attentionReason === "error") {
+  // Red means an error the user has not seen. Once they open the agent it reads as done, so every
+  // red pane is one the attention badge still counts.
+  if (input.requiresAttention && (input.status === "error" || input.attentionReason === "error")) {
     return "failed";
   }
   if (input.status === "running" || (input.backgroundWorkCount ?? 0) > 0) {

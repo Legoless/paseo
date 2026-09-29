@@ -97,7 +97,9 @@ async function updateDockBadge(count?: number): Promise<boolean> {
 export function useFaviconStatus() {
   const { agents } = useAggregatedAgents({ demand: !isNative });
   const [colorScheme, setColorScheme] = useState<ColorScheme>(getSystemColorScheme);
-  const lastDockBadgeCountRef = useRef<number | undefined>(undefined);
+  // null until the first write: a reload with nothing to count still has to clear the badge the
+  // previous renderer left on the dock.
+  const lastDockBadgeCountRef = useRef<number | undefined | null>(null);
 
   // Listen for system color scheme changes
   useEffect(() => {
