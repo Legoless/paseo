@@ -264,6 +264,8 @@ export function WorkspaceNewAgentRow({
     [newAgent.labels, serverId, setLabelAssignment],
   );
   const labelPages = useWorkspaceLabelMenuPages(labelTarget);
+  // Same label as the tab strip: a name the user gave the draft's tab, else the placeholder.
+  const title = newAgent.title ?? t("panels.draft.newAgent");
   const isCompact = useIsCompactFormFactor();
   const showBranch = useSidebarRowItems().branch && branch !== null;
   const trailing = useSidebarWorkspaceTrailing();
@@ -332,7 +334,7 @@ export function WorkspaceNewAgentRow({
 
   return (
     <AgentHoverCard
-      title={t("panels.draft.newAgent")}
+      title={title}
       serverId={serverId}
       branch={branch}
       branchPending={!branchReady}
@@ -354,7 +356,7 @@ export function WorkspaceNewAgentRow({
         <ContextMenu open={contextMenuOpen} onOpenChange={handleContextMenuOpenChange}>
           <ContextMenuTrigger
             accessibilityRole={platformIsWeb ? undefined : "button"}
-            accessibilityLabel={t("panels.draft.newAgent")}
+            accessibilityLabel={title}
             onPress={handlePress}
             onLongPress={drag}
             enabledOnMobile={!drag}
@@ -369,7 +371,7 @@ export function WorkspaceNewAgentRow({
             <AgentStatusIndicator bucket="done" />
             <View style={styles.agentIdentity}>
               <AgentTitleLine
-                title={t("panels.draft.newAgent")}
+                title={title}
                 titleTestID={`sidebar-new-agent-title-${newAgent.tabId}`}
                 branch={branch}
                 branchTestID={`sidebar-new-agent-branch-${newAgent.tabId}`}
