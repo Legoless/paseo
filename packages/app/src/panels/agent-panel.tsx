@@ -1134,6 +1134,7 @@ function ChatAgentContent({
       retryTimelineSync={retryTimelineSync}
       onAttentionInputFocus={attentionController.clearOnInputFocus}
       onAttentionPromptSend={attentionController.clearOnPromptSend}
+      onAttentionPanePress={attentionController.clearOnPanePress}
       onOpenWorkspaceFile={onOpenWorkspaceFile}
     />
   );
@@ -1164,6 +1165,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   cwd,
   onAttentionInputFocus,
   onAttentionPromptSend,
+  onAttentionPanePress,
   onOpenWorkspaceFile,
 }: {
   serverId: string;
@@ -1190,9 +1192,15 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   cwd: string;
   onAttentionInputFocus: () => void;
   onAttentionPromptSend: () => void;
+  onAttentionPanePress: () => void;
   onOpenWorkspaceFile?: (request: WorkspaceFileOpenRequest) => void;
 }) {
   const { t } = useTranslation();
+  // Observes every press in the pane without claiming it, so children keep their own handling.
+  const handlePanePress = useCallback(() => {
+    onAttentionPanePress();
+    return false;
+  }, [onAttentionPanePress]);
   const subagentRows = useSubagentsForParent({ serverId, parentAgentId: agentId });
   const tasks = useSessionStore((state): TodoEntry[] | undefined =>
     state.sessions[serverId]?.agentTasks.get(agentId),
@@ -1348,7 +1356,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       setText={agentInputDraft.replaceText}
       onRewindComplete={handleRewindComplete}
     >
-      <View style={styles.root}>
+      <View style={styles.root} onStartShouldSetResponderCapture={handlePanePress}>
         {dock}
 
         {isArchivingCurrentAgent ? (
