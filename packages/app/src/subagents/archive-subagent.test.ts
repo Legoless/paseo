@@ -104,10 +104,16 @@ describe("resolveArchiveSubagentDialog", () => {
     });
   });
 
+  it("names a subagent the user called 'New Agent'", () => {
+    expect(resolveArchiveSubagentDialog({ title: "New Agent", status: null }).message).toBe(
+      "Remove New Agent from the track. The subagent will be archived.",
+    );
+  });
+
   it("falls back to this subagent when the title is not displayable", () => {
     expect(
       resolveArchiveSubagentDialog({
-        title: "New Agent",
+        title: "   ",
         status: null,
       }),
     ).toEqual({

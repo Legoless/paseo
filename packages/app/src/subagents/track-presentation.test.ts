@@ -6,7 +6,9 @@ import {
   buildSubagentRowPresentationData,
   countFinishedSubagents,
   resolveRowLabel,
+  resolveSubagentTabTitle,
 } from "./track-presentation";
+import type { WorkspaceTab, WorkspaceTabTarget } from "@/workspace-tabs/model";
 
 function row(
   overrides: Partial<PaseoSubagentRow> & Pick<PaseoSubagentRow, "id">,
@@ -156,10 +158,8 @@ describe("resolveRowLabel", () => {
     expect(resolveRowLabel("   ")).toBe(null);
   });
 
-  it("returns null for the placeholder 'new agent' regardless of case", () => {
-    expect(resolveRowLabel("new agent")).toBe(null);
-    expect(resolveRowLabel("New Agent")).toBe(null);
-    expect(resolveRowLabel("  NEW AGENT  ")).toBe(null);
+  it("keeps a title that reads 'New Agent', since the user may have typed it", () => {
+    expect(resolveRowLabel("  New Agent  ")).toBe("New Agent");
   });
 
   it("returns the trimmed title for real names", () => {
@@ -180,8 +180,14 @@ describe("buildSubagentRowPresentationData", () => {
     expect(presentation.label).toBe("Build it");
   });
 
-  it("marks the row loading and blanks the label for the placeholder title", () => {
-    const presentation = buildSubagentRowPresentationData(row({ id: "a", title: "new agent" }));
+  it("shows a subagent named 'New Agent' verbatim instead of loading", () => {
+    const presentation = buildSubagentRowPresentationData(row({ id: "a", title: "New Agent" }));
+    expect(presentation.titleState).toBe("ready");
+    expect(presentation.label).toBe("New Agent");
+  });
+
+  it("marks the row loading and blanks the label when the title is missing", () => {
+    const presentation = buildSubagentRowPresentationData(row({ id: "a", title: "  " }));
     expect(presentation.titleState).toBe("loading");
     expect(presentation.label).toBe("");
   });
@@ -295,5 +301,66 @@ describe("provider-owned row subtitles", () => {
         providerRow({ description: null, subtitle: null, title: "general-purpose" }),
       ).subtitle,
     ).toBe("");
+  });
+});
+
+describe("renamed subagent tabs", () => {
+  function tab(target: WorkspaceTabTarget, tabId: string, title?: string): WorkspaceTab {
+    return { tabId, target, createdAt: 0, ...(title ? { title } : {}) };
+  }
+
+  const providerRow: ProviderSubagentRow = {
+    kind: "provider",
+    id: "toolu_1",
+    parentAgentId: "parent",
+    provider: "claude",
+    title: "general-purpose",
+    description: "Reply with banana",
+    subtitle: null,
+    status: "running",
+    requiresAttention: false,
+    createdAt: new Date("2026-07-26T00:00:00.000Z"),
+  };
+  const providerTarget: WorkspaceTabTarget = {
+    kind: "provider_subagent",
+    parentAgentId: "parent",
+    subagentId: "toolu_1",
+  };
+
+  function presentWithTabs(subagent: SubagentRow, tabs: WorkspaceTab[]) {
+    return buildSubagentRowPresentationData(subagent, resolveSubagentTabTitle(tabs, subagent));
+  }
+
+  it("names a provider row after its renamed tab over the task", () => {
+    const presentation = presentWithTabs(providerRow, [tab(providerTarget, "t1", "Banana check")]);
+    expect(presentation.label).toBe("Banana check");
+    expect(presentation.subtitle).toBe("general-purpose");
+  });
+
+  it("names a paseo row after its renamed tab over the agent title", () => {
+    const presentation = presentWithTabs(row({ id: "child", title: "Build it" }), [
+      tab({ kind: "agent", agentId: "child" }, "draft_42", "Release build"),
+    ]);
+    expect(presentation.label).toBe("Release build");
+  });
+
+  it("keeps the derived label when the open tab was never renamed", () => {
+    expect(presentWithTabs(providerRow, [tab(providerTarget, "t1")]).label).toBe(
+      "Reply with banana",
+    );
+  });
+
+  it("ignores a renamed tab that belongs to another subagent", () => {
+    const tabs = [
+      tab({ kind: "provider_subagent", parentAgentId: "other", subagentId: "toolu_1" }, "t1", "X"),
+      tab({ kind: "agent", agentId: "toolu_1" }, "t2", "Y"),
+    ];
+    expect(presentWithTabs(providerRow, tabs).label).toBe("Reply with banana");
+  });
+
+  it("shows a tab renamed to 'New Agent' verbatim", () => {
+    expect(presentWithTabs(providerRow, [tab(providerTarget, "t1", "New Agent")]).label).toBe(
+      "New Agent",
+    );
   });
 });

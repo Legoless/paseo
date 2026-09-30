@@ -2,6 +2,8 @@ import type { TFunction } from "i18next";
 import type { ComposerTrackPillSegment } from "@/composer/tracks";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { deriveSidebarStateBucket, STATUS_BUCKET_ORDER } from "@/utils/sidebar-agent-state";
+import { workspaceTabTargetsEqual } from "@/workspace-tabs/identity";
+import type { WorkspaceTab, WorkspaceTabTarget } from "@/workspace-tabs/model";
 import type { SubagentRow } from "./select";
 import { isFinishedSubagent } from "./archive-finished";
 import { providerSubagentLifecycleStatus } from "./provider-store";
@@ -23,12 +25,32 @@ export interface SubagentRowPresentationData {
   statusBucket: SidebarStateBucket | null;
 }
 
-export function buildSubagentRowPresentationData(row: SubagentRow): SubagentRowPresentationData {
+/**
+ * The name the user typed on the row's open tab, if the workspace has one. Matched by target rather
+ * than tab id: a tab that started as a draft keeps the draft's id after it becomes the agent.
+ */
+export function resolveSubagentTabTitle(
+  tabs: readonly WorkspaceTab[],
+  row: SubagentRow,
+): string | null {
+  const target: WorkspaceTabTarget =
+    row.kind === "paseo"
+      ? { kind: "agent", agentId: row.id }
+      : { kind: "provider_subagent", parentAgentId: row.parentAgentId, subagentId: row.id };
+  return tabs.find((tab) => workspaceTabTargetsEqual(tab.target, target))?.title ?? null;
+}
+
+export function buildSubagentRowPresentationData(
+  row: SubagentRow,
+  tabTitle: string | null = null,
+): SubagentRowPresentationData {
   // The task distinguishes siblings in a fan-out, so it names the row when present. Providers
   // own the compact secondary context because model, effort, and usage semantics differ.
   const description = resolveRowLabel(row.description);
   const title = resolveRowLabel(row.title);
-  const label = description ?? title;
+  // A renamed tab is the master name, and the row has to read the same as the tab strip. A
+  // provider subagent's rename lands only on its tab, so without this the task would win forever.
+  const label = tabTitle ?? description ?? title;
   const providerSubtitle = row.kind === "provider" ? resolveRowLabel(row.subtitle) : null;
   const subtitle = providerSubtitle ?? (description ? title : null);
   const status = presentationStatus(row);
@@ -137,9 +159,6 @@ export function resolveRowLabel(title: string | null | undefined): string | null
   }
   const normalized = title.trim();
   if (!normalized) {
-    return null;
-  }
-  if (normalized.toLowerCase() === "new agent") {
     return null;
   }
   return normalized;

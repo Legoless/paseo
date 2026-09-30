@@ -8,17 +8,22 @@ import { ComposerTrackActions, ComposerTrackPill, ComposerTrackRow } from "@/com
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
+import { usePaneContext } from "@/panels/pane-context";
 import {
   WorkspaceTabIcon,
   type WorkspaceTabPresentation,
 } from "@/screens/workspace/workspace-tab-presentation";
+import { collectAllTabs, useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import type { Theme } from "@/styles/theme";
+import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
+import { useShallow } from "zustand/shallow";
 import type { SubagentRow } from "./select";
 import type { ArchiveFinishedStatus } from "./use-archive-finished";
 import {
   buildSubagentPillPresentation,
   buildSubagentRowPresentationData,
   countFinishedSubagents,
+  resolveSubagentTabTitle,
 } from "./track-presentation";
 
 const ThemedX = withUnistyles(X);
@@ -45,14 +50,35 @@ const IDLE_ARCHIVE_FINISHED_STATUS: ArchiveFinishedStatus = { kind: "idle" };
 /** Leading and action glyphs share one size so rows keep a single icon column. */
 const ROW_ICON_SIZE = 14;
 
-function buildRowPresentation(row: SubagentRow, serverId: string): WorkspaceTabPresentation {
-  const data = buildSubagentRowPresentationData(row);
+function buildRowPresentation(
+  row: SubagentRow,
+  serverId: string,
+  tabTitle: string | null,
+): WorkspaceTabPresentation {
+  const data = buildSubagentRowPresentationData(row, tabTitle);
   return {
     ...data,
     tooltip: data.label,
     modified: false,
     icon: getProviderIcon(row.provider, serverId),
   };
+}
+
+/**
+ * Each row's renamed-tab name, in row order. Read from the pane's workspace so every mount — the
+ * agent's track and a provider subagent's nested one — agrees with the tab strip. Shallow-compared
+ * strings, so a focus or split change elsewhere in the layout does not re-render the track.
+ */
+function useSubagentTabTitles(serverId: string, rows: readonly SubagentRow[]): (string | null)[] {
+  const { workspaceId } = usePaneContext();
+  const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId });
+  return useWorkspaceLayoutStore(
+    useShallow((state) => {
+      const layout = workspaceKey ? state.layoutByWorkspace[workspaceKey] : undefined;
+      const tabs = layout ? collectAllTabs(layout.root) : [];
+      return rows.map((row) => resolveSubagentTabTitle(tabs, row));
+    }),
+  );
 }
 
 export function SubagentsTrack({
@@ -66,6 +92,7 @@ export function SubagentsTrack({
   onDetachSubagent,
 }: SubagentsTrackProps): ReactElement | null {
   const { t } = useTranslation();
+  const tabTitles = useSubagentTabTitles(serverId, rows);
 
   const isArchivingFinished = archiveFinishedStatus.kind === "archiving";
   const isArchiveFinishedFailed = archiveFinishedStatus.kind === "failed";
@@ -93,10 +120,11 @@ export function SubagentsTrack({
           />
         </ComposerTrackActions>
       ) : null}
-      {rows.map((row) => (
+      {rows.map((row, index) => (
         <SubagentsTrackRow
           key={row.id}
           row={row}
+          tabTitle={tabTitles[index] ?? null}
           serverId={serverId}
           onOpenSubagent={onOpenSubagent}
           onOpenProviderSubagent={onOpenProviderSubagent}
@@ -169,6 +197,7 @@ function ArchiveFinishedRow({
 interface SubagentsTrackRowProps {
   serverId: string;
   row: SubagentRow;
+  tabTitle: string | null;
   onOpenSubagent: (id: string) => void;
   onOpenProviderSubagent: (parentAgentId: string, subagentId: string) => void;
   onArchiveSubagent: (id: string) => void;
@@ -178,6 +207,7 @@ interface SubagentsTrackRowProps {
 function SubagentsTrackRow({
   serverId,
   row,
+  tabTitle,
   onOpenSubagent,
   onOpenProviderSubagent,
   onArchiveSubagent,
@@ -185,7 +215,10 @@ function SubagentsTrackRow({
 }: SubagentsTrackRowProps): ReactElement {
   const { t } = useTranslation();
   const isCompact = useIsCompactFormFactor();
-  const presentation = useMemo(() => buildRowPresentation(row, serverId), [row, serverId]);
+  const presentation = useMemo(
+    () => buildRowPresentation(row, serverId, tabTitle),
+    [row, serverId, tabTitle],
+  );
   const displayLabel =
     presentation.titleState === "loading" ? t("common.states.loading") : presentation.label;
   const handlePress = useCallback(() => {
