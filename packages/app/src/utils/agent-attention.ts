@@ -13,7 +13,8 @@ export type AgentAttentionClearTrigger =
   | "focus-entry"
   | "input-focus"
   | "prompt-send"
-  | "agent-blur";
+  | "agent-blur"
+  | "pane-press";
 
 const ATTENTION_REASON_PRIORITY = {
   permission: 0,

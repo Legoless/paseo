@@ -23,6 +23,7 @@ interface AgentAttentionClearController {
   clearOnInputFocus: () => void;
   clearOnPromptSend: () => void;
   clearOnAgentBlur: () => void;
+  clearOnPanePress: () => void;
 }
 
 export function useAgentAttentionClear({
@@ -130,6 +131,11 @@ export function useAgentAttentionClear({
     }, [clearAttention]),
     clearOnAgentBlur: useCallback(() => {
       clearAttention("agent-blur");
+    }, [clearAttention]),
+    // A click inside the pane is the user looking at it. Focus entry cannot stand in: a finish that
+    // lands in the pane already focused never enters focus again, so it stayed green through clicks.
+    clearOnPanePress: useCallback(() => {
+      clearAttention("pane-press");
     }, [clearAttention]),
   };
 }
