@@ -896,6 +896,7 @@ function replaceTabInTree(
     nextTabId: string;
     target: WorkspaceTabTarget;
     state?: JsonValue;
+    dropTitle?: boolean;
   },
 ): SplitNodeInternal {
   const panePath = findPanePathContainingTab(root, input.tabId);
@@ -915,7 +916,7 @@ function replaceTabInTree(
             ...(input.state !== undefined ? { state: input.state } : {}),
             // Carried across the retarget on purpose: a launcher the user named keeps that name
             // when it becomes a draft and then an agent.
-            ...(tab.title ? { title: tab.title } : {}),
+            ...(tab.title && !input.dropTitle ? { title: tab.title } : {}),
           };
         }),
         focusedTabId:
@@ -1542,6 +1543,8 @@ function insertNewTabIntoPane(
           nextTabId: tabId,
           target: input.target,
           state: input.state,
+          // An existing agent keeps its own name; the launcher's would show only in this tab strip.
+          dropTitle: input.target.kind === "agent" || input.target.kind === "provider_subagent",
         }),
         focusedPaneId: input.focus ? targetPane.id : layout.focusedPaneId,
         parentTabIdByTabId: input.layout.parentTabIdByTabId,

@@ -3092,6 +3092,72 @@ describe("workspace-layout-store actions", () => {
     expect(draftTab?.title).toBe("deploy work");
   });
 
+  function seedNamedLauncher(workspaceKey: string): void {
+    workspaceLayoutStore.setState((state) => ({
+      ...state,
+      layoutByWorkspace: {
+        ...state.layoutByWorkspace,
+        [workspaceKey]: {
+          root: createPane({
+            id: "main",
+            tabIds: ["tab-launcher"],
+            targetsByTabId: { "tab-launcher": { kind: "new_tab" } },
+          }),
+          focusedPaneId: "main",
+        },
+      },
+    }));
+    workspaceLayoutStore.getState().setTabTitle(workspaceKey, "tab-launcher", "deploy work");
+  }
+
+  it("does not stamp a named launcher's name onto an existing agent opened into its pane", () => {
+    const workspaceKey = createWorkspaceKey();
+    seedNamedLauncher(workspaceKey);
+
+    const tabId = workspaceLayoutStore.getState().openTab({
+      workspaceKey,
+      target: { kind: "agent", agentId: "agent-1" },
+      intent: "reveal",
+    });
+
+    const tabs = workspaceLayoutStore.getState().getWorkspaceTabs(workspaceKey);
+    expect(tabs.map((tab) => tab.target.kind)).toEqual(["agent"]);
+    expect(tabs.find((tab) => tab.tabId === tabId)?.title).toBeUndefined();
+  });
+
+  it("keeps a named launcher's name when a draft is opened into its pane", () => {
+    const workspaceKey = createWorkspaceKey();
+    seedNamedLauncher(workspaceKey);
+
+    const tabId = workspaceLayoutStore.getState().openTab({
+      workspaceKey,
+      target: { kind: "draft", draftId: "draft-1" },
+      intent: "reveal",
+    });
+
+    const tabs = workspaceLayoutStore.getState().getWorkspaceTabs(workspaceKey);
+    expect(tabs.map((tab) => tab.target.kind)).toEqual(["draft"]);
+    expect(tabs.find((tab) => tab.tabId === tabId)?.title).toBe("deploy work");
+  });
+
+  it("keeps a named draft's name when it becomes an agent", () => {
+    const workspaceKey = createWorkspaceKey();
+    seedNamedLauncher(workspaceKey);
+    const store = workspaceLayoutStore.getState();
+    const draftTabId = store.openTab({
+      workspaceKey,
+      target: { kind: "draft", draftId: "draft-1" },
+      intent: "reveal",
+    });
+
+    const agentTabId = store.convertDraftToAgent(workspaceKey, draftTabId!, "agent-1");
+
+    const tabs = workspaceLayoutStore.getState().getWorkspaceTabs(workspaceKey);
+    const agentTab = tabs.find((tab) => tab.tabId === agentTabId);
+    expect(agentTab?.target).toEqual({ kind: "agent", agentId: "agent-1" });
+    expect(agentTab?.title).toBe("deploy work");
+  });
+
   it("splitPane preserves four user-created levels beneath the explorer split", () => {
     useWorkspaceLayoutIds(
       "11111111-1111-1111-1111-111111111111",
