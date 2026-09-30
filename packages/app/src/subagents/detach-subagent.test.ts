@@ -75,8 +75,14 @@ describe("resolveDetachSubagentDialog", () => {
     });
   });
 
+  it("names a subagent the user called 'New Agent'", () => {
+    expect(resolveDetachSubagentDialog({ title: "New Agent" }).message).toBe(
+      "New Agent will leave this track and continue as a standalone agent.",
+    );
+  });
+
   it("falls back to this subagent when the title is not displayable", () => {
-    expect(resolveDetachSubagentDialog({ title: "New Agent" })).toEqual({
+    expect(resolveDetachSubagentDialog({ title: "   " })).toEqual({
       title: "Detach subagent?",
       message: "This subagent will leave this track and continue as a standalone agent.",
       confirmLabel: "Detach",

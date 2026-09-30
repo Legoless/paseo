@@ -13,9 +13,6 @@ function resolveSubagentLabel(title: Agent["title"] | null | undefined): string 
   if (!normalized) {
     return null;
   }
-  if (normalized.toLowerCase() === "new agent") {
-    return null;
-  }
   return normalized;
 }
 
