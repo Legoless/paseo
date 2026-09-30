@@ -775,6 +775,33 @@ describe("preserveSidebarWorkspaceGroupModelIdentity", () => {
     ).toBe("Renamed");
   });
 
+  it("rebuilds a section when a draft's tab is renamed", () => {
+    const build = (title?: string) =>
+      buildSidebarWorkspaceGroupModel({
+        sessions: [session({ workspaces: [TWO_PROJECT_WORKSPACE] })],
+        layoutsByWorkspace: layoutsFor("ws-1", [
+          {
+            ...tab({
+              tabId: "tab_draft",
+              target: { kind: "draft", draftId: "draft-1" },
+              createdAt: 1,
+            }),
+            ...(title ? { title } : {}),
+          },
+        ]),
+      });
+    const unnamed = build();
+    expect(
+      unnamed.sectionsByWorkspaceKey.get("srv:ws-1")?.uncategorized.newAgents?.[0]?.title,
+    ).toBe(null);
+
+    const preserved = preserveSidebarWorkspaceGroupModelIdentity(unnamed, build("Rockefeller"));
+    expect(preserved).not.toBe(unnamed);
+    expect(
+      preserved.sectionsByWorkspaceKey.get("srv:ws-1")?.uncategorized.newAgents?.[0]?.title,
+    ).toBe("Rockefeller");
+  });
+
   it("rebuilds a section when a member's diff stat moves", () => {
     const withDiffStat = (diffStat: { additions: number; deletions: number } | null) =>
       workspace({

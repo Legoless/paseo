@@ -8,6 +8,8 @@ import { collectAllTabs, type WorkspaceLayout } from "@/stores/workspace-layout-
 
 export interface SidebarWorkspaceNewAgentRow {
   tabId: string;
+  /** The name the user gave the tab; null keeps the "New Agent" placeholder. */
+  title: string | null;
   createdAt: number;
   cwd: string;
   cwdLabel: string;
@@ -223,6 +225,7 @@ function addNewAgentRows(input: {
     const bucket = matchedMember ?? input.uncategorized;
     (bucket.newAgents ??= []).push({
       tabId: tab.tabId,
+      title: tab.title?.trim() || null,
       createdAt: tab.createdAt,
       cwd: cwd ?? "",
       cwdLabel: matchedMember?.workspaceDirectoryLabel ?? (cwd ? shortenPath(cwd) : ""),
@@ -362,6 +365,7 @@ function areNewAgentRowsEqual(
       return (
         Boolean(rightRow) &&
         row.tabId === rightRow.tabId &&
+        row.title === rightRow.title &&
         row.createdAt === rightRow.createdAt &&
         row.cwd === rightRow.cwd &&
         row.cwdLabel === rightRow.cwdLabel &&
