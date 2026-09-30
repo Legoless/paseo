@@ -30,9 +30,8 @@ const STATUS_BUCKET_PRIORITY: readonly SidebarStateBucket[] = [
 
 /**
  * The order states are listed in when all of them are shown side by side rather than collapsed
- * into one — the sidebar's status groups, and the subagent pill's segments — and which tab a pane's
- * glow follows. Anything the user has to act on comes before anything that is still moving on its
- * own.
+ * into one — the sidebar's status groups, and the subagent pill's segments. Anything the user has
+ * to act on comes before anything that is still moving on its own.
  */
 export const STATUS_BUCKET_ORDER: readonly SidebarStateBucket[] = [
   "needs_input",

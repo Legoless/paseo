@@ -1635,7 +1635,6 @@ function SplitPaneView({
               {activeTabDescriptor ? (
                 <WorkspacePaneStatusGlow
                   tab={activeTabDescriptor}
-                  paneTabs={paneTabs}
                   serverId={normalizedServerId}
                   workspaceId={normalizedWorkspaceId}
                 />
