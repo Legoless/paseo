@@ -109,6 +109,7 @@ import {
 import { importSessionFromPersistence } from "../provider-session-import.js";
 import {
   checkProviderLaunchAvailable,
+  createProviderEnv,
   createProviderEnvSpec,
   resolveProviderLaunch,
   type ProviderRuntimeSettings,
@@ -216,6 +217,11 @@ export function summarizeACPRequestError(error: unknown): {
       code,
       diagnostic: `${message} | code=${code}${data}`,
     };
+  }
+
+  if (error instanceof Error && "code" in error && typeof error.code === "string") {
+    const message = readThrownMessage(error);
+    return { message, code: error.code, diagnostic: `${message} | code=${error.code}` };
   }
 
   return { message: readThrownMessage(error) };
@@ -541,6 +547,16 @@ export type ACPCatalogModelResolver = (
   context: ACPCatalogModelResolverContext,
 ) => Promise<AgentModelDefinition[]>;
 
+export interface ACPPromptResponseContext {
+  response: PromptResponse;
+  sessionId: string;
+  cwd: string;
+  startedAt: number;
+  env: NodeJS.ProcessEnv;
+}
+
+export type ACPPromptResponseValidator = (context: ACPPromptResponseContext) => Promise<void>;
+
 interface ACPAgentClientOptions {
   provider: string;
   logger: Logger;
@@ -548,6 +564,7 @@ interface ACPAgentClientOptions {
   defaultCommand: [string, ...string[]];
   defaultModes?: AgentMode[];
   catalogModelResolver?: ACPCatalogModelResolver;
+  promptResponseValidator?: ACPPromptResponseValidator;
   modelTransformer?: (models: AgentModelDefinition[]) => AgentModelDefinition[];
   sessionResponseTransformer?: (response: SessionStateResponse) => SessionStateResponse;
   configOptionsTransformer?: (configOptions: SessionConfigOption[]) => SessionConfigOption[];
@@ -579,6 +596,7 @@ interface ACPAgentSessionOptions {
   runtimeSettings?: ProviderRuntimeSettings;
   defaultCommand: [string, ...string[]];
   defaultModes: AgentMode[];
+  promptResponseValidator?: ACPPromptResponseValidator;
   modelTransformer?: (models: AgentModelDefinition[]) => AgentModelDefinition[];
   sessionResponseTransformer?: (response: SessionStateResponse) => SessionStateResponse;
   configOptionsTransformer?: (configOptions: SessionConfigOption[]) => SessionConfigOption[];
@@ -1004,6 +1022,7 @@ export class ACPAgentClient implements AgentClient {
   protected readonly defaultCommand: [string, ...string[]];
   protected readonly defaultModes: AgentMode[];
   private readonly catalogModelResolver?: ACPCatalogModelResolver;
+  private readonly promptResponseValidator?: ACPPromptResponseValidator;
   private readonly modelTransformer?: (models: AgentModelDefinition[]) => AgentModelDefinition[];
   private readonly sessionResponseTransformer?: (
     response: SessionStateResponse,
@@ -1046,6 +1065,7 @@ export class ACPAgentClient implements AgentClient {
     this.defaultCommand = options.defaultCommand;
     this.defaultModes = options.defaultModes ?? [];
     this.catalogModelResolver = options.catalogModelResolver;
+    this.promptResponseValidator = options.promptResponseValidator;
     this.modelTransformer = options.modelTransformer;
     this.sessionResponseTransformer = options.sessionResponseTransformer;
     this.configOptionsTransformer = options.configOptionsTransformer;
@@ -1076,6 +1096,7 @@ export class ACPAgentClient implements AgentClient {
         runtimeSettings: this.runtimeSettings,
         defaultCommand: this.defaultCommand,
         defaultModes: this.defaultModes,
+        promptResponseValidator: this.promptResponseValidator,
         modelTransformer: this.modelTransformer,
         sessionResponseTransformer: this.sessionResponseTransformer,
         configOptionsTransformer: this.configOptionsTransformer,
@@ -1126,6 +1147,7 @@ export class ACPAgentClient implements AgentClient {
       runtimeSettings: this.runtimeSettings,
       defaultCommand: this.defaultCommand,
       defaultModes: this.defaultModes,
+      promptResponseValidator: this.promptResponseValidator,
       modelTransformer: this.modelTransformer,
       sessionResponseTransformer: this.sessionResponseTransformer,
       configOptionsTransformer: this.configOptionsTransformer,
@@ -1768,6 +1790,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   private readonly runtimeSettings?: ProviderRuntimeSettings;
   private readonly defaultCommand: [string, ...string[]];
   private readonly defaultModes: AgentMode[];
+  private readonly promptResponseValidator?: ACPPromptResponseValidator;
   protected readonly modelTransformer?: (models: AgentModelDefinition[]) => AgentModelDefinition[];
   private readonly sessionResponseTransformer?: (
     response: SessionStateResponse,
@@ -1841,6 +1864,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     this.runtimeSettings = options.runtimeSettings;
     this.defaultCommand = options.defaultCommand;
     this.defaultModes = options.defaultModes;
+    this.promptResponseValidator = options.promptResponseValidator;
     this.modelTransformer = options.modelTransformer;
     this.sessionResponseTransformer = options.sessionResponseTransformer;
     this.configOptionsTransformer = options.configOptionsTransformer;
@@ -2001,17 +2025,34 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     this.pushEvent({ type: "turn_started", provider: this.provider, turnId });
     this.emitSubmittedUserMessage(prompt, messageId, turnId, options?.clientMessageId);
 
+    const sessionId = this.sessionId;
+    const startedAt = Date.now();
     void this.connection
       .prompt({
         sessionId: this.sessionId,
         messageId,
         prompt: toACPContentBlocks(prompt),
       })
-      .then((response) => {
+      .then(async (response) => {
+        if (this.closed || this.activeForegroundTurnId !== turnId) return;
+        if (this.promptResponseValidator) {
+          await this.promptResponseValidator({
+            response,
+            sessionId,
+            cwd: this.config.cwd,
+            startedAt,
+            env: createProviderEnv({
+              runtimeSettings: this.runtimeSettings,
+              overlays: [this.launchEnv],
+            }),
+          });
+          if (this.closed || this.activeForegroundTurnId !== turnId) return;
+        }
         this.handlePromptResponse(response, turnId);
         return;
       })
       .catch((error) => {
+        if (this.closed || this.activeForegroundTurnId !== turnId) return;
         const summary = summarizeACPRequestError(error);
         this.finishTurn({
           type: "turn_failed",

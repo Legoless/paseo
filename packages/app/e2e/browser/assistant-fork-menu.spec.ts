@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { expect, test as base } from "../support/fixtures";
 import { awaitAssistantMessage } from "../support/helpers/agent-stream";
 import {
@@ -19,7 +22,11 @@ import {
 } from "../support/helpers/mock-agent";
 import { getServerId } from "../support/helpers/server-id";
 import { seedSavedSettingsHosts } from "../support/helpers/settings";
-import { submitNewWorkspaceEmpty } from "../support/helpers/new-workspace";
+import {
+  connectNewWorkspaceDaemonClient,
+  submitNewWorkspaceEmpty,
+} from "../support/helpers/new-workspace";
+import { seedWorkspace } from "../support/helpers/seed-client";
 
 const test = base.extend<{
   seedForkWorkspace: (options: MockAgentOptions) => Promise<MockAgentWorkspace>;
@@ -57,6 +64,72 @@ test.describe("Assistant fork menu", () => {
 
     await forkMostRecentAssistantTurnToNewTab(page);
     await expectChatHistoryAttachment(page);
+  });
+
+  test("shows a Kimi OAuth failure reported as end_turn and recovers on retry", async ({
+    page,
+  }, testInfo) => {
+    const kimiHome = await mkdtemp(path.join(tmpdir(), "kimi-failed-turn-"));
+    const workspace = await seedWorkspace({ repoPrefix: "kimi-failed-turn-" });
+    const configClient = await connectNewWorkspaceDaemonClient();
+    try {
+      await configClient.patchDaemonConfig({
+        providers: {
+          kimi: {
+            extends: "acp",
+            label: "Kimi Code",
+            command: [
+              process.execPath,
+              path.resolve(__dirname, "../support/fixtures/catalog-acp.cjs"),
+              "kimi-native-failure",
+            ],
+            env: { KIMI_CODE_HOME: kimiHome },
+          },
+        },
+      });
+      const agent = await workspace.client.createAgent({
+        provider: "kimi",
+        cwd: workspace.repoPath,
+        workspaceId: workspace.workspaceId,
+        title: "Kimi OAuth failure",
+      });
+      await openAgentRoute(page, { workspaceId: workspace.workspaceId, agentId: agent.id });
+      await expectComposerVisible(page);
+      await submitMessage(page, "Resume last session");
+      const systemError = page.getByTestId("assistant-message").filter({
+        hasText: "[System Error] OAuthConnectionError: OAuth request failed: fetch failed",
+      });
+      await expect(systemError).toBeVisible({ timeout: 30_000 });
+      await expect(
+        page.getByTestId("user-message").filter({ hasText: "Resume last session" }),
+      ).toBeVisible();
+      const failure = await workspace.client.waitForFinish(agent.id, 30_000);
+      expect(failure.status).toBe("error");
+      expect(failure.final?.lastError).toBe(
+        "OAuthConnectionError: OAuth request failed: fetch failed",
+      );
+      await testInfo.attach("kimi-oauth-failure", {
+        body: await page.screenshot(),
+        contentType: "image/png",
+      });
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expect(systemError).toBeVisible({ timeout: 30_000 });
+      await expect(systemError).toHaveCount(1);
+
+      await submitMessage(page, "Retry the turn");
+      await expect(
+        page.getByTestId("assistant-message").filter({ hasText: "Recovered Kimi reply." }),
+      ).toBeVisible({ timeout: 30_000 });
+      const success = await workspace.client.waitForFinish(agent.id, 30_000);
+      expect(success.status).toBe("idle");
+      expect(success.final?.lastError ?? null).toBeNull();
+      await expect(systemError).toHaveCount(1);
+    } finally {
+      await workspace.cleanup();
+      await configClient.close();
+      await rm(kimiHome, { recursive: true, force: true });
+    }
   });
 
   test("forks a streaming assistant turn without interrupting it", async ({
