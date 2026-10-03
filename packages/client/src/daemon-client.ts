@@ -7,7 +7,11 @@ import {
   DEFAULT_CLIENT_CAPABILITIES,
   type TimelineSubscription,
 } from "./connection/index.js";
-import { CreationClient } from "./creation/index.js";
+import {
+  CreationClient,
+  InitialPromptFailedError,
+  toInitialPromptFailure,
+} from "./creation/index.js";
 import type { CreationSnapshot } from "@getpaseo/protocol/messages";
 import type { z } from "zod";
 import type { SessionEventSubscription } from "@getpaseo/protocol/messages";
@@ -263,6 +267,7 @@ export type {
 } from "./daemon-client-transport.js";
 
 export type { TerminalStreamEvent };
+export { InitialPromptFailedError, toInitialPromptFailure };
 
 export type ConnectionState =
   | { status: "idle" }
@@ -634,6 +639,11 @@ export type AgentTimelineSearchPayload = Extract<
 export type AgentTimelinePromptIndexPayload = Extract<
   SessionOutboundMessage,
   { type: "agent.timeline.list_prompts.response" }
+>["payload"];
+
+export type AgentTimelineImageIndexPayload = Extract<
+  SessionOutboundMessage,
+  { type: "agent.timeline.list_images.response" }
 >["payload"];
 
 export type ProviderSubagentListPayload = Extract<
@@ -2809,6 +2819,8 @@ export class DaemonClient {
       ...options,
       config: resolveAgentConfig(options),
     });
+    const promptFailure = toInitialPromptFailure(result);
+    if (promptFailure) throw promptFailure;
     if (result.error || !result.agent) throw new Error(result.error ?? "Agent creation failed");
     return result.agent;
   }
@@ -3261,6 +3273,33 @@ export class DaemonClient {
       options: { skipQueue: true },
       select: (response) =>
         response.type === "agent.timeline.list_prompts.response" &&
+        response.payload.requestId === requestId
+          ? response.payload
+          : null,
+    });
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
+    return payload;
+  }
+
+  async listAgentTimelineImages(
+    agentId: string,
+    options: { requestId?: string; timeout?: number } = {},
+  ): Promise<AgentTimelineImageIndexPayload> {
+    const requestId = this.createRequestId(options.requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.timeline.list_images.request",
+      agentId,
+      requestId,
+    });
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      timeout: options.timeout,
+      options: { skipQueue: true },
+      select: (response) =>
+        response.type === "agent.timeline.list_images.response" &&
         response.payload.requestId === requestId
           ? response.payload
           : null,

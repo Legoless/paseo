@@ -52,14 +52,11 @@ for (const command of CLIENT_SLASH_COMMANDS) {
   }
 }
 
-export function resolveClientSlashCommand(input: {
-  text: string;
-  hasAttachments: boolean;
-}): ClientSlashCommand | null {
-  if (input.hasAttachments) {
-    return null;
-  }
-
+/**
+ * Client commands run whatever else the composer holds: they discard its text and attachments
+ * (a carried Chat history chip included), which is the point of `/clear`.
+ */
+export function resolveClientSlashCommand(input: { text: string }): ClientSlashCommand | null {
   const trimmed = input.text.trim();
   if (!trimmed.startsWith("/")) {
     return null;

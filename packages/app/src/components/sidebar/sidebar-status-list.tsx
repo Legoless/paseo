@@ -47,8 +47,14 @@ import {
   SidebarWorkspaceTrailingActionBase,
   SidebarWorkspaceTrailingActionOverlay,
   SidebarWorkspaceTrailingActionSlot,
+  SidebarWorkspacePaneStatusCounts,
   sidebarWorkspaceRowStyles,
 } from "@/components/sidebar/sidebar-workspace-row-content";
+import {
+  EMPTY_PANE_STATUS_COUNTS,
+  type SidebarPaneStatusCounts,
+  type SidebarWorkspaceSection,
+} from "@/projects/workspace-groups";
 import { useOpenKebabMenuVisibility } from "@/components/sidebar/use-open-kebab-menu-visibility";
 import { getSidebarRowBackdrop } from "@/components/sidebar/sidebar-row-backdrop";
 import { getStatusDotColor } from "@/utils/status-dot-color";
@@ -106,6 +112,8 @@ function statusWorkspaceKeyExtractor(workspace: SidebarWorkspaceEntry): string {
 
 interface StatusWorkspaceListProps {
   groups: SidebarWorkspaceGroup[];
+  /** Carries each workspace's pane status counts, the dots before the kebab. */
+  sectionsByWorkspaceKey: ReadonlyMap<string, SidebarWorkspaceSection>;
   pinnedWorkspaces: SidebarWorkspaceEntry[];
   projectIconByProjectViewKey: ReadonlyMap<string, string | null>;
   shortcutIndexByWorkspaceKey: Map<string, number>;
@@ -123,6 +131,7 @@ interface StatusWorkspaceListProps {
 
 export function SidebarStatusWorkspaceList({
   groups,
+  sectionsByWorkspaceKey,
   pinnedWorkspaces,
   projectIconByProjectViewKey,
   shortcutIndexByWorkspaceKey,
@@ -168,6 +177,10 @@ export function SidebarStatusWorkspaceList({
           hostBadgeByServerId,
         })}
         inStatusGroup={false}
+        paneStatusCounts={
+          sectionsByWorkspaceKey.get(workspace.workspaceKey)?.paneStatusCounts ??
+          EMPTY_PANE_STATUS_COUNTS
+        }
         shortcutNumber={statusShortcutIndex.get(workspace.workspaceKey) ?? null}
         showShortcutBadge={showShortcutBadges}
         canPin={supportsPinningByServerId.get(workspace.serverId) === true}
@@ -183,6 +196,7 @@ export function SidebarStatusWorkspaceList({
       onToggleWorkspacePin,
       onWorkspacePress,
       projectIconByProjectViewKey,
+      sectionsByWorkspaceKey,
       showShortcutBadges,
       statusShortcutIndex,
       supportsPinningByServerId,
@@ -223,6 +237,7 @@ export function SidebarStatusWorkspaceList({
       ) : (
         <StatusGroupList
           groups={groups}
+          sectionsByWorkspaceKey={sectionsByWorkspaceKey}
           collapsedWorkspaceGroupKeys={collapsedWorkspaceGroupKeys}
           projectIconByProjectViewKey={projectIconByProjectViewKey}
           shortcutIndex={statusShortcutIndex}
@@ -263,6 +278,7 @@ export function SidebarStatusWorkspaceList({
 
 function StatusGroupList({
   groups,
+  sectionsByWorkspaceKey,
   collapsedWorkspaceGroupKeys,
   projectIconByProjectViewKey,
   shortcutIndex,
@@ -273,6 +289,7 @@ function StatusGroupList({
   onToggleWorkspacePin,
 }: {
   groups: SidebarWorkspaceGroup[];
+  sectionsByWorkspaceKey: ReadonlyMap<string, SidebarWorkspaceSection>;
   collapsedWorkspaceGroupKeys: ReadonlySet<string>;
   projectIconByProjectViewKey: ReadonlyMap<string, string | null>;
   shortcutIndex: Map<string, number>;
@@ -288,6 +305,7 @@ function StatusGroupList({
         <StatusGroupRows
           key={group.key}
           group={group}
+          sectionsByWorkspaceKey={sectionsByWorkspaceKey}
           collapsed={collapsedWorkspaceGroupKeys.has(group.key)}
           projectIconByProjectViewKey={projectIconByProjectViewKey}
           shortcutIndex={shortcutIndex}
@@ -304,6 +322,7 @@ function StatusGroupList({
 
 function StatusGroupRows({
   group,
+  sectionsByWorkspaceKey,
   collapsed,
   projectIconByProjectViewKey,
   shortcutIndex,
@@ -314,6 +333,7 @@ function StatusGroupRows({
   onToggleWorkspacePin,
 }: {
   group: SidebarWorkspaceGroup;
+  sectionsByWorkspaceKey: ReadonlyMap<string, SidebarWorkspaceSection>;
   collapsed: boolean;
   projectIconByProjectViewKey: ReadonlyMap<string, string | null>;
   shortcutIndex: Map<string, number>;
@@ -347,6 +367,10 @@ function StatusGroupRows({
                 projectIconByProjectViewKey,
                 hostBadgeByServerId,
               })}
+              paneStatusCounts={
+                sectionsByWorkspaceKey.get(workspace.workspaceKey)?.paneStatusCounts ??
+                EMPTY_PANE_STATUS_COUNTS
+              }
               shortcutNumber={shortcutIndex.get(workspace.workspaceKey) ?? null}
               showShortcutBadge={showShortcutBadges}
               canPin={supportsPinningByServerId.get(workspace.serverId) === true}
@@ -480,6 +504,7 @@ function StatusGroupIcon({ bucket }: { bucket: StatusBucket }) {
 
 const StatusWorkspaceRow = memo(function StatusWorkspaceRow({
   workspace,
+  paneStatusCounts,
   hostBadge,
   projectName,
   projectIconDataUri,
@@ -495,6 +520,7 @@ const StatusWorkspaceRow = memo(function StatusWorkspaceRow({
   dragHandleProps,
 }: {
   workspace: SidebarWorkspaceEntry;
+  paneStatusCounts: SidebarPaneStatusCounts;
   hostBadge: HostBadgeModel | null;
   projectName: string;
   projectIconDataUri: string | null;
@@ -527,6 +553,7 @@ const StatusWorkspaceRow = memo(function StatusWorkspaceRow({
   return (
     <StatusWorkspaceRowWithMenu
       workspace={workspace}
+      paneStatusCounts={paneStatusCounts}
       hostBadge={hostBadge}
       projectName={projectName}
       projectIconDataUri={projectIconDataUri}
@@ -547,6 +574,7 @@ const StatusWorkspaceRow = memo(function StatusWorkspaceRow({
 
 function StatusWorkspaceRowWithMenu({
   workspace,
+  paneStatusCounts,
   hostBadge,
   projectName,
   projectIconDataUri,
@@ -563,6 +591,7 @@ function StatusWorkspaceRowWithMenu({
   dragHandleProps,
 }: {
   workspace: SidebarWorkspaceEntry;
+  paneStatusCounts: SidebarPaneStatusCounts;
   hostBadge: HostBadgeModel | null;
   projectName: string;
   projectIconDataUri: string | null;
@@ -664,6 +693,7 @@ function StatusWorkspaceRowWithMenu({
   return (
     <StatusWorkspaceRowInner
       workspace={workspace}
+      paneStatusCounts={paneStatusCounts}
       hostBadge={hostBadge}
       projectName={projectName}
       projectIconDataUri={projectIconDataUri}
@@ -695,6 +725,7 @@ function StatusWorkspaceRowWithMenu({
 
 interface StatusWorkspaceRowInnerProps {
   workspace: SidebarWorkspaceEntry;
+  paneStatusCounts: SidebarPaneStatusCounts;
   hostBadge: HostBadgeModel | null;
   projectName: string;
   projectIconDataUri: string | null;
@@ -742,6 +773,7 @@ function DraggableStatusWorkspaceRowInner(
 
 function StatusWorkspaceRowInnerContent({
   workspace,
+  paneStatusCounts,
   hostBadge,
   projectName,
   projectIconDataUri,
@@ -812,6 +844,7 @@ function StatusWorkspaceRowInnerContent({
     <SidebarWorkspaceRowFrame workspace={workspace} isDragging={isDragging}>
       {({ isHovered, contextMenuOpen, onContextMenuOpenChange, hoverHandlers }) => {
         const showShortcut = showShortcutBadge && shortcutNumber !== null;
+        const hasPaneStatusCounts = Object.values(paneStatusCounts).some((count) => count > 0);
         const {
           trailingPresentation,
           showKebab: showKebabInSlot,
@@ -825,6 +858,7 @@ function StatusWorkspaceRowInnerContent({
           isHovered,
           isTouchPlatform,
           showShortcut,
+          hasPaneStatusCounts,
         });
         const workspaceRowStyle = getStatusWorkspaceRowStyle({
           isPressed,
@@ -885,6 +919,9 @@ function StatusWorkspaceRowInnerContent({
                 showShortcutBadge={showShortcutBadge}
                 reserveIdleStatusIndicatorSpace={reserveIdleStatusIndicatorSpace}
               >
+                {hasPaneStatusCounts ? (
+                  <SidebarWorkspacePaneStatusCounts counts={paneStatusCounts} />
+                ) : null}
                 {renderSlot ? (
                   <StatusWorkspaceActionSlot
                     workspace={workspace}

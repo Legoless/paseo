@@ -1,3 +1,4 @@
+import { InitialPromptFailedError } from "@getpaseo/client/internal/daemon-client";
 import { resolveSubmissionReadiness } from "@/provider-selection/provider-selection";
 
 export interface WorkspaceDraftAutoSubmitConfig {
@@ -49,4 +50,25 @@ export function validateDraftSubmission(input: {
     hasClient,
   });
   return readiness.ok ? null : (readiness.reason ?? null);
+}
+
+/**
+ * A failed first prompt leaves an agent that holds nothing but the failure. The draft keeps the
+ * user's text and attachments for the next send, so that empty agent is archived instead of
+ * lingering in the sidebar beside the retry. Archiving is best effort: the retry must not wait
+ * on it or fail because of it.
+ */
+export async function archiveAgentLeftByFailedPrompt(
+  error: unknown,
+  archiveAgent: (agentId: string) => Promise<unknown>,
+): Promise<void> {
+  if (!(error instanceof InitialPromptFailedError)) return;
+  try {
+    await archiveAgent(error.agentId);
+  } catch (archiveError) {
+    console.warn(
+      "[WorkspaceDraft] failed to archive the agent left by a failed prompt",
+      archiveError,
+    );
+  }
 }

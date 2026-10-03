@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { win32 } from "node:path";
+import { resolveFilePreviewReadTarget } from "@/file-explorer/preview-target";
 import {
   classifyAssistantFileLink,
   normalizeInlinePathTarget,
@@ -427,7 +429,7 @@ describe("normalizeInlinePathTarget", () => {
     });
   });
 
-  it("resolves absolute paths under cwd back to workspace-relative paths", () => {
+  it("keeps the original file project while making its directory workspace-relative", () => {
     expect(
       normalizeInlinePathTarget(
         "/Users/test/project/packages/app/src/components/message.tsx",
@@ -435,8 +437,44 @@ describe("normalizeInlinePathTarget", () => {
       ),
     ).toEqual({
       directory: "packages/app/src/components",
-      file: "packages/app/src/components/message.tsx",
+      file: "/Users/test/project/packages/app/src/components/message.tsx",
     });
+  });
+
+  it("anchors relative file targets to the originating agent directory", () => {
+    expect(
+      normalizeInlinePathTarget("captures/background/victory.png", "/Users/test/Belle"),
+    ).toEqual({
+      directory: "captures/background",
+      file: "/Users/test/Belle/captures/background/victory.png",
+    });
+    expect(normalizeInlinePathTarget("./README.md", "~/project")).toEqual({
+      directory: ".",
+      file: "~/project/README.md",
+    });
+  });
+
+  it("opens the source project's file even when the file pane belongs to another project", () => {
+    const path = "/Users/test/Belle/captures/background/southport-victory.png";
+    const target = normalizeInlinePathTarget(path, "/Users/test/Belle");
+    expect(
+      resolveFilePreviewReadTarget({ path: target!.file!, workspaceRoot: "/Users/test/TurboSim" }),
+    ).toEqual({
+      cwd: "/",
+      path,
+    });
+  });
+
+  it("preserves the server and share for absolute and relative Windows UNC files", () => {
+    const cwd = "\\\\server\\share\\project";
+    for (const source of ["\\\\server\\share\\project\\src\\report.md", "src\\report.md"]) {
+      const target = normalizeInlinePathTarget(source, cwd);
+      expect(target).toEqual({ directory: "src", file: "//server/share/project/src/report.md" });
+      const read = resolveFilePreviewReadTarget({ path: target!.file!, workspaceRoot: "C:/other" });
+      expect(win32.resolve(read!.cwd, read!.path)).toBe(
+        "\\\\server\\share\\project\\src\\report.md",
+      );
+    }
   });
 
   it("keeps absolute paths outside cwd as absolute file targets", () => {

@@ -29,7 +29,7 @@ interface SavedTerminal {
   workspaceId: string;
   // Only a title the user typed; the session's own title also follows the shell.
   title?: string;
-  resumeKey: string;
+  restoreKey: string;
 }
 
 const savedTerminalById = new Map<string, SavedTerminal>();
@@ -95,8 +95,9 @@ function toTerminalInfo(session: TerminalSession): WorkerTerminalInfo {
   };
 }
 
-function resumeKeyOf(session: TerminalSession): string {
-  return JSON.stringify(session.getResumeTarget?.() ?? null);
+// What a restore uses that changes without a request: the agent to resume and the shell's directory.
+function restoreKeyOf(session: TerminalSession): string {
+  return JSON.stringify([session.getResumeTarget?.() ?? null, session.getShellCwd?.() ?? null]);
 }
 
 function saveTerminal(session: TerminalSession): void {
@@ -105,6 +106,7 @@ function saveTerminal(session: TerminalSession): void {
     return;
   }
   const resume = session.getResumeTarget?.() ?? null;
+  const shellCwd = session.getShellCwd?.();
   const state = resume ? null : (session.getRestoreState?.() ?? null);
   try {
     writeTerminalRecord(recordsDirectory, {
@@ -112,6 +114,7 @@ function saveTerminal(session: TerminalSession): void {
       id: session.id,
       workspaceId: saved.workspaceId,
       cwd: session.cwd,
+      ...(shellCwd ? { shellCwd } : {}),
       name: session.name,
       ...(saved.title ? { title: saved.title } : {}),
       ...session.getSize(),
@@ -119,15 +122,15 @@ function saveTerminal(session: TerminalSession): void {
       ...(resume ? { resume } : {}),
       ...(state ? { scrollback: renderRestoreScrollback(state) } : {}),
     });
-    saved.resumeKey = JSON.stringify(resume);
+    saved.restoreKey = restoreKeyOf(session);
   } catch (error) {
     console.error("Failed to save terminal record:", error);
   }
 }
 
-function saveTerminalIfResumeChanged(session: TerminalSession | undefined): void {
+function saveTerminalIfRestoreChanged(session: TerminalSession | undefined): void {
   const saved = session ? savedTerminalById.get(session.id) : undefined;
-  if (session && saved && saved.resumeKey !== resumeKeyOf(session)) {
+  if (session && saved && saved.restoreKey !== restoreKeyOf(session)) {
     saveTerminal(session);
   }
 }
@@ -279,7 +282,7 @@ function watchTerminal(session: TerminalSession): void {
     });
   });
   const unsubscribeCommandFinished = session.onCommandFinished((info) => {
-    saveTerminalIfResumeChanged(session);
+    saveTerminalIfRestoreChanged(session);
     outputCoalescer.flush();
     sendToParent({
       type: "terminalCommandFinished",
@@ -332,7 +335,7 @@ async function handleCreateTerminalRequest(message: TerminalCreateRequest): Prom
       savedTerminalById.set(session.id, {
         workspaceId,
         ...(message.options.title?.trim() ? { title: message.options.title.trim() } : {}),
-        resumeKey: "",
+        restoreKey: "",
       });
       saveTerminal(session);
     }
@@ -380,7 +383,7 @@ async function handleRequest(message: TerminalWorkerRequest): Promise<void> {
         message.attentionReason,
         message.sessionId,
       );
-      saveTerminalIfResumeChanged(manager.getTerminal(message.terminalId));
+      saveTerminalIfRestoreChanged(manager.getTerminal(message.terminalId));
       sendToParent({ type: "response", requestId: message.requestId, ok: true });
       return;
     }

@@ -13,7 +13,11 @@ import { AgentStreamView } from "@/agent-stream/view";
 import { composerWorkspaceAttachment } from "@/composer/attachments/workspace";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
 import type { CreateAgentInitialValues } from "@/hooks/use-agent-form-state";
-import { useDraftAgentCreateFlow, type DraftCreateAttempt } from "@/composer/draft/create-flow";
+import {
+  buildDraftCreationKey,
+  useDraftAgentCreateFlow,
+  type DraftCreateAttempt,
+} from "@/composer/draft/create-flow";
 import { resolveTurnPresentation, TURN_LIVENESS_IDLE } from "@/timeline/turn-liveness";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { buildWorkspaceDraftAgentConfig } from "@/screens/workspace/workspace-draft-agent-config";
@@ -27,9 +31,11 @@ import { encodeImages } from "@/utils/encode-images";
 import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
 import { shouldAutoFocusWorkspaceDraftComposer } from "@/screens/workspace/workspace-draft-pane-focus";
 import {
+  archiveAgentLeftByFailedPrompt,
   shouldAllowEmptyDraftText,
   validateDraftSubmission,
 } from "@/composer/draft/workspace-tab-core";
+import type { ClientSlashCommand } from "@/client-slash-commands";
 import type { AgentCapabilityFlags } from "@getpaseo/protocol/agent-types";
 import type { AgentSnapshotPayload } from "@getpaseo/protocol/messages";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
@@ -136,7 +142,7 @@ function resolveDraftModeId(input: {
 
 async function submitDraftCreateRequest(input: {
   draftId: string;
-  attempt: { clientMessageId: string };
+  attempt: { clientMessageId: string; timestamp: Date };
   text: string;
   images?: UserMessageImageAttachment[];
   attachments?: unknown;
@@ -197,7 +203,7 @@ async function submitDraftCreateRequest(input: {
   const attachmentsArray = Array.isArray(attachments) ? attachments : undefined;
   const imagesData = await encodeImages(images);
   const options = {
-    idempotencyKey: input.draftId,
+    idempotencyKey: buildDraftCreationKey(input.draftId, attempt),
     config,
     workspaceId,
     initialPrompt: text,
@@ -205,8 +211,7 @@ async function submitDraftCreateRequest(input: {
     ...(imagesData && imagesData.length > 0 ? { images: imagesData } : {}),
     ...(attachmentsArray && attachmentsArray.length > 0 ? { attachments: attachmentsArray } : {}),
   };
-  const creation = useWorkspaceDraftSubmissionStore.getState().creationByDraftId[input.draftId];
-  const result = creation ? await creation.retry(options) : await client.createAgent(options);
+  const result = await client.createAgent(options);
 
   return {
     agentId: result.id,
@@ -308,6 +313,35 @@ interface WorkspaceDraftAgentTabProps {
   onCreated: (snapshot: AgentSnapshotPayload) => void;
   onOpenWorkspaceFile: (request: WorkspaceFileOpenRequest) => void;
   onOpenImportSheet?: () => void;
+  /** `/clear`: replace this draft with a fresh one. `setup` carries the current selections. */
+  onStartFreshDraft: (setup: WorkspaceDraftTabSetup | undefined) => void;
+  /** `/exit`: close this draft's tab. */
+  onCloseDraft: () => void;
+}
+
+function buildFreshDraftSetup(input: {
+  fallback: WorkspaceDraftTabSetup | null;
+  cwd: string | null;
+  composerState: {
+    selectedProvider: string | null;
+    selectedMode: string;
+    effectiveModelId: string | null;
+    effectiveThinkingOptionId: string | null;
+    featureValues: Record<string, unknown> | undefined;
+  };
+}): WorkspaceDraftTabSetup | undefined {
+  const { composerState, cwd } = input;
+  if (!composerState.selectedProvider || !cwd) {
+    return input.fallback ?? undefined;
+  }
+  return {
+    provider: composerState.selectedProvider,
+    cwd,
+    modeId: composerState.selectedMode || null,
+    model: composerState.effectiveModelId || null,
+    thinkingOptionId: composerState.effectiveThinkingOptionId || null,
+    featureValues: composerState.featureValues ?? {},
+  };
 }
 
 function resolveImportPillPress(
@@ -331,6 +365,8 @@ export function WorkspaceDraftAgentTab({
   onCreated,
   onOpenWorkspaceFile,
   onOpenImportSheet,
+  onStartFreshDraft,
+  onCloseDraft,
 }: WorkspaceDraftAgentTabProps) {
   const { t } = useTranslation();
   const client = useHostRuntimeClient(serverId);
@@ -456,6 +492,7 @@ export function WorkspaceDraftAgentTab({
     pendingMessageSubmissions,
     draftAgent,
     handleCreateFromInput,
+    handleComposerSubmit,
     continueCreateFromAttempt,
   } = useDraftAgentCreateFlow<Agent, AgentSnapshotPayload>({
     draftId,
@@ -494,25 +531,32 @@ export function WorkspaceDraftAgentTab({
         selectModelMessage: t("workspaceSetup.errors.selectModel"),
       }),
     createRequest: async ({ attempt, text, images, attachments, cwd }) => {
-      if (pendingAutoSubmit?.agentCreation) {
-        const result = await pendingAutoSubmit.agentCreation.result;
-        return { agentId: result.id, result };
+      try {
+        if (pendingAutoSubmit?.agentCreation) {
+          const result = await pendingAutoSubmit.agentCreation.result;
+          return { agentId: result.id, result };
+        }
+        return await submitDraftCreateRequest({
+          draftId,
+          attempt,
+          text,
+          images,
+          attachments,
+          cwd,
+          client,
+          workspaceDirectory: draftWorkingDirectory,
+          workspaceId: workspaceFields?.id ?? null,
+          autoSubmitConfig,
+          composerState,
+          hostDisconnectedMessage: t("workspace.terminal.hostDisconnected"),
+          selectModelMessage: t("workspaceSetup.errors.selectModel"),
+        });
+      } catch (error) {
+        if (client) {
+          void archiveAgentLeftByFailedPrompt(error, (agentId) => client.archiveAgent(agentId));
+        }
+        throw error;
       }
-      return submitDraftCreateRequest({
-        draftId,
-        attempt,
-        text,
-        images,
-        attachments,
-        cwd,
-        client,
-        workspaceDirectory: draftWorkingDirectory,
-        workspaceId: workspaceFields?.id ?? null,
-        autoSubmitConfig,
-        composerState,
-        hostDisconnectedMessage: t("workspace.terminal.hostDisconnected"),
-        selectModelMessage: t("workspaceSetup.errors.selectModel"),
-      });
     },
     onCreateSuccess: ({ result }) => {
       clearDraftInput("sent");
@@ -521,6 +565,37 @@ export function WorkspaceDraftAgentTab({
       onCreated(result);
     },
   });
+  // A draft has no agent to archive: `/clear` drops the draft itself — its text, attachments,
+  // carried Chat history and any failed attempt — and starts a fresh one with the same
+  // selections. That fresh draft is also the way out of a creation that keeps failing.
+  const handleClientSlashCommand = useCallback(
+    async (command: ClientSlashCommand) => {
+      if (command.kind === "archive-agent") {
+        onCloseDraft();
+        return;
+      }
+      clearWorkspaceAttachments({ scopeKey: draftAttachmentScopeKey });
+      useWorkspaceDraftSubmissionStore.getState().clearDraftSetup({ draftId });
+      useCreateFlowStore.getState().clear({ draftId });
+      onStartFreshDraft(
+        buildFreshDraftSetup({
+          fallback: draftSetup,
+          cwd: draftWorkingDirectory,
+          composerState,
+        }),
+      );
+    },
+    [
+      clearWorkspaceAttachments,
+      composerState,
+      draftAttachmentScopeKey,
+      draftId,
+      draftSetup,
+      draftWorkingDirectory,
+      onCloseDraft,
+      onStartFreshDraft,
+    ],
+  );
   const turnPresentation = useMemo(
     () => resolveTurnPresentation(TURN_LIVENESS_IDLE, pendingMessageSubmissions.length > 0),
     [pendingMessageSubmissions],
@@ -674,7 +749,8 @@ export function WorkspaceDraftAgentTab({
             serverId={serverId}
             workspaceId={workspaceId}
             isPaneFocused={isPaneFocused}
-            onSubmitMessage={handleCreateFromInput}
+            onSubmitMessage={handleComposerSubmit}
+            onClientSlashCommand={handleClientSlashCommand}
             isSubmitLoading={isSubmitting}
             blurOnSubmit={true}
             textSource={draftInput.textSource}

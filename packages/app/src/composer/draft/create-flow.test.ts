@@ -6,7 +6,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
 import type { UserMessageImageAttachment } from "@/types/stream";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
-import { useDraftAgentCreateFlow, type DraftCreateAttempt } from "./create-flow";
+import {
+  buildDraftCreationKey,
+  useDraftAgentCreateFlow,
+  type DraftCreateAttempt,
+} from "./create-flow";
 
 describe("useDraftAgentCreateFlow", () => {
   beforeEach(() => {
@@ -249,5 +253,125 @@ describe("useDraftAgentCreateFlow", () => {
       cwd: "/repo",
     });
     expect(onCreateSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the draft banner empty when the composer shows the submit failure", async () => {
+    const { result } = renderHook(() =>
+      useDraftAgentCreateFlow({
+        draftId: "draft-composer-error",
+        getPendingServerId: () => "server-1",
+        buildDraftAgent: () => ({ provider: "codex" }),
+        createRequest: async () => {
+          throw new Error("Input exceeds the maximum length");
+        },
+        onCreateSuccess: () => undefined,
+      }),
+    );
+
+    const captureError = (error: unknown) => error;
+    let thrown: unknown;
+    await act(async () => {
+      thrown = await result.current
+        .handleComposerSubmit({ text: "build this", attachments: [], cwd: "/repo" })
+        .catch(captureError);
+    });
+
+    expect((thrown as Error).message).toBe("Input exceeds the maximum length");
+    expect(result.current.isSubmitting).toBe(false);
+    expect(result.current.formErrorMessage).toBe("");
+  });
+
+  it("replaces a raw request key conflict with a readable message", async () => {
+    const { result } = renderHook(() =>
+      useDraftAgentCreateFlow({
+        draftId: "draft-conflict",
+        getPendingServerId: () => "server-1",
+        buildDraftAgent: () => ({ provider: "codex" }),
+        createRequest: async () => {
+          throw new Error("agent_request_key_conflict");
+        },
+        onCreateSuccess: () => undefined,
+      }),
+    );
+
+    const ignoreError = () => undefined;
+    await act(async () => {
+      await result.current
+        .handleCreateFromInput({ text: "build this", attachments: [], cwd: "/repo" })
+        .catch(ignoreError);
+    });
+
+    expect(result.current.formErrorMessage).not.toBe("");
+    expect(result.current.formErrorMessage).not.toContain("request_key_conflict");
+  });
+
+  it("sends a retry without the removed Chat history under a new creation key", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const chatHistory = {
+        kind: "chat_history",
+        id: "chat-history-1",
+        attachment: {
+          type: "text",
+          mimeType: "text/plain",
+          contextKind: "chat_history",
+          title: "Chat history",
+          text: "Previous conversation",
+        },
+        source: { serverId: "server-1", agentId: "agent-source" },
+      } as const;
+      const requests: { key: string; attachments?: AgentAttachment[] }[] = [];
+      const { result } = renderHook(() =>
+        useDraftAgentCreateFlow({
+          draftId: "draft-history",
+          getPendingServerId: () => "server-1",
+          buildDraftAgent: () => ({ provider: "codex" }),
+          createRequest: async ({ attempt, attachments }) => {
+            requests.push({ key: buildDraftCreationKey("draft-history", attempt), attachments });
+            if (requests.length === 1) throw new Error("Input exceeds the maximum length");
+            return { agentId: "agent-1", result: { id: "agent-1" } };
+          },
+          onCreateSuccess: () => undefined,
+        }),
+      );
+
+      const ignoreError = () => undefined;
+      vi.setSystemTime(new Date("2026-10-03T08:00:00.000Z"));
+      await act(async () => {
+        await result.current
+          .handleComposerSubmit({ text: "continue", attachments: [chatHistory], cwd: "/repo" })
+          .catch(ignoreError);
+      });
+      vi.setSystemTime(new Date("2026-10-03T08:00:05.000Z"));
+      await act(async () => {
+        await result.current.handleComposerSubmit({
+          text: "continue",
+          attachments: [],
+          cwd: "/repo",
+        });
+      });
+
+      expect(requests).toHaveLength(2);
+      expect(requests[0]?.attachments).toEqual([chatHistory.attachment]);
+      expect(requests[1]?.attachments).toBeUndefined();
+      expect(requests[1]?.key).not.toBe(requests[0]?.key);
+      expect(result.current.formErrorMessage).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("buildDraftCreationKey", () => {
+  it("gives every attempt of a draft its own key and keeps it stable for the same attempt", () => {
+    const first = { timestamp: new Date(1_000) };
+    const second = { timestamp: new Date(2_000) };
+
+    expect(buildDraftCreationKey("draft-1", first)).toBe(
+      buildDraftCreationKey("draft-1", { timestamp: new Date(1_000) }),
+    );
+    expect(buildDraftCreationKey("draft-1", first)).not.toBe(
+      buildDraftCreationKey("draft-1", second),
+    );
   });
 });

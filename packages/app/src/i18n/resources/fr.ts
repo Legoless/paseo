@@ -185,6 +185,8 @@ export const fr = {
         "Aucune image dans le presse-papiers actuel. Essayez de coller depuis votre clavier.",
       pasteImageFailed: "Impossible de coller l’image",
       fileTooLarge: "{{fileName}} is too large (max {{size}})",
+      requestKeyConflict:
+        "Ce brouillon a déjà été envoyé avec un contenu différent. Exécutez /clear pour recommencer.",
     },
     clientCommands: {
       archiveAgent: "Fermer l'agent actuel",
@@ -1300,6 +1302,12 @@ export const fr = {
         serviceRunning: "Service {{name}} en cours",
         serviceUnhealthy: "Service {{name}} en échec",
         creating: "Création...",
+        paneNeedsInputOne: "1 volet attend une réponse",
+        paneNeedsInputMany: "{{count}} volets attendent une réponse",
+        paneFailedOne: "1 volet s’est arrêté sur une erreur",
+        paneFailedMany: "{{count}} volets se sont arrêtés sur une erreur",
+        paneReadyOne: "1 volet prêt à être examiné",
+        paneReadyMany: "{{count}} volets prêts à être examinés",
       },
       checks: {
         passed: "Réussis : {{count}}",

@@ -346,7 +346,10 @@ It keeps cumulative milestones and permanent IDs under an operation kind and ide
 key. Reconnect subscribes to that key; retries
 join active work or reuse committed stages. A persisted resource alone cannot prove
 that a provider accepted its initial prompt. Interrupted side effects with no conclusive
-receipt return an unknown outcome instead of being repeated.
+receipt return an unknown outcome instead of being repeated. A key therefore names one
+attempt: reusing it replays a failed prompt, and reusing it with edited content is a
+`*_request_key_conflict`. Draft retries take a fresh key (`buildDraftCreationKey`) and
+archive the agent the failed prompt left behind.
 
 `packages/client/src/creation/` owns capability selection and legacy orchestration.
 Callers always pass the initial prompt to agent creation. On an older host, the client

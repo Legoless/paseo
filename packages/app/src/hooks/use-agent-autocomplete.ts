@@ -199,7 +199,8 @@ interface BuildAutocompleteOptionsInput {
   mode: AutocompleteMode;
   commands: AgentSlashCommand[];
   pluginCommands: readonly PluginClientSlashCommand[];
-  isDraftContext: boolean;
+  /** Built-in commands are listed only where the composer can run them. */
+  showClientCommands: boolean;
   commandFilterQuery: string;
   activeSlashCommand: SlashCommandRange | null;
   activeFileMention: FileMentionRange | null;
@@ -207,7 +208,7 @@ interface BuildAutocompleteOptionsInput {
   t: TFunction;
 }
 
-function buildCommandAutocompleteOptions(input: BuildAutocompleteOptionsInput) {
+export function buildCommandAutocompleteOptions(input: BuildAutocompleteOptionsInput) {
   if (!input.isVisible) {
     return [];
   }
@@ -227,7 +228,7 @@ function buildCommandAutocompleteOptions(input: BuildAutocompleteOptionsInput) {
         );
       },
     })
-      .filter((entry) => !input.isDraftContext || entry.source !== "built-in")
+      .filter((entry) => input.showClientCommands || entry.source !== "built-in")
       .map((entry): AvailableCommand => {
         if (entry.source === "built-in") return { source: "client", command: entry.command };
         return entry;
@@ -469,7 +470,7 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
         pluginCommands: pluginClientSlashCommands,
         activeSlashCommand,
         fileSuggestions: fileSuggestionsQuery.data ?? [],
-        isDraftContext,
+        showClientCommands: canExecuteClientSlashCommand === true,
         isVisible,
         mode,
         t,
@@ -481,7 +482,7 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
       commands,
       pluginClientSlashCommands,
       fileSuggestionsQuery.data,
-      isDraftContext,
+      canExecuteClientSlashCommand,
       isVisible,
       mode,
       t,

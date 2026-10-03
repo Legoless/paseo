@@ -127,6 +127,16 @@ describe("buildTerminalRestoreInput", () => {
   it("starts a terminal with nothing saved as a plain shell", () => {
     expect(buildTerminalRestoreInput(record())).toEqual({});
   });
+
+  it("starts the shell where it last was while that directory exists", () => {
+    const shellCwd = mkdtempSync(join(tmpdir(), "terminal-shell-cwd-"));
+    temporaryDirs.push(shellCwd);
+    const resume = { agent: "claude" as const, sessionId: "s1" };
+
+    expect(buildTerminalRestoreInput(record({ shellCwd, resume }))).toEqual({ shellCwd, resume });
+    rmSync(shellCwd, { recursive: true });
+    expect(buildTerminalRestoreInput(record({ shellCwd, resume }))).toEqual({ resume });
+  });
 });
 
 describe("readTerminalRecords", () => {

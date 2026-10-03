@@ -83,37 +83,34 @@ describe("resolveClientSlashCommand", () => {
   });
 
   it("resolves canonical names and aliases after trimming", () => {
-    expect(resolveClientSlashCommand({ text: " /quit ", hasAttachments: false })).toMatchObject({
+    expect(resolveClientSlashCommand({ text: " /quit " })).toMatchObject({
       name: "exit",
       kind: "archive-agent",
       execution: "immediate",
     });
-    expect(resolveClientSlashCommand({ text: "/exit", hasAttachments: false })).toMatchObject({
+    expect(resolveClientSlashCommand({ text: "/exit" })).toMatchObject({
       name: "exit",
       kind: "archive-agent",
     });
-    expect(resolveClientSlashCommand({ text: "/q", hasAttachments: false })).toMatchObject({
+    expect(resolveClientSlashCommand({ text: "/q" })).toMatchObject({
       name: "exit",
       kind: "archive-agent",
     });
-    expect(resolveClientSlashCommand({ text: "/clear", hasAttachments: false })).toMatchObject({
+    expect(resolveClientSlashCommand({ text: "/clear" })).toMatchObject({
       name: "clear",
       kind: "replace-agent-with-draft",
     });
-    expect(resolveClientSlashCommand({ text: "/new", hasAttachments: false })).toMatchObject({
+    expect(resolveClientSlashCommand({ text: "/new" })).toMatchObject({
       name: "clear",
       kind: "replace-agent-with-draft",
     });
   });
 
-  it("leaves provider commands, arguments, ordinary messages, and attachment submits alone", () => {
-    expect(resolveClientSlashCommand({ text: "/clear now", hasAttachments: false })).toBeNull();
-    expect(resolveClientSlashCommand({ text: "/quit now", hasAttachments: false })).toBeNull();
-    expect(
-      resolveClientSlashCommand({ text: "/provider-command", hasAttachments: false }),
-    ).toBeNull();
-    expect(resolveClientSlashCommand({ text: "hello /quit", hasAttachments: false })).toBeNull();
-    expect(resolveClientSlashCommand({ text: "/quit", hasAttachments: true })).toBeNull();
+  it("leaves provider commands, arguments, and ordinary messages alone", () => {
+    expect(resolveClientSlashCommand({ text: "/clear now" })).toBeNull();
+    expect(resolveClientSlashCommand({ text: "/quit now" })).toBeNull();
+    expect(resolveClientSlashCommand({ text: "/provider-command" })).toBeNull();
+    expect(resolveClientSlashCommand({ text: "hello /quit" })).toBeNull();
   });
 });
 

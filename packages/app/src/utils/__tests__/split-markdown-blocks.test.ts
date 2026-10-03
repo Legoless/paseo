@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { assistantMarkdownParser } from "../assistant-markdown-parser";
 import { splitMarkdownBlocks } from "../split-markdown-blocks";
+
+function renderBlocks(text: string): string {
+  return splitMarkdownBlocks(text)
+    .map((block) => assistantMarkdownParser.render(block))
+    .join("");
+}
 
 describe("splitMarkdownBlocks", () => {
   it("returns a single block for a single paragraph", () => {
@@ -81,20 +88,52 @@ describe("splitMarkdownBlocks", () => {
     ]);
   });
 
-  it("folds a leading definition-only block into the block below it", () => {
+  it("resolves a reference defined several paragraphs after the link", () => {
+    const text = "See [design][d].\n\nOther paragraph.\n\n[d]: /tmp/design.html";
+
+    expect(renderBlocks(text)).toBe(
+      '<p>See <a href="/tmp/design.html">design</a>.</p>\n<p>Other paragraph.</p>\n',
+    );
+  });
+
+  it("uses the first definition throughout the message for normalized and shortcut references", () => {
+    const text =
+      "[D]: /tmp/first.html 'Original'\n\nRead [D] and [design][d].\n\n[d]: /tmp/second.html\n\nAgain [D][].";
+
+    expect(renderBlocks(text)).toBe(
+      '<p>Read <a href="/tmp/first.html" title="Original">D</a> and <a href="/tmp/first.html" title="Original">design</a>.</p>\n<p>Again <a href="/tmp/first.html" title="Original">D</a>.</p>\n',
+    );
+  });
+
+  it("keeps file URL references in the assistant renderer's document context", () => {
+    const text = "See [design][d].\n\nOther paragraph.\n\n[d]: file:///tmp/design.html";
+
+    expect(renderBlocks(text)).toBe(
+      '<p>See <a href="file:///tmp/design.html">design</a>.</p>\n<p>Other paragraph.</p>\n',
+    );
+  });
+
+  it("does not treat reference examples inside code fences as definitions", () => {
+    expect(splitMarkdownBlocks("Before\n\n```\n[d]: /tmp/design.html\n```\n\nAfter")).toEqual([
+      "Before",
+      "```\n[d]: /tmp/design.html\n```",
+      "After",
+    ]);
+  });
+
+  it("keeps leading definitions in the same parser context as their references", () => {
     expect(splitMarkdownBlocks('[d]: https://example.com "Docs"\n\nSee the [docs][d].')).toEqual([
       '[d]: https://example.com "Docs"\n\nSee the [docs][d].',
     ]);
   });
 
-  it("folds several definition lines and several definition blocks into one block", () => {
+  it("keeps all paragraphs together when reference definitions need document context", () => {
     expect(
       splitMarkdownBlocks(
         "See [one][a] and [two][b].\n\n[a]: https://example.com/a\n[b]: <https://example.com/b>\n\n[c]: https://example.com/c 'Third'\n\nAfter",
       ),
     ).toEqual([
-      "See [one][a] and [two][b].\n\n[a]: https://example.com/a\n[b]: <https://example.com/b>\n\n[c]: https://example.com/c 'Third'",
-      "After",
+      "See [one][a] and [two][b].\n\n[a]: https://example.com/a\n[b]: <https://example.com/b>\n\n[c]: https://example.com/c 'Third'\n\nAfter",
     ]);
   });
 

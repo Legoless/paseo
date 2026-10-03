@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { StreamItem } from "@/types/stream";
 import {
   collectAgentStreamItems,
+  selectLatestArtifactImageKey,
   selectWorkspaceArtifacts,
   type ArtifactAgentInput,
+  type ArtifactImageHistory,
 } from "./select";
 
 function agent(
@@ -14,6 +16,7 @@ function agent(
     cwd: input.cwd ?? "/tmp/repo",
     workspaceId: input.workspaceId ?? "ws-1",
     archivedAt: input.archivedAt,
+    imageFallbackRoot: input.imageFallbackRoot,
     id: input.id,
   };
 }
@@ -24,14 +27,30 @@ function assistantImage(input: {
   alt?: string;
   timestamp: Date;
   extra?: string;
+  messageId?: string;
+  seq?: number;
 }): StreamItem {
   const alt = input.alt ?? "Screenshot";
   const extra = input.extra ? `${input.extra}\n\n` : "";
   return {
     kind: "assistant_message",
     id: input.id,
+    ...(input.messageId ? { messageId: input.messageId } : {}),
+    ...(input.seq === undefined ? {} : { timelineCursor: { epoch: "e1", seq: input.seq } }),
     text: `${extra}![${alt}](${input.source})`,
     timestamp: input.timestamp,
+  };
+}
+
+function historyImage(
+  input: Partial<ArtifactImageHistory["images"][number]> & { seq: number; source: string },
+): ArtifactImageHistory["images"][number] {
+  return {
+    messageId: null,
+    timestamp: "2026-09-21T09:00:00.000Z",
+    imageIndex: 0,
+    alt: null,
+    ...input,
   };
 }
 
@@ -81,6 +100,7 @@ describe("selectWorkspaceArtifacts", () => {
         agentId: "agent-a",
         agentTitle: "Coder",
         workspaceRoot: "/tmp/repo",
+        imageFallbackRoot: null,
         itemId: "msg-a",
         imageIndex: 0,
         source: "https://example.com/a.png",
@@ -92,6 +112,7 @@ describe("selectWorkspaceArtifacts", () => {
         agentId: "agent-b",
         agentTitle: "Browser",
         workspaceRoot: "/tmp/repo",
+        imageFallbackRoot: null,
         itemId: "msg-b",
         imageIndex: 0,
         source: "/tmp/browser.png",
@@ -133,6 +154,7 @@ describe("selectWorkspaceArtifacts", () => {
         agentId: "live",
         agentTitle: "Live",
         workspaceRoot: "/tmp/repo",
+        imageFallbackRoot: null,
         itemId: "live-shot",
         imageIndex: 0,
         source: "/tmp/live.png",
@@ -201,6 +223,185 @@ describe("selectWorkspaceArtifacts", () => {
         },
       }).map((entry) => entry.source),
     ).toEqual(["/tmp/one.png", "https://example.com/two.png"]);
+  });
+});
+
+describe("selectWorkspaceArtifacts with daemon image history", () => {
+  const liveAt = new Date("2026-09-21T10:00:00.000Z");
+
+  it("adds history from before the loaded window and leaves the window to the stream", () => {
+    const entries = selectWorkspaceArtifacts({
+      workspaceId: "ws-1",
+      agents: [agent({ id: "grok", imageFallbackRoot: "~/.grok/sessions/s1" })],
+      streamsByAgentId: {
+        grok: [
+          assistantImage({ id: "by-seq", source: "/tmp/seq.png", timestamp: liveAt, seq: 40 }),
+          assistantImage({
+            id: "item-9",
+            messageId: "msg-9",
+            source: "/tmp/id.png",
+            timestamp: liveAt,
+            seq: 45,
+          }),
+        ],
+      },
+      loadedRangeByAgentId: { grok: { epoch: "e1", startSeq: 40, endSeq: 45 } },
+      historyByAgentId: {
+        grok: {
+          epoch: "e1",
+          images: [
+            historyImage({ seq: 3, source: "images/old.png", alt: "Old" }),
+            historyImage({
+              seq: 7,
+              messageId: "msg-7",
+              imageIndex: 1,
+              source: "/tmp/seven.png",
+              timestamp: "2026-09-21T09:30:00.000Z",
+            }),
+            historyImage({ seq: 40, source: "/tmp/seq.png" }),
+            // A message still streaming when the list was built sits at an older seq.
+            historyImage({ seq: 44, messageId: "msg-9", source: "/tmp/id.png" }),
+          ],
+        },
+      },
+    });
+
+    expect(entries.map((entry) => [entry.id, entry.source])).toEqual([
+      ["grok:seq:e1:3:0", "images/old.png"],
+      ["grok:seq:e1:7:1", "/tmp/seven.png"],
+      ["grok:by-seq:0", "/tmp/seq.png"],
+      ["grok:item-9:0", "/tmp/id.png"],
+    ]);
+    expect(entries[0]).toEqual({
+      id: "grok:seq:e1:3:0",
+      agentId: "grok",
+      agentTitle: "grok",
+      workspaceRoot: "/tmp/repo",
+      imageFallbackRoot: "~/.grok/sessions/s1",
+      itemId: "seq:e1:3",
+      imageIndex: 0,
+      source: "images/old.png",
+      alt: "Old",
+      timestamp: new Date("2026-09-21T09:00:00.000Z"),
+    });
+  });
+
+  it("shows parallel tool images once when the app and the daemon split the message differently", () => {
+    // The app folds both images into the message they follow; the daemon lists each at its own
+    // row. Deduping by message would show both twice.
+    const entries = selectWorkspaceArtifacts({
+      workspaceId: "ws-1",
+      agents: [agent({ id: "grok" })],
+      streamsByAgentId: {
+        grok: [
+          {
+            kind: "assistant_message",
+            id: "m1",
+            text: "Reading both.\n\n![Image](/tmp/a.png)![Image](/tmp/b.png)",
+            timestamp: liveAt,
+            timelineCursor: { epoch: "e1", seq: 1 },
+          },
+        ],
+      },
+      loadedRangeByAgentId: { grok: { epoch: "e1", startSeq: 1, endSeq: 7 } },
+      historyByAgentId: {
+        grok: {
+          epoch: "e1",
+          images: [
+            historyImage({ seq: 5, source: "/tmp/a.png" }),
+            historyImage({ seq: 7, source: "/tmp/b.png" }),
+          ],
+        },
+      },
+    });
+    expect(entries.map((entry) => entry.source)).toEqual(["/tmp/a.png", "/tmp/b.png"]);
+  });
+
+  it("waits for a fresh list when the loaded window moved to another epoch", () => {
+    const entries = selectWorkspaceArtifacts({
+      workspaceId: "ws-1",
+      agents: [agent({ id: "grok" })],
+      streamsByAgentId: { grok: [] },
+      loadedRangeByAgentId: { grok: { epoch: "e2", startSeq: 1, endSeq: 3 } },
+      historyByAgentId: {
+        grok: { epoch: "e1", images: [historyImage({ seq: 1, source: "/tmp/old.png" })] },
+      },
+    });
+    expect(entries).toEqual([]);
+  });
+
+  it("uses the whole list for an agent whose timeline is not loaded", () => {
+    const entries = selectWorkspaceArtifacts({
+      workspaceId: "ws-1",
+      agents: [agent({ id: "grok" })],
+      streamsByAgentId: {},
+      historyByAgentId: {
+        grok: {
+          epoch: "e1",
+          images: [
+            historyImage({ seq: 1, source: "/tmp/a.png" }),
+            historyImage({ seq: 9, source: "/tmp/b.png" }),
+          ],
+        },
+      },
+    });
+    expect(entries.map((entry) => entry.source)).toEqual(["/tmp/a.png", "/tmp/b.png"]);
+  });
+
+  it("keeps history out for archived and other-workspace agents", () => {
+    const history = { epoch: "e1", images: [historyImage({ seq: 1, source: "/tmp/a.png" })] };
+    expect(
+      selectWorkspaceArtifacts({
+        workspaceId: "ws-1",
+        agents: [
+          agent({ id: "archived", archivedAt: new Date("2026-09-20T12:00:00.000Z") }),
+          agent({ id: "elsewhere", workspaceId: "ws-2" }),
+        ],
+        streamsByAgentId: {},
+        historyByAgentId: { archived: history, elsewhere: history },
+      }),
+    ).toEqual([]);
+  });
+
+  it("reads image links and escaped paths the way the chat renders them", () => {
+    expect(
+      selectWorkspaceArtifacts({
+        workspaceId: "ws-1",
+        agents: [agent({ id: "agent-a" })],
+        streamsByAgentId: {
+          "agent-a": [
+            {
+              kind: "assistant_message",
+              id: "links",
+              text: "[Saved shot](/tmp/shot.png) and [notes](/tmp/notes.md)\n\n![Win](C:\\\\Users\\\\a.png)",
+              timestamp: liveAt,
+            },
+          ],
+        },
+      }).map((entry) => entry.source),
+    ).toEqual(["/tmp/shot.png", "C:\\Users\\a.png"]);
+  });
+});
+
+describe("selectLatestArtifactImageKey", () => {
+  const at = new Date("2026-09-21T10:00:00.000Z");
+
+  it("tracks the newest image message and ignores text-only output after it", () => {
+    const shot = assistantImage({ id: "shot", source: "/tmp/a.png", timestamp: at, seq: 4 });
+    const text: StreamItem = {
+      kind: "assistant_message",
+      id: "text",
+      text: "Done.",
+      timestamp: at,
+    };
+
+    expect(selectLatestArtifactImageKey([text])).toBe("");
+    expect(selectLatestArtifactImageKey([shot, text])).toBe("shot@e1:4");
+    expect(
+      selectLatestArtifactImageKey([
+        assistantImage({ id: "shot", source: "/tmp/a.png", timestamp: at, seq: 9 }),
+      ]),
+    ).toBe("shot@e1:9");
   });
 });
 

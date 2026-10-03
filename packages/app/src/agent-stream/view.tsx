@@ -52,6 +52,7 @@ import type {
 } from "@getpaseo/protocol/agent-types";
 import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
 import { useSessionStore } from "@/stores/session-store";
+import { resolveAgentImageFallbackRoot } from "@/utils/assistant-image-source";
 import { useRevealedText } from "@/hooks/use-revealed-text";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
@@ -397,6 +398,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
 
     const workspaceRoot = context.cwd?.trim() || "";
+    const imageFallbackRoot = useImageFallbackRoot(resolvedServerId, agentId);
     const { requestDirectoryListing } = useFileExplorerActions({
       serverId: resolvedServerId,
       workspaceId: context.workspaceId,
@@ -730,6 +732,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                   message={item.text}
                   timestamp={item.timestamp.getTime()}
                   workspaceRoot={workspaceRoot}
+                  imageFallbackRoot={imageFallbackRoot}
                   serverId={resolvedServerId}
                   client={client}
                   spacing={layoutItem.assistantSpacing}
@@ -740,7 +743,15 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           </AssistantFileLinkResolverProvider>
         );
       },
-      [agentId, client, handleInlinePathPress, resolvedServerId, toast, workspaceRoot],
+      [
+        agentId,
+        client,
+        handleInlinePathPress,
+        imageFallbackRoot,
+        resolvedServerId,
+        toast,
+        workspaceRoot,
+      ],
     );
 
     const renderThoughtItem = useCallback(
@@ -1276,6 +1287,13 @@ function agentStreamViewPropsEqual(
   }
   recordRenderProfileReasons(`AgentStreamView:${right.agentId}`, reasons);
   return reasons.length === 0;
+}
+
+function useImageFallbackRoot(serverId: string, agentId: string): string | undefined {
+  return useSessionStore((state) => {
+    const agent = state.sessions[serverId]?.agents?.get(agentId);
+    return (agent && resolveAgentImageFallbackRoot(agent)) ?? undefined;
+  });
 }
 
 export const AgentStreamView = memo(AgentStreamViewComponent, agentStreamViewPropsEqual);

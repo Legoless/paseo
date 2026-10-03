@@ -8,6 +8,10 @@ import { projectTimelineRows } from "./timeline-projection.js";
 const DEFAULT_MAX_ITEMS = 0;
 const MAX_TOOL_INPUT_CHARS = 400;
 const MAX_TOOL_SUMMARY_CHARS = 200;
+// Carried chat history rides inside the new agent's first prompt. Providers reject oversized
+// prompts outright (Codex caps input at 1 MiB), and a failed first prompt strands the draft,
+// so the history keeps its newest entries within this budget (~50k tokens).
+export const MAX_FORK_CONTEXT_BODY_CHARS = 200_000;
 
 interface ActivityCuratorOptions {
   maxItems?: number;
@@ -279,6 +283,32 @@ function trimContextMetadata(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
+/** Keeps the newest entries that fit `budget` characters; older ones collapse into one notice. */
+function joinEntriesWithinBudget(entries: readonly ActivityEntry[], budget: number): string {
+  const kept: string[] = [];
+  let used = 0;
+  let index = entries.length - 1;
+  for (; index >= 0; index -= 1) {
+    const text = entries[index].text;
+    const cost = text.length + (kept.length > 0 ? 1 : 0);
+    if (used + cost > budget) break;
+    kept.push(text);
+    used += cost;
+  }
+  if (index >= 0 && kept.length === 0) {
+    // The newest entry alone is over budget. Its tail holds the latest state.
+    kept.push(`...${entries[index].text.slice(-(budget - 3))}`);
+    index -= 1;
+  }
+  kept.reverse();
+  const omitted = index + 1;
+  if (omitted > 0) {
+    const noun = omitted === 1 ? "entry" : "entries";
+    kept.unshift(`[${omitted} earlier ${noun} omitted to fit the context limit]`);
+  }
+  return kept.join("\n");
+}
+
 function buildForkContextText(input: {
   body: string;
   agentTitle?: string | null;
@@ -321,7 +351,7 @@ export function buildAgentForkContextAttachment(input: {
   });
   const body =
     entries.length > 0
-      ? entries.map((entry) => entry.text).join("\n")
+      ? joinEntriesWithinBudget(entries, MAX_FORK_CONTEXT_BODY_CHARS)
       : "No chat history to display.";
   return {
     attachment: {

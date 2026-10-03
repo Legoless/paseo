@@ -91,7 +91,10 @@ import {
   useSessionStore,
 } from "@/stores/session-store";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
-import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
+import {
+  buildWorkspaceTabPersistenceKey,
+  type WorkspaceDraftTabSetup,
+} from "@/workspace-tabs/model";
 import { openWorkspaceChanges } from "@/workspace-tabs/open-supporting-view";
 import { useSettings } from "@/hooks/use-settings";
 import type { Theme } from "@/styles/theme";
@@ -442,6 +445,26 @@ function DraftPanel() {
     [labelDefinitions, retargetCurrentTab, serverId, t, tabId, toast, workspaceId],
   );
 
+  const handleStartFreshDraft = useCallback(
+    (setup: WorkspaceDraftTabSetup | undefined) => {
+      retargetCurrentTab({
+        kind: "draft",
+        draftId: generateDraftId(),
+        ...(setup ? { setup } : {}),
+        ...(target.labels ? { labels: target.labels } : {}),
+        ...(target.cwd ? { cwd: target.cwd } : {}),
+      });
+    },
+    [retargetCurrentTab, target.cwd, target.labels],
+  );
+
+  const handleCloseDraft = useCallback(() => {
+    const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId });
+    if (workspaceKey) {
+      useWorkspaceLayoutStore.getState().closeTab(workspaceKey, tabId);
+    }
+  }, [serverId, tabId, workspaceId]);
+
   return (
     <WorkspaceDraftAgentTab
       serverId={serverId}
@@ -454,6 +477,8 @@ function DraftPanel() {
       onOpenWorkspaceFile={openFileInWorkspace}
       onCreated={handleCreated}
       onOpenImportSheet={openImportSheet}
+      onStartFreshDraft={handleStartFreshDraft}
+      onCloseDraft={handleCloseDraft}
     />
   );
 }
@@ -857,6 +882,26 @@ function ChatAgentContent({
   const [missingAgentState, setMissingAgentState] = useState<AgentScreenMissingState>({
     kind: "idle",
   });
+  // "ready" is reached only by a catch-up that succeeded, so a history that recovered lifts a
+  // remembered dismissal. One that can never refresh never gets here and stays dismissed.
+  const undismissTimelineSyncError = useTimelineSyncDismissalStore((state) => state.undismiss);
+  useEffect(() => {
+    const hasRefreshedHistory =
+      Boolean(agentId && viewedTimelineSync) &&
+      isPaneVisible &&
+      timelineStatus === "ready" &&
+      missingAgentState.kind !== "error";
+    if (!hasRefreshedHistory || !agentId) return;
+    undismissTimelineSyncError(timelineSyncDismissalKey(serverId, agentId));
+  }, [
+    agentId,
+    isPaneVisible,
+    missingAgentState.kind,
+    serverId,
+    timelineStatus,
+    undismissTimelineSyncError,
+    viewedTimelineSync,
+  ]);
 
   const hasHydratedHistoryBefore =
     hasAppliedAuthoritativeHistory || replicaTimelineStatus === "painted";

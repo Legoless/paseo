@@ -292,6 +292,32 @@ const SourceSchema = z.object({
     expect(result.success).toBe(true);
   });
 
+  it("accepts an agent.timeline.list_images.response envelope", () => {
+    const result = GeneratedWSOutboundMessageSchema.safeParse({
+      type: "session",
+      message: {
+        type: "agent.timeline.list_images.response",
+        payload: {
+          requestId: "req-images-1",
+          agentId: "agent_live",
+          epoch: "epoch-1",
+          images: [
+            {
+              seq: 7,
+              messageId: null,
+              timestamp: "2026-02-08T20:10:00.000Z",
+              imageIndex: 0,
+              source: "/tmp/shot.png",
+              alt: "Shot",
+            },
+          ],
+          error: null,
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("accepts a legacy github_search_response envelope", () => {
     const result = GeneratedWSOutboundMessageSchema.safeParse({
       type: "session",

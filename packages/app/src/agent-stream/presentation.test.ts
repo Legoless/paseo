@@ -1,5 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
+import MarkdownIt from "markdown-it";
 import type { AgentStreamEventPayload } from "@getpaseo/protocol/messages";
 import { runPluginClientBundle, type PluginClientRuntime } from "@/plugins/evaluate";
 import type { InstalledPlugin } from "@/plugins/types";
@@ -13,6 +14,16 @@ import {
 import { transformTimelineItem, type TimelineItemTransform } from "@/plugins/timeline/model";
 import { createStreamPresentation } from "./presentation";
 import { buildAgentStreamRenderModel } from "./model";
+
+const markdownParser = new MarkdownIt();
+
+function renderAssistantBlocks(items: StreamItem[]): string {
+  return items
+    .flatMap((item) =>
+      item.kind === "assistant_message" ? [markdownParser.render(item.text)] : [],
+    )
+    .join("");
+}
 
 const runtime = {
   paseo: {},
@@ -210,10 +221,35 @@ describe("stream presentation through installed plugins", () => {
     expect(result.head).toMatchObject([{ text: "```ts\nconst a = 1;\n\nconst b = 2;" }]);
   });
 
+  it("restores document context when a reference definition arrives after promoted blocks", () => {
+    const harness = streamHarness();
+    const initialText = "See [design][d].\n\nOther paragraph.";
+    harness.send(assistant(initialText));
+    harness.send(assistant("\n\n[d]: "));
+    const result = harness.send(assistant("/tmp/design.html\n"));
+
+    expect(result.tail).toEqual([]);
+    expect(result.head).toMatchObject([
+      { blockIndex: 0, text: `${initialText}\n\n[d]: /tmp/design.html\n` },
+    ]);
+    expect(renderAssistantBlocks(rows(result))).toBe(
+      '<p>See <a href="/tmp/design.html">design</a>.</p>\n<p>Other paragraph.</p>\n',
+    );
+  });
+
+  it("keeps the first streamed definition when a duplicate arrives in a later paragraph", () => {
+    const harness = streamHarness();
+    harness.send(assistant("[d]: /tmp/first.html\n\nSee [design][d]."));
+    const result = harness.send(assistant("\n\n[d]: /tmp/wrong.html\n\nAgain [design][d]."));
+
+    expect(renderAssistantBlocks(rows(result))).toBe(
+      '<p>See <a href="/tmp/first.html">design</a>.</p>\n<p>Again <a href="/tmp/first.html">design</a>.</p>\n',
+    );
+  });
+
   // One rendering path: a fetched message is the same block group as a streamed one,
   // which is what lets find, scroll-to-message and history reveal address it by id.
-  // A link reference definition stays with the paragraph that uses it, so the split
-  // never leaves an empty row behind and the reference still resolves.
+  // Reference definitions retain the complete document context in either placement.
   it("splits an assistant message into the same blocks through history and through the live head", () => {
     const source = hydrateStreamState([
       {
@@ -236,13 +272,7 @@ describe("stream presentation through installed plugins", () => {
         id: `${messageId}:block:0`,
         blockGroupId: messageId,
         blockIndex: 0,
-        text: "[Link][docs]\n\n[docs]: https://example.com",
-      },
-      {
-        id: `${messageId}:block:1`,
-        blockGroupId: messageId,
-        blockIndex: 1,
-        text: "Closing paragraph.",
+        text: "[Link][docs]\n\n[docs]: https://example.com\n\nClosing paragraph.",
       },
     ]);
     const blocks = (items: StreamItem[]) =>

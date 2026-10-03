@@ -810,6 +810,35 @@ describe("workspace message schemas", () => {
     expect(parsed.statusEnteredAt).toBeNull();
   });
 
+  // An old daemon sends no terminal buckets; an old client must still parse a new descriptor.
+  test("carries terminal status buckets, and parses a descriptor without them", () => {
+    const baseWorkspace = {
+      id: "ws-terminal-buckets",
+      projectId: "proj",
+      projectDisplayName: "repo",
+      projectRootPath: "/repo",
+      workspaceDirectory: "/repo",
+      projectKind: "git",
+      workspaceKind: "worktree",
+      name: "feature",
+      status: "needs_input",
+      activityAt: null,
+      scripts: [],
+    } as const;
+    const terminalStatusBuckets = {
+      "term-1": "attention",
+      "term-2": "needs_input",
+      "term-3": "failed",
+    };
+    expect(
+      WorkspaceDescriptorPayloadSchema.parse({ ...baseWorkspace, terminalStatusBuckets })
+        .terminalStatusBuckets,
+    ).toEqual(terminalStatusBuckets);
+    expect(
+      WorkspaceDescriptorPayloadSchema.parse(baseWorkspace).terminalStatusBuckets,
+    ).toBeUndefined();
+  });
+
   test("parses legacy workspace descriptor enum values", () => {
     const parsed = SessionOutboundMessageSchema.parse({
       type: "workspace_update",

@@ -44,9 +44,24 @@ export function createAssistantImageFileAcquisition(input: {
       if (!port) {
         throw new Error(input.unavailableMessage);
       }
-      const file = await port.readFile(resolution.cwd, resolution.path);
-      if (file.kind !== "image") {
-        throw new Error(input.unavailableMessage);
+      const readImage = async (target: { cwd: string; path: string }) => {
+        const read = await port.readFile(target.cwd, target.path);
+        if (read.kind !== "image") {
+          throw new Error(input.unavailableMessage);
+        }
+        return read;
+      };
+      let file: Awaited<ReturnType<typeof readImage>>;
+      try {
+        file = await readImage(resolution);
+      } catch (error) {
+        // The workspace wins; the fallback only fills in a file the workspace does not have. The
+        // tradeoff: a workspace file at the same relative path shadows the fallback's. When both
+        // miss, the workspace's error is the one worth showing.
+        if (!resolution.fallback) throw error;
+        file = await readImage(resolution.fallback).catch(() => {
+          throw error;
+        });
       }
       return await port.persist({
         id: createAssistantImageFilePreviewAttachmentId({

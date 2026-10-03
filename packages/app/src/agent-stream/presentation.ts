@@ -1,7 +1,10 @@
 import type { AssistantMessageItem, StreamItem, UserMessageItem } from "@/types/stream";
 import type { TimelineItemTransform } from "@/plugins/timeline/model";
 import { projectPluginTimelineItems } from "@/plugins/timeline/projection";
-import { splitMarkdownBlocks } from "@/utils/split-markdown-blocks";
+import {
+  hasMarkdownLinkReferenceDefinitions,
+  splitMarkdownBlocks,
+} from "@/utils/split-markdown-blocks";
 import {
   prepareToolCallHistory,
   projectToolCallDetailLevel,
@@ -80,11 +83,8 @@ export function createStreamPresentation() {
   let preparedHistory: PreparedToolCallHistory | null = null;
 
   /**
-   * One display row per Markdown block. Each block renders on its own, so a construct
-   * that needs context from another block does not resolve: `splitMarkdownBlocks` keeps
-   * link reference definitions with the block that uses them, but a reference pointing
-   * at a definition several blocks away renders as literal text. Streamed messages
-   * always behaved this way; history now matches them.
+   * One display row per Markdown block. Messages with reference definitions stay
+   * together because every link needs the same document-wide definitions.
    */
   function nativeBlocks(item: StreamItem): StreamItem[] {
     if (item.kind === "user_message") return [presentUserMessage(item)];
@@ -102,6 +102,10 @@ export function createStreamPresentation() {
       prefix = previous.slice(0, -1);
       growingText =
         previous[previous.length - 1]!.text + item.text.slice(previousSource.text.length);
+      if (prefix.length > 0 && hasMarkdownLinkReferenceDefinitions(growingText)) {
+        prefix = [];
+        growingText = item.text;
+      }
     }
     const parsed = splitMarkdownBlocks(growingText);
     // Whitespace-only text has no block, and a message still owns exactly one row.
@@ -113,7 +117,7 @@ export function createStreamPresentation() {
       let blockText = text;
       if (offset === textBlocks.length - 1) {
         const trailingNewlines = /\n+$/.exec(item.text)?.[0] ?? "";
-        blockText += trailingNewlines;
+        blockText = blockText.replace(/\n*$/, trailingNewlines);
       }
       const existing = previous?.[index];
       const id = `${item.id}:block:${index}`;

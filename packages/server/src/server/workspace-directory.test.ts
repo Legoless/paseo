@@ -91,6 +91,7 @@ class WorkspaceStatus {
   private readonly agents: AgentSnapshotPayload[] = [];
   private readonly providerSubagents: ProviderSubagentWorkspaceActivity[] = [];
   private readonly terminals: Array<{
+    terminalId: string;
     cwd: string;
     workspaceId?: string;
     activity: TerminalActivity | null;
@@ -204,6 +205,7 @@ class WorkspaceStatus {
 
   hasWorkingTerminal(changedAt: number): void {
     this.terminals.push({
+      terminalId: `terminal-${this.terminals.length + 1}`,
       cwd: this.workspace.members[0].cwd,
       workspaceId: this.workspace.workspaceId,
       activity: { state: "working", changedAt },
@@ -215,6 +217,7 @@ class WorkspaceStatus {
   // reflects this terminal's activity.
   hasStampedWorkingTerminal(input: { workspaceId: string; changedAt: number }): void {
     this.terminals.push({
+      terminalId: `terminal-${this.terminals.length + 1}`,
       cwd: this.workspace.members[0].cwd,
       workspaceId: input.workspaceId,
       activity: { state: "working", changedAt: input.changedAt },
@@ -225,6 +228,7 @@ class WorkspaceStatus {
   // (stamped at creation); the subdir cwd is cosmetic, ownership is the id.
   hasWorkingTerminalInSubdirectory(changedAt: number): void {
     this.terminals.push({
+      terminalId: `terminal-${this.terminals.length + 1}`,
       cwd: `${this.workspace.members[0].cwd}/packages/app`,
       workspaceId: this.workspace.workspaceId,
       activity: { state: "working", changedAt },
@@ -233,22 +237,38 @@ class WorkspaceStatus {
 
   hasIdleTerminal(changedAt: number): void {
     this.terminals.push({
+      terminalId: `terminal-${this.terminals.length + 1}`,
       cwd: this.workspace.members[0].cwd,
       workspaceId: this.workspace.workspaceId,
       activity: { state: "idle", changedAt },
     });
   }
 
-  hasFinishedTerminal(changedAt: number): void {
+  hasFinishedTerminal(changedAt: number): string {
+    const terminalId = `terminal-${this.terminals.length + 1}`;
     this.terminals.push({
+      terminalId,
       cwd: this.workspace.members[0].cwd,
       workspaceId: this.workspace.workspaceId,
       activity: { state: "idle", attentionReason: "finished", changedAt },
     });
+    return terminalId;
+  }
+
+  hasTerminalWaiting(attentionReason: "needs_input" | "quota", changedAt: number): string {
+    const terminalId = `terminal-${this.terminals.length + 1}`;
+    this.terminals.push({
+      terminalId,
+      cwd: this.workspace.members[0].cwd,
+      workspaceId: this.workspace.workspaceId,
+      activity: { state: "attention", attentionReason, changedAt },
+    });
+    return terminalId;
   }
 
   hasUnknownTerminal(): void {
     this.terminals.push({
+      terminalId: `terminal-${this.terminals.length + 1}`,
       cwd: this.workspace.members[0].cwd,
       workspaceId: this.workspace.workspaceId,
       activity: null,
@@ -534,6 +554,35 @@ describe("WorkspaceDirectory", () => {
     workspace.hasFinishedTerminal(changedAt);
 
     await expect(workspace.workspaceStatus()).resolves.toBe("attention");
+  });
+
+  test("lists each terminal waiting on the user by its bucket, and no busy or quiet one", async () => {
+    const workspace = new WorkspaceStatus();
+    const changedAt = new Date(NOW).getTime();
+
+    workspace.hasWorkingTerminal(changedAt);
+    const finished = workspace.hasFinishedTerminal(changedAt);
+    workspace.hasIdleTerminal(changedAt);
+    const asking = workspace.hasTerminalWaiting("needs_input", changedAt);
+    workspace.hasUnknownTerminal();
+    const outOfQuota = workspace.hasTerminalWaiting("quota", changedAt);
+
+    const descriptor = await workspace.workspaceDescriptor();
+    expect(descriptor.terminalStatusBuckets).toEqual({
+      [finished]: "attention",
+      [asking]: "needs_input",
+      [outOfQuota]: "failed",
+    });
+  });
+
+  test("sends an empty terminal bucket map when no terminal waits on the user", async () => {
+    const workspace = new WorkspaceStatus();
+
+    workspace.hasWorkingTerminal(new Date(NOW).getTime());
+
+    await expect(workspace.workspaceDescriptor()).resolves.toMatchObject({
+      terminalStatusBuckets: {},
+    });
   });
 
   test("idle terminal contributes nothing to workspace status", async () => {

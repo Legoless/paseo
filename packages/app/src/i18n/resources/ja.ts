@@ -183,6 +183,8 @@ export const ja = {
         "現在のクリップボードに画像がありません。キーボードから貼り付けてみてください。",
       pasteImageFailed: "画像を貼り付けられませんでした",
       fileTooLarge: "{{fileName}}が大きすぎます（最大{{size}}）",
+      requestKeyConflict:
+        "この下書きは別の内容で既に送信されています。/clear を実行してやり直してください。",
     },
     clientCommands: {
       archiveAgent: "現在のエージェントを閉じる",
@@ -1276,6 +1278,12 @@ export const ja = {
         serviceRunning: "サービス {{name}} 実行中",
         serviceUnhealthy: "サービス {{name}} 異常",
         creating: "作成中...",
+        paneNeedsInputOne: "入力待ちのペイン 1 件",
+        paneNeedsInputMany: "入力待ちのペイン {{count}} 件",
+        paneFailedOne: "エラーで停止したペイン 1 件",
+        paneFailedMany: "エラーで停止したペイン {{count}} 件",
+        paneReadyOne: "確認待ちのペイン 1 件",
+        paneReadyMany: "確認待ちのペイン {{count}} 件",
       },
       checks: {
         passed: "成功: {{count}}",

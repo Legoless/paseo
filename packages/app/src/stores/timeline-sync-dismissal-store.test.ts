@@ -43,4 +43,16 @@ describe("useTimelineSyncDismissalStore", () => {
     expect(keys).not.toContain("srv:agent_0");
     expect(keys.at(-1)).toBe(`srv:agent_${MAX_DISMISSED_TIMELINE_SYNC_AGENTS}`);
   });
+
+  it("lifts only the agent whose history refreshed", () => {
+    const store = useTimelineSyncDismissalStore.getState();
+    store.dismiss(timelineSyncDismissalKey("srv_a", "agent_1"));
+    store.dismiss(timelineSyncDismissalKey("srv_a", "agent_2"));
+
+    useTimelineSyncDismissalStore
+      .getState()
+      .undismiss(timelineSyncDismissalKey("srv_a", "agent_1"));
+
+    expect(useTimelineSyncDismissalStore.getState().dismissedAgentKeys).toEqual(["srv_a:agent_2"]);
+  });
 });

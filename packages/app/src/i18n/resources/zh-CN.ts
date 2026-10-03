@@ -181,6 +181,7 @@ export const zhCN = {
       noClipboardImage: "当前剪贴板中没有图片。请尝试通过键盘粘贴。",
       pasteImageFailed: "无法粘贴图片",
       fileTooLarge: "{{fileName}} is too large (max {{size}})",
+      requestKeyConflict: "此草稿已使用不同内容发送。运行 /clear 重新开始。",
     },
     clientCommands: {
       archiveAgent: "关闭当前 Agent",
@@ -1251,6 +1252,12 @@ export const zhCN = {
         serviceRunning: "服务 {{name}} 运行中",
         serviceUnhealthy: "服务 {{name}} 异常",
         creating: "正在创建...",
+        paneNeedsInputOne: "1 个窗格等待输入",
+        paneNeedsInputMany: "{{count}} 个窗格等待输入",
+        paneFailedOne: "1 个窗格因错误停止",
+        paneFailedMany: "{{count}} 个窗格因错误停止",
+        paneReadyOne: "1 个窗格待查看",
+        paneReadyMany: "{{count}} 个窗格待查看",
       },
       checks: {
         passed: "成功: {{count}}",

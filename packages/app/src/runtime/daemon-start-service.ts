@@ -94,6 +94,10 @@ export class DaemonStartService {
     return this.lastError;
   }
 
+  clearError(): void {
+    this.setLastError(null);
+  }
+
   isRunning(): boolean {
     return this.inFlightCount > 0;
   }

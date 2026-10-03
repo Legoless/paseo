@@ -51,6 +51,7 @@ import {
 import { GenericACPAgentClient } from "./generic-acp-agent.js";
 import { parseKiroExtensionCommands } from "./kiro-acp-agent.js";
 import { transformPiModels } from "./pi/agent.js";
+import { isProviderImageMarkdown } from "./provider-image-output.js";
 import type { AgentStreamEvent } from "../agent-sdk-types.js";
 import type {
   AgentCapabilityFlags,
@@ -2705,6 +2706,73 @@ describe("ACPAgentSession slash commands", () => {
   });
 });
 
+describe("ACPAgentSession tool result images", () => {
+  // Grok's real shape: the image rides the completed tool_call_update as a content block.
+  const completedScreenshotUpdate: SessionUpdate = {
+    sessionUpdate: "tool_call_update",
+    toolCallId: "tool-shot",
+    status: "completed",
+    content: [
+      { type: "content", content: { type: "text", text: "Captured screenshot" } },
+      { type: "content", content: { type: "image", data: "/9j/AA==", mimeType: "image/jpeg" } },
+    ],
+  };
+
+  function startScreenshotTool(internals: ACPSessionInternals): void {
+    internals.translateSessionUpdate({
+      sessionUpdate: "tool_call",
+      toolCallId: "tool-shot",
+      title: "Take screenshot",
+      kind: "other",
+      status: "in_progress",
+    });
+  }
+
+  test("emits one image assistant_message right after a completed tool call that carries an image", () => {
+    const internals = asInternals<ACPSessionInternals>(createSession());
+    startScreenshotTool(internals);
+
+    const events = internals.translateSessionUpdate(completedScreenshotUpdate);
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      type: "timeline",
+      item: { type: "tool_call", callId: "tool-shot", status: "completed" },
+    });
+    expect(events[1]).toMatchObject({ type: "timeline", item: { type: "assistant_message" } });
+    const imageText = events[1].type === "timeline" ? events[1].item : null;
+    expect(imageText?.type === "assistant_message" && isProviderImageMarkdown(imageText.text)).toBe(
+      true,
+    );
+  });
+
+  test("does not duplicate the image when the same tool content is resent", () => {
+    const internals = asInternals<ACPSessionInternals>(createSession());
+    startScreenshotTool(internals);
+    internals.translateSessionUpdate(completedScreenshotUpdate);
+
+    const events = internals.translateSessionUpdate(completedScreenshotUpdate);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ item: { type: "tool_call", callId: "tool-shot" } });
+  });
+
+  test("emits no assistant_message for a text-only tool result", () => {
+    const internals = asInternals<ACPSessionInternals>(createSession());
+    startScreenshotTool(internals);
+
+    const events = internals.translateSessionUpdate({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tool-shot",
+      status: "completed",
+      content: [{ type: "content", content: { type: "text", text: "No image" } }],
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ item: { type: "tool_call", status: "completed" } });
+  });
+});
+
 describe("ACPAgentSession", () => {
   test("drops MCP servers from ACP requests when the provider does not support MCP", () => {
     const session = new ACPAgentSession(
@@ -4516,6 +4584,51 @@ describe("ACP session/load invariant — cwd and mcpServers always passed", () =
         },
       },
     ]);
+  });
+
+  test("replays a tool result image as an image assistant_message after its tool call", async () => {
+    let session!: ACPAgentSession;
+    const loadSession = async () => {
+      for (const update of [
+        {
+          sessionUpdate: "tool_call",
+          toolCallId: "tool-shot",
+          title: "Take screenshot",
+          status: "in_progress",
+        },
+        {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "tool-shot",
+          status: "completed",
+          content: [
+            {
+              type: "content",
+              content: { type: "image", data: "/9j/AA==", mimeType: "image/jpeg" },
+            },
+          ],
+        },
+      ]) {
+        await session.sessionUpdate({ sessionId: "session-1", update: update as SessionUpdate });
+      }
+      return { sessionId: "session-1", modes: null, models: null, configOptions: [] };
+    };
+    ({ session } = makeTestSession({
+      capabilities: { loadSession: true },
+      handle: { sessionId: "session-1", provider: "claude-acp" },
+      loadSession,
+    }));
+
+    await session.initializeResumedSession();
+
+    const items = [];
+    for await (const event of session.streamHistory()) {
+      if (event.type === "timeline") items.push(event.item);
+    }
+    expect(items.map((item) => item.type)).toEqual(["tool_call", "tool_call", "assistant_message"]);
+    const imageItem = items[2];
+    expect(imageItem.type === "assistant_message" && isProviderImageMarkdown(imageItem.text)).toBe(
+      true,
+    );
   });
 
   test("assigns stable fallback IDs to ID-less assistant messages during loadSession replay", async () => {

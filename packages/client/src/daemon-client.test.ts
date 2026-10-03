@@ -2,6 +2,7 @@ import { afterEach, expect, expectTypeOf, test, vi } from "vitest";
 import { z } from "zod";
 import {
   DaemonClient,
+  InitialPromptFailedError,
   type DaemonClientTrace,
   type CreateAgentRequestOptions,
   type DaemonTransport,
@@ -1532,6 +1533,56 @@ test("lists the full agent prompt index", async () => {
     epoch: "epoch-1",
     prompts: [{ seq: 1, preview: "First prompt" }],
   });
+});
+
+test("lists the full agent image index", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const responsePromise = client.listAgentTimelineImages("agent-1", {
+    requestId: "req-images-1",
+  });
+
+  expect(parseSentFrame(mock.sent[0])).toEqual({
+    type: "agent.timeline.list_images.request",
+    requestId: "req-images-1",
+    agentId: "agent-1",
+  });
+
+  const image = {
+    seq: 4,
+    messageId: "msg-1",
+    timestamp: "2026-01-01T00:00:00.000Z",
+    imageIndex: 0,
+    source: "/tmp/shot.png",
+    alt: "Shot",
+  };
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "agent.timeline.list_images.response",
+      payload: {
+        requestId: "req-images-1",
+        agentId: "agent-1",
+        epoch: "epoch-1",
+        images: [image],
+        error: null,
+      },
+    }),
+  );
+
+  await expect(responsePromise).resolves.toMatchObject({ epoch: "epoch-1", images: [image] });
 });
 
 test("honors explicit fetchAgents timeout below the session RPC default", async () => {
@@ -6730,6 +6781,59 @@ test("creation lifecycle sends the keyed agent and initial prompt as one intent"
   );
   await expect(creation).rejects.toThrow("provider unavailable");
   expect(transport.sent).toHaveLength(1);
+});
+
+test("creation lifecycle reports a failed first prompt with the agent it created", async () => {
+  const transport = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "creation-prompt-failure",
+    transportFactory: () => transport.transport,
+    reconnect: { enabled: false },
+  });
+  clients.push(client);
+  const connected = client.connect();
+  transport.triggerOpen({ features: { creationLifecycle: true, agentRequestReceipts: true } });
+  await connected;
+  const creation = client.createAgent({
+    idempotencyKey: "draft-prompt",
+    provider: "codex",
+    cwd: "/project",
+    workspaceId: "wks_0123456789abcdef",
+    initialPrompt: "Too long",
+  });
+  void creation.catch(() => undefined);
+  const request = parseSentFrame(transport.sent[0]);
+  transport.triggerMessage(
+    wrapSessionMessage({
+      type: "agent.create.response",
+      payload: {
+        requestId: request.requestId,
+        agent: null,
+        error: "Input exceeds the maximum length of 1048576 characters.",
+        creation: {
+          kind: "agent",
+          idempotencyKey: "draft-prompt",
+          revision: 2,
+          phase: "failed",
+          workspaceId: "wks_0123456789abcdef",
+          agentId: "agent-orphan",
+          error: "Input exceeds the maximum length of 1048576 characters.",
+          failedStage: "prompt",
+          outcomeUnknown: true,
+        },
+      },
+    }),
+  );
+  const error = await creation.then(
+    () => null,
+    (reason: unknown) => reason,
+  );
+  expect(error).toBeInstanceOf(InitialPromptFailedError);
+  expect(error).toMatchObject({
+    agentId: "agent-orphan",
+    message: "Input exceeds the maximum length of 1048576 characters.",
+  });
 });
 
 test("creation lifecycle acknowledgement reaches the observer before the final response", async () => {

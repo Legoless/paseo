@@ -40,6 +40,26 @@ function layout(tabs: WorkspaceTab[]): WorkspaceLayout {
   };
 }
 
+function splitLayout(
+  panes: { id: string; tabs: WorkspaceTab[]; focusedTabId: string | null }[],
+): WorkspaceLayout {
+  return {
+    root: {
+      kind: "group",
+      group: {
+        id: "root",
+        direction: "horizontal",
+        sizes: panes.map(() => 1 / panes.length),
+        children: panes.map((pane) => ({
+          kind: "pane",
+          pane: { ...pane, tabIds: pane.tabs.map((entry) => entry.tabId) },
+        })),
+      },
+    } as unknown as WorkspaceLayout["root"],
+    focusedPaneId: panes[0]?.id ?? null,
+  };
+}
+
 function member(input: {
   projectId: string;
   projectDisplayName: string;
@@ -77,6 +97,7 @@ function workspace(input: {
     workspaceKind: "worktree",
     name: input.id,
     status: "done",
+    terminalStatusBuckets: {},
     statusEnteredAt: null,
     archivingAt: null,
     diffStat: null,
@@ -573,6 +594,185 @@ describe("buildSidebarWorkspaceGroupModel", () => {
     expect(buckets.get("review")).toBe("attention");
   });
 
+  it("counts the panes whose front tab is an unseen finish, leaving out the Explorer dock", () => {
+    const finished = (id: string) =>
+      agent({
+        id,
+        workspaceId: "ws-1",
+        cwd: "/repo/project-a/ws-1",
+        requiresAttention: true,
+        attentionReason: "finished",
+      });
+    const agentTab = (agentId: string) =>
+      tab({ tabId: `agent_${agentId}`, target: { kind: "agent", agentId }, createdAt: 1 });
+    const model = buildSidebarWorkspaceGroupModel({
+      sessions: [
+        session({
+          workspaces: [TWO_PROJECT_WORKSPACE],
+          agents: [
+            finished("done-a"),
+            finished("done-b"),
+            finished("behind"),
+            finished("docked"),
+            agent({
+              id: "busy",
+              workspaceId: "ws-1",
+              cwd: "/repo/project-a/ws-1",
+              status: "running",
+            }),
+          ],
+        }),
+      ],
+      layoutsByWorkspace: {
+        "srv:ws-1": splitLayout([
+          { id: "left", tabs: [agentTab("done-a")], focusedTabId: "agent_done-a" },
+          {
+            id: "middle",
+            tabs: [agentTab("busy"), agentTab("behind")],
+            focusedTabId: "agent_busy",
+          },
+          { id: "right", tabs: [agentTab("done-b")], focusedTabId: null },
+          { id: "side", tabs: [agentTab("docked")], focusedTabId: "agent_docked" },
+        ]),
+      },
+      explorerPaneIdByWorkspace: { "srv:ws-1": "side" },
+    });
+
+    expect(model.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts.attention).toBe(2);
+  });
+
+  it("counts each pane by the color its front tab glows, agent or terminal", () => {
+    const terminalTab = (terminalId: string) =>
+      tab({
+        tabId: `terminal_${terminalId}`,
+        target: { kind: "terminal", terminalId },
+        createdAt: 1,
+      });
+    const agentTab = (agentId: string) =>
+      tab({ tabId: `agent_${agentId}`, target: { kind: "agent", agentId }, createdAt: 1 });
+    const front = (id: string, entry: WorkspaceTab) => ({
+      id,
+      tabs: [entry],
+      focusedTabId: entry.tabId,
+    });
+    const model = buildSidebarWorkspaceGroupModel({
+      sessions: [
+        session({
+          workspaces: [
+            {
+              ...TWO_PROJECT_WORKSPACE,
+              terminalStatusBuckets: {
+                "term-done": "attention",
+                "term-asking": "needs_input",
+                "term-quota": "failed",
+                "term-behind": "needs_input",
+                "term-docked": "failed",
+              },
+            },
+          ],
+          agents: [
+            agent({
+              id: "asking",
+              workspaceId: "ws-1",
+              cwd: "/repo/project-a/ws-1",
+              pendingPermissions: [{ id: "perm-1" } as Agent["pendingPermissions"][number]],
+            }),
+            agent({
+              id: "broken",
+              workspaceId: "ws-1",
+              cwd: "/repo/project-a/ws-1",
+              status: "error",
+              requiresAttention: true,
+              attentionReason: "error",
+            }),
+            agent({
+              id: "done",
+              workspaceId: "ws-1",
+              cwd: "/repo/project-a/ws-1",
+              requiresAttention: true,
+              attentionReason: "finished",
+            }),
+          ],
+        }),
+      ],
+      layoutsByWorkspace: {
+        "srv:ws-1": splitLayout([
+          front("t-done", terminalTab("term-done")),
+          front("t-asking", terminalTab("term-asking")),
+          front("t-quota", terminalTab("term-quota")),
+          {
+            id: "t-shell",
+            tabs: [terminalTab("term-shell"), terminalTab("term-behind")],
+            focusedTabId: "terminal_term-shell",
+          },
+          front("a-asking", agentTab("asking")),
+          front("a-broken", agentTab("broken")),
+          front("a-done", agentTab("done")),
+          front("side", terminalTab("term-docked")),
+        ]),
+      },
+      explorerPaneIdByWorkspace: { "srv:ws-1": "side" },
+    });
+
+    expect(model.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts).toEqual({
+      needs_input: 2,
+      failed: 2,
+      attention: 2,
+    });
+  });
+
+  it("counts no panes against a daemon that sends no terminal buckets", () => {
+    const { terminalStatusBuckets: _omitted, ...oldDaemonWorkspace } = TWO_PROJECT_WORKSPACE;
+    const model = buildSidebarWorkspaceGroupModel({
+      sessions: [
+        session({
+          workspaces: [oldDaemonWorkspace],
+          agents: [
+            agent({
+              id: "done",
+              workspaceId: "ws-1",
+              cwd: "/repo/project-a/ws-1",
+              requiresAttention: true,
+              attentionReason: "finished",
+            }),
+          ],
+        }),
+      ],
+      layoutsByWorkspace: layoutsFor("ws-1", agentTabs("done")),
+    });
+
+    expect(model.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts).toEqual({
+      needs_input: 0,
+      failed: 0,
+      attention: 0,
+    });
+  });
+
+  it("counts no panes for a workspace this client has never laid out", () => {
+    const model = buildSidebarWorkspaceGroupModel({
+      sessions: [
+        session({
+          workspaces: [TWO_PROJECT_WORKSPACE],
+          agents: [
+            agent({
+              id: "done",
+              workspaceId: "ws-1",
+              cwd: "/repo/project-a/ws-1",
+              requiresAttention: true,
+              attentionReason: "finished",
+            }),
+          ],
+        }),
+      ],
+    });
+
+    expect(model.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts).toEqual({
+      needs_input: 0,
+      failed: 0,
+      attention: 0,
+    });
+  });
+
   it("falls back to a placeholder title when the agent has none", () => {
     const model = buildSidebarWorkspaceGroupModel({
       sessions: [
@@ -773,6 +973,31 @@ describe("preserveSidebarWorkspaceGroupModelIdentity", () => {
         .get("srv:ws-1")
         ?.members.find((entry) => entry.projectId === "project-a")?.agents[0]?.title,
     ).toBe("Renamed");
+  });
+
+  it("rebuilds a section when a pane's front tab changes its green count", () => {
+    const agents = [
+      agent({
+        id: "done",
+        workspaceId: "ws-1",
+        cwd: "/repo/project-a/ws-1",
+        requiresAttention: true,
+        attentionReason: "finished",
+      }),
+      agent({ id: "idle", workspaceId: "ws-1", cwd: "/repo/project-a/ws-1" }),
+    ];
+    const tabs = agentTabs("done", "idle");
+    const build = (focusedTabId: string) =>
+      buildSidebarWorkspaceGroupModel({
+        sessions: [session({ workspaces: [TWO_PROJECT_WORKSPACE], agents })],
+        layoutsByWorkspace: { "srv:ws-1": splitLayout([{ id: "main", tabs, focusedTabId }]) },
+      });
+    const green = build("agent_done");
+    expect(green.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts.attention).toBe(1);
+
+    const preserved = preserveSidebarWorkspaceGroupModelIdentity(green, build("agent_idle"));
+    expect(preserved).not.toBe(green);
+    expect(preserved.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts.attention).toBe(0);
   });
 
   it("rebuilds a section when a draft's tab is renamed", () => {

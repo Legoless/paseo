@@ -1,6 +1,11 @@
-import { describe, expect, test } from "vitest";
+import { InitialPromptFailedError } from "@getpaseo/client/internal/daemon-client";
+import { describe, expect, test, vi } from "vitest";
 
-import { shouldAllowEmptyDraftText, validateDraftSubmission } from "./workspace-tab-core";
+import {
+  archiveAgentLeftByFailedPrompt,
+  shouldAllowEmptyDraftText,
+  validateDraftSubmission,
+} from "./workspace-tab-core";
 
 const baseComposerState = {
   providerDefinitions: [{ id: "codewhale" }],
@@ -67,5 +72,38 @@ describe("workspace draft empty text readiness", () => {
         attachments: [],
       }),
     ).toBe(false);
+  });
+});
+
+describe("archiving the agent left by a failed first prompt", () => {
+  test("archives the agent named by a failed first prompt", async () => {
+    const archived: string[] = [];
+    await archiveAgentLeftByFailedPrompt(
+      new InitialPromptFailedError("Input exceeds the maximum length", "agent-orphan"),
+      async (agentId) => {
+        archived.push(agentId);
+      },
+    );
+    expect(archived).toEqual(["agent-orphan"]);
+  });
+
+  test("archives nothing when creation failed before an agent existed", async () => {
+    const archived: string[] = [];
+    await archiveAgentLeftByFailedPrompt(new Error("Provider unavailable"), async (agentId) => {
+      archived.push(agentId);
+    });
+    expect(archived).toEqual([]);
+  });
+
+  test("does not fail the retry when archiving fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await expect(
+      archiveAgentLeftByFailedPrompt(
+        new InitialPromptFailedError("failed", "agent-1"),
+        async () => {
+          throw new Error("host disconnected");
+        },
+      ),
+    ).resolves.toBeUndefined();
   });
 });

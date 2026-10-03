@@ -162,6 +162,7 @@ function ArtifactRow({
         })}:${entry.imageIndex}`}
         client={client}
         workspaceRoot={entry.workspaceRoot}
+        imageFallbackRoot={entry.imageFallbackRoot ?? undefined}
         serverId={serverId}
       />
       <View style={styles.meta}>
@@ -180,6 +181,7 @@ function ArtifactImage({
   occurrenceKey,
   client,
   workspaceRoot,
+  imageFallbackRoot,
   serverId,
 }: {
   source: string;
@@ -187,6 +189,7 @@ function ArtifactImage({
   occurrenceKey: string;
   client: DaemonClient | null;
   workspaceRoot: string;
+  imageFallbackRoot?: string;
   serverId: string;
 }) {
   const { t } = useTranslation();
@@ -194,8 +197,8 @@ function ArtifactImage({
   const [viewerOpen, setViewerOpen] = useState(false);
   const closeViewer = useCallback(() => setViewerOpen(false), []);
   const fileLocation = useMemo(
-    () => resolveArtifactFileLocation({ source, workspaceRoot }),
-    [source, workspaceRoot],
+    () => resolveArtifactFileLocation({ source, workspaceRoot, fallbackRoot: imageFallbackRoot }),
+    [imageFallbackRoot, source, workspaceRoot],
   );
   const openImage = useCallback(() => {
     if (fileLocation) {
@@ -209,6 +212,7 @@ function ArtifactImage({
     occurrenceKey,
     client,
     workspaceRoot,
+    fallbackRoot: imageFallbackRoot,
     serverId,
   });
   const binding = image.status === "failed" ? null : image.binding;

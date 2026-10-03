@@ -80,7 +80,12 @@ export interface WorkspaceDirectoryDeps {
   listAgentPayloads(): Promise<AgentSnapshotPayload[]>;
   listProviderSubagentActivity(): Promise<ProviderSubagentWorkspaceActivity[]>;
   listTerminalActivityContributions(): Promise<
-    Array<{ cwd: string; workspaceId?: string; activity: TerminalActivity | null }>
+    Array<{
+      terminalId: string;
+      cwd: string;
+      workspaceId?: string;
+      activity: TerminalActivity | null;
+    }>
   >;
   isProviderVisibleToClient(provider: string): boolean;
   buildWorkspaceDescriptor(input: {
@@ -260,6 +265,8 @@ export class WorkspaceDirectory {
       descriptorsByWorkspaceId.set(workspaceId, {
         ...workspaceDescriptors[i],
         archivingAt: this.archivingByWorkspaceId.get(workspaceId) ?? null,
+        // Always present, so a client can tell "nothing waits" from an old daemon.
+        terminalStatusBuckets: {},
       });
     }
 
@@ -408,9 +415,11 @@ export class WorkspaceDirectory {
   // Apply working terminal contributions to descriptor statuses and seed the
   // activity timestamp entries used by `resolveStatusEnteredAt`.
   // A terminal contributes only to the workspace it carries; same-cwd siblings
-  // are untouched.
+  // are untouched. A terminal waiting on the user is also listed by id with its
+  // bucket, so the client can tell which of its panes glows which color.
   private applyTerminalContributions(
     terminalContributions: Array<{
+      terminalId: string;
       cwd: string;
       workspaceId?: string;
       activity: TerminalActivity | null;
@@ -418,7 +427,7 @@ export class WorkspaceDirectory {
     descriptorsByWorkspaceId: Map<string, WorkspaceDescriptorPayload>,
   ): Map<string, WorkspaceBucketTimestampEntry[]> {
     const activityEntriesByWorkspaceId = new Map<string, WorkspaceBucketTimestampEntry[]>();
-    for (const { workspaceId, activity } of terminalContributions) {
+    for (const { terminalId, workspaceId, activity } of terminalContributions) {
       if (!activity || !workspaceId) {
         continue;
       }
@@ -432,6 +441,12 @@ export class WorkspaceDirectory {
         getWorkspaceStateBucketPriority(bucket) < getWorkspaceStateBucketPriority(existing.status)
       ) {
         existing.status = bucket;
+      }
+      if (bucket !== "running") {
+        existing.terminalStatusBuckets = {
+          ...existing.terminalStatusBuckets,
+          [terminalId]: bucket,
+        };
       }
       const entries = activityEntriesByWorkspaceId.get(workspaceId) ?? [];
       entries.push({ bucket, changedAtIso: new Date(activity.changedAt).toISOString() });

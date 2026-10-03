@@ -1,6 +1,6 @@
-import type {
-  CreateAgentRequestOptions,
-  CreateWorkspaceRequestOptions,
+import {
+  toInitialPromptFailure,
+  type CreateWorkspaceRequestOptions,
 } from "@getpaseo/client/internal/daemon-client";
 import type { AgentSnapshotPayload, CreationSnapshot } from "@getpaseo/protocol/messages";
 import { encodeImages } from "@/utils/encode-images";
@@ -761,7 +761,6 @@ interface SubmitDraftInput {
   clearConsumedDraft: () => void;
   agentCreation?: {
     result: Promise<AgentSnapshotPayload>;
-    retry: (input: CreateAgentRequestOptions) => Promise<AgentSnapshotPayload>;
   };
   serverId: string;
   draftKey: string;
@@ -845,6 +844,8 @@ async function createMultiplicityWorkspace(input: {
         },
     ...(firstAgentContext ? { firstAgentContext } : {}),
   });
+  const promptFailure = toInitialPromptFailure(payload);
+  if (promptFailure) throw promptFailure;
   if (payload.error || !payload.workspace) {
     throw new Error(payload.error ?? input.createFailedMessage);
   }
@@ -980,13 +981,13 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
     images: images?.length ? images : undefined,
     attachments: wirePayload.attachments?.length ? wirePayload.attachments : undefined,
   };
-  const execute = async (requestedAgent = initialAgent): Promise<AgentSnapshotPayload> => {
+  const execute = async (): Promise<AgentSnapshotPayload> => {
     const { agent } = await ensureWorkspace({
       cwd,
       prompt: text,
       attachments: workspaceNamingAttachments,
       withInitialAgent: true,
-      agent: requestedAgent,
+      agent: initialAgent,
       onEvent: (snapshot) => {
         if (!snapshot.workspace || navigated) return;
         navigated = true;
@@ -1025,17 +1026,10 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
     if (!agent) throw new Error("Workspace creation returned no agent");
     return agent;
   };
+  // A failure here lands on the workspace's draft tab, which retries as a plain agent
+  // creation: the workspace already exists by the time that tab is mounted.
   const agentCreation = {
     result: Promise.resolve().then(() => execute()),
-    retry: (request: CreateAgentRequestOptions) =>
-      execute({
-        ...initialAgent,
-        config: { ...request.config!, cwd },
-        initialPrompt: request.initialPrompt ?? "",
-        clientMessageId: initialAgent.clientMessageId,
-        images: request.images,
-        attachments: request.attachments,
-      }),
   };
   await agentCreation.result;
   if (outcome === "background") clearConsumedDraft();

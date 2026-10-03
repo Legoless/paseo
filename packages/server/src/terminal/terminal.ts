@@ -2,7 +2,7 @@ import * as pty from "node-pty";
 import xterm, { type Terminal as TerminalType } from "@xterm/headless";
 import { randomUUID } from "crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { tmpdir, userInfo } from "node:os";
+import { hostname, tmpdir, userInfo } from "node:os";
 import { basename, delimiter, dirname, extname, join, resolve as resolvePath } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -111,6 +111,8 @@ export interface TerminalSession {
   getExitInfo(): TerminalExitInfo | null;
   // Only the process that owns the PTY can answer these; the daemon-side mirror leaves them out.
   getResumeTarget?(): TerminalResumeTarget | null;
+  /** The directory the shell last reported (OSC 7), or the one it started in. */
+  getShellCwd?(): string;
   /** The screen a restore seeds from. Null while a full-screen app holds the alternate screen. */
   getRestoreState?(): TerminalState | null;
   kill(): void;
@@ -132,6 +134,25 @@ function parseCommandFinishedOsc(data: string): TerminalCommandFinishedInfo | nu
     return null;
   }
   return { exitCode: Number(parts[1]) };
+}
+
+function parseShellCwdOsc(data: string, localHost: string): string | null {
+  // file://host/path. Shells send $HOST, which fileURLToPath rejects on POSIX, so the host is
+  // checked here and dropped. Another host's path is a shell inside ssh, which is no directory here.
+  const match = /^file:\/\/([^/]*)(\/.*)$/s.exec(data);
+  if (!match) {
+    return null;
+  }
+  const host = match[1].toLowerCase();
+  if (host && host !== "localhost" && host !== localHost) {
+    return null;
+  }
+  try {
+    // oh-my-zsh leaves ? and # raw; a URL would read them as a query and a fragment.
+    return fileURLToPath(`file://${match[2].replace(/[?#]/g, encodeURIComponent)}`);
+  } catch {
+    return null;
+  }
 }
 
 export interface CreateTerminalOptions {
@@ -942,6 +963,11 @@ async function seedRestoredScreen(
   }
 }
 
+/** A restored shell starts where it last was; the terminal itself stays filed under `cwd`. */
+function resolveShellStartCwd(cwd: string, restore: TerminalRestoreInput | undefined): string {
+  return restore?.shellCwd ?? cwd;
+}
+
 /** Types a restored agent's resume command and returns it as the terminal's resume target. */
 function resumeRestoredAgent(
   ptyProcess: pty.IPty,
@@ -1017,10 +1043,16 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   });
   activityScanner.handleInitialCommand(command ? [command, ...args].join(" ") : undefined);
   let resumeTarget: TerminalResumeTarget | null = null;
-  // An agent is only worth resuming while its exit would be seen: the shell integration reports
-  // each command's end (zsh only, marked by its first prompt), or the agent is the pty's own process.
+  // Newly observed agents need a visible exit: shell integration reports each command's end
+  // (zsh only, marked by its first prompt), or the agent is the pty's own process.
   let shellReportsCommands = false;
   const commandAgent = detectAgentFromCommand(command);
+  let shellCwd = resolveShellStartCwd(cwd, options.restore);
+  // A running program can print OSC 7 too. Once the shell reports its prompts, a report waits for
+  // the next prompt or command end, where the shell's own report replaces anything printed before.
+  let promptShellCwd: string | null = null;
+  // Captured with the shell, which fixes its $HOST at startup too.
+  const localHost = hostname().toLowerCase();
   await seedRestoredScreen(terminal, options.restore);
 
   ensureNodePtySpawnHelperExecutableForCurrentPlatform();
@@ -1033,7 +1065,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     name: "xterm-256color",
     cols,
     rows,
-    cwd,
+    cwd: shellCwd,
     env: buildTerminalEnvironment({
       shell: spawnCommand,
       env: {
@@ -1157,16 +1189,27 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     });
   }
 
+  function commitPromptShellCwd(): void {
+    shellCwd = promptShellCwd ?? shellCwd;
+    promptShellCwd = null;
+  }
+
   const disposeCommandLifecycleSubscription = terminal.parser.registerOscHandler(633, (data) => {
     shellReportsCommands = true;
     if (data === "B") {
       activityScanner.handleCommandStarted();
       return true;
     }
+    if (data === "A") {
+      commitPromptShellCwd();
+      return true;
+    }
     const commandFinished = parseCommandFinishedOsc(data);
     if (!commandFinished) {
       return true;
     }
+    // Before the listeners: the command-finished save records where the command left the shell.
+    commitPromptShellCwd();
 
     activityScanner.handleCommandFinished();
     // The agent quitting leaves nothing to resume. 129 and 143 are SIGHUP and SIGTERM, the
@@ -1181,6 +1224,20 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
       } catch {
         // no-op
       }
+    }
+    return true;
+  });
+
+  const disposeShellCwdSubscription = terminal.parser.registerOscHandler(7, (data) => {
+    // A directly spawned agent has no shell whose directory this sequence could report.
+    if (commandAgent) {
+      return true;
+    }
+    const reported = parseShellCwdOsc(data, localHost);
+    if (reported && shellReportsCommands) {
+      promptShellCwd = reported;
+    } else if (reported) {
+      shellCwd = reported;
     }
     return true;
   });
@@ -1254,6 +1311,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     clearPendingTitleChange();
     disposeTitleChangeSubscription();
     disposeCommandLifecycleSubscription.dispose();
+    disposeShellCwdSubscription.dispose();
     activityTracker.dispose();
     terminal.dispose();
     listeners.clear();
@@ -1559,8 +1617,16 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   }
 
   function getResumeTarget(): TerminalResumeTarget | null {
-    const exitVisible = shellReportsCommands || resumeTarget?.agent === commandAgent;
+    // A restored target is already known before the new shell reaches its first prompt.
+    const exitVisible =
+      Boolean(options.restore?.resume) ||
+      shellReportsCommands ||
+      resumeTarget?.agent === commandAgent;
     return exitVisible ? resumeTarget : null;
+  }
+
+  function getShellCwd(): string {
+    return shellCwd;
   }
 
   function getRestoreState(): TerminalState | null {
@@ -1687,6 +1753,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     setTitle,
     getExitInfo,
     getResumeTarget,
+    getShellCwd,
     getRestoreState,
     kill,
     killAndWait,
