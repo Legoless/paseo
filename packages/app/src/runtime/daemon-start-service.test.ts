@@ -4,6 +4,7 @@ import type { HostRuntimeStore } from "./host-runtime";
 import type { DesktopDaemonStatus } from "@/desktop/daemon/desktop-daemon";
 import { defaultHostAppearance } from "@/hosts/appearance";
 import type { HostProfile } from "@/types/host-connection";
+import { resolveStartupBlocker } from "@/navigation/host-runtime-bootstrap";
 
 interface RecordedUpsert {
   listenAddress: string;
@@ -140,6 +141,33 @@ describe("DaemonStartService", () => {
 
     expect(result).toEqual({ ok: false, error: "ipc broke" });
     expect(service.getLastError()).toBe("ipc broke");
+  });
+
+  it("does not replay a recovered startup error when the host reconnects", async () => {
+    const fake = createFakeStore();
+    const service = new DaemonStartService({
+      store: fake.store,
+      startDesktopDaemon: async () => makeStatus({ serverId: "" }),
+    });
+    await service.start();
+
+    const errors: Array<string | null> = [];
+    service.subscribe(() => errors.push(service.getLastError()));
+    service.clearError();
+    service.clearError();
+
+    expect(errors).toEqual([null]);
+    expect(
+      resolveStartupBlocker({
+        isDesktopRuntime: true,
+        anyOnlineHostServerId: null,
+        daemonStartIsRunning: service.isRunning(),
+        daemonStartError: service.getLastError(),
+      }),
+    ).toEqual({ kind: "none" });
+
+    await service.start();
+    expect(service.getLastError()).toBe("Desktop daemon did not return a server id.");
   });
 
   it("clears lastError on retry entry and reports null after subsequent success", async () => {

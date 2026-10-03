@@ -1,9 +1,18 @@
 import { afterEach, expect, it } from "vitest";
 import { isPlatform } from "../test-utils/platform.js";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { delimiter, join } from "node:path";
-import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
+import { hostname, tmpdir } from "node:os";
 import { createWorkerTerminalManager } from "./worker-terminal-manager.js";
 import { restorePersistedTerminals, writeTerminalRecord } from "./terminal-persistence.js";
 import { createTestLogger } from "../test-utils/test-logger.js";
@@ -218,6 +227,52 @@ it("brings a saved terminal back with its id, title and scrollback after a resta
   }, 10000);
 });
 
+it("brings a terminal back in the directory its shell last reported", async () => {
+  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "worker-terminal-manager-shell-cwd-")));
+  const recordsDirectory = mkdtempSync(join(tmpdir(), "worker-terminal-records-"));
+  temporaryDirs.push(cwd, recordsDirectory);
+  const moved = join(cwd, "moved-shell-dir");
+  mkdirSync(moved);
+  const previousDaemon = createWorkerTerminalManager({ recordsDirectory });
+  // What zsh's integration prints once `cd moved-shell-dir` ends: the directory, then the command's end.
+  const prompt = `\x1b]7;file://${hostname()}${pathToFileURL(moved).pathname}\x07\x1b]633;D;0\x07`;
+  const session = await previousDaemon.createTerminal({
+    workspaceId: "ws-test",
+    cwd,
+    persist: true,
+    ...nodeTerminalCommand(
+      `process.stdin.once("data", () => process.stdout.write(${JSON.stringify(prompt)})); setInterval(() => {}, 1000);`,
+    ),
+  });
+  const readRecord = () =>
+    JSON.parse(readFileSync(terminalRecordPath(recordsDirectory, session.id), "utf8"));
+  expect(readRecord()).toMatchObject({ cwd, shellCwd: cwd });
+
+  // Saved when the command ends, so a crash or power loss keeps it too.
+  session.send({ type: "input", data: "x\r" });
+  await waitForCondition(() => readRecord().shellCwd === moved, 10000);
+  await previousDaemon.killAll();
+  const saved = readRecord();
+  expect(saved).toMatchObject({ cwd, shellCwd: moved });
+
+  manager = createWorkerTerminalManager({ recordsDirectory });
+  await restorePersistedTerminals({
+    directory: recordsDirectory,
+    terminalManager: manager,
+    activeWorkspaceIds: new Set(["ws-test"]),
+    logger: createTestLogger(),
+  });
+  const restored = manager.getTerminal(session.id);
+  expect(restored).toBeDefined();
+  trackTerminal(restored!);
+  // Still filed under its own cwd, so the workspace keeps listing it.
+  expect(restored!.cwd).toBe(cwd);
+  // Saved again on create by the restored terminal, which reports the directory it started in.
+  const resaved = readRecord();
+  expect(resaved.savedAt).not.toBe(saved.savedAt);
+  expect(resaved).toMatchObject({ cwd, shellCwd: moved });
+});
+
 it("drops saved terminals whose workspace is gone", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "worker-terminal-manager-restore-gone-"));
   const recordsDirectory = mkdtempSync(join(tmpdir(), "worker-terminal-records-"));
@@ -241,6 +296,79 @@ it("drops saved terminals whose workspace is gone", async () => {
 
   expect(manager.getTerminal(session.id)).toBeUndefined();
   expect(existsSync(terminalRecordPath(recordsDirectory, session.id))).toBe(false);
+});
+
+it("keeps a restored agent's resume record while its shell initializes", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "worker-terminal-manager-resume-"));
+  const recordsDirectory = mkdtempSync(join(tmpdir(), "worker-terminal-records-"));
+  temporaryDirs.push(cwd, recordsDirectory);
+  const resume = { agent: "claude" as const, sessionId: "sess-restored" };
+  const terminalId = "term-restored-agent";
+  const promptGate = join(cwd, "prompt-ready");
+  writeTerminalRecord(recordsDirectory, {
+    version: 1,
+    id: terminalId,
+    workspaceId: "ws-test",
+    cwd,
+    name: "Terminal 1",
+    rows: 24,
+    cols: 200,
+    savedAt: new Date().toISOString(),
+    resume,
+  });
+  manager = createWorkerTerminalManager({ recordsDirectory });
+  const terminals = manager;
+  // A real child holds its first prompt until the test releases it, so create's 50 ms delay
+  // cannot conceal the interval where the restore command has been typed but no prompt appeared.
+  const command = nodeTerminalCommand(`
+    const fs = require("node:fs");
+    let input = "";
+    process.stdin.on("data", (chunk) => { input += chunk.toString(); });
+    process.stdout.write("waiting-for-prompt\\r\\n");
+    const timer = setInterval(() => {
+      if (!fs.existsSync(${JSON.stringify(promptGate)}) || !input.includes("sess-restored")) return;
+      clearInterval(timer);
+      process.stdout.write("\\x1b]633;A\\x07Claude Code v2.1.284\\r\\nresume:" + input);
+    }, 10);
+    setInterval(() => {}, 1000);
+  `);
+  await restorePersistedTerminals({
+    directory: recordsDirectory,
+    terminalManager: {
+      ...terminals,
+      createTerminal: (options) => terminals.createTerminal({ ...options, ...command }),
+    },
+    activeWorkspaceIds: new Set(["ws-test"]),
+    logger: createTestLogger(),
+  });
+  const session = terminals.getTerminal(terminalId);
+  expect(session?.id).toBe(terminalId);
+  trackTerminal(session!);
+  const readRecord = () =>
+    JSON.parse(readFileSync(terminalRecordPath(recordsDirectory, terminalId), "utf8"));
+  await waitForCondition(
+    async () => (await renderedTerminalText(terminals, terminalId)).includes("waiting-for-prompt"),
+    10000,
+  );
+  expect(readRecord().resume).toEqual(resume);
+
+  // Metadata saves during startup must preserve the same target too.
+  terminals.setTerminalTitle(terminalId, "Restored agent");
+  await waitForCondition(() => readRecord().title === "Restored agent", 10000);
+  expect(readRecord().resume).toEqual(resume);
+
+  writeFileSync(promptGate, "ready");
+  await waitForCondition(
+    async () =>
+      (await renderedTerminalText(terminals, terminalId)).includes(
+        "resume: claude --resume sess-restored",
+      ),
+    10000,
+  );
+  await terminals.setTerminalActivity(terminalId, "working", undefined, resume.sessionId);
+  expect(readRecord().resume).toEqual(resume);
+  await terminals.killAll();
+  expect(readRecord().resume).toEqual(resume);
 });
 
 it("keeps a saved terminal only while it can still come back", async () => {
@@ -291,7 +419,8 @@ it("keeps a saved terminal only while it can still come back", async () => {
   // A signal Paseo did not send may be a reboot: the record waits for shutdown, then goes.
   signalled.send({ type: "input", data: "x\r" });
   await waitForCondition(() => terminals.getTerminal(signalled.id) === undefined, 10000);
-  expect(existsSync(recordOf(signalled.id))).toBe(true);
+  // ConPTY reports only an exit code, so Windows deletes immediately rather than entering grace.
+  expect(existsSync(recordOf(signalled.id))).toBe(signalled.getExitInfo()!.signal !== null);
   await waitForCondition(() => !existsSync(recordOf(signalled.id)), 10000);
 });
 

@@ -35,12 +35,14 @@ import { useSidebarCollapsedSectionsStore } from "@/stores/sidebar-collapsed-sec
 import { useHostFeatureMap } from "@/runtime/host-features";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useProjectIcons } from "@/projects/icons";
-import type {
-  SidebarWorkspaceAgentRow,
-  SidebarWorkspaceMemberRow,
-  SidebarWorkspaceNewAgentRow,
-  SidebarWorkspaceUncategorizedRow,
-  SidebarWorkspaceSection,
+import {
+  EMPTY_PANE_STATUS_COUNTS,
+  type SidebarPaneStatusCounts,
+  type SidebarWorkspaceAgentRow,
+  type SidebarWorkspaceMemberRow,
+  type SidebarWorkspaceNewAgentRow,
+  type SidebarWorkspaceUncategorizedRow,
+  type SidebarWorkspaceSection,
 } from "@/projects/workspace-groups";
 import { WorkspaceAgentRow, WorkspaceNewAgentRow } from "@/components/sidebar/workspace-agent-row";
 import { useRemoveWorkspaceMember } from "@/workspaces/use-remove-workspace-member";
@@ -103,6 +105,7 @@ import { useLimitedSidebarGroup } from "@/components/sidebar/use-limited-sidebar
 import {
   SidebarWorkspaceRowFrame,
   SidebarWorkspaceRowContent,
+  SidebarWorkspacePaneStatusCounts,
   resolveTrailingActionVisibility,
   SidebarWorkspaceTrailingActionBase,
   SidebarWorkspaceTrailingActionOverlay,
@@ -221,6 +224,7 @@ interface WorkspaceRowInnerProps {
   onTogglePin?: () => void;
   reserveIdleStatusIndicatorSpace?: boolean;
   collapseAccessory?: WorkspaceCollapseToggle;
+  paneStatusCounts?: SidebarPaneStatusCounts;
 }
 
 function getProjectWorkspaceRowStyle({
@@ -250,6 +254,7 @@ type WorkspaceCollapseToggle = Omit<SidebarWorkspaceCollapseAccessory, "visible"
 
 function WorkspaceRowRightGroup({
   workspace,
+  paneStatusCounts,
   includeProjectActions,
   backdrop,
   isHovered,
@@ -272,6 +277,7 @@ function WorkspaceRowRightGroup({
   onTogglePin,
 }: {
   workspace: SidebarWorkspaceEntry;
+  paneStatusCounts: SidebarPaneStatusCounts;
   includeProjectActions: boolean;
   backdrop: SidebarSurfaceBackdrop;
   isHovered: boolean;
@@ -296,6 +302,7 @@ function WorkspaceRowRightGroup({
   const { t } = useTranslation();
   const trailing = useSidebarWorkspaceTrailing();
   const showShortcut = showShortcutBadge && shortcutNumber !== null;
+  const hasPaneStatusCounts = Object.values(paneStatusCounts).some((count) => count > 0);
   const {
     trailingPresentation,
     showKebab: showKebabInSlot,
@@ -309,6 +316,7 @@ function WorkspaceRowRightGroup({
     isHovered,
     isTouchPlatform,
     showShortcut,
+    hasPaneStatusCounts,
   });
   const kebab = useOpenKebabMenuVisibility(showKebabInSlot);
 
@@ -317,6 +325,7 @@ function WorkspaceRowRightGroup({
       {isCreating ? (
         <Text style={styles.workspaceCreatingText}>{t("sidebar.workspace.status.creating")}</Text>
       ) : null}
+      {hasPaneStatusCounts ? <SidebarWorkspacePaneStatusCounts counts={paneStatusCounts} /> : null}
       {renderSlot ? (
         <SidebarWorkspaceTrailingActionSlot reserveWidth={reserveSlotWidth}>
           <SidebarWorkspaceTrailingActionBase presentation={trailingPresentation}>
@@ -386,6 +395,7 @@ function WorkspaceRowInner({
   onTogglePin,
   reserveIdleStatusIndicatorSpace = true,
   collapseAccessory,
+  paneStatusCounts = EMPTY_PANE_STATUS_COUNTS,
 }: WorkspaceRowInnerProps) {
   const isCompact = useIsCompactFormFactor();
   const [isPressed, setIsPressed] = useState(false);
@@ -498,6 +508,7 @@ function WorkspaceRowInner({
               >
                 <WorkspaceRowRightGroup
                   workspace={workspace}
+                  paneStatusCounts={paneStatusCounts}
                   includeProjectActions={Boolean(leadingProjectName)}
                   backdrop={backdrop}
                   isHovered={isHovered}
@@ -546,6 +557,7 @@ function WorkspaceRowWithMenu({
   reserveIdleStatusIndicatorSpace = true,
   isCreating = false,
   collapseAccessory,
+  paneStatusCounts,
 }: {
   workspace: SidebarWorkspaceEntry;
   hostBadge?: HostBadgeModel | null;
@@ -564,6 +576,7 @@ function WorkspaceRowWithMenu({
   reserveIdleStatusIndicatorSpace?: boolean;
   isCreating?: boolean;
   collapseAccessory?: WorkspaceCollapseToggle;
+  paneStatusCounts?: SidebarPaneStatusCounts;
 }) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -680,6 +693,7 @@ function WorkspaceRowWithMenu({
       onTogglePin={onTogglePin}
       reserveIdleStatusIndicatorSpace={reserveIdleStatusIndicatorSpace}
       collapseAccessory={collapseAccessory}
+      paneStatusCounts={paneStatusCounts}
     />
   );
 }
@@ -703,6 +717,7 @@ interface WorkspaceRowItemProps {
   isDragging?: boolean;
   dragHandleProps?: DraggableListDragHandleProps;
   collapseAccessory?: WorkspaceCollapseToggle;
+  paneStatusCounts?: SidebarPaneStatusCounts;
 }
 
 function WorkspaceRowItem({
@@ -724,6 +739,7 @@ function WorkspaceRowItem({
   isDragging = false,
   dragHandleProps,
   collapseAccessory,
+  paneStatusCounts,
 }: WorkspaceRowItemProps) {
   const pendingToggleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedRef = useRef(false);
@@ -808,6 +824,7 @@ function WorkspaceRowItem({
       isDragging={isDragging}
       dragHandleProps={dragHandleProps}
       collapseAccessory={collapseAccessory}
+      paneStatusCounts={paneStatusCounts}
     />
   );
 }
@@ -845,6 +862,7 @@ function areWorkspaceRowItemPropsEqual(
     previous.isDragging === next.isDragging &&
     previous.dragHandleProps === next.dragHandleProps &&
     previous.collapseAccessory === next.collapseAccessory &&
+    previous.paneStatusCounts === next.paneStatusCounts &&
     previousSelected === nextSelected
   );
 }
@@ -867,6 +885,7 @@ function WorkspaceRow({
   onToggleWorkspacePin,
   reserveIdleStatusIndicatorSpace = true,
   collapseAccessory,
+  paneStatusCounts,
   selected,
 }: {
   workspaceEntry: SidebarWorkspaceEntry | null;
@@ -884,6 +903,7 @@ function WorkspaceRow({
   onToggleWorkspacePin: ToggleSidebarWorkspacePin;
   reserveIdleStatusIndicatorSpace?: boolean;
   collapseAccessory?: WorkspaceCollapseToggle;
+  paneStatusCounts?: SidebarPaneStatusCounts;
   selected: boolean;
 }) {
   if (!workspaceEntry) {
@@ -908,6 +928,7 @@ function WorkspaceRow({
       onToggleWorkspacePin={onToggleWorkspacePin}
       reserveIdleStatusIndicatorSpace={reserveIdleStatusIndicatorSpace}
       collapseAccessory={collapseAccessory}
+      paneStatusCounts={paneStatusCounts}
     />
   );
 }
@@ -1470,6 +1491,7 @@ function WorkspaceSectionBlock({
         isDragging={isDragging}
         dragHandleProps={dragHandleProps}
         collapseAccessory={collapseAccessory}
+        paneStatusCounts={section?.paneStatusCounts ?? EMPTY_PANE_STATUS_COUNTS}
       />
       {!collapsed && section ? (
         <>
@@ -1636,6 +1658,7 @@ export function SidebarWorkspaceList({
     groupMode !== "project" ? (
       <SidebarGroupedModeList
         workspaceGroups={workspaceGroups}
+        sectionsByWorkspaceKey={sectionsByWorkspaceKey}
         pinnedGroups={pinnedGroups}
         workspaceEntriesByKey={workspaceEntriesByKey}
         projectIconByProjectViewKey={projectIconByProjectViewKey}
@@ -1688,6 +1711,7 @@ export function SidebarWorkspaceList({
  */
 function SidebarGroupedModeList({
   workspaceGroups,
+  sectionsByWorkspaceKey,
   pinnedGroups,
   workspaceEntriesByKey,
   projectIconByProjectViewKey,
@@ -1702,6 +1726,7 @@ function SidebarGroupedModeList({
   dragGestureHostActive,
 }: {
   workspaceGroups: SidebarWorkspaceGroup[];
+  sectionsByWorkspaceKey: ReadonlyMap<string, SidebarWorkspaceSection>;
   pinnedGroups: PinnedSidebarGroups;
   workspaceEntriesByKey: ReadonlyMap<string, SidebarWorkspaceEntry>;
   projectIconByProjectViewKey: ReadonlyMap<string, string | null>;
@@ -1728,6 +1753,7 @@ function SidebarGroupedModeList({
   return (
     <SidebarStatusWorkspaceList
       groups={workspaceGroups}
+      sectionsByWorkspaceKey={sectionsByWorkspaceKey}
       pinnedWorkspaces={pinnedWorkspaces}
       projectIconByProjectViewKey={projectIconByProjectViewKey}
       shortcutIndexByWorkspaceKey={_projectShortcutIndex}
@@ -2063,6 +2089,10 @@ function WorkspaceSectionList({
           drag={drag}
           isDragging={isActive}
           dragHandleProps={dragHandleProps}
+          paneStatusCounts={
+            sectionsByWorkspaceKey.get(workspace.workspaceKey)?.paneStatusCounts ??
+            EMPTY_PANE_STATUS_COUNTS
+          }
         />
       );
     },
@@ -2070,6 +2100,7 @@ function WorkspaceSectionList({
       activeWorkspaceSelection,
       hostBadgeByServerId,
       onWorkspacePress,
+      sectionsByWorkspaceKey,
       selectionEnabled,
       shortcutIndexByWorkspaceKey,
       showShortcutBadges,

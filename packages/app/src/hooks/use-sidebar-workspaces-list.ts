@@ -282,14 +282,21 @@ export function useSidebarWorkspaceGroupSections(input: {
   const layoutsByWorkspace = useWorkspaceLayoutStore((state) =>
     enabled ? state.layoutByWorkspace : EMPTY_WORKSPACE_LAYOUTS,
   );
+  const explorerPaneIdByWorkspace = useWorkspaceLayoutStore((state) =>
+    enabled ? state.explorerSidebarPaneIdByWorkspace : EMPTY_WORKSPACE_LAYOUTS,
+  );
   const previousModelRef = useRef<SidebarWorkspaceGroupModel>(EMPTY_GROUP_MODEL);
   return useMemo(() => {
     if (!enabled || sessions.length === 0) {
       return previousModelRef.current;
     }
-    const next = buildSidebarWorkspaceGroupModel({ sessions, layoutsByWorkspace });
+    const next = buildSidebarWorkspaceGroupModel({
+      sessions,
+      layoutsByWorkspace,
+      explorerPaneIdByWorkspace,
+    });
     const model = preserveSidebarWorkspaceGroupModelIdentity(previousModelRef.current, next);
     previousModelRef.current = model;
     return model;
-  }, [enabled, layoutsByWorkspace, sessions]);
+  }, [enabled, explorerPaneIdByWorkspace, layoutsByWorkspace, sessions]);
 }

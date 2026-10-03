@@ -98,6 +98,7 @@ import {
 
 import { AgentManager, AgentRunCancellationError } from "./agent/agent-manager.js";
 import { buildTimelinePromptIndex } from "./agent/timeline-prompt-index.js";
+import { buildTimelineImageIndex } from "./agent/timeline-image-index.js";
 import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import type {
   AgentManagerEvent,
@@ -2672,6 +2673,8 @@ export class Session {
         return this.handleAgentTimelineSearchRequest(msg, source);
       case "agent.timeline.list_prompts.request":
         return this.handleAgentTimelineListPromptsRequest(msg, source);
+      case "agent.timeline.list_images.request":
+        return this.handleAgentTimelineListImagesRequest(msg, source);
       case "agent.provider_subagents.list.request":
         return this.handleProviderSubagentListRequest(msg);
       case "agent.provider_subagents.timeline.get.request":
@@ -5612,7 +5615,12 @@ export class Session {
   }
 
   private async listTerminalActivityContributions(): Promise<
-    Array<{ cwd: string; workspaceId?: string; activity: TerminalActivity | null }>
+    Array<{
+      terminalId: string;
+      cwd: string;
+      workspaceId?: string;
+      activity: TerminalActivity | null;
+    }>
   > {
     const terminalManager = this.terminalManager;
     if (!terminalManager) {
@@ -5623,11 +5631,16 @@ export class Session {
       directories.map((cwd) => terminalManager.getTerminals(cwd)),
     );
     return terminalsByDirectory.flat().map((session) => {
-      const contribution: { cwd: string; workspaceId?: string; activity: TerminalActivity | null } =
-        {
-          cwd: session.cwd,
-          activity: session.getActivity(),
-        };
+      const contribution: {
+        terminalId: string;
+        cwd: string;
+        workspaceId?: string;
+        activity: TerminalActivity | null;
+      } = {
+        terminalId: session.id,
+        cwd: session.cwd,
+        activity: session.getActivity(),
+      };
       if (session.workspaceId) {
         contribution.workspaceId = session.workspaceId;
       }
@@ -5981,6 +5994,9 @@ export class Session {
       membersAuthoritative: true,
       archivingAt: null,
       status: "done",
+      // Present on every descriptor this daemon sends, so a client never mistakes a creation
+      // response for an old daemon's; buildDescriptorMap fills in the waiting terminals.
+      terminalStatusBuckets: {},
       statusEnteredAt: null,
       activityAt: null,
       diffStat,
@@ -8325,6 +8341,72 @@ export class Session {
             agentId: msg.agentId,
             epoch: "",
             prompts: [],
+            error: error instanceof Error ? error.message : String(error),
+          },
+        },
+        source,
+      );
+    }
+  }
+
+  private async handleAgentTimelineListImagesRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.timeline.list_images.request" }>,
+    source?: object,
+  ): Promise<void> {
+    if (msg.agentId.startsWith("draft_")) {
+      this.emitForSource(
+        {
+          type: "agent.timeline.list_images.response",
+          payload: {
+            requestId: msg.requestId,
+            agentId: msg.agentId,
+            epoch: "",
+            images: [],
+            error: null,
+          },
+        },
+        source,
+      );
+      return;
+    }
+
+    try {
+      await ensureAgentLoaded(msg.agentId, {
+        agentManager: this.agentManager,
+        agentStorage: this.agentStorage,
+        logger: this.sessionLogger,
+      });
+      const rows = await this.agentManager.getTimelineRows(msg.agentId);
+      const timeline = this.agentManager.fetchTimeline(msg.agentId, {
+        direction: "tail",
+        limit: 1,
+      });
+      const index = buildTimelineImageIndex(timeline.epoch, rows);
+      this.emitForSource(
+        {
+          type: "agent.timeline.list_images.response",
+          payload: {
+            requestId: msg.requestId,
+            agentId: msg.agentId,
+            ...index,
+            error: null,
+          },
+        },
+        source,
+      );
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, agentId: msg.agentId },
+        "Failed to handle agent.timeline.list_images.request",
+      );
+      this.emitForSource(
+        {
+          type: "agent.timeline.list_images.response",
+          payload: {
+            requestId: msg.requestId,
+            agentId: msg.agentId,
+            epoch: "",
+            images: [],
             error: error instanceof Error ? error.message : String(error),
           },
         },

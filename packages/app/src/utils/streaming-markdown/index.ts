@@ -2,9 +2,25 @@ import type MarkdownIt from "markdown-it";
 import type StateInline from "markdown-it/lib/rules_inline/state_inline.mjs";
 
 const STREAMING_TAIL = Symbol("streaming markdown tail");
+const referenceRule: Parameters<
+  MarkdownIt["block"]["ruler"]["at"]
+>[1] = require("markdown-it/lib/rules_block/reference");
 
 /** Adds provisional inline formatting without changing the source or literal code blocks. */
 export function enableStreamingMarkdown(parser: MarkdownIt): void {
+  parser.block.ruler.at("reference", (state, startLine, endLine, silent) => {
+    if (silent) return referenceRule(state, startLine, endLine, silent);
+    const references = state.env.references && { ...state.env.references };
+    const previousLine = state.line;
+    const parsed = referenceRule(state, startLine, endLine, silent);
+    // A reference destination can still grow until its final line terminates.
+    if (parsed && state.line === state.lineMax && !state.src.endsWith("\n")) {
+      state.env.references = references;
+      state.line = previousLine;
+      return false;
+    }
+    return parsed;
+  });
   parser.core.ruler.at("inline", (state) => {
     const tail = state.tokens.findLast((token) => token.nesting !== -1);
     for (const token of state.tokens) {
@@ -24,6 +40,27 @@ export function enableStreamingMarkdown(parser: MarkdownIt): void {
       for (const token of block.children ?? []) {
         if (token.type === "streaming_link_text") token.type = "text";
       }
+    }
+
+    // An automatic link at the growing tail has no closing delimiter yet.
+    // Keep its text visible until whitespace, more text, or turn completion.
+    if (/\s$/.test(state.src)) return;
+    const tail = state.tokens.findLast((token) => token.nesting !== -1);
+    const children = tail?.type === "inline" ? tail.children : null;
+    if (!children) return;
+    const opening = children.findLastIndex(
+      (token) => token.type === "link_open" && token.markup === "linkify",
+    );
+    if (opening < 0 || children[opening + 2]?.type !== "link_close") return;
+    const suffix = children.slice(opening + 3);
+    if (
+      suffix.every(
+        (token) =>
+          token.nesting === -1 || (token.type === "text" && /^[\p{P}\p{S}]*$/u.test(token.content)),
+      )
+    ) {
+      children.splice(opening + 2, 1);
+      children.splice(opening, 1);
     }
   });
 }
@@ -58,6 +95,7 @@ function completeCode(state: StateInline, silent: boolean): boolean {
   if (content) {
     const token = state.push("code_inline", "code", 0);
     token.markup = opening[0];
+    token.info = "streaming";
     token.content = content.replace(/\n/g, " ").replace(/^ (.+) $/, "$1");
   }
   state.pos = state.posMax;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAggregatedAgents } from "./use-aggregated-agents";
 import { getDesktopHost } from "@/desktop/host";
 import {
@@ -77,29 +77,25 @@ function getSystemColorScheme(): ColorScheme {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-async function updateDockBadge(count?: number): Promise<boolean> {
-  if (isNative || !getIsElectron()) return false;
+async function updateDockBadge(count?: number): Promise<void> {
+  if (isNative || !getIsElectron()) return;
 
   const desktopWindow = getDesktopHost()?.window?.getCurrentWindow?.();
   if (!desktopWindow || typeof desktopWindow.setBadgeCount !== "function") {
-    return false;
+    return;
   }
 
   try {
     await desktopWindow.setBadgeCount(count);
-    return true;
   } catch (error) {
     console.warn("[useFaviconStatus] Failed to update dock badge", error);
-    return false;
   }
 }
 
 export function useFaviconStatus() {
   const { agents } = useAggregatedAgents({ demand: !isNative });
   const [colorScheme, setColorScheme] = useState<ColorScheme>(getSystemColorScheme);
-  // null until the first write: a reload with nothing to count still has to clear the badge the
-  // previous renderer left on the dock.
-  const lastDockBadgeCountRef = useRef<number | undefined | null>(null);
+  const dockBadgeCount = deriveDockBadgeCountFromAgents(agents);
 
   // Listen for system color scheme changes
   useEffect(() => {
@@ -120,15 +116,11 @@ export function useFaviconStatus() {
 
     const status = deriveFaviconStatus(agents);
     updateFavicon(status, colorScheme);
-
-    const dockBadgeCount = deriveDockBadgeCountFromAgents(agents);
-    if (dockBadgeCount !== lastDockBadgeCountRef.current) {
-      void (async () => {
-        const applied = await updateDockBadge(dockBadgeCount);
-        if (applied) {
-          lastDockBadgeCountRef.current = dockBadgeCount;
-        }
-      })();
-    }
   }, [agents, colorScheme]);
+
+  // Write on mount to clear any previous renderer's badge, then on every count change. A pending
+  // IPC acknowledgement must not suppress a newer clear.
+  useEffect(() => {
+    void updateDockBadge(dockBadgeCount);
+  }, [dockBadgeCount]);
 }

@@ -10,9 +10,13 @@ import {
   type TextStyle,
 } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight, Folder, FolderOpen } from "lucide-react-native";
 import { ProjectStatusIndicator } from "@/components/sidebar/project-leading-visual";
 import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
+import { getStatusDotColor } from "@/utils/status-dot-color";
+import { STATUS_INDICATOR_FILLED_DOT_SIZE } from "@/utils/status-indicator-geometry";
+import type { SidebarPaneStatusBucket, SidebarPaneStatusCounts } from "@/projects/workspace-groups";
 import {
   WorkspaceMetaRow,
   type WorkspaceServiceSummary,
@@ -403,6 +407,42 @@ export const sidebarWorkspaceRowStyles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.medium,
     lineHeight: 14,
   },
+  // Above the kebab's scrim, which spans further left than the kebab and would fade the counts.
+  paneStatusCounts: {
+    position: "relative",
+    zIndex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    height: 20,
+    flexShrink: 0,
+  },
+  paneStatusCount: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+  },
+  paneStatusDot: {
+    width: STATUS_INDICATOR_FILLED_DOT_SIZE,
+    height: STATUS_INDICATOR_FILLED_DOT_SIZE,
+    borderRadius: theme.borderRadius.full,
+  },
+  paneStatusDotNeedsInput: {
+    backgroundColor: getStatusDotColor({ theme, bucket: "needs_input" }) ?? undefined,
+  },
+  paneStatusDotFailed: {
+    backgroundColor: getStatusDotColor({ theme, bucket: "failed" }) ?? undefined,
+  },
+  paneStatusDotAttention: {
+    backgroundColor: getStatusDotColor({ theme, bucket: "attention" }) ?? undefined,
+  },
+  paneStatusCountText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.normal,
+    lineHeight: 20,
+    fontVariant: ["tabular-nums"],
+  },
   hidden: { opacity: 0 },
   // Stays position:relative at zero width so the absolutely-positioned kebab keeps
   // anchoring to the same right edge whether or not the slot holds anything.
@@ -436,6 +476,72 @@ export function SidebarWorkspaceShortcutBadge({ number }: { number: number }) {
   );
 }
 
+// Anything to act on before a finish to look at, as STATUS_BUCKET_ORDER lists them.
+const PANE_STATUS_COUNT_ORDER: readonly SidebarPaneStatusBucket[] = [
+  "needs_input",
+  "failed",
+  "attention",
+];
+
+// One and Many keys picked by the count, as the subagent pill does: i18next's own plural forms
+// would need _few and _many keys for Russian and Arabic, which the locale files do not carry.
+const PANE_STATUS_COUNT_LABEL_KEYS = {
+  needs_input: {
+    one: "sidebar.workspace.status.paneNeedsInputOne",
+    many: "sidebar.workspace.status.paneNeedsInputMany",
+  },
+  failed: {
+    one: "sidebar.workspace.status.paneFailedOne",
+    many: "sidebar.workspace.status.paneFailedMany",
+  },
+  attention: {
+    one: "sidebar.workspace.status.paneReadyOne",
+    many: "sidebar.workspace.status.paneReadyMany",
+  },
+} as const satisfies Record<SidebarPaneStatusBucket, { one: string; many: string }>;
+
+function paneStatusDotStyle(bucket: SidebarPaneStatusBucket) {
+  if (bucket === "needs_input") return sidebarWorkspaceRowStyles.paneStatusDotNeedsInput;
+  if (bucket === "failed") return sidebarWorkspaceRowStyles.paneStatusDotFailed;
+  return sidebarWorkspaceRowStyles.paneStatusDotAttention;
+}
+
+/**
+ * How many of the workspace's panes glow orange (needs input), red (failed) and green (finished,
+ * not looked at yet): the same dots as the agent rows underneath, each with its count, sitting
+ * just before the kebab. It counts every pane in the layout, so a compact window, which shows only
+ * the focused pane, can show fewer.
+ */
+export function SidebarWorkspacePaneStatusCounts({ counts }: { counts: SidebarPaneStatusCounts }) {
+  const { t } = useTranslation();
+  const shown = PANE_STATUS_COUNT_ORDER.filter((bucket) => counts[bucket] > 0);
+  return (
+    <View
+      role="status"
+      accessibilityLabel={shown
+        .map((bucket) =>
+          counts[bucket] === 1
+            ? t(PANE_STATUS_COUNT_LABEL_KEYS[bucket].one)
+            : t(PANE_STATUS_COUNT_LABEL_KEYS[bucket].many, { count: counts[bucket] }),
+        )
+        .join(", ")}
+      style={sidebarWorkspaceRowStyles.paneStatusCounts}
+      testID="sidebar-workspace-pane-status-counts"
+    >
+      {shown.map((bucket) => (
+        <View
+          key={bucket}
+          style={sidebarWorkspaceRowStyles.paneStatusCount}
+          testID={`sidebar-workspace-pane-status-count-${bucket}`}
+        >
+          <View style={[sidebarWorkspaceRowStyles.paneStatusDot, paneStatusDotStyle(bucket)]} />
+          <Text style={sidebarWorkspaceRowStyles.paneStatusCountText}>{counts[bucket]}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 export type SidebarWorkspaceTrailingPresentation = "visible" | "hidden" | "absent";
 
 /**
@@ -455,6 +561,7 @@ export function resolveTrailingActionVisibility({
   isHovered,
   isTouchPlatform,
   showShortcut,
+  hasPaneStatusCounts = false,
 }: {
   workspace: SidebarWorkspaceEntry;
   trailing: SidebarWorkspaceTrailing;
@@ -462,6 +569,7 @@ export function resolveTrailingActionVisibility({
   isHovered: boolean;
   isTouchPlatform: boolean;
   showShortcut: boolean;
+  hasPaneStatusCounts?: boolean;
 }): {
   trailingPresentation: SidebarWorkspaceTrailingPresentation;
   showKebab: boolean;
@@ -486,9 +594,10 @@ export function resolveTrailingActionVisibility({
     renderSlot: hasArchiveAction || hasTrailing,
     // The slot only holds width for something that permanently sits in it. Trailing content
     // does; the kebab only does on touch, where there is no hover for it to appear on and so
-    // no scrim to let it overlay the title. Everywhere else the width goes back to the title
+    // no scrim to let it overlay the title, and beside pane status counts, which it has to
+    // appear next to rather than on top of. Everywhere else the width goes back to the title
     // and the kebab fades in over its tail.
-    reserveSlotWidth: hasContent || (hasArchiveAction && isTouchPlatform),
+    reserveSlotWidth: hasContent || (hasArchiveAction && (isTouchPlatform || hasPaneStatusCounts)),
   };
 }
 

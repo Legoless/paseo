@@ -4,10 +4,11 @@ import { deriveSidebarStateBucket, type SidebarStateBucket } from "@/utils/sideb
 /**
  * Attention accounting shared by the dock badge and the web favicon.
  *
- * The badge counts agents by the same bucket the tabs, sidebar and pane glow colour them with, so
- * every counted agent has an orange, red or green mark somewhere: waiting on a permission, an
- * error the user has not seen, or a finish the user has not seen. A running agent is counted
- * once it stops, not while its loader shows.
+ * The badge counts agents by the same bucket their tabs and sidebar rows are coloured with: waiting
+ * on a permission, an error the user has not seen, or a finish the user has not seen. A running
+ * agent is counted once it stops, not while its loader shows. It counts unread agents, not
+ * glowing panes: a pane glows only for its front tab, so an unread tab behind it is counted
+ * without lighting the pane.
  */
 export type DesktopBadgeAgent = AgentStateBucketInput;
 

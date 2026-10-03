@@ -183,6 +183,8 @@ export const es = {
         "No hay ninguna imagen en el portapapeles actual. Prueba a pegar desde el teclado.",
       pasteImageFailed: "No se pudo pegar la imagen",
       fileTooLarge: "{{fileName}} is too large (max {{size}})",
+      requestKeyConflict:
+        "Este borrador ya se envió con otro contenido. Ejecute /clear para empezar de nuevo.",
     },
     clientCommands: {
       archiveAgent: "Cerrar el agente actual",
@@ -1298,6 +1300,12 @@ export const es = {
         serviceRunning: "Servicio {{name}} en ejecución",
         serviceUnhealthy: "Servicio {{name}} con fallos",
         creating: "Creando...",
+        paneNeedsInputOne: "1 panel necesita una respuesta",
+        paneNeedsInputMany: "{{count}} paneles necesitan una respuesta",
+        paneFailedOne: "1 panel se detuvo con un error",
+        paneFailedMany: "{{count}} paneles se detuvieron con un error",
+        paneReadyOne: "1 panel listo para revisar",
+        paneReadyMany: "{{count}} paneles listos para revisar",
       },
       checks: {
         passed: "Superados: {{count}}",

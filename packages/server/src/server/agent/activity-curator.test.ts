@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentForkContextAttachment, curateAgentActivity } from "./activity-curator.js";
+import {
+  buildAgentForkContextAttachment,
+  curateAgentActivity,
+  MAX_FORK_CONTEXT_BODY_CHARS,
+} from "./activity-curator.js";
 import type { AgentTimelineItem } from "./agent-sdk-types.js";
 import type { AgentTimelineRow } from "./agent-timeline-store-types.js";
 
@@ -352,6 +356,41 @@ second line'`,
     expect(result.attachment.text).toContain("[User] Message 1");
     expect(result.attachment.text).toContain("[User] Message 25");
     expect(result.attachment.text).toContain("[Assistant] Done.");
+  });
+
+  it("keeps the newest fork context entries within the character budget", () => {
+    const filler = "x".repeat(1_000);
+    const entryCount = Math.ceil(MAX_FORK_CONTEXT_BODY_CHARS / filler.length) + 50;
+    const messageRows = Array.from({ length: entryCount }, (_, index) =>
+      row(index + 1, {
+        type: "user_message",
+        text: `Message ${index + 1} ${filler}`,
+        messageId: `user-${index + 1}`,
+      }),
+    );
+    const result = buildAgentForkContextAttachment({ rows: messageRows });
+
+    expect(result.attachment.text.length).toBeLessThan(MAX_FORK_CONTEXT_BODY_CHARS + 1_000);
+    expect(result.attachment.text).toContain(`[User] Message ${entryCount} `);
+    expect(result.attachment.text).not.toContain("[User] Message 1 ");
+    expect(result.attachment.text).toMatch(
+      /\[\d+ earlier entries omitted to fit the context limit\]\n\[User\] Message \d+ /,
+    );
+  });
+
+  it("keeps the tail of a single entry larger than the budget", () => {
+    const huge = `start-marker ${"y".repeat(MAX_FORK_CONTEXT_BODY_CHARS * 2)} end-marker`;
+    const result = buildAgentForkContextAttachment({
+      rows: [
+        row(1, { type: "user_message", text: "Earlier", messageId: "user-1" }),
+        row(2, { type: "user_message", text: huge, messageId: "user-2" }),
+      ],
+    });
+
+    expect(result.attachment.text.length).toBeLessThan(MAX_FORK_CONTEXT_BODY_CHARS + 1_000);
+    expect(result.attachment.text).toContain("end-marker");
+    expect(result.attachment.text).not.toContain("start-marker");
+    expect(result.attachment.text).toContain("[1 earlier entry omitted to fit the context limit]");
   });
 
   it("rejects a checkpoint whose projected tool state changed later", () => {

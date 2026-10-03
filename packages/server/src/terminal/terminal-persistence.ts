@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { accessSync, constants, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import type { Logger } from "pino";
 import { z } from "zod";
@@ -8,8 +8,8 @@ import { writePrivateFileAtomicSync } from "../server/private-files.js";
 import type { TerminalManager } from "./terminal-manager.js";
 
 // A terminal the user opened comes back after the daemon or the machine restarts, the way cmux and
-// Orca bring panes back: same id, saved cwd, a fresh login shell, and either the old scrollback or
-// the agent's own resume command. The old process is never re-run from its argv.
+// Orca bring panes back: same id, the shell's last directory, a fresh login shell, and either the old
+// scrollback or the agent's own resume command. The old process is never re-run from its argv.
 
 export const TERMINAL_RECORDS_DIRNAME = "terminals";
 
@@ -33,6 +33,8 @@ const TerminalRecordSchema = z.object({
   id: z.string().min(1),
   workspaceId: z.string().min(1),
   cwd: z.string().min(1),
+  // Where the shell last reported being (OSC 7). The terminal stays filed under `cwd`.
+  shellCwd: z.string().min(1).optional(),
   name: z.string(),
   // Only a title the user typed. A shell-derived title regenerates at the first prompt.
   title: z.string().optional(),
@@ -48,6 +50,8 @@ export type TerminalRecord = z.infer<typeof TerminalRecordSchema>;
 
 /** What a restored terminal starts with, besides its saved id, cwd, name, title and size. */
 export interface TerminalRestoreInput {
+  /** Where the shell starts, in place of the terminal's cwd. */
+  shellCwd?: string;
   /** Written into the terminal before the shell starts, so it sits above the first prompt. */
   seed?: string;
   /** Typed into the new shell once, and kept as the terminal's resume target. */
@@ -90,14 +94,19 @@ export function renderRestoreScrollback(state: TerminalState): string {
 }
 
 export function buildTerminalRestoreInput(record: TerminalRecord): TerminalRestoreInput {
+  // A directory removed since, or one only another user could enter (a `sudo -s` shell), falls
+  // back to the terminal's cwd: the pty cannot start in it, and the exit would drop the record.
+  const start =
+    record.shellCwd && isEnterableDirectory(record.shellCwd) ? { shellCwd: record.shellCwd } : {};
   if (record.resume) {
-    return { resume: record.resume };
+    return { ...start, resume: record.resume };
   }
   if (!record.scrollback) {
-    return {};
+    return start;
   }
   const restoredAt = new Date(record.savedAt).toLocaleString();
   return {
+    ...start,
     seed: `${record.scrollback}\r\n\u001b[2m── Session restored from ${restoredAt} ──\u001b[0m\r\n`,
   };
 }
@@ -148,6 +157,15 @@ function isDirectory(candidate: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isEnterableDirectory(candidate: string): boolean {
+  try {
+    accessSync(candidate, constants.X_OK);
+  } catch {
+    return false;
+  }
+  return isDirectory(candidate);
 }
 
 /**

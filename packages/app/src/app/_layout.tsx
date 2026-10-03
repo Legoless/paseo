@@ -389,6 +389,11 @@ function HostRuntimeBootstrapProvider({ children }: { children: ReactNode }) {
   const anyOnlineHostServerId = useEarliestOnlineHostServerId();
   const daemonStartError = useDaemonStartLastError();
   const daemonStartIsRunning = useDaemonStartIsRunning();
+  useEffect(() => {
+    if (!anyOnlineHostServerId) return;
+    // A live host resolves startup; reconnecting must not revive an earlier startup failure.
+    getDaemonStartService({ store: getHostRuntimeStore() }).clearError();
+  }, [anyOnlineHostServerId, daemonStartError]);
   const [hasGivenUpWaitingForHost, setHasGivenUpWaitingForHost] = useState(false);
   const isDesktopRuntime = shouldUseDesktopDaemon();
   const startupBlocker = useMemo(

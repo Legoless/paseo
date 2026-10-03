@@ -24,7 +24,7 @@ TerminalSession
 
 `TerminalActivityTracker` is the single stateful object per session. It holds `{ state, changedAt }`, starts at unknown (`null`), and fires `onChange` only when the state actually changes.
 
-Terminal directory snapshots (`terminalsChanged`) and workspace contribution changes are separate concerns. A title-only change produces a terminal list snapshot but never touches workspace descriptors. A transition that changes the derived workspace bucket (e.g. idle -> working, working -> idle, attention cleared) emits both a terminal list snapshot and a server-internal `TerminalWorkspaceContributionChanged` event, which Session consumes to invalidate every active workspace sharing the owning workspace's `cwd`.
+Terminal directory snapshots (`terminalsChanged`) and workspace contribution changes are separate concerns. A title-only change produces a terminal list snapshot but never touches workspace descriptors. A transition that changes the terminal's own status bucket (e.g. idle -> working, working -> idle, attention cleared) emits both a terminal list snapshot and a server-internal `TerminalWorkspaceContributionChanged` event, which Session consumes to re-send the descriptor of the workspace the terminal carries. The descriptor folds the terminal into its `status` and, while the terminal waits on the user (needs input, out of quota, or a finish nobody has seen), lists its bucket in `terminalStatusBuckets`, so a client with no terminal subscription for that workspace can still count its orange, red and green terminal panes.
 
 ### Transitions carry their own history
 

@@ -338,6 +338,11 @@ const StoredWorkspaceSchema = z.strictObject({
   members: z.array(StoredWorkspaceMemberSchema).optional(),
   membersAuthoritative: z.boolean().optional(),
   status: z.enum(["needs_input", "failed", "running", "attention", "done"]),
+  // Cached with `status`, which a current directory cursor never re-sends; optional for entries
+  // written before it existed.
+  terminalStatusBuckets: z
+    .record(z.string(), z.enum(["needs_input", "failed", "running", "attention", "done"]))
+    .optional(),
   statusEnteredAt: IsoDateSchema.nullable(),
   activityAt: z.null(),
   archivingAt: z.string().nullable(),
@@ -740,6 +745,7 @@ function serializeWorkspace(workspace: WorkspaceDescriptor): StoredWorkspace {
       diffStat: member.diffStat ?? null,
     })),
     status: workspace.status,
+    terminalStatusBuckets: workspace.terminalStatusBuckets,
     statusEnteredAt: workspace.statusEnteredAt?.toISOString() ?? null,
     activityAt: null,
     archivingAt: workspace.archivingAt,

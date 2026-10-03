@@ -5,12 +5,14 @@ import { z } from "zod";
 import { createValidatedPersistStorage } from "@/storage/validated-persist-storage";
 
 // A history that can never refresh (the provider deleted the session) fails on every retry, so
-// a dismissal has to outlive the callout, the pane, and the app session.
+// a dismissal has to outlive the callout, the pane, and the app session. A refresh that succeeds
+// lifts it (`undismiss`), so the next failure of a healthy agent shows the callout again.
 export const MAX_DISMISSED_TIMELINE_SYNC_AGENTS = 200;
 
 export interface TimelineSyncDismissalStoreState {
   dismissedAgentKeys: string[];
   dismiss: (agentKey: string) => void;
+  undismiss: (agentKey: string) => void;
   clear: () => void;
 }
 
@@ -36,6 +38,11 @@ export const useTimelineSyncDismissalStore = create<TimelineSyncDismissalStoreSt
         set({
           dismissedAgentKeys: [...current, agentKey].slice(-MAX_DISMISSED_TIMELINE_SYNC_AGENTS),
         });
+      },
+      undismiss: (agentKey: string) => {
+        const current = get().dismissedAgentKeys;
+        if (!current.includes(agentKey)) return;
+        set({ dismissedAgentKeys: current.filter((key) => key !== agentKey) });
       },
       clear: () => set({ dismissedAgentKeys: [] }),
     }),

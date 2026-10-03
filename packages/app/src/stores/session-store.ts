@@ -136,6 +136,8 @@ export interface WorkspaceDescriptor {
   pinnedAt?: string | null;
   labels?: string[];
   status: WorkspaceDescriptorPayload["status"];
+  /** The terminals waiting on the user (needs input, failed, unseen finish), by bucket. */
+  terminalStatusBuckets?: Record<string, WorkspaceDescriptorPayload["status"]>;
   statusEnteredAt: Date | null;
   archivingAt: string | null;
   diffStat: { additions: number; deletions: number } | null;
@@ -177,6 +179,9 @@ export function normalizeWorkspaceDescriptor(
     // COMPAT(workspaceLabels): old daemons omit assignments.
     labels: payload.labels ?? [],
     status: payload.status,
+    // COMPAT(terminalStatusBuckets): old daemons omit it, and the sidebar shows no pane counts
+    // for them rather than agent-only ones that a glowing terminal pane would contradict.
+    terminalStatusBuckets: payload.terminalStatusBuckets,
     statusEnteredAt,
     archivingAt: payload.archivingAt ?? null,
     diffStat: payload.diffStat ?? null,

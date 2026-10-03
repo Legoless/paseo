@@ -81,6 +81,8 @@ interface UseAssistantImageInput {
   occurrenceKey: string;
   client?: DaemonClient | null;
   workspaceRoot?: string;
+  /** See `resolveAgentImageFallbackRoot`. */
+  fallbackRoot?: string;
   serverId?: string;
 }
 
@@ -376,12 +378,13 @@ export function useAssistantImage({
   occurrenceKey,
   client,
   workspaceRoot,
+  fallbackRoot,
   serverId,
 }: UseAssistantImageInput): AssistantImageResult {
   const { t } = useTranslation();
   const resolution = useMemo(
-    () => resolveAssistantImageSource({ source, workspaceRoot }),
-    [source, workspaceRoot],
+    () => resolveAssistantImageSource({ source, workspaceRoot, fallbackRoot }),
+    [fallbackRoot, source, workspaceRoot],
   );
   const dataImage = useMemo(() => parseImageDataUrl(source), [source]);
   const fileAcquisition = useMemo(() => {

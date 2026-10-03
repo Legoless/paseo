@@ -116,6 +116,10 @@ import {
 import { renderPromptAttachmentAsText } from "../prompt-attachments.js";
 import { appendOrReplaceGrowingAssistantMessage, runProviderTurn } from "./provider-runner.js";
 import {
+  materializeProviderImage,
+  renderProviderImageOutputAsAssistantMarkdown,
+} from "./provider-image-output.js";
+import {
   buildStringCommandShellInvocation,
   createStringCommandShellEnvOverlay,
 } from "../../../utils/string-command-shell.js";
@@ -1794,6 +1798,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   private pendingUserMessage: PendingUserMessage | null = null;
   private submittedUserMessageTurnId: string | null = null;
   private readonly toolCalls = new Map<string, ACPToolSnapshot>();
+  private readonly emittedToolImageCounts = new Map<string, number>();
   private readonly terminalEntries = new Map<string, TerminalEntry>();
   private readonly persistedHistory: AgentTimelineItem[] = [];
   private readonly initialHandle?: AgentPersistenceHandle;
@@ -3209,7 +3214,31 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       snapshot = this.toolSnapshotTransformer(snapshot);
     }
     this.toolCalls.set(toolCallId, snapshot);
-    return [this.wrapTimeline(mapToolSnapshotToTimeline(snapshot, this.terminalEntries))];
+    return [
+      this.wrapTimeline(mapToolSnapshotToTimeline(snapshot, this.terminalEntries)),
+      ...this.renderNewToolImages(snapshot),
+    ];
+  }
+
+  // Tool-result images become assistant_message markdown after the tool call, as Claude and Codex
+  // emit them, so they render inline in chat. Providers resend a tool call's full content on each
+  // update, so only images past the ones already emitted for this call are new.
+  private renderNewToolImages(snapshot: ACPToolSnapshot): AgentStreamEvent[] {
+    const images = (snapshot.content ?? []).flatMap((item) =>
+      item.type === "content" && item.content.type === "image" ? [item.content] : [],
+    );
+    const emitted = this.emittedToolImageCounts.get(snapshot.toolCallId) ?? 0;
+    if (images.length <= emitted) {
+      return [];
+    }
+    this.emittedToolImageCounts.set(snapshot.toolCallId, images.length);
+    return images.slice(emitted).flatMap((image) => {
+      const item = renderProviderImageOutputAsAssistantMarkdown(
+        { data: image.data, mimeType: image.mimeType },
+        { materialize: materializeProviderImage },
+      );
+      return item ? [this.wrapTimeline(item)] : [];
+    });
   }
 
   private createMessageTimelineItem(

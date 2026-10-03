@@ -182,6 +182,8 @@ export const ptBR = {
       noClipboardImage: "Não há imagem na área de transferência atual. Tente colar pelo teclado.",
       pasteImageFailed: "Falha ao colar a imagem",
       fileTooLarge: "{{fileName}} é grande demais (máximo {{size}})",
+      requestKeyConflict:
+        "Este rascunho já foi enviado com outro conteúdo. Execute /clear para recomeçar.",
     },
     clientCommands: {
       archiveAgent: "Fechar o agente atual",
@@ -1287,6 +1289,12 @@ export const ptBR = {
         serviceRunning: "Serviço {{name}} em execução",
         serviceUnhealthy: "Serviço {{name}} com falha",
         creating: "Criando...",
+        paneNeedsInputOne: "1 painel precisa de resposta",
+        paneNeedsInputMany: "{{count}} painéis precisam de resposta",
+        paneFailedOne: "1 painel parou com um erro",
+        paneFailedMany: "{{count}} painéis pararam com um erro",
+        paneReadyOne: "1 painel pronto para revisão",
+        paneReadyMany: "{{count}} painéis prontos para revisão",
       },
       checks: {
         passed: "Aprovados: {{count}}",

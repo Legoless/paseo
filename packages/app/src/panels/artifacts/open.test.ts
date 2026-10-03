@@ -20,6 +20,16 @@ describe("resolveArtifactFileLocation", () => {
     ).toEqual({ path: "screenshots/output.png" });
   });
 
+  it("leaves a Grok session-relative image for the viewer, since it may live outside the workspace", () => {
+    expect(
+      resolveArtifactFileLocation({
+        source: "images/celestine-paywall.png",
+        workspaceRoot: "/Users/test/Celestine",
+        fallbackRoot: "~/.grok/sessions/%2FUsers%2Ftest%2FCelestine/01a0f1b8",
+      }),
+    ).toBeNull();
+  });
+
   it("opens file URIs as file tabs", () => {
     expect(
       resolveArtifactFileLocation({

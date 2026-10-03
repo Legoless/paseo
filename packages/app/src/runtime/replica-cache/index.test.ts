@@ -275,6 +275,28 @@ describe("ReplicaCache", () => {
     expect(restoredTimeline).toEqual(timeline());
   });
 
+  it("keeps a workspace's terminal status buckets across a cache round-trip", async () => {
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    const workspace = normalizeWorkspaceDescriptor({
+      ...workspacePayload(),
+      status: "needs_input",
+      terminalStatusBuckets: { "terminal-1": "needs_input", "terminal-2": "attention" },
+    });
+    commitDirectory(writer, SERVER_ID, {
+      ...directory(),
+      workspaces: new Map([[workspace.id, workspace]]),
+    });
+    await writer.flush();
+
+    const restored = await createCache(storage).readDirectory(SERVER_ID);
+
+    expect(restored.workspaces.get("workspace-1")?.terminalStatusBuckets).toEqual({
+      "terminal-1": "needs_input",
+      "terminal-2": "attention",
+    });
+  });
+
   it("keeps every workspace member across a cache round-trip", async () => {
     const storage = new MemoryStorage();
     const writer = createCache(storage);

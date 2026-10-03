@@ -26,7 +26,8 @@ import {
 import { spawnSync } from "node:child_process";
 import * as pty from "node-pty";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
+import { hostname, tmpdir } from "node:os";
 import { setImmediate as waitForImmediate, setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 
@@ -1331,6 +1332,122 @@ describe("terminal restore", () => {
     expect(session.getActivity()).toBeNull();
   });
 
+  // An OSC 7 sequence as a shell prints it: this machine's host and a percent-encoded path.
+  function osc7(dir: string, host = hostname()): string {
+    return `\x1b]7;file://${host}${pathToFileURL(dir).pathname}\x07`;
+  }
+
+  function writeClaudeExecutable(script: string): string {
+    const binDir = mkdtempSync(join(tmpdir(), "terminal-restore-agent-"));
+    temporaryDirs.push(binDir);
+    const command = join(binDir, "claude");
+    if (isPlatform("win32")) {
+      const scriptPath = join(binDir, "agent.cjs");
+      writeFileSync(scriptPath, script);
+      writeFileSync(`${command}.cmd`, `@echo off\r\n"${process.execPath}" "${scriptPath}"\r\n`);
+    } else {
+      writeFileSync(command, `#!${process.execPath}\n${script}\n`);
+      chmodSync(command, 0o755);
+    }
+    return command;
+  }
+
+  it("follows the directory the shell reports, keeping the terminal's own cwd", async () => {
+    const cwd = mkdtempSync(join(realpathSync(tmpdir()), "terminal-shell-cwd-"));
+    temporaryDirs.push(cwd);
+    const moved = join(cwd, "moved here");
+    const output = [
+      osc7(moved),
+      // A shell inside ssh reports the remote host's path; a broken encoding names no path.
+      osc7(join(cwd, "remote"), "elsewhere.example"),
+      "\x1b]7;file:///bad%E9\x07",
+      "cwd-reported\r\n",
+    ].join("");
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd,
+        command: process.execPath,
+        args: [
+          "-e",
+          `process.stdout.write(${JSON.stringify(output)}); setInterval(() => {}, 1000);`,
+        ],
+      }),
+    );
+
+    await waitForState(session, (state) => getLines(state).join("\n").includes("cwd-reported"));
+    expect(session.getShellCwd?.()).toBe(moved);
+    expect(session.cwd).toBe(cwd);
+  });
+
+  it("takes only the directory a reporting shell prints at its prompt", async () => {
+    const cwd = mkdtempSync(join(realpathSync(tmpdir()), "terminal-shell-cwd-"));
+    temporaryDirs.push(cwd);
+    const moved = join(cwd, "moved");
+    // zsh's integration at a prompt (633;A), then after `cd moved` (its OSC 7, then 633;D), then a
+    // program that prints an OSC 7 of its own while it runs.
+    const output = [
+      "\x1b]633;A\x07",
+      osc7(moved),
+      "\x1b]633;D;0\x07",
+      osc7(join(cwd, "printed-by-a-program")),
+      "program-output\r\n",
+    ].join("");
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd,
+        command: process.execPath,
+        args: [
+          "-e",
+          `process.stdout.write(${JSON.stringify(output)}); setInterval(() => {}, 1000);`,
+        ],
+      }),
+    );
+
+    await waitForState(session, (state) => getLines(state).join("\n").includes("program-output"));
+    expect(session.getShellCwd?.()).toBe(moved);
+  });
+
+  it("ignores directory reports printed by a directly spawned agent", async () => {
+    const cwd = realpathSync(tmpdir());
+    const command = writeClaudeExecutable(
+      `process.stdout.write(${JSON.stringify(osc7(join(cwd, "agent-directory")))}); ${CLAUDE_BANNER_SCRIPT}`,
+    );
+    const session = trackSession(await createTerminal({ workspaceId: "ws-test", cwd, command }));
+
+    await waitForState(session, (state) => getLines(state).join("\n").includes("Claude Code"));
+
+    expect(session.getShellCwd?.()).toBe(cwd);
+    expect(session.cwd).toBe(cwd);
+  });
+
+  it("starts a restored shell in its last directory", async () => {
+    const cwd = mkdtempSync(join(realpathSync(tmpdir()), "terminal-shell-cwd-"));
+    temporaryDirs.push(cwd);
+    const moved = join(cwd, "moved");
+    mkdirSync(moved);
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd,
+        command: process.execPath,
+        // Wide enough that the temp path does not wrap.
+        cols: 400,
+        args: [
+          "-e",
+          'process.stdout.write("pwd:" + process.cwd() + "\\r\\n"); setInterval(() => {}, 1000);',
+        ],
+        restore: { shellCwd: moved },
+      }),
+    );
+
+    await waitForState(session, (state) => getLines(state).join("\n").includes("pwd:"));
+    expect(getLines(session.getState()).join("\n")).toContain(`pwd:${moved}`);
+    expect(session.getShellCwd?.()).toBe(moved);
+    expect(session.cwd).toBe(cwd);
+  });
+
   it("types the resume command into the restored shell and keeps it as the target", async () => {
     const session = trackSession(
       await createTerminal({
@@ -1396,11 +1513,7 @@ describe("terminal restore", () => {
   });
 
   it("offers a resume target when the agent is the terminal's own process", async () => {
-    const binDir = mkdtempSync(join(tmpdir(), "terminal-restore-agent-"));
-    temporaryDirs.push(binDir);
-    const fakeClaude = join(binDir, "claude");
-    writeFileSync(fakeClaude, `#!${process.execPath}\n${CLAUDE_BANNER_SCRIPT}\n`);
-    chmodSync(fakeClaude, 0o755);
+    const fakeClaude = writeClaudeExecutable(CLAUDE_BANNER_SCRIPT);
     const session = trackSession(
       await createTerminal({
         workspaceId: "ws-test",

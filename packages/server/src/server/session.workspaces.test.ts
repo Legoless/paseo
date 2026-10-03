@@ -7327,7 +7327,8 @@ test("listWorkspaceDescriptorsSnapshot keeps git workspaces on the baseline desc
 
   expect(describeWorkspaceRecord).toHaveBeenCalledWith(workspace);
   expect(describeWorkspaceRecordWithGitData).not.toHaveBeenCalled();
-  expect(descriptors).toEqual([baselineDescriptor]);
+  // The directory fold always adds the terminal bucket map, empty while no terminal waits.
+  expect(descriptors).toEqual([{ ...baselineDescriptor, terminalStatusBuckets: {} }]);
 });
 
 test("lists Git runtime for a checkout explicitly owned by a non-Git project", async () => {

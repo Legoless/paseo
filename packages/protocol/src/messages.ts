@@ -1896,6 +1896,12 @@ export const AgentTimelineListPromptsRequestMessageSchema = z.object({
   requestId: z.string(),
 });
 
+export const AgentTimelineListImagesRequestMessageSchema = z.object({
+  type: z.literal("agent.timeline.list_images.request"),
+  agentId: z.string(),
+  requestId: z.string(),
+});
+
 export const ProviderSubagentListRequestMessageSchema = z.object({
   type: z.literal("agent.provider_subagents.list.request"),
   parentAgentId: z.string(),
@@ -3360,6 +3366,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   FetchAgentTimelineRequestMessageSchema,
   AgentTimelineSearchRequestMessageSchema,
   AgentTimelineListPromptsRequestMessageSchema,
+  AgentTimelineListImagesRequestMessageSchema,
   ProviderSubagentListRequestMessageSchema,
   ProviderSubagentTimelineRequestMessageSchema,
   ProviderSubagentStopRequestMessageSchema,
@@ -3739,6 +3746,8 @@ export const ServerInfoStatusPayloadSchema = z
         rewind: z.boolean().optional(),
         // COMPAT(agentTimelinePromptIndex): added in v0.2.X, drop the gate when floor >= v0.2.X.
         agentTimelinePromptIndex: z.boolean().optional(),
+        // COMPAT(agentTimelineImages): added in v0.9.2, remove gate after 2027-03-30.
+        agentTimelineImages: z.boolean().optional(),
         // COMPAT(agentHistorySearch): added in v0.3.0, remove gate after 2027-02-07.
         agentHistorySearch: z.boolean().optional(),
         // COMPAT(checkoutRefresh): added in v0.1.86, remove gate after 2026-11-29.
@@ -4185,6 +4194,12 @@ export const WorkspaceDescriptorPayloadSchema = z
     membersAuthoritative: z.boolean().optional(),
     archivingAt: z.string().nullable().optional().default(null),
     status: WorkspaceStateBucketSchema,
+    // COMPAT(terminalStatusBuckets): added on feature/integration after v0.9.1, remove optional after 2027-04-02.
+    // The terminals waiting on the user, by the bucket their pane glows: needs_input, failed (out
+    // of quota) or attention (a finish nobody has looked at yet). Running and quiet terminals are
+    // left out. A daemon that knows the field always sends it, empty when nothing waits, so its
+    // absence marks an old daemon: the sidebar then shows no pane counts rather than wrong ones.
+    terminalStatusBuckets: z.record(z.string(), WorkspaceStateBucketSchema).optional(),
     // Best-effort workspace status entry timestamp. Old daemons omit the
     // field; old clients treat missing and null equivalently. The transform
     // coerces a missing field to `null` so downstream code never has to
@@ -4834,6 +4849,28 @@ export const AgentTimelineListPromptsResponseMessageSchema = z.object({
         seq: z.number().int().nonnegative(),
         timestamp: z.string(),
         preview: z.string(),
+      }),
+    ),
+    error: z.string().nullable(),
+  }),
+});
+
+export const AgentTimelineListImagesResponseMessageSchema = z.object({
+  type: z.literal("agent.timeline.list_images.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    epoch: z.string(),
+    // One entry per image in each merged assistant message, in timeline order. `seq` and
+    // `timestamp` are the message's last source row, the cursor its fetched stream item carries.
+    images: z.array(
+      z.object({
+        seq: z.number().int().nonnegative(),
+        messageId: z.string().nullable(),
+        timestamp: z.string(),
+        imageIndex: z.number().int().nonnegative(),
+        source: z.string(),
+        alt: z.string().nullable(),
       }),
     ),
     error: z.string().nullable(),
@@ -7100,6 +7137,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   AgentTimelineReplacementMessageSchema,
   AgentTimelineSearchResponseMessageSchema,
   AgentTimelineListPromptsResponseMessageSchema,
+  AgentTimelineListImagesResponseMessageSchema,
   ProviderSubagentListResponseMessageSchema,
   ProviderSubagentTimelineResponseMessageSchema,
   ProviderSubagentStopResponseMessageSchema,
@@ -7331,6 +7369,9 @@ export type FetchAgentTimelineResponseMessage = z.infer<
 >;
 export type AgentTimelineListPromptsResponseMessage = z.infer<
   typeof AgentTimelineListPromptsResponseMessageSchema
+>;
+export type AgentTimelineListImagesResponseMessage = z.infer<
+  typeof AgentTimelineListImagesResponseMessageSchema
 >;
 export type AgentForkContextResponseMessage = z.infer<typeof AgentForkContextResponseMessageSchema>;
 export type CancelAgentResponseMessage = z.infer<typeof CancelAgentResponseMessageSchema>;

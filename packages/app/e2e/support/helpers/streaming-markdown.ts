@@ -10,14 +10,14 @@ export async function withStreamingMarkdown(
   page: Page,
   testInfo: TestInfo,
   run: (agent: StreamingMarkdownAgent) => Promise<void>,
+  response = "**Bold text stays bold** and [Paseo docs](https://example.com/documentation). Done.",
 ): Promise<void> {
   testInfo.setTimeout(120_000);
   const agent = await seedMockAgentWorkspace({
     repoPrefix: "streaming-markdown-",
     title: "Streaming Markdown",
     featureValues: {
-      mockStreamingAssistantResponse:
-        "**Bold text stays bold** and [Paseo docs](https://example.com/documentation). Done.",
+      mockStreamingAssistantResponse: response,
       mockStreamingAssistantIntervalMs: 400,
     },
   });

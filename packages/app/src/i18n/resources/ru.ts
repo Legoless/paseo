@@ -183,6 +183,8 @@ export const ru = {
         "В текущем буфере обмена нет изображения. Попробуйте вставить его с клавиатуры.",
       pasteImageFailed: "Не удалось вставить изображение",
       fileTooLarge: "Файл {{fileName}} слишком большой (максимальный размер: {{size}})",
+      requestKeyConflict:
+        "Этот черновик уже был отправлен с другим содержимым. Выполните /clear, чтобы начать заново.",
     },
     clientCommands: {
       archiveAgent: "Закрыть текущего агента",
@@ -1280,6 +1282,12 @@ export const ru = {
         serviceRunning: "Сервис {{name}} запущен",
         serviceUnhealthy: "Сервис {{name}} работает некорректно",
         creating: "Создание...",
+        paneNeedsInputOne: "1 панель ждёт ответа",
+        paneNeedsInputMany: "Панели, ждущие ответа: {{count}}",
+        paneFailedOne: "1 панель остановлена с ошибкой",
+        paneFailedMany: "Панели, остановленные с ошибкой: {{count}}",
+        paneReadyOne: "1 панель готова к просмотру",
+        paneReadyMany: "Панели, готовые к просмотру: {{count}}",
       },
       checks: {
         passed: "Успешные: {{count}}",

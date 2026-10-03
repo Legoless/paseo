@@ -1722,10 +1722,7 @@ function ComposerContentImpl({
   const handleSubmit = useCallback(
     (payload: MessagePayload) => {
       const outgoingAttachments = buildOutgoingAttachments(attachments);
-      const clientSlashCommand = resolveClientSlashCommand({
-        text: payload.text,
-        hasAttachments: outgoingAttachments.length > 0,
-      });
+      const clientSlashCommand = resolveClientSlashCommand({ text: payload.text });
       if (clientSlashCommand && runClientSlashCommand(clientSlashCommand)) {
         return;
       }
@@ -1975,10 +1972,7 @@ function ComposerContentImpl({
   const handleQueue = useCallback(
     (payload: MessagePayload) => {
       const outgoingAttachments = buildOutgoingAttachments(attachments);
-      const clientSlashCommand = resolveClientSlashCommand({
-        text: payload.text,
-        hasAttachments: outgoingAttachments.length > 0,
-      });
+      const clientSlashCommand = resolveClientSlashCommand({ text: payload.text });
       if (clientSlashCommand && runClientSlashCommand(clientSlashCommand)) {
         return;
       }
@@ -2374,7 +2368,8 @@ function ComposerContentImpl({
       serverId,
       agentId,
       draftConfig: commandDraftConfig,
-      canExecuteClientSlashCommand: buildOutgoingAttachments(attachments).length === 0,
+      // Client commands discard the composer's attachments, so only a missing handler blocks them.
+      canExecuteClientSlashCommand: Boolean(onClientSlashCommand),
       onClientSlashCommand: runClientSlashCommand,
       pluginClientSlashCommands,
     }),
@@ -2383,8 +2378,7 @@ function ComposerContentImpl({
       serverId,
       agentId,
       commandDraftConfig,
-      buildOutgoingAttachments,
-      attachments,
+      onClientSlashCommand,
       runClientSlashCommand,
       pluginClientSlashCommands,
     ],

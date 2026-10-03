@@ -4,7 +4,13 @@ import { createProjectIconTarget, type ProjectIconTarget } from "@/projects/icon
 import { deriveSidebarStateBucket, type SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { normalizeWorkspaceOpaqueId, normalizeWorkspacePath } from "@/utils/workspace-identity";
 import { shortenPath } from "@/utils/shorten-path";
-import { collectAllTabs, type WorkspaceLayout } from "@/stores/workspace-layout-actions";
+import {
+  collectAllPanes,
+  collectAllTabs,
+  type WorkspaceLayout,
+} from "@/stores/workspace-layout-actions";
+import { resolveExplorerSidebarPaneId } from "@/stores/workspace-layout-store";
+import { deriveWorkspacePaneState } from "@/screens/workspace/workspace-pane-state";
 
 export interface SidebarWorkspaceNewAgentRow {
   tabId: string;
@@ -61,6 +67,28 @@ export interface SidebarWorkspaceSection {
    */
   uncategorized: SidebarWorkspaceUncategorizedRow;
   members: SidebarWorkspaceMemberRow[];
+  /** How many panes glow each color that wants the user: orange, red and green. */
+  paneStatusCounts: SidebarPaneStatusCounts;
+}
+
+/** The pane glow colors the sidebar counts: needs input, failed, and a finish nobody has seen. */
+export type SidebarPaneStatusBucket = Extract<
+  SidebarStateBucket,
+  "needs_input" | "failed" | "attention"
+>;
+
+export type SidebarPaneStatusCounts = Readonly<Record<SidebarPaneStatusBucket, number>>;
+
+export const EMPTY_PANE_STATUS_COUNTS: SidebarPaneStatusCounts = {
+  needs_input: 0,
+  failed: 0,
+  attention: 0,
+};
+
+function isPaneStatusBucket(
+  bucket: SidebarStateBucket | undefined,
+): bucket is SidebarPaneStatusBucket {
+  return bucket === "needs_input" || bucket === "failed" || bucket === "attention";
 }
 
 export interface SidebarWorkspaceGroupModel {
@@ -84,18 +112,21 @@ export interface SidebarWorkspaceGroupSession {
 export function buildSidebarWorkspaceGroupModel(input: {
   sessions: readonly SidebarWorkspaceGroupSession[];
   layoutsByWorkspace?: Readonly<Record<string, WorkspaceLayout>>;
+  explorerPaneIdByWorkspace?: Readonly<Record<string, string | null>>;
 }): SidebarWorkspaceGroupModel {
   const sectionsByWorkspaceKey = new Map<string, SidebarWorkspaceSection>();
   const memberIconTargets: ProjectIconTarget[] = [];
 
   for (const session of input.sessions) {
     for (const workspace of session.workspaces.values()) {
+      const workspaceKey = `${session.serverId}:${workspace.id}`;
       const { section, iconTargets } = buildWorkspaceSection({
         serverId: session.serverId,
         workspace,
         agents: session.agents,
         projects: session.projects,
-        layout: input.layoutsByWorkspace?.[`${session.serverId}:${workspace.id}`],
+        layout: input.layoutsByWorkspace?.[workspaceKey],
+        explorerPaneId: input.explorerPaneIdByWorkspace?.[workspaceKey],
       });
       sectionsByWorkspaceKey.set(section.workspaceKey, section);
       memberIconTargets.push(...iconTargets);
@@ -111,6 +142,7 @@ function buildWorkspaceSection(input: {
   agents: ReadonlyMap<string, Agent>;
   projects: ReadonlyMap<string, ProjectDescriptor>;
   layout?: WorkspaceLayout;
+  explorerPaneId?: string | null;
 }): { section: SidebarWorkspaceSection; iconTargets: ProjectIconTarget[] } {
   const workspaceId = input.workspace.id;
   const workspaceKey = `${input.serverId}:${workspaceId}`;
@@ -182,9 +214,54 @@ function buildWorkspaceSection(input: {
   members.sort(compareMemberRows);
 
   return {
-    section: { workspaceKey, serverId: input.serverId, workspaceId, uncategorized, members },
+    section: {
+      workspaceKey,
+      serverId: input.serverId,
+      workspaceId,
+      uncategorized,
+      members,
+      paneStatusCounts: countPaneStatuses(input),
+    },
     iconTargets,
   };
+}
+
+/**
+ * The panes that glow orange, red or green. Only a pane's front tab lights it — `SplitPaneView`
+ * in split-container.tsx picks it with the same `deriveWorkspacePaneState` call — and the Explorer
+ * dock never glows, so a tab behind the front one is not counted here. A terminal takes the bucket
+ * the daemon lists for it: only a known agent running in it ever gets one, and the client has no
+ * terminal activity of its own for a workspace that is not open. A provider subagent tab is not
+ * counted: its status lives in the client's subagent store, not in the session this model reads.
+ */
+function countPaneStatuses(input: {
+  workspace: WorkspaceDescriptor;
+  agents: ReadonlyMap<string, Agent>;
+  layout?: WorkspaceLayout;
+  explorerPaneId?: string | null;
+}): SidebarPaneStatusCounts {
+  // Without terminal buckets (an old daemon) the counts would leave out every terminal pane.
+  if (!input.layout || !input.workspace.terminalStatusBuckets) {
+    return EMPTY_PANE_STATUS_COUNTS;
+  }
+  const tabs = collectAllTabs(input.layout.root);
+  const explorerPaneId = resolveExplorerSidebarPaneId(input.layout, input.explorerPaneId);
+  const counts: Record<SidebarPaneStatusBucket, number> = { ...EMPTY_PANE_STATUS_COUNTS };
+  for (const pane of collectAllPanes(input.layout.root)) {
+    if (pane.id === explorerPaneId) continue;
+    const target = deriveWorkspacePaneState({ pane, tabs }).activeTab?.descriptor.target;
+    const agent = target?.kind === "agent" ? input.agents.get(target.agentId) : undefined;
+    let bucket: SidebarStateBucket | undefined;
+    if (target?.kind === "terminal") {
+      bucket = input.workspace.terminalStatusBuckets?.[target.terminalId];
+    } else if (agent) {
+      bucket = deriveAgentStatusBucket(agent);
+    }
+    if (isPaneStatusBucket(bucket)) {
+      counts[bucket] += 1;
+    }
+  }
+  return counts;
 }
 
 function collectOpenAgentTabIds(layout: WorkspaceLayout | undefined): Set<string> {
@@ -247,15 +324,19 @@ function createAgentRow(
     cwdLabel,
     matchesMemberDirectory,
     labels: getAgentWorkspaceLabelNames(agent.labels),
-    statusBucket: deriveSidebarStateBucket({
-      status: agent.status,
-      pendingPermissionCount: agent.pendingPermissions.length,
-      backgroundWorkCount: agent.backgroundWorkCount,
-      requiresAttention: agent.requiresAttention,
-      attentionReason: agent.attentionReason,
-    }),
+    statusBucket: deriveAgentStatusBucket(agent),
     lastActivityAt: agent.lastActivityAt,
   };
+}
+
+function deriveAgentStatusBucket(agent: Agent): SidebarStateBucket {
+  return deriveSidebarStateBucket({
+    status: agent.status,
+    pendingPermissionCount: agent.pendingPermissions.length,
+    backgroundWorkCount: agent.backgroundWorkCount,
+    requiresAttention: agent.requiresAttention,
+    attentionReason: agent.attentionReason,
+  });
 }
 
 function compareMemberRows(
@@ -313,6 +394,9 @@ function areSectionsEqual(left: SidebarWorkspaceSection, right: SidebarWorkspace
     left.workspaceKey !== right.workspaceKey ||
     left.serverId !== right.serverId ||
     left.workspaceId !== right.workspaceId ||
+    left.paneStatusCounts.needs_input !== right.paneStatusCounts.needs_input ||
+    left.paneStatusCounts.failed !== right.paneStatusCounts.failed ||
+    left.paneStatusCounts.attention !== right.paneStatusCounts.attention ||
     left.members.length !== right.members.length ||
     !areAgentBucketsEqual(left.uncategorized, right.uncategorized)
   ) {

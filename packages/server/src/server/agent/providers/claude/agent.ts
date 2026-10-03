@@ -2355,8 +2355,9 @@ class ClaudeAgentSession implements AgentSession {
       }
       this.activeForegroundQuery = this.query;
       this.activeForegroundInput = this.input;
+      const input = this.input;
       this.startQueryPump();
-      this.input.push(sdkMessage);
+      input.push(sdkMessage);
       setTimeout(() => {
         if (this.activeForegroundTurnId === turnId) {
           this.emitSubmittedUserMessage(sdkMessage, turnId, options?.clientMessageId);
@@ -3922,7 +3923,10 @@ class ClaudeAgentSession implements AgentSession {
   private async runQueryPump(): Promise<void> {
     let activeQuery: Query;
     try {
-      activeQuery = await this.ensureQuery();
+      // startTurn built this query and is writing its prompt into it. A restart requested since
+      // (a thinking change) applies at the next turn's ensureQuery(); honouring it here would
+      // close the query and null the input under startTurn.
+      activeQuery = this.query ?? (await this.ensureQuery());
     } catch (error) {
       this.logger.trace(
         {

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveAssistantImageSource } from "./assistant-image-source";
+import {
+  resolveAgentImageFallbackRoot,
+  resolveAssistantImageSource,
+} from "./assistant-image-source";
 
 describe("resolveAssistantImageSource", () => {
   it("passes through direct image URIs", () => {
@@ -103,5 +106,71 @@ describe("resolveAssistantImageSource", () => {
       cwd: "C:/",
       path: "C:/Users/test/Desktop/screenshot.png",
     });
+  });
+});
+
+describe("Grok session-relative images", () => {
+  const cwd = "/Users/test/Celestine";
+  const sessionRoot = `~/.grok/sessions/${encodeURIComponent(cwd)}/01a0f1b8`;
+
+  it("roots a Grok agent's relative images in its session folder", () => {
+    expect(
+      resolveAgentImageFallbackRoot({
+        provider: "grok",
+        cwd,
+        runtimeInfo: { sessionId: "01a0f1b8" },
+      }),
+    ).toBe("~/.grok/sessions/%2FUsers%2Ftest%2FCelestine/01a0f1b8");
+    expect(
+      resolveAgentImageFallbackRoot({
+        provider: "claude",
+        cwd,
+        runtimeInfo: { sessionId: "01a0f1b8" },
+      }),
+    ).toBe(null);
+    expect(resolveAgentImageFallbackRoot({ provider: "grok", cwd, runtimeInfo: null })).toBe(null);
+  });
+
+  it("finds the session through persistence when runtime info is gone", () => {
+    expect(
+      resolveAgentImageFallbackRoot({
+        provider: "grok",
+        cwd,
+        runtimeInfo: undefined,
+        persistence: { sessionId: "01a0f1b8" },
+      }),
+    ).toBe(sessionRoot);
+  });
+
+  it("reads a relative image from the workspace first and the session folder second", () => {
+    expect(
+      resolveAssistantImageSource({
+        source: "./images/celestine-paywall.png",
+        workspaceRoot: cwd,
+        fallbackRoot: sessionRoot,
+      }),
+    ).toEqual({
+      kind: "file_rpc",
+      cwd,
+      path: "./images/celestine-paywall.png",
+      fallback: { cwd: sessionRoot, path: "images/celestine-paywall.png" },
+    });
+  });
+
+  it("leaves absolute and home paths where they point", () => {
+    expect(
+      resolveAssistantImageSource({
+        source: "/tmp/celestine-paywall.png",
+        workspaceRoot: cwd,
+        fallbackRoot: sessionRoot,
+      }),
+    ).toEqual({ kind: "file_rpc", cwd: "/", path: "/tmp/celestine-paywall.png" });
+    expect(
+      resolveAssistantImageSource({
+        source: "~/shots/paywall.png",
+        workspaceRoot: cwd,
+        fallbackRoot: sessionRoot,
+      }),
+    ).toEqual({ kind: "file_rpc", cwd: "~", path: "~/shots/paywall.png" });
   });
 });

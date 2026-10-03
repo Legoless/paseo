@@ -8,8 +8,13 @@ import {
 class MemoryFileAcquisitionPort implements AssistantImageFileAcquisitionPort {
   readonly reads: Array<{ cwd: string; path: string }> = [];
 
+  constructor(private readonly missing: ReadonlySet<string> = new Set()) {}
+
   async readFile(cwd: string, path: string) {
     this.reads.push({ cwd, path });
+    if (this.missing.has(path)) {
+      throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+    }
     return {
       kind: "image" as const,
       path,
@@ -49,5 +54,43 @@ describe("assistant image file acquisition", () => {
     await expect(disconnected?.locate()).rejects.toThrow("Image unavailable");
     await expect(connected?.locate()).resolves.toMatchObject({ mimeType: "image/png" });
     expect(connectedPort.reads).toEqual([{ cwd: "/workspace", path: "reconnect.png" }]);
+  });
+
+  const withFallback = {
+    resolution: {
+      kind: "file_rpc" as const,
+      cwd: "/workspace",
+      path: "images/paywall.png",
+      fallback: { cwd: "~", path: "~/.grok/sessions/%2Fworkspace/s1/images/paywall.png" },
+    },
+    serverId: "server",
+    occurrenceKey: "agent:message:grok-image",
+    unavailableMessage: "Image unavailable",
+  };
+
+  it("reads the fallback when the workspace has no such image", async () => {
+    const port = new MemoryFileAcquisitionPort(new Set(["images/paywall.png"]));
+    const acquisition = createAssistantImageFileAcquisition({ ...withFallback, port });
+
+    await expect(acquisition?.locate()).resolves.toMatchObject({ fileName: "paywall.png" });
+    expect(port.reads).toEqual([
+      { cwd: "/workspace", path: "images/paywall.png" },
+      { cwd: "~", path: "~/.grok/sessions/%2Fworkspace/s1/images/paywall.png" },
+    ]);
+  });
+
+  it("keeps the workspace image when it exists", async () => {
+    const port = new MemoryFileAcquisitionPort();
+    await createAssistantImageFileAcquisition({ ...withFallback, port })?.locate();
+    expect(port.reads).toEqual([{ cwd: "/workspace", path: "images/paywall.png" }]);
+  });
+
+  it("reports the workspace error when neither has the image", async () => {
+    const port = new MemoryFileAcquisitionPort(
+      new Set(["images/paywall.png", "~/.grok/sessions/%2Fworkspace/s1/images/paywall.png"]),
+    );
+    await expect(
+      createAssistantImageFileAcquisition({ ...withFallback, port })?.locate(),
+    ).rejects.toThrow("ENOENT: no such file or directory, open 'images/paywall.png'");
   });
 });

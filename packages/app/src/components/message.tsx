@@ -740,6 +740,8 @@ interface AssistantMessageProps {
   message: string;
   timestamp: number;
   workspaceRoot?: string;
+  /** See `resolveAgentImageFallbackRoot`. */
+  imageFallbackRoot?: string;
   serverId?: string;
   client?: DaemonClient | null;
   spacing?: "default" | "compactTop" | "compactBottom" | "compactBoth";
@@ -810,6 +812,7 @@ function AssistantMarkdownImage({
   hasLeadingContent,
   client,
   workspaceRoot,
+  imageFallbackRoot,
   serverId,
 }: {
   source: string;
@@ -818,6 +821,7 @@ function AssistantMarkdownImage({
   hasLeadingContent: boolean;
   client?: DaemonClient | null;
   workspaceRoot?: string;
+  imageFallbackRoot?: string;
   serverId?: string;
 }) {
   const { t } = useTranslation();
@@ -836,6 +840,7 @@ function AssistantMarkdownImage({
     occurrenceKey,
     client,
     workspaceRoot,
+    fallbackRoot: imageFallbackRoot,
     serverId,
   });
   const binding = image.status === "failed" ? null : image.binding;
@@ -1485,6 +1490,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   message,
   timestamp: _timestamp,
   workspaceRoot,
+  imageFallbackRoot,
   serverId,
   client,
   spacing = "default",
@@ -1769,7 +1775,9 @@ export const AssistantMessage = memo(function AssistantMessage({
           sourceType: "inline-code",
         };
         const shouldResolveInlinePath =
-          !isLinkedInlineCode && fileLinkActions.canResolveFile(inlineCodeSource);
+          node.sourceInfo !== "streaming" &&
+          !isLinkedInlineCode &&
+          fileLinkActions.canResolveFile(inlineCodeSource);
 
         if (shouldResolveInlinePath) {
           return (
@@ -1783,7 +1791,10 @@ export const AssistantMessage = memo(function AssistantMessage({
           );
         }
 
-        const inlineCodeLinkUrl = getInlineCodeAutoLinkUrl(assistantMarkdownParser, content);
+        const inlineCodeLinkUrl =
+          node.sourceInfo === "streaming"
+            ? null
+            : getInlineCodeAutoLinkUrl(assistantMarkdownParser, content);
         if (inlineCodeLinkUrl) {
           const source = getInlineCodeAutoLinkSource({
             href: inlineCodeLinkUrl,
@@ -1933,12 +1944,13 @@ export const AssistantMessage = memo(function AssistantMessage({
             hasLeadingContent={hasLeadingContent}
             client={client}
             workspaceRoot={workspaceRoot}
+            imageFallbackRoot={imageFallbackRoot}
             serverId={serverId}
           />
         );
       },
     };
-  }, [client, fileLinkActions, occurrenceKey, phase, serverId, workspaceRoot]);
+  }, [client, fileLinkActions, imageFallbackRoot, occurrenceKey, phase, serverId, workspaceRoot]);
 
   const blocks = useMemo(() => splitMarkdownBlocks(revealedMessage), [revealedMessage]);
   const keyedBlocks = useMemo(
@@ -1977,10 +1989,16 @@ export const AssistantMessage = memo(function AssistantMessage({
           marginBottom={index < keyedBlocks.length - 1 ? 12 : 0}
         >
           <MemoizedMarkdownBlock
-            text={block}
+            text={
+              index === keyedBlocks.length - 1 &&
+              revealedMessage.endsWith("\n") &&
+              !block.endsWith("\n")
+                ? `${block}\n`
+                : block
+            }
             rules={markdownRules}
             parser={
-              phase === "streaming" && index === keyedBlocks.length - 1
+              (phase === "streaming" || renderedMessage.capped) && index === keyedBlocks.length - 1
                 ? streamingAssistantMarkdownParser
                 : assistantMarkdownParser
             }

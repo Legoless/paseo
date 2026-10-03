@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useReducer } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import type { ComposerAttachment } from "@/attachments/types";
 import {
@@ -27,13 +28,16 @@ interface CreateAttempt {
 }
 
 type DraftAgentMachineState<TDraftAgent> =
-  | { tag: "draft"; errorMessage: string }
+  // `errorShownByComposer`: the composer already shows this error inline, so the draft banner
+  // must not repeat it. Errors from auto-submit, a prepared attempt, or a remount have no
+  // composer to show them and stay on the banner.
+  | { tag: "draft"; errorMessage: string; errorShownByComposer: boolean }
   | { tag: "creating"; attempt: CreateAttempt; draftAgent: TDraftAgent };
 
 type DraftAgentMachineEvent<TDraftAgent> =
-  | { type: "DRAFT_SET_ERROR"; message: string }
+  | { type: "DRAFT_SET_ERROR"; message: string; errorShownByComposer: boolean }
   | { type: "SUBMIT"; attempt: CreateAttempt; draftAgent: TDraftAgent }
-  | { type: "CREATE_FAILED"; message: string };
+  | { type: "CREATE_FAILED"; message: string; errorShownByComposer: boolean };
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled state: ${JSON.stringify(value)}`);
@@ -48,7 +52,11 @@ function reducer<TDraftAgent>(
       if (state.tag !== "draft") {
         return state;
       }
-      return { ...state, errorMessage: event.message };
+      return {
+        ...state,
+        errorMessage: event.message,
+        errorShownByComposer: event.errorShownByComposer,
+      };
     }
     case "SUBMIT": {
       return { tag: "creating", attempt: event.attempt, draftAgent: event.draftAgent };
@@ -57,7 +65,11 @@ function reducer<TDraftAgent>(
       if (state.tag !== "creating") {
         return state;
       }
-      return { tag: "draft", errorMessage: event.message };
+      return {
+        tag: "draft",
+        errorMessage: event.message,
+        errorShownByComposer: event.errorShownByComposer,
+      };
     }
     default:
       return assertNever(event);
@@ -71,8 +83,36 @@ function prepareCreateAttempt<TDraftAgent>(
   try {
     return { tag: "creating", attempt, draftAgent: buildDraftAgent(attempt) };
   } catch (error) {
-    return { tag: "draft", errorMessage: error instanceof Error ? error.message : String(error) };
+    return {
+      tag: "draft",
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorShownByComposer: false,
+    };
   }
+}
+
+/**
+ * Every submit is its own creation. A failed attempt leaves a daemon receipt under its key, and
+ * the daemon rejects that key for edited content, so a retry needs a fresh one. A remount
+ * continues the same attempt, so the key derives from the attempt's persisted timestamp.
+ */
+export function buildDraftCreationKey(
+  draftId: string,
+  attempt: Pick<CreateAttempt, "timestamp">,
+): string {
+  return `${draftId}:${attempt.timestamp.getTime()}`;
+}
+
+const REQUEST_KEY_CONFLICT_PATTERN = /^(agent|workspace)_request_key_conflict$/;
+
+function resolveCreateError(error: unknown, t: TFunction): Error {
+  if (!(error instanceof Error)) {
+    return new Error(t("composer.errors.failedToCreateAgent"));
+  }
+  if (REQUEST_KEY_CONFLICT_PATTERN.test(error.message)) {
+    return new Error(t("composer.errors.requestKeyConflict"));
+  }
+  return error;
 }
 
 interface CreateRequestResult<TCreateResult> {
@@ -131,6 +171,7 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
         : {
             tag: "draft",
             errorMessage: "",
+            errorShownByComposer: false,
           },
   );
 
@@ -139,7 +180,15 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
   // arrive, and observe the original request's failure through shared state.
   const machine = useMemo<DraftAgentMachineState<TDraftAgent>>(() => {
     if (pending?.lifecycle === "abandoned") {
-      return { tag: "draft", errorMessage: pending.errorMessage ?? "" };
+      // This mount saw the failure (or a newer one) itself and knows where it is shown.
+      if (localMachine.tag === "draft" && localMachine.errorMessage) {
+        return localMachine;
+      }
+      return {
+        tag: "draft",
+        errorMessage: pending.errorMessage ?? "",
+        errorShownByComposer: false,
+      };
     }
     if (pending?.lifecycle === "active" && localMachine.tag === "draft" && initialAttempt) {
       return prepareCreateAttempt(initialAttempt, buildDraftAgent);
@@ -150,7 +199,8 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
   const setPendingCreateAttempt = useCreateFlowStore((state) => state.setPending);
   const updatePendingAgentId = useCreateFlowStore((state) => state.updateAgentId);
   const markPendingCreateLifecycle = useCreateFlowStore((state) => state.markLifecycle);
-  const formErrorMessage = machine.tag === "draft" ? machine.errorMessage : "";
+  const formErrorMessage =
+    machine.tag === "draft" && !machine.errorShownByComposer ? machine.errorMessage : "";
   const isSubmitting = machine.tag === "creating";
 
   const submittedStreamItems = useMemo<StreamItem[]>(() => {
@@ -187,10 +237,10 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
 
   const draftAgent = machine.tag === "creating" ? machine.draftAgent : null;
   const startCreateAttempt = useCallback(
-    (attempt: CreateAttempt) => {
+    (attempt: CreateAttempt, errorShownByComposer: boolean) => {
       const prepared = prepareCreateAttempt(attempt, buildDraftAgent);
       if (prepared.tag === "draft") {
-        dispatch({ type: "DRAFT_SET_ERROR", message: prepared.errorMessage });
+        dispatch({ type: "DRAFT_SET_ERROR", message: prepared.errorMessage, errorShownByComposer });
         throw new Error(prepared.errorMessage);
       }
       dispatch({ type: "SUBMIT", attempt, draftAgent: prepared.draftAgent });
@@ -199,11 +249,19 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
   );
 
   const runCreateAttempt = useCallback(
-    async ({ attempt, cwd }: { attempt: CreateAttempt; cwd: string }) => {
+    async ({
+      attempt,
+      cwd,
+      errorShownByComposer,
+    }: {
+      attempt: CreateAttempt;
+      cwd: string;
+      errorShownByComposer: boolean;
+    }) => {
       const pendingServerId = getPendingServerId();
       if (!pendingServerId) {
         const error = new Error(t("composer.errors.noHostSelected"));
-        dispatch({ type: "DRAFT_SET_ERROR", message: error.message });
+        dispatch({ type: "DRAFT_SET_ERROR", message: error.message, errorShownByComposer });
         throw error;
       }
 
@@ -241,16 +299,15 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
 
         await onCreateSuccess({ result: createResult.result, attempt });
       } catch (error) {
-        const resolved =
-          error instanceof Error ? error : new Error(t("composer.errors.failedToCreateAgent"));
-        dispatch({ type: "CREATE_FAILED", message: resolved.message });
+        const resolved = resolveCreateError(error, t);
+        dispatch({ type: "CREATE_FAILED", message: resolved.message, errorShownByComposer });
         markPendingCreateLifecycle({
           draftId,
           lifecycle: "abandoned",
           errorMessage: resolved.message,
         });
         onCreateError?.(resolved);
-        throw error;
+        throw resolved;
       }
     },
     [
@@ -266,8 +323,8 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
     ],
   );
 
-  const handleCreateFromInput = useCallback(
-    async ({ text, attachments, cwd }: SubmitContext) => {
+  const createFromInput = useCallback(
+    async ({ text, attachments, cwd }: SubmitContext, errorShownByComposer: boolean) => {
       const existing = useCreateFlowStore.getState().pendingByDraftId[draftId];
       if (
         isSubmitting ||
@@ -276,12 +333,14 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
         throw new Error(t("composer.errors.alreadyLoading"));
       }
 
-      dispatch({ type: "DRAFT_SET_ERROR", message: "" });
+      const setError = (message: string) =>
+        dispatch({ type: "DRAFT_SET_ERROR", message, errorShownByComposer });
+      setError("");
       const trimmedPrompt = text.trim();
       const pendingServerId = getPendingServerId();
       if (!pendingServerId) {
         const error = new Error(t("composer.errors.noHostSelected"));
-        dispatch({ type: "DRAFT_SET_ERROR", message: error.message });
+        setError(error.message);
         throw error;
       }
       const supportsForgeSearch =
@@ -297,7 +356,7 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
       const hasAttachmentContent = images.length > 0 || wirePayload.attachments.length > 0;
       if (!trimmedPrompt && !hasAttachmentContent && !allowEmptyText) {
         const error = new Error(t("composer.errors.initialPromptRequired"));
-        dispatch({ type: "DRAFT_SET_ERROR", message: error.message });
+        setError(error.message);
         throw error;
       }
 
@@ -308,7 +367,7 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
       });
       if (validationError) {
         const error = new Error(validationError);
-        dispatch({ type: "DRAFT_SET_ERROR", message: validationError });
+        setError(validationError);
         throw error;
       }
 
@@ -320,7 +379,7 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
         ...(wirePayload.attachments.length > 0 ? { attachments: wirePayload.attachments } : {}),
       };
 
-      startCreateAttempt(attempt);
+      startCreateAttempt(attempt, errorShownByComposer);
       setPendingCreateAttempt({
         draftId,
         serverId: pendingServerId,
@@ -335,7 +394,7 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
       });
 
       onCreateStart?.();
-      await runCreateAttempt({ attempt, cwd });
+      await runCreateAttempt({ attempt, cwd, errorShownByComposer });
     },
     [
       allowEmptyText,
@@ -351,12 +410,23 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
     ],
   );
 
+  /** For callers that show nothing themselves: failures land on the draft's banner. */
+  const handleCreateFromInput = useCallback(
+    (ctx: SubmitContext) => createFromInput(ctx, false),
+    [createFromInput],
+  );
+  /** For the composer's submit: the composer shows the failure inline, so the banner stays clear. */
+  const handleComposerSubmit = useCallback(
+    (ctx: SubmitContext) => createFromInput(ctx, true),
+    [createFromInput],
+  );
+
   const continueCreateFromAttempt = useCallback(
     async ({ attempt, cwd }: { attempt: CreateAttempt; cwd: string }) => {
       if (!isSubmitting) {
-        startCreateAttempt(attempt);
+        startCreateAttempt(attempt, false);
       }
-      await runCreateAttempt({ attempt, cwd });
+      await runCreateAttempt({ attempt, cwd, errorShownByComposer: false });
     },
     [isSubmitting, runCreateAttempt, startCreateAttempt],
   );
@@ -369,6 +439,7 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
     pendingMessageSubmissions,
     draftAgent,
     handleCreateFromInput,
+    handleComposerSubmit,
     continueCreateFromAttempt,
   };
 }

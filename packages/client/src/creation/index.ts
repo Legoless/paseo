@@ -48,6 +48,27 @@ interface Operation {
   stopObserving?: () => void;
 }
 
+/**
+ * The agent was created but its first prompt failed. The agent exists and holds nothing but the
+ * failure; callers own what happens to it (a draft archives it so the next send starts clean).
+ */
+export class InitialPromptFailedError extends Error {
+  readonly agentId: string;
+  constructor(message: string, agentId: string) {
+    super(message);
+    this.name = "InitialPromptFailedError";
+    this.agentId = agentId;
+  }
+}
+
+export function toInitialPromptFailure(
+  result: Pick<CreationResult, "error" | "agent" | "creation">,
+): InitialPromptFailedError | null {
+  if (!result.error || result.creation?.failedStage !== "prompt") return null;
+  const agentId = result.agent?.id ?? result.creation.agentId;
+  return agentId ? new InitialPromptFailedError(result.error, agentId) : null;
+}
+
 /** Client-owned observation and compatibility. UI callbacks never advance creation. */
 export class CreationClient {
   private readonly operations = new Map<string, Operation>();

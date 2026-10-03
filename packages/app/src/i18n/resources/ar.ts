@@ -180,6 +180,7 @@ export const ar = {
       noClipboardImage: "لا توجد صورة في الحافظة الحالية. جرّب اللصق من لوحة المفاتيح.",
       pasteImageFailed: "تعذر لصق الصورة",
       fileTooLarge: "{{fileName}} is too large (max {{size}})",
+      requestKeyConflict: "تم إرسال هذه المسودة بالفعل بمحتوى مختلف. شغّل /clear للبدء من جديد.",
     },
     clientCommands: {
       archiveAgent: "أرشفة الوكيل الحالي",
@@ -1208,6 +1209,12 @@ export const ar = {
         serviceRunning: "الخدمة {{name}} قيد التشغيل",
         serviceUnhealthy: "الخدمة {{name}} غير سليمة",
         creating: "جارٍ الإنشاء...",
+        paneNeedsInputOne: "لوحة واحدة بانتظار إدخال",
+        paneNeedsInputMany: "لوحات بانتظار إدخال: {{count}}",
+        paneFailedOne: "لوحة واحدة توقفت بسبب خطأ",
+        paneFailedMany: "لوحات توقفت بسبب خطأ: {{count}}",
+        paneReadyOne: "لوحة واحدة جاهزة للمراجعة",
+        paneReadyMany: "لوحات جاهزة للمراجعة: {{count}}",
       },
       checks: {
         passed: "ناجحة: {{count}}",

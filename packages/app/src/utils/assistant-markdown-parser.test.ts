@@ -25,6 +25,70 @@ describe("assistant markdown parsers", () => {
   });
 
   it.each([
+    "https://example.com/raceline-engine-",
+    "**https://example.com/raceline-engine-",
+    "https://example.com/raceline-engine-.",
+  ])("does not activate an unfinished automatic link: %s", (source) => {
+    expect(streamingAssistantMarkdownParser.renderInline(source)).not.toContain("href=");
+    expect(assistantMarkdownParser.renderInline(source)).toContain("href=");
+  });
+
+  it.each([
+    "https://example.com/design ",
+    "https://example.com/design\n",
+    "https://example.com/design more text",
+    "[design](https://example.com/design)",
+    "<https://example.com/design>",
+  ])("keeps completed link destinations active during streaming: %s", (source) => {
+    expect(streamingAssistantMarkdownParser.render(source)).toContain(
+      'href="https://example.com/design"',
+    );
+  });
+
+  it.each(["~/Downloads/raceline-engine-", "https://example.com/raceline-engine-"])(
+    "distinguishes growing inline code from a complete link target: %s",
+    (target) => {
+      const growing = streamingAssistantMarkdownParser.parseInline("`" + target, {})[0].children;
+      const complete = streamingAssistantMarkdownParser.parseInline("`" + target + "`", {})[0]
+        .children;
+      expect(growing?.map(({ type, content, info }) => ({ type, content, info }))).toEqual([
+        { type: "code_inline", content: target, info: "streaming" },
+      ]);
+      expect(complete?.map(({ type, content, info }) => ({ type, content, info }))).toEqual([
+        { type: "code_inline", content: target, info: "" },
+      ]);
+    },
+  );
+
+  it.each([
+    "[docs][ref]\n\n[ref]: https://example.com/raceline-engine-",
+    "[docs][ref]\n\n[ref]:\n  https://example.com/raceline-engine-",
+  ])("does not resolve an unfinished reference destination: %s", (source) => {
+    expect(streamingAssistantMarkdownParser.render(source)).not.toContain("href=");
+    expect(streamingAssistantMarkdownParser.render(source + "\n")).toContain("href=");
+    expect(assistantMarkdownParser.render(source)).toContain("href=");
+  });
+
+  it("waits for a reference definition to terminate even with a closed file URL", () => {
+    const source = "[docs][ref]\n\n[ref]: <file:///tmp/raceline-engine->";
+    expect(streamingAssistantMarkdownParser.render(source)).toContain("<p>[docs][ref]</p>");
+    expect(streamingAssistantMarkdownParser.render(source + "\n")).toContain(
+      '<a href="file:///tmp/raceline-engine-">docs</a>',
+    );
+  });
+
+  it("preserves the first complete definition while a duplicate is still growing", () => {
+    const source =
+      "[docs][ref]\n\n[ref]: https://example.com/complete\n\n[ref]: https://example.com/unfinished";
+    expect(streamingAssistantMarkdownParser.render(source)).toContain(
+      '<a href="https://example.com/complete">docs</a>',
+    );
+    expect(streamingAssistantMarkdownParser.render(source)).not.toContain(
+      'href="https://example.com/unfinished"',
+    );
+  });
+
+  it.each([
     ["**", "strong"],
     ["__", "strong"],
     ["*", "em"],

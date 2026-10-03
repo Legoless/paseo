@@ -181,6 +181,8 @@ export const ko = {
       noClipboardImage: "현재 클립보드에 이미지가 없습니다. 키보드에서 붙여넣기를 시도해 보세요.",
       pasteImageFailed: "이미지를 붙여넣지 못했습니다.",
       fileTooLarge: "{{fileName}}이(가) 너무 큽니다 (최대 {{size}})",
+      requestKeyConflict:
+        "이 초안은 이미 다른 내용으로 전송되었습니다. /clear를 실행해 다시 시작하세요.",
     },
     clientCommands: {
       archiveAgent: "현재 에이전트 닫기",
@@ -1270,6 +1272,12 @@ export const ko = {
         serviceRunning: "서비스 {{name}} 실행 중",
         serviceUnhealthy: "서비스 {{name}} 비정상",
         creating: "생성하는 중...",
+        paneNeedsInputOne: "입력이 필요한 창 1개",
+        paneNeedsInputMany: "입력이 필요한 창 {{count}}개",
+        paneFailedOne: "오류로 중단된 창 1개",
+        paneFailedMany: "오류로 중단된 창 {{count}}개",
+        paneReadyOne: "검토할 창 1개",
+        paneReadyMany: "검토할 창 {{count}}개",
       },
       checks: {
         passed: "통과: {{count}}개",

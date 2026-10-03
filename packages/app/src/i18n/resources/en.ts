@@ -177,6 +177,8 @@ export const en = {
       noClipboardImage: "No image in the current clipboard. Try pasting from your keyboard.",
       pasteImageFailed: "Failed to paste image",
       fileTooLarge: "{{fileName}} is too large (max {{size}})",
+      requestKeyConflict:
+        "This draft was already sent with different content. Run /clear to start over.",
     },
     clientCommands: {
       archiveAgent: "Close the current agent",
@@ -1270,6 +1272,12 @@ export const en = {
         serviceRunning: "Service {{name}} running",
         serviceUnhealthy: "Service {{name}} unhealthy",
         creating: "Creating...",
+        paneNeedsInputOne: "1 pane needs input",
+        paneNeedsInputMany: "{{count}} panes need input",
+        paneFailedOne: "1 pane stopped with an error",
+        paneFailedMany: "{{count}} panes stopped with an error",
+        paneReadyOne: "1 pane ready to review",
+        paneReadyMany: "{{count}} panes ready to review",
       },
       checks: {
         passed: "Passed: {{count}}",

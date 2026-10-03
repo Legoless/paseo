@@ -503,10 +503,20 @@ export function normalizeInlinePathTarget(
 
   const lastSlash = normalized.lastIndexOf("/");
   const directory = lastSlash >= 0 ? normalized.slice(0, lastSlash) : ".";
+  const fileInput = normalizePathToken(rawPath)!;
+  const fileRoot = cwd ? normalizePathToken(cwd) : null;
+  // File tabs can inherit another pane's project; keep the source directory
+  // in their identity rather than rebinding a relative filename on selection.
+  let file = normalized;
+  if (isAbsolutePath(fileInput) || isHomeRelativePath(fileInput)) {
+    file = fileInput;
+  } else if (fileRoot) {
+    file = `${fileRoot.replace(/\/+$/, "")}/${normalized}`;
+  }
 
   return {
     directory: directory.length > 0 ? directory : ".",
-    file: normalized,
+    file,
   };
 }
 
