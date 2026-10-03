@@ -43,6 +43,9 @@ mac:
   notarize: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.inherit.plist
+  # Chromium data packs are sealed by the framework's bundle signature.
+  signIgnore:
+    - 'Electron Framework\.framework/(?:Versions/[^/]+/)?Resources/.*\.pak$'
   extraResources:
     - from: bin/paseo
       to: bin/paseoneo

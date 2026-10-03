@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -99,6 +100,38 @@ describe("desktop packaging", () => {
     const config = readFileSync(join(packageRoot, "electron-builder.yml"), "utf8");
 
     expect(config).toContain('minimumSystemVersion: "13.0.0"');
+  });
+
+  it("limits Neo signing exclusions to Chromium resource data", () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "-e",
+        'const fs = require("node:fs"); const yaml = require("js-yaml"); process.stdout.write(JSON.stringify(yaml.load(fs.readFileSync(process.argv[1], "utf8")).mac.signIgnore));',
+        join(packageRoot, "electron-builder.neo.yml"),
+      ],
+      { cwd: packageRoot, encoding: "utf8" },
+    );
+    expect(result.status).toBe(0);
+    const patterns = z.array(z.string()).parse(JSON.parse(result.stdout));
+    const filters = patterns.map((pattern) => new RegExp(pattern));
+    const framework = "/Paseo Neo.app/Contents/Frameworks/Electron Framework.framework";
+    const resources = "/Paseo Neo.app/Contents/Resources";
+    const paths = [
+      `${framework}/Versions/A/Resources/en.lproj/locale.pak`,
+      `${framework}/Versions/Current/Resources/en.lproj/locale.pak`,
+      `${framework}/Resources/resources.pak`,
+      `${framework}/Versions/A/Electron Framework`,
+      framework,
+      `${resources}/app.asar.unpacked/node_modules/sherpa-onnx-darwin-arm64/sherpa-onnx.node`,
+      `${resources}/app.asar.unpacked/node_modules/sherpa-onnx-darwin-arm64/libonnxruntime.dylib`,
+      "/Paseo Neo.app/Contents/MacOS/Paseo Neo",
+    ];
+    const excluded: boolean[] = [];
+    for (const path of paths) {
+      excluded.push(filters.some((filter) => filter.test(path)));
+    }
+    expect(excluded).toEqual([true, true, true, false, false, false, false, false]);
   });
 
   it("unpacks server zsh shell integration files for external shells", () => {
