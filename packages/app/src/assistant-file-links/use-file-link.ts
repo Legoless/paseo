@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import type { OpenFileDisposition } from "@/workspace/file-open";
@@ -7,6 +7,7 @@ import { openExternalUrl } from "@/utils/open-external-url";
 import type { InlinePathTarget } from "./parse";
 import {
   useAssistantFileLinkResolverContext,
+  type AssistantFileLinkResolverConfig,
   type AssistantFileLinkResolverContextValue,
 } from "./provider";
 import {
@@ -18,6 +19,7 @@ import {
 
 export interface UseFileLinkResult {
   target: InlinePathTarget | null;
+  isPending: boolean;
   onHoverIn: () => void;
   onPress: () => void;
   open: (source: AssistantFileLinkSource, disposition: OpenFileDisposition) => void;
@@ -37,6 +39,12 @@ type AssistantFileLinkQueryKey = readonly [
 ];
 
 const DISABLED_QUERY_KEY = ["assistantFileLink", null, null, ""] as const;
+
+interface AssistantFileLinkOpenInput {
+  source: AssistantFileLinkSource;
+  disposition: OpenFileDisposition;
+  capturedConfig: AssistantFileLinkResolverConfig;
+}
 
 export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult {
   const { t } = useTranslation();
@@ -84,14 +92,36 @@ export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult 
     staleTime: Infinity,
   });
 
-  const open = useStableEvent(
-    (nextSource: AssistantFileLinkSource, disposition: OpenFileDisposition) => {
+  const openMutation = useMutation({
+    mutationFn: (input: AssistantFileLinkOpenInput) =>
       openAssistantFileLink({
-        source: nextSource,
-        disposition,
+        ...input,
         context,
         queryClient,
         formatNoFileFoundMessage: (token) => t("common.errors.noFileFound", { token }),
+      }),
+    onError: (error, input) => {
+      const current = context.configRef.current;
+      if (
+        current.serverId !== input.capturedConfig.serverId ||
+        current.workspaceRoot !== input.capturedConfig.workspaceRoot
+      )
+        return;
+      current.toast?.show(error.message, {
+        variant: "error",
+        durationMs: null,
+        testID: "assistant-file-link-open-error-toast",
+      });
+    },
+  });
+
+  const open = useStableEvent(
+    (nextSource: AssistantFileLinkSource, disposition: OpenFileDisposition) => {
+      if (openMutation.isPending) return;
+      openMutation.mutate({
+        source: nextSource,
+        disposition,
+        capturedConfig: context.configRef.current,
       });
     },
   );
@@ -127,7 +157,11 @@ export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult 
     return query.data ?? null;
   }, [query.data, resolution]);
 
-  return useMemo(() => ({ target, onHoverIn, onPress, open }), [target, onHoverIn, onPress, open]);
+  const isPending = openMutation.isPending;
+  return useMemo(
+    () => ({ target, isPending, onHoverIn, onPress, open }),
+    [target, isPending, onHoverIn, onPress, open],
+  );
 }
 
 export function useAssistantFileLinkActions(): AssistantFileLinkActions {
@@ -153,20 +187,21 @@ export function useAssistantFileLinkActions(): AssistantFileLinkActions {
   return useMemo(() => ({ open, canOpen, canResolveFile }), [open, canOpen, canResolveFile]);
 }
 
-function openAssistantFileLink(input: {
+async function openAssistantFileLink(input: {
   source: AssistantFileLinkSource;
   disposition: OpenFileDisposition;
+  capturedConfig: AssistantFileLinkResolverConfig;
   context: AssistantFileLinkResolverContextValue;
   queryClient: ReturnType<typeof useQueryClient>;
   formatNoFileFoundMessage: (token: string) => string;
-}): void {
-  const capturedConfig = input.context.configRef.current;
+}): Promise<void> {
+  const capturedConfig = input.capturedConfig;
   const capturedResolution = classifyForResolution(input.source, {
     workspaceRoot: capturedConfig.workspaceRoot,
   });
 
   if (capturedResolution.kind === "resolved") {
-    void dispatchResolvedLink({
+    await dispatchResolvedLink({
       resolution: capturedResolution,
       disposition: input.disposition,
       capturedServerId: capturedConfig.serverId,
@@ -182,40 +217,38 @@ function openAssistantFileLink(input: {
     ambiguousQuery: capturedResolution.ambiguousQuery,
   });
 
-  const run = async () => {
-    try {
-      const target = await input.queryClient.fetchQuery({
-        queryKey: capturedQueryKey,
-        queryFn: () =>
-          fetchDaemonResolution({
-            ambiguousQuery: capturedResolution.ambiguousQuery,
-            token: capturedResolution.token,
-            target: capturedResolution.target,
-            workspaceRoot: capturedConfig.workspaceRoot,
-            getDirectorySuggestions: input.context.getDirectorySuggestions,
-          }),
-        retry: 0,
-        staleTime: Infinity,
-      });
-      await dispatchFileTarget({
-        target,
-        disposition: input.disposition,
-        capturedServerId: capturedConfig.serverId,
-        capturedWorkspaceRoot: capturedConfig.workspaceRoot,
-        context: input.context,
-      });
-    } catch (error) {
-      await dispatchUnresolvedError({
-        error,
-        noFileFoundMessage: input.formatNoFileFoundMessage(capturedResolution.token),
-        capturedServerId: capturedConfig.serverId,
-        capturedWorkspaceRoot: capturedConfig.workspaceRoot,
-        context: input.context,
-      });
-    }
-  };
-
-  void run();
+  let target: InlinePathTarget;
+  try {
+    target = await input.queryClient.fetchQuery({
+      queryKey: capturedQueryKey,
+      queryFn: () =>
+        fetchDaemonResolution({
+          ambiguousQuery: capturedResolution.ambiguousQuery,
+          token: capturedResolution.token,
+          target: capturedResolution.target,
+          workspaceRoot: capturedConfig.workspaceRoot,
+          getDirectorySuggestions: input.context.getDirectorySuggestions,
+        }),
+      retry: 0,
+      staleTime: Infinity,
+    });
+  } catch (error) {
+    await dispatchUnresolvedError({
+      error,
+      noFileFoundMessage: input.formatNoFileFoundMessage(capturedResolution.token),
+      capturedServerId: capturedConfig.serverId,
+      capturedWorkspaceRoot: capturedConfig.workspaceRoot,
+      context: input.context,
+    });
+    return;
+  }
+  await dispatchFileTarget({
+    target,
+    disposition: input.disposition,
+    capturedServerId: capturedConfig.serverId,
+    capturedWorkspaceRoot: capturedConfig.workspaceRoot,
+    context: input.context,
+  });
 }
 
 function canOpenAssistantFileLink(
@@ -297,7 +330,7 @@ async function dispatchFileTarget(input: {
   ) {
     return;
   }
-  current.onOpenWorkspaceFile?.(input.target, input.disposition);
+  await current.onOpenWorkspaceFile?.(input.target, input.disposition);
 }
 
 async function dispatchExternalUrl(input: {

@@ -2,6 +2,7 @@ import { test, expect } from "../../app/e2e/support/fixtures";
 import { withStreamingMarkdown } from "../../app/e2e/support/helpers/streaming-markdown";
 import { openAgentRoute } from "../../app/e2e/support/helpers/mock-agent";
 import { seedWorkspace } from "../../app/e2e/support/helpers/seed-client";
+import { installDaemonWebSocketGate } from "../../app/e2e/support/helpers/daemon-websocket-gate";
 import { installDesktopRuntime } from "./support/runtime";
 
 test("only complete streamed paths and URLs become clickable", async ({ page }, testInfo) => {
@@ -66,13 +67,22 @@ test("chat file links keep their originating project in a multi-project workspac
   test.setTimeout(90_000);
   await installDesktopRuntime(page, { serverId: process.env.E2E_SERVER_ID! });
   const relativePath = "source/report.md";
+  const modelPath =
+    "data/artifacts/20261003-081559-2bc300/lego-pdf/77239-porsche-911-gt3-rs/0/agent/model.ldr";
+  const binaryPath = "exports/Original model #2.payload";
   const primary = await seedWorkspace({
     repoPrefix: "chat-links-primary-",
     repo: { files: [{ path: relativePath, content: "# Primary report\n" }] },
   });
   const secondary = await seedWorkspace({
     repoPrefix: "chat-links-secondary-",
-    repo: { files: [{ path: relativePath, content: "# Secondary report\n" }] },
+    repo: {
+      files: [
+        { path: relativePath, content: "# Secondary report\n" },
+        { path: modelPath, content: "0 Secondary LEGO model\n" },
+        { path: binaryPath, content: "\0\x01binary model" },
+      ],
+    },
   });
   try {
     const member = await primary.client.addWorkspaceMember(primary.workspaceId, {
@@ -91,7 +101,7 @@ test("chat file links keep their originating project in a multi-project workspac
       model: "e2e-fast-stream",
       initialPrompt: "Show the report.",
       featureValues: {
-        mockAssistantResponse: `[Absolute report](${secondaryPath}) and \`${relativePath}\`.`,
+        mockAssistantResponse: `[Absolute report](${secondaryPath}), [Relative report](${relativePath}), \`${relativePath}\`, [LEGO model](${modelPath}), and [Binary model](${encodeURI(binaryPath).replace(/#/g, "%23")}).`,
       },
     });
     await primary.client.waitForFinish(secondaryAgent.id, 30_000);
@@ -106,6 +116,67 @@ test("chat file links keep their originating project in a multi-project workspac
     await expect(
       page.getByTestId(`workspace-tab-file_${secondaryPath}`).filter({ visible: true }),
     ).toHaveCount(1);
+
+    await page
+      .getByTestId(`workspace-tab-agent_${secondaryAgent.id}`)
+      .filter({ visible: true })
+      .click();
+    await message
+      .getByRole("link", { name: "Relative report", exact: true })
+      .and(message.locator("a"))
+      .click();
+    await expect(filePane.getByText("Secondary report", { exact: true })).toBeVisible();
+    await expect(
+      page.getByTestId(`workspace-tab-file_${secondaryPath}`).filter({ visible: true }),
+    ).toHaveCount(1);
+
+    await page
+      .getByTestId(`workspace-tab-agent_${secondaryAgent.id}`)
+      .filter({ visible: true })
+      .click();
+    await message
+      .getByRole("link", { name: "LEGO model", exact: true })
+      .and(message.locator("a"))
+      .click();
+    await expect(filePane).toContainText("0 Secondary LEGO model");
+    const modelTab = page
+      .getByTestId(`workspace-tab-file_${secondary.repoPath}/${modelPath}`)
+      .filter({ visible: true });
+    await expect(modelTab).toHaveCount(1);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(filePane).toContainText("0 Secondary LEGO model");
+    await expect(modelTab).toHaveCount(1);
+
+    await page
+      .getByTestId(`workspace-tab-agent_${secondaryAgent.id}`)
+      .filter({ visible: true })
+      .click();
+    await message
+      .getByRole("link", { name: "Binary model", exact: true })
+      .and(message.locator("a"))
+      .click();
+    await expect
+      .poll(() => page.evaluate(() => window.__capturedSystemOpenPaths))
+      .toEqual([`${secondary.repoPath}/${binaryPath}`]);
+    await expect(
+      page
+        .getByTestId(`workspace-tab-file_${secondary.repoPath}/${binaryPath}`)
+        .filter({ visible: true }),
+    ).toHaveCount(0);
+    await expect(message).toBeVisible();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await message
+      .getByRole("link", { name: "Binary model", exact: true })
+      .and(message.locator("a"))
+      .click();
+    await expect
+      .poll(() => page.evaluate(() => window.__capturedSystemOpenPaths))
+      .toEqual([`${secondary.repoPath}/${binaryPath}`]);
+    await expect(
+      page
+        .getByTestId(`workspace-tab-file_${secondary.repoPath}/${binaryPath}`)
+        .filter({ visible: true }),
+    ).toHaveCount(0);
 
     await page
       .getByTestId(`workspace-tab-agent_${secondaryAgent.id}`)
@@ -157,6 +228,113 @@ test("chat file links keep their originating project in a multi-project workspac
   } finally {
     await secondary.cleanup();
     await primary.cleanup();
+  }
+});
+
+test("unsupported chat file opens show pending and OS errors and allow retry", async ({ page }) => {
+  await installDesktopRuntime(page, {
+    serverId: process.env.E2E_SERVER_ID!,
+    holdSystemOpen: true,
+    systemOpenError: "No application is registered for this file",
+  });
+  const path = "exports/original.custom-format";
+  const workspace = await seedWorkspace({
+    repoPrefix: "chat-system-file-",
+    repo: { files: [{ path, content: "\0\x01binary model" }] },
+  });
+  try {
+    const agent = await workspace.client.createAgent({
+      provider: "mock",
+      cwd: workspace.repoPath,
+      workspaceId: workspace.workspaceId,
+      modeId: "load-test",
+      model: "e2e-fast-stream",
+      initialPrompt: "Show the file.",
+      featureValues: { mockAssistantResponse: `[Original file](${path})` },
+    });
+    await workspace.client.waitForFinish(agent.id, 30_000);
+    await openAgentRoute(page, { workspaceId: workspace.workspaceId, agentId: agent.id });
+    const link = page
+      .getByTestId("assistant-message")
+      .filter({ visible: true })
+      .locator("a")
+      .filter({ hasText: "Original file" });
+    await link.click();
+    await expect(link).toHaveAttribute("aria-busy", "true");
+    await link.click();
+    await expect
+      .poll(() => page.evaluate(() => window.__capturedSystemOpenPaths))
+      .toEqual([`${workspace.repoPath}/${path}`]);
+    await page.evaluate(() => window.__releaseSystemOpen!());
+    const error = page.getByTestId("assistant-file-link-open-error-toast");
+    await expect(error).toContainText("No application is registered for this file");
+    await expect(link).toHaveAttribute("aria-busy", "false");
+    await expect(page.getByTestId("workspace-file-pane").filter({ visible: true })).toHaveCount(0);
+    await link.click();
+    await expect
+      .poll(() => page.evaluate(() => window.__capturedSystemOpenPaths))
+      .toEqual([`${workspace.repoPath}/${path}`, `${workspace.repoPath}/${path}`]);
+    await page.evaluate(() => window.__releaseSystemOpen!());
+    await expect(link).toHaveAttribute("aria-busy", "false");
+    await expect(error).toBeVisible();
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+test("switching chat while a file read is pending does not open the old file", async ({ page }) => {
+  await installDesktopRuntime(page, { serverId: process.env.E2E_SERVER_ID! });
+  const gate = await installDaemonWebSocketGate(page);
+  const path = "exports/original.custom-format";
+  const workspace = await seedWorkspace({
+    repoPrefix: "chat-pending-file-",
+    repo: { files: [{ path, content: "\0\x01binary model" }] },
+  });
+  try {
+    const original = await workspace.client.createAgent({
+      provider: "mock",
+      cwd: workspace.repoPath,
+      workspaceId: workspace.workspaceId,
+      modeId: "load-test",
+      model: "e2e-fast-stream",
+      initialPrompt: "Show the file.",
+      featureValues: { mockAssistantResponse: `[Original file](${path})` },
+    });
+    const other = await workspace.client.createAgent({
+      provider: "mock",
+      cwd: workspace.repoPath,
+      workspaceId: workspace.workspaceId,
+      modeId: "load-test",
+      model: "e2e-fast-stream",
+      initialPrompt: "Keep working.",
+      featureValues: { mockAssistantResponse: "Other conversation" },
+    });
+    await workspace.client.waitForFinish(original.id, 30_000);
+    await workspace.client.waitForFinish(other.id, 30_000);
+    await openAgentRoute(page, { workspaceId: workspace.workspaceId, agentId: original.id });
+    gate.holdFileReads(`${workspace.repoPath}/${path}`);
+    const link = page
+      .getByTestId("assistant-message")
+      .locator("a")
+      .filter({ hasText: "Original file" });
+    await link.click();
+    await gate.waitForHeldFileRead();
+    const heldRead = gate
+      .getClientRequests("file_explorer_request")
+      .find((request) => request.path === `${workspace.repoPath}/${path}`);
+    if (typeof heldRead?.requestId !== "string")
+      throw new Error("Held file read has no request ID");
+    await page.getByTestId(`workspace-tab-agent_${other.id}`).filter({ visible: true }).click();
+    gate.releaseHeldFileRead();
+    await gate.waitForFileRead(heldRead.requestId);
+    await expect(page.getByText("Other conversation", { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => window.__capturedSystemOpenPaths)).toEqual([]);
+    await expect(page.getByTestId("workspace-file-pane").filter({ visible: true })).toHaveCount(0);
+    await page.getByTestId(`workspace-tab-agent_${original.id}`).filter({ visible: true }).click();
+    await expect(link).toHaveAttribute("aria-busy", "false");
+    expect(await page.evaluate(() => window.__capturedSystemOpenPaths)).toEqual([]);
+  } finally {
+    await workspace.cleanup();
   }
 });
 

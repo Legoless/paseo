@@ -21,7 +21,10 @@ export interface AssistantFileLinkResolverConfig {
   client?: AssistantFileLinkDaemonClient | null;
   serverId?: string;
   workspaceRoot?: string;
-  onOpenWorkspaceFile?: (target: InlinePathTarget, disposition: OpenFileDisposition) => void;
+  onOpenWorkspaceFile?: (
+    target: InlinePathTarget,
+    disposition: OpenFileDisposition,
+  ) => void | Promise<void>;
   toast?: ToastApi | null;
 }
 

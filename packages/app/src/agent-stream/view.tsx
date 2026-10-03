@@ -56,6 +56,10 @@ import { resolveAgentImageFallbackRoot } from "@/utils/assistant-image-source";
 import { useRevealedText } from "@/hooks/use-revealed-text";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
+import { getDesktopHost } from "@/desktop/host";
+import { getDesktopDaemonStatus } from "@/desktop/daemon/desktop-daemon";
+import { resolveFilePreviewReadTarget } from "@/file-explorer/preview-target";
+import { SOURCE_PRESENTATION_BUDGETS } from "@/file-pane/source/presentation";
 import { useSettings } from "@/hooks/use-settings";
 import type { ToastApi } from "@/components/toast-host";
 import { returnToTimelineTail } from "./timeline-tail-navigation";
@@ -101,7 +105,7 @@ import {
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { useForkAgent } from "@/hooks/use-fork-agent";
-import { isWeb } from "@/constants/platform";
+import { getIsElectron, isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
 import { recordRenderProfileReasons } from "@/utils/render-profiler";
 import { useRetainedPanelActive } from "@/components/retained-panel";
@@ -532,6 +536,24 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     // When isActive flips back to true, the context change triggers a re-render and
     // the component reads the current (fresh) streamItems/streamHead from props.
     const isActive = useRetainedPanelActive();
+    const fileOpenScope = JSON.stringify([
+      resolvedServerId,
+      agentId,
+      context.workspaceId,
+      workspaceRoot,
+    ]);
+    const fileOpenScopeRef = useRef({ key: fileOpenScope, active: isActive });
+    fileOpenScopeRef.current = { key: fileOpenScope, active: isActive };
+    useEffect(() => {
+      fileOpenScopeRef.current = { key: fileOpenScope, active: isActive };
+      return () => {
+        fileOpenScopeRef.current.active = false;
+      };
+    }, [fileOpenScope, isActive]);
+    function isFileOpenCurrent() {
+      const current = fileOpenScopeRef.current;
+      return current.active && current.key === fileOpenScope;
+    }
     const effectiveStreamItems = useRetainedValue(streamItems, isActive);
     const effectiveStreamHead = useRetainedValue(streamHead, isActive);
     const effectiveTurnPresentation = useRetainedValue(turnPresentation, isActive);
@@ -714,6 +736,55 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [context.capabilities, agentId, client, pendingClientMessageIds, resolvedServerId],
     );
 
+    const handleAssistantFilePress = useStableEvent(
+      async (target: InlinePathTarget, disposition: OpenFileDisposition) => {
+        if (!getIsElectron() || disposition !== "preferred") {
+          handleInlinePathPress(target, disposition);
+          return;
+        }
+        const localDaemon = await getDesktopDaemonStatus();
+        if (!isFileOpenCurrent()) return;
+        if (localDaemon.serverId !== resolvedServerId) {
+          handleInlinePathPress(target, disposition);
+          return;
+        }
+        const normalized = normalizeInlinePathTarget(target.path, context.cwd);
+        if (!normalized?.file) {
+          handleInlinePathPress(target, disposition);
+          return;
+        }
+        const readTarget = resolveFilePreviewReadTarget({
+          path: normalized.file,
+          workspaceRoot,
+        });
+        if (!client || !readTarget) throw new Error("File preview is unavailable");
+        let requiresSystemApp = false;
+        try {
+          const file = await client.readFile(
+            readTarget.cwd,
+            readTarget.path,
+            undefined,
+            SOURCE_PRESENTATION_BUDGETS.web.plain,
+          );
+          requiresSystemApp = file.kind === "binary";
+        } catch (error) {
+          if (!isFileOpenCurrent()) return;
+          if (!(error instanceof Error) || error.message !== "File is too large to display") {
+            throw error;
+          }
+          requiresSystemApp = true;
+        }
+        if (!isFileOpenCurrent()) return;
+        if (!requiresSystemApp) {
+          handleInlinePathPress(target, disposition);
+          return;
+        }
+        const openPath = getDesktopHost()?.opener?.openPath;
+        if (!openPath) throw new Error("Desktop file opener is unavailable");
+        await openPath(normalized.file);
+      },
+    );
+
     const renderAssistantMessageItem = useCallback(
       (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "assistant_message" }>) => {
         return (
@@ -721,7 +792,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             client={client}
             serverId={resolvedServerId}
             workspaceRoot={workspaceRoot}
-            onOpenWorkspaceFile={handleInlinePathPress}
+            onOpenWorkspaceFile={handleAssistantFilePress}
             toast={toast}
           >
             <ChatFindExpansion messageId={getStreamItemMessageId(item)}>
@@ -746,7 +817,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [
         agentId,
         client,
-        handleInlinePathPress,
+        handleAssistantFilePress,
         imageFallbackRoot,
         resolvedServerId,
         toast,

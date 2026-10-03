@@ -84,6 +84,8 @@ export interface DesktopRuntimeConfig {
   dialogOpenResult?: string | string[] | null;
   editorTargets?: DesktopEditorTargetConfig[];
   editorRecordPath?: string;
+  systemOpenError?: string;
+  holdSystemOpen?: boolean;
 }
 
 interface DesktopEditorTargetConfig {
@@ -112,6 +114,8 @@ declare global {
     __capturedDialogOpenCalls: Array<Record<string, unknown> | undefined>;
     __recordDesktopEditorOpen?: (input: DesktopEditorOpenRecord) => Promise<void>;
     __desktopDaemonStartRequested?: boolean;
+    __capturedSystemOpenPaths: string[];
+    __releaseSystemOpen?: () => void;
   }
 }
 
@@ -145,6 +149,7 @@ export async function installDesktopRuntime(
     let ownedByDesktop = cfg.ownedByDesktop ?? false;
     let manualUpdateAdmitted = false;
     window.__desktopDaemonStartRequested = false;
+    window.__capturedSystemOpenPaths = [];
 
     function buildDaemonStatus() {
       return {
@@ -296,6 +301,17 @@ export async function installDesktopRuntime(
         open: async (options?: Record<string, unknown>) => {
           window.__capturedDialogOpenCalls.push(options);
           return cfg.dialogOpenResult ?? null;
+        },
+      },
+      opener: {
+        openPath: async (filePath: string) => {
+          window.__capturedSystemOpenPaths.push(filePath);
+          if (cfg.holdSystemOpen) {
+            await new Promise<void>((resolve) => {
+              window.__releaseSystemOpen = resolve;
+            });
+          }
+          if (cfg.systemOpenError) throw new Error(cfg.systemOpenError);
         },
       },
       getPendingOpenProject: async () => null,
