@@ -30,7 +30,7 @@ export function AssistantMarkdownLink({
   monoSurface,
   children,
 }: AssistantMarkdownLinkProps) {
-  const { target, onHoverIn, onPress } = useFileLink(source);
+  const { target, isPending, onHoverIn, onPress } = useFileLink(source);
   const { configRef } = useAssistantFileLinkResolverContext();
   const workspaceRoot = configRef.current.workspaceRoot;
   const tooltipPath = useMemo(
@@ -65,6 +65,7 @@ export function AssistantMarkdownLink({
         style={style}
       >
         {children}
+        {isPending ? " …" : null}
       </MarkdownTextSpan>
     );
     return (
@@ -83,6 +84,7 @@ export function AssistantMarkdownLink({
       {...(unwrapForMarkdownCopy ? { "data-paseo-markdown-unwrap": "true" } : {})}
       href={source.href}
       title={source.title}
+      aria-busy={isPending}
       onClickCapture={preventAnchorNavigation}
       onAuxClickCapture={preventAnchorNavigation}
       style={LINK_ANCHOR_STYLE}
@@ -94,6 +96,7 @@ export function AssistantMarkdownLink({
         onHoverIn={onHoverIn}
       >
         {children}
+        {isPending ? " …" : null}
       </MarkdownLinkText>
     </a>
   );

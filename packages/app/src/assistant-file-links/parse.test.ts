@@ -273,6 +273,69 @@ describe("parseAssistantFileLink", () => {
     });
   });
 
+  it("preserves explicit relative file links from the originating agent project", () => {
+    const raw =
+      "data/artifacts/20261003-081559-2bc300/lego-pdf/77239-porsche-911-gt3-rs/0/agent/model.ldr";
+    const workspaceRoot = "/Users/test/legobench";
+    const path = `${workspaceRoot}/${raw}`;
+    const target = parseAssistantFileLink(raw, { workspaceRoot, isExplicitLink: true });
+    expect(target).toEqual({
+      raw,
+      path,
+      lineStart: undefined,
+      lineEnd: undefined,
+    });
+    const normalized = normalizeInlinePathTarget(target!.path, workspaceRoot);
+    expect(
+      resolveFilePreviewReadTarget({
+        path: normalized!.file!,
+        workspaceRoot: "/Users/test/LegoModels",
+      }),
+    ).toEqual({ cwd: "/", path });
+  });
+
+  it("decodes explicit Markdown filenames without requiring a known extension", () => {
+    expect(
+      parseAssistantFileLink("exports/My%20model%23v2.custom-format", {
+        workspaceRoot: "/Users/test/project",
+        isExplicitLink: true,
+      }),
+    ).toEqual({
+      raw: "exports/My%20model%23v2.custom-format",
+      path: "/Users/test/project/exports/My model#v2.custom-format",
+      lineStart: undefined,
+      lineEnd: undefined,
+    });
+  });
+
+  it("keeps encoded colons in explicit filenames separate from line markers", () => {
+    expect(
+      parseAssistantFileLink("exports/report%3A12:33", {
+        workspaceRoot: "/Users/test/project",
+        isExplicitLink: true,
+      }),
+    ).toEqual({
+      raw: "exports/report%3A12:33",
+      path: "/Users/test/project/exports/report:12",
+      lineStart: 33,
+      lineEnd: undefined,
+    });
+  });
+
+  it.each([
+    { suffix: "", lineStart: undefined },
+    { suffix: "#L33", lineStart: 33 },
+    { suffix: ":33", lineStart: 33 },
+  ])("decodes explicit Windows filenames with '$suffix'", ({ suffix, lineStart }) => {
+    const raw = `C:/exports/My%20model%23v2.custom-format${suffix}`;
+    expect(parseAssistantFileLink(raw, { isExplicitLink: true })).toEqual({
+      raw,
+      path: "C:/exports/My model#v2.custom-format",
+      lineStart,
+      lineEnd: undefined,
+    });
+  });
+
   it("parses absolute POSIX hrefs inside the active workspace", () => {
     expect(
       parseAssistantFileLink("/Users/test/project/src/app.tsx#L33", {

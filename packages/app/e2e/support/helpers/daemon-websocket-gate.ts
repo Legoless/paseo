@@ -1,4 +1,6 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
+import nodePath from "node:path";
+import { pathToFileURL } from "node:url";
 import { daemonWsRoutePattern } from "./daemon-port";
 
 export interface DirectoryBootstrapCounts {
@@ -14,6 +16,7 @@ export interface DirectoryRequestStartCounts {
 
 interface ClientRequest {
   type?: unknown;
+  requestId?: unknown;
   direction?: unknown;
   subscribe?: unknown;
   page?: { cursor?: unknown };
@@ -295,6 +298,15 @@ function recordClientRequest(
 }
 
 export async function installDaemonWebSocketGate(page: Page) {
+  const fileTransferModuleUrl = pathToFileURL(
+    nodePath.resolve(__dirname, "../../../../protocol/dist/binary-frames/file-transfer.js"),
+  ).href;
+  const {
+    decodeFileTransferFrame,
+    FileTransferOpcode,
+  }: typeof import("@getpaseo/protocol/binary-frames/file-transfer") = await import(
+    fileTransferModuleUrl
+  );
   let acceptingConnections = true;
   let reconnectWithFreshClient = false;
   let suppressAgentStream = false;
@@ -336,6 +348,16 @@ export async function installDaemonWebSocketGate(page: Page) {
   const fileSubscriptionWaiters = new Map<string, () => void>();
   const observedFileUpdates = new Set<string>();
   const fileUpdateWaiters = new Map<string, () => void>();
+  const completedFileReads = new Set<string>();
+  const fileReadWaiters = new Map<string, () => void>();
+  function recordFileRead(message: string | Buffer): void {
+    if (typeof message === "string") return;
+    const frame = decodeFileTransferFrame(message);
+    if (frame?.opcode !== FileTransferOpcode.FileEnd) return;
+    completedFileReads.add(frame.requestId);
+    fileReadWaiters.get(frame.requestId)?.();
+    fileReadWaiters.delete(frame.requestId);
+  }
   let fileReadPathToHold: string | null = null;
   let heldFileReads: Array<() => void> = [];
   let resolveHeldFileRead: (() => void) | null = null;
@@ -539,6 +561,7 @@ export async function installDaemonWebSocketGate(page: Page) {
       if (holdReadyFileUpdate(ws, outboundMessage, fileMessage)) return;
       try {
         ws.send(outboundMessage);
+        recordFileRead(outboundMessage);
       } catch {
         activeSockets.delete(ws);
       }
@@ -546,6 +569,10 @@ export async function installDaemonWebSocketGate(page: Page) {
   });
 
   return {
+    waitForFileRead(requestId: string): Promise<void> {
+      if (completedFileReads.has(requestId)) return Promise.resolve();
+      return new Promise((resolve) => fileReadWaiters.set(requestId, resolve));
+    },
     waitForFileSubscription(path: string): Promise<void> {
       if (subscribedFilePaths.has(path)) return Promise.resolve();
       return new Promise((resolve) => fileSubscriptionWaiters.set(path, resolve));

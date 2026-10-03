@@ -52,6 +52,38 @@ const unavailableSuggestions: GetDirectorySuggestions = async () => {
 };
 
 describe("classifyForResolution", () => {
+  it("uses explicit filenames exactly rather than searching for another matching basename", () => {
+    expect(classifyForResolution({ href: "report.md", text: "Report" }, CONTEXT)).toEqual({
+      kind: "resolved",
+      value: {
+        kind: "file",
+        target: {
+          raw: "report.md",
+          path: "/Users/test/project/report.md",
+          lineStart: undefined,
+          lineEnd: undefined,
+        },
+      },
+    });
+  });
+
+  it("opens explicit file links regardless of their extension", () => {
+    expect(
+      classifyForResolution({ href: "exports/model.ldr", text: "LEGO model" }, CONTEXT),
+    ).toEqual({
+      kind: "resolved",
+      value: {
+        kind: "file",
+        target: {
+          raw: "exports/model.ldr",
+          path: "/Users/test/project/exports/model.ldr",
+          lineStart: undefined,
+          lineEnd: undefined,
+        },
+      },
+    });
+  });
+
   it("returns the directFile target synchronously", () => {
     const result = classifyForResolution({ href: "src/components/message.tsx#L33" }, CONTEXT);
 
