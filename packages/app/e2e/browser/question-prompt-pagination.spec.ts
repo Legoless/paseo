@@ -1,4 +1,4 @@
-import { test } from "../support/fixtures";
+import { expect, test } from "../support/fixtures";
 import { openAgentRoute, seedMockAgentWorkspace } from "../support/helpers/mock-agent";
 import {
   chooseQuestionOption,
@@ -23,8 +23,16 @@ const SUCCESS_QUESTION = "What success criteria should we use?";
 const REPO_URL_QUESTION = "What is the GitHub private repo URL to push to?";
 const COMMIT_MESSAGE_QUESTION = "What should the first commit message be?";
 
+function selectedQuestionText(): string {
+  return window.getSelection()?.toString().trim() ?? "";
+}
+
+function clipboardText(): Promise<string> {
+  return navigator.clipboard.readText();
+}
+
 test.describe("Question prompt pagination", () => {
-  test("shows one question at a time with numbered navigation", async ({ page }) => {
+  test("shows one question at a time with numbered navigation", async ({ page, context }) => {
     test.setTimeout(180_000);
 
     const session = await seedMockAgentWorkspace({
@@ -44,6 +52,14 @@ test.describe("Question prompt pagination", () => {
       });
       await expectQuestionHidden(page, ROLLOUT_QUESTION);
       await expectQuestionHidden(page, SUCCESS_QUESTION);
+
+      await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+      await page
+        .getByTestId("question-form-current-question")
+        .click({ clickCount: 3, position: { x: 5, y: 5 } });
+      await expect.poll(() => page.evaluate(selectedQuestionText)).toBe(SURFACE_QUESTION);
+      await page.keyboard.press("ControlOrMeta+c");
+      await expect.poll(() => page.evaluate(clipboardText)).toBe(SURFACE_QUESTION);
 
       await chooseQuestionOption(page, "App");
       await expectCurrentQuestion(page, {
