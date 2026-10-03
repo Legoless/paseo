@@ -19,6 +19,8 @@ import {
 import {
   ACPAgentClient,
   ACPAgentSession,
+  type ACPPromptResponseContext,
+  type ACPPromptResponseValidator,
   type SpawnedACPProcess,
   type SessionStateResponse,
   buildACPClientCapabilities,
@@ -98,7 +100,10 @@ describe("buildACPClientCapabilities", () => {
 
 interface ACPSessionInternals {
   sessionId: string | null;
-  connection: { prompt: (...args: unknown[]) => Promise<PromptResponse> };
+  connection: {
+    prompt: (...args: unknown[]) => Promise<PromptResponse>;
+    cancel?: ClientSideConnection["cancel"];
+  };
   activeForegroundTurnId: string | null;
   configOptions: SessionConfigOption[];
   translateSessionUpdate(update: SessionUpdate): AgentStreamEvent[];
@@ -140,9 +145,10 @@ function createSession(
   options: {
     terminateProcess?: ProcessTerminator;
     launchEnv?: Record<string, string>;
+    promptResponseValidator?: ACPPromptResponseValidator;
   } = {},
 ): ACPAgentSession {
-  const { terminateProcess, launchEnv } = options;
+  const { terminateProcess, launchEnv, promptResponseValidator } = options;
   return new ACPAgentSession(
     {
       provider: "claude-acp",
@@ -153,6 +159,7 @@ function createSession(
       logger: createTestLogger(),
       defaultCommand: ["claude", "--acp"],
       defaultModes: [],
+      promptResponseValidator,
       capabilities: {
         supportsStreaming: true,
         supportsSessionPersistence: true,
@@ -2841,6 +2848,17 @@ describe("ACPAgentSession", () => {
     });
   });
 
+  test("preserves string error codes from provider-native failures", () => {
+    class NativeProviderError extends Error {
+      readonly code = "internal";
+    }
+    expect(summarizeACPRequestError(new NativeProviderError("OAuth request failed"))).toEqual({
+      message: "OAuth request failed",
+      code: "internal",
+      diagnostic: "OAuth request failed | code=internal",
+    });
+  });
+
   test("names the Cursor Fable restricted-model gate", () => {
     expect(isACPSettingsGateText("\n\nCheck your settings to continue")).toBe(true);
     expect(describeACPSettingsGate("claude-fable-5-1")).toBe(
@@ -3750,6 +3768,87 @@ describe("ACPAgentSession", () => {
       error: "prompt failed",
     });
     expect(asInternals<ACPSessionInternals>(session).activeForegroundTurnId).toBeNull();
+  });
+
+  test("startTurn validates provider-native outcomes before reporting a completed ACP response", async () => {
+    const contexts: ACPPromptResponseContext[] = [];
+    const session = createSession({
+      launchEnv: { KIMI_CODE_HOME: "/tmp/isolated-kimi-home" },
+      promptResponseValidator: async (context) => {
+        contexts.push(context);
+        throw new Error("OAuthConnectionError: OAuth request failed: fetch failed");
+      },
+    });
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => {
+      events.push(event);
+    });
+    const internals = asInternals<ACPSessionInternals>(session);
+    internals.sessionId = "session-native-error";
+    internals.connection = { prompt: async () => ({ stopReason: "end_turn" }) };
+    const { turnId } = await session.startTurn("Resume last session");
+    await vi.waitFor(() => {
+      expect(events.at(-1)).toMatchObject({
+        type: "turn_failed",
+        turnId,
+        error: "OAuthConnectionError: OAuth request failed: fetch failed",
+      });
+    });
+    expect(events.filter((event) => event.type === "turn_completed")).toEqual([]);
+    expect(
+      contexts.map((context) => ({
+        cwd: context.cwd,
+        sessionId: context.sessionId,
+        kimiHome: context.env.KIMI_CODE_HOME,
+        stopReason: context.response.stopReason,
+      })),
+    ).toEqual([
+      {
+        cwd: "/tmp/paseo-acp-test",
+        sessionId: "session-native-error",
+        kimiHome: "/tmp/isolated-kimi-home",
+        stopReason: "end_turn",
+      },
+    ]);
+    expect(internals.activeForegroundTurnId).toBeNull();
+  });
+
+  test("does not complete a closed turn after provider-native validation finishes", async () => {
+    let markValidationStarted!: () => void;
+    const validationStarted = new Promise<void>((resolve) => {
+      markValidationStarted = resolve;
+    });
+    let releaseValidation!: () => void;
+    const validationPending = new Promise<void>((resolve) => {
+      releaseValidation = resolve;
+    });
+    const session = createSession({
+      promptResponseValidator: async () => {
+        markValidationStarted();
+        await validationPending;
+      },
+    });
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => {
+      events.push(event);
+    });
+    const internals = asInternals<ACPSessionInternals>(session);
+    internals.sessionId = "session-pending-validation";
+    internals.connection = {
+      prompt: async () => ({ stopReason: "end_turn" }),
+      cancel: async () => {},
+    };
+    await session.startTurn("Resume last session");
+    await validationStarted;
+    await session.close();
+    releaseValidation();
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(
+      events.filter((event) => event.type === "turn_completed" || event.type === "turn_failed"),
+    ).toEqual([]);
+    expect(internals.activeForegroundTurnId).toBeNull();
   });
 
   // The wedge behind #349/#3256: session/cancel is a notification, so

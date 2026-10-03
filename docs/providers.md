@@ -63,7 +63,10 @@ model: Privacy Mode and every Enterprise team must approve its data-retention po
 Cursor dashboard before `cursor-agent` will run it. ACP otherwise ends the turn with
 `Check your settings to continue`. Kimi still probes model selections in its own shim. The
 initial session supplies modes and the current model; it does not override the model list
-returned by a resolver.
+returned by a resolver. Kimi 2.1.1 maps some native failures, including OAuth connection errors,
+to a successful ACP `end_turn`. Its shim checks the current turn's structured native journal before
+accepting that result; keep this recovery in the Kimi shim rather than inferring failures from empty
+replies or stderr across ACP providers.
 
 ### Direct
 
