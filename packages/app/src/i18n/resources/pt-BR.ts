@@ -188,6 +188,8 @@ export const ptBR = {
     clientCommands: {
       archiveAgent: "Fechar o agente atual",
       freshDraft: "Fechar este agente e iniciar um novo rascunho",
+      closeDraft: "Fechar este rascunho",
+      clearDraft: "Limpar este rascunho e recomeçar",
     },
     github: {
       searching: "Buscando...",

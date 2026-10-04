@@ -186,6 +186,8 @@ export const zhCN = {
     clientCommands: {
       archiveAgent: "关闭当前 Agent",
       freshDraft: "关闭此 Agent 并开始新的草稿",
+      closeDraft: "关闭此草稿",
+      clearDraft: "清空此草稿并重新开始",
     },
     github: {
       searching: "正在搜索...",

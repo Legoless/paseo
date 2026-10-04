@@ -189,6 +189,8 @@ export const ja = {
     clientCommands: {
       archiveAgent: "現在のエージェントを閉じる",
       freshDraft: "このエージェントを閉じて新しい下書きを開始",
+      closeDraft: "この下書きを閉じる",
+      clearDraft: "この下書きを消去してやり直す",
     },
     github: {
       searching: "検索中...",

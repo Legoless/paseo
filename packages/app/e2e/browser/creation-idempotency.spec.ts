@@ -1,3 +1,4 @@
+import { rename } from "node:fs/promises";
 import type { createCreationScenario } from "../support/helpers/creation";
 import { expect } from "../support/fixtures";
 import { test } from "../support/creation-fixtures";
@@ -70,6 +71,35 @@ test("repeated new-workspace prompt submissions create one workspace and one age
   await creation.openWorkspaceForm("local");
   await creation.submitRepeatedly("Create", "Start one agent in one new workspace.");
   await creation.expectPromptVisible();
+  await creation.expectOneCreatedWorkspace();
+  await creation.expectAgentCount(1);
+});
+
+test("editing a prompt after a confirmed workspace failure creates one workspace on retry", async ({
+  page,
+  creation,
+}) => {
+  await creation.openWorkspaceForm("local");
+  const sourceDirectory = new URL(page.url()).searchParams.get("dir");
+  if (!sourceDirectory) {
+    throw new Error("New workspace route has no source directory.");
+  }
+  const movedDirectory = `${sourceDirectory}-retry-source`;
+  await rename(sourceDirectory, movedDirectory);
+  try {
+    await creation.submitPrompt("Try the missing source directory.", "Create");
+    await expect(
+      page.getByText(`Directory not found: ${sourceDirectory}`, { exact: true }).first(),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/\/new(?:\?.*)?$/);
+    await creation.expectAgentCount(0);
+  } finally {
+    await rename(movedDirectory, sourceDirectory);
+  }
+
+  const editedPrompt = "Retry this restored source with an edited prompt.";
+  await creation.submitPrompt(editedPrompt, "Create");
+  await creation.expectPromptVisible(editedPrompt);
   await creation.expectOneCreatedWorkspace();
   await creation.expectAgentCount(1);
 });

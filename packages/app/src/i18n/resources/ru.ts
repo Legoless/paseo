@@ -189,6 +189,8 @@ export const ru = {
     clientCommands: {
       archiveAgent: "Закрыть текущего агента",
       freshDraft: "Закрыть этого агента и создать новый черновик",
+      closeDraft: "Закрыть этот черновик",
+      clearDraft: "Очистить черновик и начать заново",
     },
     github: {
       searching: "Идет поиск...",

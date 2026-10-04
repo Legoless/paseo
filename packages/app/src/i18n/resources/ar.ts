@@ -185,6 +185,8 @@ export const ar = {
     clientCommands: {
       archiveAgent: "أرشفة الوكيل الحالي",
       freshDraft: "أرشفة هذا الوكيل وابدأ مسودة جديدة",
+      closeDraft: "إغلاق هذه المسودة",
+      clearDraft: "مسح هذه المسودة والبدء من جديد",
     },
     github: {
       searching: "جارٍ البحث...",

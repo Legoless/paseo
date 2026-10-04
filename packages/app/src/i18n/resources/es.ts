@@ -189,6 +189,8 @@ export const es = {
     clientCommands: {
       archiveAgent: "Cerrar el agente actual",
       freshDraft: "Cierre este agente y comience un nuevo borrador",
+      closeDraft: "Cerrar este borrador",
+      clearDraft: "Borrar este borrador y empezar de nuevo",
     },
     github: {
       searching: "Búsqueda...",

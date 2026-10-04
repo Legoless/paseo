@@ -191,6 +191,8 @@ export const fr = {
     clientCommands: {
       archiveAgent: "Fermer l'agent actuel",
       freshDraft: "Fermez cet agent et démarrez un nouveau brouillon",
+      closeDraft: "Fermer ce brouillon",
+      clearDraft: "Effacer ce brouillon et recommencer",
     },
     github: {
       searching: "Recherche...",

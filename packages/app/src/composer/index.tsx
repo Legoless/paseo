@@ -152,7 +152,11 @@ import { useComposerForgeAutoAttach } from "./forge-auto-attach";
 import { readClipboardImage } from "./clipboard-image";
 import { normalizeNativePastedImages, type NativePastedFile } from "./native-pasted-image";
 import { PluginResourceAttachmentPill, usePluginAttachmentPicker } from "@/plugins";
-import { resolveClientSlashCommand, type ClientSlashCommand } from "@/client-slash-commands";
+import {
+  resolveClientSlashCommand,
+  type ClientSlashCommand,
+  type ClientSlashCommandTarget,
+} from "@/client-slash-commands";
 import {
   appendWorkspaceFileAttachment,
   getWorkspaceFileAttachmentKey,
@@ -945,6 +949,8 @@ interface ComposerProps {
   isPaneFocused: boolean;
   onSubmitMessage?: (payload: MessagePayload) => Promise<void>;
   onClientSlashCommand?: (command: ClientSlashCommand) => Promise<void>;
+  /** Who `onClientSlashCommand` acts on; a draft describes `/clear` and `/exit` as draft actions. */
+  clientSlashCommandTarget?: ClientSlashCommandTarget;
   /** When true, the submit button is enabled even without text or images (e.g. external attachment selected). */
   hasExternalContent?: boolean;
   /** When true, the composer can submit even with no text or attachments. */
@@ -1246,6 +1252,7 @@ function ComposerContentImpl({
   workspaceId,
   onSubmitMessage,
   onClientSlashCommand,
+  clientSlashCommandTarget,
   hasExternalContent = false,
   allowEmptySubmit = false,
   submitButtonAccessibilityLabel,
@@ -2370,6 +2377,7 @@ function ComposerContentImpl({
       draftConfig: commandDraftConfig,
       // Client commands discard the composer's attachments, so only a missing handler blocks them.
       canExecuteClientSlashCommand: Boolean(onClientSlashCommand),
+      clientSlashCommandTarget,
       onClientSlashCommand: runClientSlashCommand,
       pluginClientSlashCommands,
     }),
@@ -2379,6 +2387,7 @@ function ComposerContentImpl({
       agentId,
       commandDraftConfig,
       onClientSlashCommand,
+      clientSlashCommandTarget,
       runClientSlashCommand,
       pluginClientSlashCommands,
     ],

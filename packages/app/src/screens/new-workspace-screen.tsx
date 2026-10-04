@@ -65,6 +65,10 @@ import { buildNewWorkspaceDraftKey, generateDraftId } from "@/stores/draft-keys"
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { isActiveCreateFlowForDraft, useCreateFlowStore } from "@/stores/create-flow-store";
 import {
+  createWorkspaceCreationKey,
+  WorkspaceCreationFailedError,
+} from "./new-workspace-creation-key";
+import {
   useWorkspaceDraftSubmissionStore,
   type PendingWorkspaceDraftSetup,
 } from "@/stores/workspace-draft-submission-store";
@@ -847,7 +851,7 @@ async function createMultiplicityWorkspace(input: {
   const promptFailure = toInitialPromptFailure(payload);
   if (promptFailure) throw promptFailure;
   if (payload.error || !payload.workspace) {
-    throw new Error(payload.error ?? input.createFailedMessage);
+    throw new WorkspaceCreationFailedError(payload.error ?? input.createFailedMessage, payload);
   }
   const normalizedWorkspace = normalizeWorkspaceDescriptor(payload.workspace);
   const workspaceForInitialMerge = input.withInitialAgent
@@ -1659,6 +1663,9 @@ export function NewWorkspaceScreen({
     draftId: draftId ?? generateDraftId(),
     worktreeSlug: createNameId(),
   }));
+  const [workspaceCreationKey] = useState(() =>
+    createWorkspaceCreationKey(creationIdentity.draftId),
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [creationResult, setCreationResult] = useState<
     WorkspaceCreationResult | { workspace: null }
@@ -2060,23 +2067,25 @@ export function NewWorkspaceScreen({
             selectedItem ?? defaultBasePickerItem(checkoutStatusForCreate),
           )
         : undefined;
-      const normalizedWorkspace = await createMultiplicityWorkspace({
-        idempotencyKey: creationIdentity.draftId,
-        worktreeSlug: creationIdentity.worktreeSlug,
-        client: connectedClient,
-        isolation: createsWorktree ? "worktree" : "local",
-        project: selectedProject,
-        sourceDirectory: selectedSourceDirectory,
-        checkoutRequest,
-        withInitialAgent: input.withInitialAgent,
-        prompt: input.prompt,
-        attachments: input.attachments,
-        agent: input.agent,
-        onEvent: input.onEvent,
-        mergeWorkspaces,
-        serverId: selectedServerId,
-        createFailedMessage: t("newWorkspace.errors.createWorktreeFailed"),
-      });
+      const normalizedWorkspace = await workspaceCreationKey.run((idempotencyKey) =>
+        createMultiplicityWorkspace({
+          idempotencyKey,
+          worktreeSlug: creationIdentity.worktreeSlug,
+          client: connectedClient,
+          isolation: createsWorktree ? "worktree" : "local",
+          project: selectedProject,
+          sourceDirectory: selectedSourceDirectory,
+          checkoutRequest,
+          withInitialAgent: input.withInitialAgent,
+          prompt: input.prompt,
+          attachments: input.attachments,
+          agent: input.agent,
+          onEvent: input.onEvent,
+          mergeWorkspaces,
+          serverId: selectedServerId,
+          createFailedMessage: t("newWorkspace.errors.createWorktreeFailed"),
+        }),
+      );
       setCreationResult(normalizedWorkspace);
       return normalizedWorkspace;
     },
@@ -2093,6 +2102,7 @@ export function NewWorkspaceScreen({
       supportsWorkspaceMultiplicity,
       t,
       withConnectedClient,
+      workspaceCreationKey,
     ],
   );
 
