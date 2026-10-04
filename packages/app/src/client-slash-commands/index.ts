@@ -12,12 +12,20 @@ import {
 
 export type ClientSlashCommandKind = "archive-agent" | "replace-agent-with-draft";
 export type ClientSlashCommandExecution = "immediate" | "insert";
+/** What the composer running the command belongs to: an agent, or a draft that has none yet. */
+export type ClientSlashCommandTarget = "agent" | "draft";
+
+type ClientSlashCommandDescriptionKey =
+  | "composer.clientCommands.archiveAgent"
+  | "composer.clientCommands.freshDraft"
+  | "composer.clientCommands.closeDraft"
+  | "composer.clientCommands.clearDraft";
 
 export interface ClientSlashCommand {
   name: string;
   aliases: readonly string[];
   description: string;
-  descriptionKey: "composer.clientCommands.archiveAgent" | "composer.clientCommands.freshDraft";
+  descriptionKeys: Record<ClientSlashCommandTarget, ClientSlashCommandDescriptionKey>;
   argumentHint: string;
   kind: ClientSlashCommandKind;
   execution: ClientSlashCommandExecution;
@@ -28,7 +36,10 @@ export const CLIENT_SLASH_COMMANDS: readonly ClientSlashCommand[] = [
     name: "exit",
     aliases: ["quit", "q"],
     description: "Archive the current agent",
-    descriptionKey: "composer.clientCommands.archiveAgent",
+    descriptionKeys: {
+      agent: "composer.clientCommands.archiveAgent",
+      draft: "composer.clientCommands.closeDraft",
+    },
     argumentHint: "",
     kind: "archive-agent",
     execution: "immediate",
@@ -37,7 +48,10 @@ export const CLIENT_SLASH_COMMANDS: readonly ClientSlashCommand[] = [
     name: "clear",
     aliases: ["new"],
     description: "Archive this agent and start a fresh draft",
-    descriptionKey: "composer.clientCommands.freshDraft",
+    descriptionKeys: {
+      agent: "composer.clientCommands.freshDraft",
+      draft: "composer.clientCommands.clearDraft",
+    },
     argumentHint: "",
     kind: "replace-agent-with-draft",
     execution: "immediate",
@@ -67,7 +81,8 @@ export function resolveClientSlashCommand(input: { text: string }): ClientSlashC
     return null;
   }
 
-  return COMMAND_BY_NAME.get(commandName) ?? null;
+  // Autocomplete matches case-insensitively, so a typed `/Clear` must resolve the same way.
+  return COMMAND_BY_NAME.get(commandName.toLowerCase()) ?? null;
 }
 
 export function buildDraftAgentSetup(agent: Agent): WorkspaceDraftTabSetup {

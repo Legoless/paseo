@@ -1,5 +1,10 @@
 import { expect, test, type Page } from "../support/fixtures";
-import { composerLocator, expectComposerVisible, submitMessage } from "../support/helpers/composer";
+import {
+  attachFileFromMenu,
+  composerLocator,
+  expectComposerVisible,
+  submitMessage,
+} from "../support/helpers/composer";
 import { openAgentRoute, seedMockAgentWorkspace } from "../support/helpers/mock-agent";
 import { renameModalInput, renameModalSubmit } from "../support/helpers/rename";
 import {
@@ -167,6 +172,55 @@ test.describe("Client slash commands", () => {
         await createAgentFromReplacementDraft(page);
         await waitForReplacementAgentId(page, agentId);
         await expectAgentArchivedInSessions(page, title);
+      },
+    );
+  });
+
+  test("mixed-case slash clear clears an attached draft repeatedly with draft descriptions", async ({
+    page,
+  }) => {
+    await withOpenReadyMockAgent(
+      page,
+      { title: "Slash clear draft e2e" },
+      async ({ agentId, title }) => {
+        await selectClientSlashCommand(page, "/Clear", "/clear");
+        await expectWorkspaceTabHidden(page, agentId);
+        await expectComposerVisible(page);
+        const draftTab = page
+          .getByTestId("workspace-pane-main")
+          .locator('[data-testid^="workspace-tab-draft_"]');
+        await expect(draftTab).toHaveCount(1);
+        await expect(draftTab).toContainText(title);
+
+        await attachFileFromMenu(page, {
+          name: "clear-draft.txt",
+          mimeType: "text/plain",
+          buffer: Buffer.from("Discard this attachment with /clear."),
+        });
+        await expect(page.getByTestId("composer-file-attachment-pill")).toContainText(
+          "clear-draft.txt",
+        );
+        const input = composerLocator(page);
+        await input.fill("/exit");
+        await expect(page.getByText("Close this draft", { exact: true }).first()).toBeVisible();
+
+        for (const command of ["/Clear", "/clear"]) {
+          await input.fill(command);
+          await expect(
+            page.getByText("Clear this draft and start over", { exact: true }).first(),
+          ).toBeVisible();
+          await input.press("Enter");
+          await expect(input).toHaveValue("");
+          await expect(draftTab).toHaveCount(1);
+          await expect(draftTab).toContainText(title);
+          await expect(draftTab).toHaveAttribute("aria-selected", "true");
+          await expect(page.getByTestId("composer-file-attachment-pill")).toHaveCount(0);
+          await expect(
+            page
+              .getByTestId("workspace-pane-main")
+              .locator('[data-testid^="workspace-tab-agent_"]'),
+          ).toHaveCount(0);
+        }
       },
     );
   });

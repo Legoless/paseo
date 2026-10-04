@@ -106,6 +106,11 @@ describe("resolveClientSlashCommand", () => {
     });
   });
 
+  it("resolves a capitalized command, as a phone keyboard may type it", () => {
+    expect(resolveClientSlashCommand({ text: "/Clear" })).toMatchObject({ name: "clear" });
+    expect(resolveClientSlashCommand({ text: "/EXIT" })).toMatchObject({ name: "exit" });
+  });
+
   it("leaves provider commands, arguments, and ordinary messages alone", () => {
     expect(resolveClientSlashCommand({ text: "/clear now" })).toBeNull();
     expect(resolveClientSlashCommand({ text: "/quit now" })).toBeNull();

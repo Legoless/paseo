@@ -183,6 +183,8 @@ export const en = {
     clientCommands: {
       archiveAgent: "Close the current agent",
       freshDraft: "Close this agent and start a fresh draft",
+      closeDraft: "Close this draft",
+      clearDraft: "Clear this draft and start over",
     },
     github: {
       searching: "Searching...",

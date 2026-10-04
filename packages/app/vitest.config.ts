@@ -86,6 +86,8 @@ export default defineConfig({
       "react/jsx-runtime",
       "react-native-gesture-handler > hoist-non-react-statics",
       "react-native-gesture-handler > invariant",
+      // Deep CJS import in streaming-markdown; found late, it reloads the browser run.
+      "markdown-it/lib/rules_block/reference",
     ],
     exclude: [
       "react-native-reanimated",

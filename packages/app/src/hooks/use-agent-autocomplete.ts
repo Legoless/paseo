@@ -12,7 +12,11 @@ import { orderAutocompleteOptions } from "@/components/ui/autocomplete-utils";
 import { useAutocomplete } from "./use-autocomplete";
 import { useSessionStore } from "@/stores/session-store";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { CLIENT_SLASH_COMMANDS, type ClientSlashCommand } from "@/client-slash-commands";
+import {
+  CLIENT_SLASH_COMMANDS,
+  type ClientSlashCommand,
+  type ClientSlashCommandTarget,
+} from "@/client-slash-commands";
 import type { PluginClientSlashCommand } from "@/plugins/client-slash-commands";
 import { mergeSlashCommandSources } from "@/plugins/client-slash-commands/model";
 import {
@@ -38,6 +42,8 @@ interface UseAgentAutocompleteInput {
   onAutocompleteApplied?: () => void;
   onClientSlashCommand?: (command: ClientSlashCommand) => void;
   canExecuteClientSlashCommand?: boolean;
+  /** Who the built-in commands act on, which picks their descriptions. Defaults to an agent. */
+  clientSlashCommandTarget?: ClientSlashCommandTarget;
   pluginClientSlashCommands?: readonly PluginClientSlashCommand[];
 }
 
@@ -166,14 +172,20 @@ function mapDirectorySuggestionsToEntries(payload: {
   }));
 }
 
-function mapCommandToOption(entry: AvailableCommand, t: TFunction): AgentAutocompleteOption {
+function mapCommandToOption(
+  entry: AvailableCommand,
+  t: TFunction,
+  clientCommandTarget: ClientSlashCommandTarget,
+): AgentAutocompleteOption {
   const command = entry.command;
   const base = {
     id: command.name,
     label: `/${command.name}`,
     detail: command.argumentHint || undefined,
     description:
-      entry.source === "client" ? t(entry.command.descriptionKey) : entry.command.description,
+      entry.source === "client"
+        ? t(entry.command.descriptionKeys[clientCommandTarget])
+        : entry.command.description,
     kind: "command" as const,
   };
   if (entry.source === "client") {
@@ -201,6 +213,7 @@ interface BuildAutocompleteOptionsInput {
   pluginCommands: readonly PluginClientSlashCommand[];
   /** Built-in commands are listed only where the composer can run them. */
   showClientCommands: boolean;
+  clientCommandTarget?: ClientSlashCommandTarget;
   commandFilterQuery: string;
   activeSlashCommand: SlashCommandRange | null;
   activeFileMention: FileMentionRange | null;
@@ -242,7 +255,9 @@ export function buildCommandAutocompleteOptions(input: BuildAutocompleteOptionsI
       input.commandFilterQuery,
     );
     const orderedMatches = orderAutocompleteOptions(matches);
-    return orderedMatches.map((entry) => mapCommandToOption(entry, input.t));
+    return orderedMatches.map((entry) =>
+      mapCommandToOption(entry, input.t, input.clientCommandTarget ?? "agent"),
+    );
   }
 
   const activeFileMention = input.activeFileMention;
@@ -350,6 +365,7 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
     onAutocompleteApplied,
     onClientSlashCommand,
     canExecuteClientSlashCommand,
+    clientSlashCommandTarget,
     pluginClientSlashCommands = [],
   } = input;
 
@@ -471,6 +487,7 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
         activeSlashCommand,
         fileSuggestions: fileSuggestionsQuery.data ?? [],
         showClientCommands: canExecuteClientSlashCommand === true,
+        clientCommandTarget: clientSlashCommandTarget,
         isVisible,
         mode,
         t,
@@ -483,6 +500,7 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
       pluginClientSlashCommands,
       fileSuggestionsQuery.data,
       canExecuteClientSlashCommand,
+      clientSlashCommandTarget,
       isVisible,
       mode,
       t,

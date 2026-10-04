@@ -1352,10 +1352,11 @@ describe("terminal restore", () => {
     return command;
   }
 
+  // The reported directories need not exist, and the process runs in a directory no test deletes:
+  // Windows keeps a process's cwd locked, so removing it after the test fails with EBUSY.
   it("follows the directory the shell reports, keeping the terminal's own cwd", async () => {
-    const cwd = mkdtempSync(join(realpathSync(tmpdir()), "terminal-shell-cwd-"));
-    temporaryDirs.push(cwd);
-    const moved = join(cwd, "moved here");
+    const cwd = realpathSync(tmpdir());
+    const moved = join(cwd, "terminal-shell-cwd", "moved here");
     const output = [
       osc7(moved),
       // A shell inside ssh reports the remote host's path; a broken encoding names no path.
@@ -1381,9 +1382,8 @@ describe("terminal restore", () => {
   });
 
   it("takes only the directory a reporting shell prints at its prompt", async () => {
-    const cwd = mkdtempSync(join(realpathSync(tmpdir()), "terminal-shell-cwd-"));
-    temporaryDirs.push(cwd);
-    const moved = join(cwd, "moved");
+    const cwd = realpathSync(tmpdir());
+    const moved = join(cwd, "terminal-shell-cwd", "moved");
     // zsh's integration at a prompt (633;A), then after `cd moved` (its OSC 7, then 633;D), then a
     // program that prints an OSC 7 of its own while it runs.
     const output = [
@@ -1423,10 +1423,10 @@ describe("terminal restore", () => {
   });
 
   it("starts a restored shell in its last directory", async () => {
+    // The shell runs in `moved`, so that is the directory no test deletes (see above).
     const cwd = mkdtempSync(join(realpathSync(tmpdir()), "terminal-shell-cwd-"));
     temporaryDirs.push(cwd);
-    const moved = join(cwd, "moved");
-    mkdirSync(moved);
+    const moved = realpathSync(tmpdir());
     const session = trackSession(
       await createTerminal({
         workspaceId: "ws-test",
@@ -1443,7 +1443,8 @@ describe("terminal restore", () => {
     );
 
     await waitForState(session, (state) => getLines(state).join("\n").includes("pwd:"));
-    expect(getLines(session.getState()).join("\n")).toContain(`pwd:${moved}`);
+    // A whole line: `moved` is a prefix of `cwd`, so a substring would match the wrong directory.
+    expect(getLines(session.getState()).map((line) => line.trimEnd())).toContain(`pwd:${moved}`);
     expect(session.getShellCwd?.()).toBe(moved);
     expect(session.cwd).toBe(cwd);
   });

@@ -187,6 +187,8 @@ export const ko = {
     clientCommands: {
       archiveAgent: "현재 에이전트 닫기",
       freshDraft: "이 에이전트를 닫고 새 초안을 시작합니다",
+      closeDraft: "이 초안 닫기",
+      clearDraft: "이 초안을 지우고 다시 시작",
     },
     github: {
       searching: "검색 중...",

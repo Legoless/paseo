@@ -1,10 +1,8 @@
 import type MarkdownIt from "markdown-it";
+import referenceRule from "markdown-it/lib/rules_block/reference";
 import type StateInline from "markdown-it/lib/rules_inline/state_inline.mjs";
 
 const STREAMING_TAIL = Symbol("streaming markdown tail");
-const referenceRule: Parameters<
-  MarkdownIt["block"]["ruler"]["at"]
->[1] = require("markdown-it/lib/rules_block/reference");
 
 /** Adds provisional inline formatting without changing the source or literal code blocks. */
 export function enableStreamingMarkdown(parser: MarkdownIt): void {
