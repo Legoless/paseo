@@ -16,10 +16,12 @@ interface Mounted {
   root: HTMLDivElement;
   runtime: TerminalEmulatorRuntime;
   terminal: InspectableTerminal;
+  sizes: Array<{ rows: number; cols: number; shouldClaim: boolean }>;
 }
 
 interface InspectableTerminal {
   cols: number;
+  rows: number;
   buffer: {
     active: {
       length: number;
@@ -53,7 +55,14 @@ function mount(width: number, height: number): Mounted {
   document.body.appendChild(root);
 
   const runtime = new TerminalEmulatorRuntime();
-  runtime.setCallbacks({ callbacks: {} });
+  const sizes: Mounted["sizes"] = [];
+  runtime.setCallbacks({
+    callbacks: {
+      onResize: (size) => {
+        sizes.push(size);
+      },
+    },
+  });
   runtime.mount({
     root,
     host,
@@ -65,7 +74,7 @@ function mount(width: number, height: number): Mounted {
   if (!terminal) {
     throw new Error("terminal did not mount");
   }
-  const m = { host, root, runtime, terminal };
+  const m = { host, root, runtime, terminal, sizes };
   mounted.push(m);
   return m;
 }
@@ -141,6 +150,104 @@ afterEach(() => {
 });
 
 describe("terminal resize reflow repro (Paseo terminal)", () => {
+  it.each([
+    { history: "without prior output", priorOutput: [] },
+    { history: "after a committed prior output", priorOutput: [pinoLine(89)] },
+  ])(
+    "commits live output queued behind a settled pane snapshot $history",
+    async ({ priorOutput }) => {
+      await page.viewport(900, 600);
+      const m = mount(720, 360);
+      await waitFor(() => m.terminal.cols > 40);
+      await new Promise((resolve) => setTimeout(resolve, 2_600));
+      for (const output of priorOutput) {
+        await writeCommitted(m.runtime, encodeTerminalOutput(output));
+      }
+      const state = buildWrappedSnapshot(180);
+      const snapshotCommitted = renderSnapshotCommitted(m.runtime, state);
+      let outputCommitted = false;
+      m.runtime.write({
+        data: encodeTerminalOutput(pinoLine(90)),
+        onCommitted: () => {
+          outputCommitted = true;
+        },
+      });
+      await snapshotCommitted;
+      await waitFor(() => outputCommitted);
+
+      expect(
+        dumpRows(m.terminal)
+          .map((row) => row.text)
+          .join(""),
+      ).toBe(
+        state.grid
+          .flat()
+          .map((cell) => cell.char)
+          .join("") + pinoLine(90).trimEnd(),
+      );
+    },
+  );
+
+  it.each([34, 180])(
+    "keeps a settled pane fitted after restoring a %i-column snapshot",
+    async (cols) => {
+      await page.viewport(900, 600);
+      const m = mount(720, 360);
+      await waitFor(() => m.terminal.cols > 40);
+      // Wait for startup refits to finish so they cannot hide a late snapshot resize.
+      await new Promise((resolve) => setTimeout(resolve, 2_600));
+      const paneSize = { cols: m.terminal.cols, rows: m.terminal.rows };
+      const screen = m.host.querySelector<HTMLElement>(".xterm-screen");
+      if (!screen) throw new Error("terminal screen did not mount");
+      const screenWidth = screen.getBoundingClientRect().width;
+      m.sizes.length = 0;
+
+      const state = { ...buildWrappedSnapshot(cols), rows: paneSize.rows + 8 };
+      await renderSnapshotCommitted(m.runtime, state);
+
+      expect({ cols: m.terminal.cols, rows: m.terminal.rows }).toEqual(paneSize);
+      expect(screen.getBoundingClientRect().width).toBe(screenWidth);
+      expect(m.sizes).toEqual([]);
+      expect(
+        dumpRows(m.terminal)
+          .map((row) => row.text)
+          .join(""),
+      ).toBe(
+        state.grid
+          .flat()
+          .map((cell) => cell.char)
+          .join(""),
+      );
+
+      await writeCommitted(m.runtime, encodeTerminalOutput(pinoLine(90)));
+      expect(
+        dumpRows(m.terminal).find((row) => row.text.startsWith("[server] [15:30:30"))?.text.length,
+      ).toBe(paneSize.cols);
+    },
+  );
+
+  it("refits a snapshot restored while its retained pane is hidden when the pane returns", async () => {
+    await page.viewport(900, 600);
+    const m = mount(720, 360);
+    await waitFor(() => m.terminal.cols > 40);
+    await new Promise((resolve) => setTimeout(resolve, 2_600));
+    const paneSize = { cols: m.terminal.cols, rows: m.terminal.rows };
+    m.sizes.length = 0;
+
+    m.root.style.display = "none";
+    await nextFrame();
+    await renderSnapshotCommitted(m.runtime, buildWrappedSnapshot(34));
+    expect(m.sizes).toEqual([]);
+
+    m.root.style.display = "block";
+    await waitFor(() => m.terminal.cols === paneSize.cols && m.terminal.rows === paneSize.rows);
+
+    expect(m.sizes.filter((size) => size.shouldClaim)).toEqual([]);
+    expect(
+      dumpRows(m.terminal).find((row) => row.text.startsWith("[server]"))?.text.length,
+    ).toBeGreaterThan(34);
+  });
+
   it("snapshot-restored rows stay frozen at the snapshot width after the terminal grows", async () => {
     await page.viewport(1600, 700);
     const m = mount(560, 360); // ~70 cols

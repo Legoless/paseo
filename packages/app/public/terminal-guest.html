@@ -35533,6 +35533,8 @@ WARNING: This link could potentially be dangerous`)
         var APPLICATION_CURSOR_KEYS_MODE = 1;
         var WIN32_INPUT_MODE = 9001;
         var BRACKETED_PASTE_MODE = 2004;
+        var MOUSE_PROTOCOL_MODES = /* @__PURE__ */ new Set([9, 1e3, 1002, 1003]);
+        var MOUSE_ENCODING_MODES = /* @__PURE__ */ new Set([1006, 1016]);
         var CSI_INPUT_MODE_SEQUENCE = new RegExp(
           `${ESC}\\[(?:([<>=?]?)([0-9;]*)u|\\?([0-9;]*)([hl]))`,
           "g",
@@ -35578,6 +35580,8 @@ WARNING: This link could potentially be dangerous`)
             this.win32InputMode = false;
             this.applicationCursorKeys = false;
             this.bracketedPaste = false;
+            this.mouseProtocol = 0;
+            this.mouseEncoding = 0;
             this.kittyKeyboardStack = [];
             this.pending = "";
           }
@@ -35620,6 +35624,8 @@ WARNING: This link could potentially be dangerous`)
             this.win32InputMode = false;
             this.applicationCursorKeys = false;
             this.bracketedPaste = false;
+            this.mouseProtocol = 0;
+            this.mouseEncoding = 0;
             this.kittyKeyboardStack.length = 0;
             this.pending = "";
           }
@@ -35650,6 +35656,12 @@ WARNING: This link could potentially be dangerous`)
             }
             if (this.bracketedPaste) {
               parts.push("\x1B[?2004h");
+            }
+            if (this.mouseProtocol !== 0) {
+              parts.push(`\x1B[?${this.mouseProtocol}h`);
+            }
+            if (this.mouseEncoding !== 0) {
+              parts.push(`\x1B[?${this.mouseEncoding}h`);
             }
             return parts.join("");
           }
@@ -35703,6 +35715,20 @@ WARNING: This link could potentially be dangerous`)
               const previous = this.bracketedPaste;
               this.bracketedPaste = final === "h";
               changed = this.bracketedPaste !== previous || changed;
+            }
+            const enabled = final === "h";
+            for (const mode of modes) {
+              if (MOUSE_PROTOCOL_MODES.has(mode)) {
+                const next = enabled ? mode : 0;
+                changed = next !== this.mouseProtocol || changed;
+                this.mouseProtocol = next;
+                continue;
+              }
+              if (MOUSE_ENCODING_MODES.has(mode)) {
+                const next = enabled ? mode : 0;
+                changed = next !== this.mouseEncoding || changed;
+                this.mouseEncoding = next;
+              }
             }
             return changed;
           }
@@ -37212,6 +37238,13 @@ WARNING: This link could potentially be dangerous`)
           isBarrierOperation(operation) {
             return operation.type !== "write" || Boolean(operation.suppressInput);
           }
+          isSizedSnapshot(operation) {
+            return (
+              operation.type === "snapshot" &&
+              typeof operation.cols === "number" &&
+              typeof operation.rows === "number"
+            );
+          }
           processOutputQueue() {
             if (this.inFlightOutputOperation) {
               return;
@@ -37254,7 +37287,13 @@ WARNING: This link could potentially be dangerous`)
               OUTPUT_OPERATION_TIMEOUT_MS,
             );
             try {
-              terminal.write(EMPTY_TERMINAL_OUTPUT, startBarrier);
+              terminal.write(EMPTY_TERMINAL_OUTPUT, () => {
+                if (this.isSizedSnapshot(operation)) {
+                  queueMicrotask(startBarrier);
+                  return;
+                }
+                startBarrier();
+              });
             } catch {
               startBarrier();
             }
@@ -37288,6 +37327,7 @@ WARNING: This link could potentially be dangerous`)
             if (operation.suppressInput) {
               this.suppressInput = Boolean(operation.suppressInput);
             }
+            const shouldRefitAfterSnapshot = this.isSizedSnapshot(operation);
             const finalizeOperation = (expectedOperation) => {
               if (this.inFlightOutputOperation !== expectedOperation) {
                 return;
@@ -37295,6 +37335,9 @@ WARNING: This link could potentially be dangerous`)
               this.inFlightOutputOperation = null;
               this.clearInFlightOutputTimeout();
               this.suppressInput = previousSuppressInput;
+              if (shouldRefitAfterSnapshot) {
+                this.fitAndEmitResize?.({ shouldClaim: false });
+              }
               expectedOperation.onCommitted?.();
               if (expectedOperation.type === "snapshot" && this.needsTextureAtlasReset) {
                 this.needsTextureAtlasReset = false;
@@ -37343,6 +37386,12 @@ WARNING: This link could potentially be dangerous`)
             }, OUTPUT_OPERATION_TIMEOUT_MS);
             try {
               terminal.write(data, () => {
+                if (shouldRefitAfterSnapshot) {
+                  queueMicrotask(() => {
+                    finalizeOperation(operation);
+                  });
+                  return;
+                }
                 finalizeOperation(operation);
               });
             } catch {
