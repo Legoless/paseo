@@ -6,6 +6,7 @@ import {
   isAntigravityBusyScreen,
   isClaudeBusyScreen,
   isCodexBusyScreen,
+  isGrokBusyScreen,
   isIdleAgentScreen,
   isIdlePromptLine,
   isNeedsInputScreen,
@@ -85,6 +86,7 @@ describe("detectAgentFromOutput", () => {
     expect(detectAgentFromOutput("\x1b[32m✳ Claude\x1b[0m is ready")).toBe("claude");
     expect(detectAgentFromOutput("OpenAI Codex v0.155.1")).toBe("codex");
     expect(detectAgentFromOutput("Welcome to Grok Build")).toBe("grok");
+    expect(detectAgentFromOutput("Grok 4.7 (xhigh) · always-approve")).toBe("grok");
     expect(detectAgentFromOutput("Welcome to the Antigravity CLI")).toBe("antigravity");
     expect(detectAgentFromOutput("OpenCode v1.18.31")).toBe("opencode");
     expect(detectAgentFromOutput("  Cursor Agent\r\n  v2026.09.18-9a7762b")).toBe("cursor");
@@ -261,9 +263,11 @@ describe("isIdlePromptLine", () => {
     expect(isIdlePromptLine("› 1. Yes, proceed (y)", "codex")).toBe(false);
   });
 
-  it("detects Grok prompt (grok> or >)", () => {
+  it("detects Grok prompt (grok>, >, or ❯)", () => {
     expect(isIdlePromptLine("grok>", "grok")).toBe(true);
     expect(isIdlePromptLine(">", "grok")).toBe(true);
+    expect(isIdlePromptLine("❯", "grok")).toBe(true);
+    expect(isIdlePromptLine("❯ ", "grok")).toBe(true);
   });
 
   it("detects Antigravity prompt (>)", () => {
@@ -1136,6 +1140,76 @@ describe("PtyActivityScanner — full lifecycle", () => {
     screenLines = ["Antigravity completed.", ">"];
     cursorLine = ">";
     scanner.feedOutput("> ");
+    vi.advanceTimersByTime(500);
+
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "finished",
+    });
+  });
+
+  it("keeps Grok working while the dock row above the composer is still running", () => {
+    // The painted row matches the Belle terminal: ⸬, then the verb, then the
+    // clock, with a blank line between the dock and the composer box.
+    const running = [
+      "Worked for 59m16s",
+      "",
+      "▼ Tasks 1",
+      "⸬ Run Start the Stormcloud supervisor for a live run  1h04m",
+      "",
+      "╭────────────────────╮",
+      "❯",
+      "Grok 4.7 (xhigh) · always-approve",
+      "Shift+Tab: mode",
+    ];
+    const finished = [
+      "Worked for 59m16s",
+      "",
+      "╭────────────────────╮",
+      "❯",
+      "Grok 4.7 (xhigh) · always-approve",
+    ];
+    expect(isGrokBusyScreen(running)).toBe(true);
+    expect(isIdleAgentScreen(running, "❯", "grok")).toBe(false);
+    expect(isGrokBusyScreen(finished)).toBe(false);
+    expect(isIdleAgentScreen(finished, "❯", "grok")).toBe(true);
+    expect(
+      isGrokBusyScreen(["⠋ Run Start the Stormcloud supervisor for a live run  1h04m", "", "❯"]),
+    ).toBe(true);
+    // A braille logo, or the turn marker alone, is not a running task.
+    expect(isGrokBusyScreen(["⠋⠋⠋", "", "Worked for 59m16s", "❯"])).toBe(false);
+    expect(isGrokBusyScreen(["⠋⠋⠋ Grok", "❯"])).toBe(false);
+    expect(isGrokBusyScreen(["⸬ Run Start the supervisor", "❯"])).toBe(false);
+    expect(
+      isGrokBusyScreen(["◎ 1 command · 2 monitors · 1 loop · 1 subagent still running", "❯"]),
+    ).toBe(true);
+    expect(isGrokBusyScreen(["◎ waiting · send a message to interrupt", "❯"])).toBe(true);
+    expect(isGrokBusyScreen(["see ◎ 1 command still running in the docs", "❯"])).toBe(false);
+
+    const tracker = new TerminalActivityTracker();
+    let screenLines = running;
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screenLines,
+      readCursorLine: () => "❯",
+      stillnessMs: 500,
+    });
+
+    // The profile command is not the grok binary, and the resumed screen does
+    // not reprint the welcome banner. The next byte is the task clock.
+    scanner.handleInitialCommand("grokyolo");
+    scanner.feedOutput("1h05m");
+    vi.advanceTimersByTime(500);
+    vi.advanceTimersByTime(500);
+    vi.advanceTimersByTime(500);
+
+    expect(scanner.getActiveAgent()).toBe("grok");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    screenLines = finished;
+    scanner.feedOutput("❯");
     vi.advanceTimersByTime(500);
 
     expect(tracker.getSnapshot()).toMatchObject({
