@@ -109,7 +109,8 @@ const IDLE_PROMPT_PATTERNS = {
   claude: [/^❯$/],
   // Codex keeps its composer (`› ` + placeholder or draft) on the cursor line; `› 1.` is a menu row.
   codex: [/^(?:codex\s*)?›(?:\s+(?!\d+\.\s)\S.*)?$/i],
-  grok: [/^(?:grok\s*)?>$/i],
+  // Grok 4.7's composer is `❯`. `>` and `grok>` are the older prompt.
+  grok: [/^(?:grok\s*)?[>❯]$/i],
   antigravity: [/^>$/],
   opencode: [/^[>❯]$/],
   pi: [/^>$/],
@@ -165,11 +166,37 @@ export function isClaudeBusyScreen(lines: string[]): boolean {
     .some((line) => CLAUDE_BACKGROUND_STATUS.test(line));
 }
 
+// Grok prints "Worked for …" when the turn ends and leaves the ❯ composer up.
+// Work that is still running is the dock row above that composer. Its mark is
+// the four-dot ⸬ (a braille spinner is the other running mark) and the row
+// ends with a live elapsed time: `⸬ Run …  1h04m`. A blank line separates that
+// row from the composer box. The ◎ status line counts too. The window is only
+// the lines near the composer, so a braille logo higher in the scrollback does not.
+const GROK_RUNNING_ROW = /^(?:[\u2800-\u28FF]|⸬).*(?:\d+h\d+m(?:\d+s)?|\d+m\d+s|\d+[hms])$/;
+const GROK_STILL_RUNNING = /^◎\s+(?:waiting\b|\d+\b.*\bstill running\b)/;
+const GROK_DOCK_LINE_LIMIT = 12;
+
+export function isGrokBusyScreen(lines: string[]): boolean {
+  const stripped = dropComposerBlock(lines.map((line) => stripAnsi(line).trim()));
+  const dock: string[] = [];
+  for (
+    let index = stripped.length - 1;
+    index >= 0 && dock.length < GROK_DOCK_LINE_LIMIT;
+    index -= 1
+  ) {
+    const line = stripped[index];
+    if (line.length === 0) continue;
+    dock.push(line);
+  }
+  return dock.some((line) => GROK_RUNNING_ROW.test(line) || GROK_STILL_RUNNING.test(line));
+}
+
 // Agents that keep their idle-looking composer up while work still runs.
 function isAgentBusyScreen(lines: string[], agent: KnownAgentName): boolean {
   if (agent === "antigravity") return isAntigravityBusyScreen(lines);
   if (agent === "codex") return isCodexBusyScreen(lines);
   if (agent === "claude") return isClaudeBusyScreen(lines);
+  if (agent === "grok") return isGrokBusyScreen(lines);
   return false;
 }
 
@@ -332,7 +359,11 @@ export function detectAgentFromOutput(chunk: string): KnownAgentName | null {
 
   if (/\bclaude code\s+v?\d/i.test(stripped) || /✳\s*claude\b/i.test(stripped)) return "claude";
   if (/\bopenai codex\b/i.test(stripped) || /\bcodex\s+v\d/i.test(stripped)) return "codex";
-  if (/\bwelcome to grok build\b/i.test(stripped)) return "grok";
+  // The welcome banner is not reprinted when a session resumes. The footer
+  // (`Grok 4.7 (xhigh)`) stays on the screen.
+  if (/\bwelcome to grok build\b/i.test(stripped) || /\bgrok\s+\d+\.\d+/i.test(stripped)) {
+    return "grok";
+  }
   if (/welcome to the antigravity cli/i.test(stripped) || /google antigravity/i.test(stripped)) {
     return "antigravity";
   }
@@ -358,6 +389,9 @@ export class PtyActivityScanner {
   // Spinner frames the agent drew before it handled an interrupt must not restart the turn.
   // A bounded window, so a turn the agent starts on its own later still lights.
   private interruptedAt: number | null = null;
+  // One look at a screen the scanner does not recognize yet. A restored Grok
+  // session's next byte is often only the task clock, while the footer is already painted.
+  private lookedAtScreen = false;
   private stillnessTimer: NodeJS.Timeout | null = null;
   private lastOutputAt = 0;
   private readonly options: PtyActivityScannerOptions;
@@ -438,7 +472,19 @@ export class PtyActivityScanner {
 
   feedOutput(chunk: string): void {
     if (!this.activeAgent) {
-      const detected = detectAgentFromOutput(chunk);
+      // A resumed session's next byte is often a clock tick. The footer that
+      // names Grok is already on the screen, not in that tick.
+      let detected = detectAgentFromOutput(chunk);
+      if (
+        !detected &&
+        (!this.lookedAtScreen ||
+          BRAILLE_SPINNER_REGEX.test(chunk) ||
+          chunk.includes("◎") ||
+          chunk.includes("⸬"))
+      ) {
+        this.lookedAtScreen = true;
+        detected = detectAgentFromOutput(this.options.readLastLines(15).join("\n"));
+      }
       if (detected) {
         this.activeAgent = detected;
         this.initialLaunch = true;
@@ -530,6 +576,9 @@ export class PtyActivityScanner {
     if (isAgentBusyScreen(lines, this.activeAgent) && !isSpendLimitScreen(lines)) {
       this.unresolvedWorkingStillness = 0;
       if (this.currentActivity !== "working") {
+        // The welcome screen never looks busy. Work we can see is a turn, including
+        // one already running when the scanner first recognized the CLI.
+        this.initialLaunch = false;
         this.currentActivity = "working";
         this.options.setActivity("working");
       }
