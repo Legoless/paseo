@@ -321,7 +321,7 @@ describe("terminal-emulator-runtime", () => {
     expect(onCommitted).toHaveBeenCalledTimes(1);
   });
 
-  it("reports input mode changes from terminal output and resets them on snapshots", () => {
+  it("reports input mode changes from terminal output and resets them on snapshots", async () => {
     const { runtime, writeCallbacks } = createRuntimeWithTerminal();
     const inputModeChanges: Array<{
       kittyKeyboardFlags: number;
@@ -363,6 +363,8 @@ describe("terminal-emulator-runtime", () => {
     writeCallbacks[0]();
     expect(inputModeChanges).toHaveLength(1);
     writeCallbacks[1]();
+    expect(inputModeChanges).toHaveLength(1);
+    await Promise.resolve();
 
     expect(inputModeChanges).toEqual([
       { kittyKeyboardFlags: 7, win32InputMode: false, bracketedPaste: false },

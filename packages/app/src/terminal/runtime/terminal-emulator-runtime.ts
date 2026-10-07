@@ -989,6 +989,14 @@ export class TerminalEmulatorRuntime {
     return operation.type !== "write" || Boolean(operation.suppressInput);
   }
 
+  private isSizedSnapshot(operation: TerminalOutputOperation): boolean {
+    return (
+      operation.type === "snapshot" &&
+      typeof operation.cols === "number" &&
+      typeof operation.rows === "number"
+    );
+  }
+
   private processOutputQueue(): void {
     if (this.inFlightOutputOperation) {
       return;
@@ -1039,7 +1047,15 @@ export class TerminalEmulatorRuntime {
     this.inFlightOutputOperation = operation;
     this.inFlightOutputOperationTimeout = setTimeout(startBarrier, OUTPUT_OPERATION_TIMEOUT_MS);
     try {
-      terminal.write(EMPTY_TERMINAL_OUTPUT, startBarrier);
+      terminal.write(EMPTY_TERMINAL_OUTPUT, () => {
+        if (this.isSizedSnapshot(operation)) {
+          // Resize flushes xterm's write buffer. Start replay after the sentinel
+          // callback unwinds so that flush cannot discard the snapshot write.
+          queueMicrotask(startBarrier);
+          return;
+        }
+        startBarrier();
+      });
     } catch {
       startBarrier();
     }
@@ -1080,6 +1096,7 @@ export class TerminalEmulatorRuntime {
     if (operation.suppressInput) {
       this.suppressInput = Boolean(operation.suppressInput);
     }
+    const shouldRefitAfterSnapshot = this.isSizedSnapshot(operation);
     const finalizeOperation = (expectedOperation: TerminalOutputOperation) => {
       if (this.inFlightOutputOperation !== expectedOperation) {
         return;
@@ -1087,6 +1104,12 @@ export class TerminalEmulatorRuntime {
       this.inFlightOutputOperation = null;
       this.clearInFlightOutputTimeout();
       this.suppressInput = previousSuppressInput;
+      if (shouldRefitAfterSnapshot) {
+        // Replay at the saved grid size, then return to the current pane before
+        // committing or draining live output. The pane itself did not resize,
+        // so its ResizeObserver will not correct a stale snapshot size.
+        this.fitAndEmitResize?.({ shouldClaim: false });
+      }
       expectedOperation.onCommitted?.();
       if (expectedOperation.type === "snapshot" && this.needsTextureAtlasReset) {
         this.needsTextureAtlasReset = false;
@@ -1145,6 +1168,14 @@ export class TerminalEmulatorRuntime {
 
     try {
       terminal.write(data, () => {
+        if (shouldRefitAfterSnapshot) {
+          // A refit resizes xterm, which flushes its write buffer. Let the parser
+          // finish this callback before refitting or submitting queued live output.
+          queueMicrotask(() => {
+            finalizeOperation(operation);
+          });
+          return;
+        }
         finalizeOperation(operation);
       });
     } catch {
