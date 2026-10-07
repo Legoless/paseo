@@ -1,4 +1,4 @@
-import { localFileSourceToPath } from "@/attachments/utils";
+import { localFileSourceToPath, markdownFilePathCandidates } from "@/attachments/utils";
 import {
   resolveFilePreviewReadTarget,
   type FilePreviewReadTarget,
@@ -11,8 +11,10 @@ export type AssistantImageSourceResolution =
       kind: "file_rpc";
       cwd: string;
       path: string;
+      /** The destination as written, when percent-decoding changed the path that is opened. */
+      literalPath?: string;
       /** Where a relative path is read when the workspace has no such file. */
-      fallback?: FilePreviewReadTarget;
+      fallback?: FilePreviewReadTarget & { literalPath?: string };
     };
 
 /**
@@ -53,7 +55,8 @@ export function resolveAssistantImageSource(input: {
     return { kind: "direct", uri: source };
   }
 
-  const path = localFileSourceToPath(source);
+  const literal = localFileSourceToPath(source);
+  const path = markdownFilePathCandidates(literal)[0] ?? literal;
   const readTarget = resolveFilePreviewReadTarget({
     path,
     workspaceRoot: input.workspaceRoot,
@@ -65,14 +68,21 @@ export function resolveAssistantImageSource(input: {
   // Scoped to the fallback folder itself, so a relative path cannot climb out of it and a symlinked
   // home folder still passes the daemon's root check.
   const isRelative = !isAbsolutePath(path) && !path.startsWith("~");
+  const relativeLiteral = literal.replace(/^\.[\\/]/, "");
+  const relativePath = path.replace(/^\.[\\/]/, "");
   const fallback =
     input.fallbackRoot && isRelative
-      ? { cwd: input.fallbackRoot, path: path.replace(/^\.[\\/]/, "") }
+      ? {
+          cwd: input.fallbackRoot,
+          path: relativePath,
+          ...(relativeLiteral !== relativePath ? { literalPath: relativeLiteral } : {}),
+        }
       : null;
   return {
     kind: "file_rpc",
     cwd: readTarget.cwd,
     path: readTarget.path,
+    ...(literal !== readTarget.path ? { literalPath: literal } : {}),
     ...(fallback ? { fallback } : {}),
   };
 }

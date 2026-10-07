@@ -132,7 +132,15 @@ export function selectProviderSubagentsForParent(
   return rows;
 }
 
-export function useSubagentsForParent(params: SelectSubagentsParams): SubagentRow[] {
+/**
+ * `demand: false` reads the store without fetching. Tab-level surfaces pass it: the provider list
+ * request loads the parent agent on the daemon, so fetching per tab would wake every open tab's agent.
+ */
+export function useSubagentsForParent(
+  params: SelectSubagentsParams,
+  options?: { demand?: boolean },
+): SubagentRow[] {
+  const demand = options?.demand ?? true;
   const pendingArchiveIds = usePendingArchiveAgentIds(params.serverId);
   const paseoRows = useStoreWithEqualityFn(
     useSessionStore,
@@ -154,11 +162,11 @@ export function useSubagentsForParent(params: SelectSubagentsParams): SubagentRo
   const client = useSessionStore((state) => state.sessions[params.serverId]?.client ?? null);
 
   useEffect(() => {
-    if (!client || !supported) return;
+    if (!demand || !client || !supported) return;
     void refreshProviderSubagents(client, params.serverId, params.parentAgentId).catch(
       () => undefined,
     );
-  }, [client, params.parentAgentId, params.serverId, supported]);
+  }, [client, demand, params.parentAgentId, params.serverId, supported]);
 
   return useMemo(() => {
     if (params.providerParentSubagentId) return providerRows;

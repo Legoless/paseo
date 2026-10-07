@@ -23,6 +23,7 @@ import type {
 } from "@/terminal/local-links/terminal-local-link-provider";
 import type { PendingTerminalModifiers } from "@/utils/terminal-keys";
 import { openExternalUrl } from "@/utils/open-external-url";
+import { hasActiveWebOverlay, subscribeWebOverlays } from "@/lib/overlay-root";
 import { getDesktopHost } from "@/desktop/host";
 import { selectTerminalClipboardWriter } from "@/desktop/terminal/copy-selection";
 import type {
@@ -691,6 +692,28 @@ export function IsolatedTerminalEmulator({
       isolatedTerminalGuestBudget.release(guestKey);
     };
   }, [lifecycle.epoch, stableIpcMessageListener, isEvicted]);
+
+  // The guest is a native compositor surface: a confirm dialog or menu in
+  // overlay-root paints above it and still loses the click. Same rule as
+  // resident browser surfaces.
+  useEffect(() => {
+    if (isEvicted) {
+      return () => {};
+    }
+    const apply = () => {
+      const webview = webviewRef.current;
+      if (!webview) {
+        return;
+      }
+      const blocked = hasActiveWebOverlay();
+      webview.style.pointerEvents = blocked ? "none" : "auto";
+      if (blocked) {
+        webview.blur();
+      }
+    };
+    apply();
+    return subscribeWebOverlays(apply);
+  }, [isEvicted, lifecycle.epoch]);
 
   useEffect(() => {
     const terminal = getDesktopHost()?.terminal;

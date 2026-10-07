@@ -4,13 +4,7 @@ import { createProjectIconTarget, type ProjectIconTarget } from "@/projects/icon
 import { deriveSidebarStateBucket, type SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { normalizeWorkspaceOpaqueId, normalizeWorkspacePath } from "@/utils/workspace-identity";
 import { shortenPath } from "@/utils/shorten-path";
-import {
-  collectAllPanes,
-  collectAllTabs,
-  type WorkspaceLayout,
-} from "@/stores/workspace-layout-actions";
-import { resolveExplorerSidebarPaneId } from "@/stores/workspace-layout-store";
-import { deriveWorkspacePaneState } from "@/screens/workspace/workspace-pane-state";
+import { collectAllTabs, type WorkspaceLayout } from "@/stores/workspace-layout-actions";
 
 export interface SidebarWorkspaceNewAgentRow {
   tabId: string;
@@ -67,11 +61,11 @@ export interface SidebarWorkspaceSection {
    */
   uncategorized: SidebarWorkspaceUncategorizedRow;
   members: SidebarWorkspaceMemberRow[];
-  /** How many panes glow each color that wants the user: orange, red and green. */
+  /** How many open tabs show each color that wants the user: orange, red and green. */
   paneStatusCounts: SidebarPaneStatusCounts;
 }
 
-/** The pane glow colors the sidebar counts: needs input, failed, and a finish nobody has seen. */
+/** The status colors the sidebar counts: needs input, failed, and a finish nobody has seen. */
 export type SidebarPaneStatusBucket = Extract<
   SidebarStateBucket,
   "needs_input" | "failed" | "attention"
@@ -112,7 +106,6 @@ export interface SidebarWorkspaceGroupSession {
 export function buildSidebarWorkspaceGroupModel(input: {
   sessions: readonly SidebarWorkspaceGroupSession[];
   layoutsByWorkspace?: Readonly<Record<string, WorkspaceLayout>>;
-  explorerPaneIdByWorkspace?: Readonly<Record<string, string | null>>;
 }): SidebarWorkspaceGroupModel {
   const sectionsByWorkspaceKey = new Map<string, SidebarWorkspaceSection>();
   const memberIconTargets: ProjectIconTarget[] = [];
@@ -126,7 +119,6 @@ export function buildSidebarWorkspaceGroupModel(input: {
         agents: session.agents,
         projects: session.projects,
         layout: input.layoutsByWorkspace?.[workspaceKey],
-        explorerPaneId: input.explorerPaneIdByWorkspace?.[workspaceKey],
       });
       sectionsByWorkspaceKey.set(section.workspaceKey, section);
       memberIconTargets.push(...iconTargets);
@@ -142,7 +134,6 @@ function buildWorkspaceSection(input: {
   agents: ReadonlyMap<string, Agent>;
   projects: ReadonlyMap<string, ProjectDescriptor>;
   layout?: WorkspaceLayout;
-  explorerPaneId?: string | null;
 }): { section: SidebarWorkspaceSection; iconTargets: ProjectIconTarget[] } {
   const workspaceId = input.workspace.id;
   const workspaceKey = `${input.serverId}:${workspaceId}`;
@@ -194,8 +185,7 @@ function buildWorkspaceSection(input: {
   const openAgentIds = collectOpenAgentTabIds(input.layout);
 
   for (const agent of input.agents.values()) {
-    if (agent.archivedAt) continue;
-    if (normalizeWorkspaceOpaqueId(agent.workspaceId) !== workspaceId) continue;
+    if (!isWorkspaceAgentRow(agent, workspaceId)) continue;
     if (!openAgentIds.has(agent.id)) continue;
     const directory = normalizeWorkspacePath(agent.cwd);
     const matchedMember = directory ? memberByDirectory.get(directory) : undefined;
@@ -220,48 +210,75 @@ function buildWorkspaceSection(input: {
       workspaceId,
       uncategorized,
       members,
-      paneStatusCounts: countPaneStatuses(input),
+      paneStatusCounts: countTabStatuses(input),
     },
     iconTargets,
   };
 }
 
 /**
- * The panes that glow orange, red or green. Only a pane's front tab lights it — `SplitPaneView`
- * in split-container.tsx picks it with the same `deriveWorkspacePaneState` call — and the Explorer
- * dock never glows, so a tab behind the front one is not counted here. A terminal takes the bucket
- * the daemon lists for it: only a known agent running in it ever gets one, and the client has no
- * terminal activity of its own for a workspace that is not open. A provider subagent tab is not
- * counted: its status lives in the client's subagent store, not in the session this model reads.
+ * The open tabs that want the user, by color: every agent row underneath the workspace plus every
+ * terminal tab, wherever the tab sits. An unseen tab behind a pane's front tab lights no pane but
+ * still counts. A terminal takes the bucket the daemon lists for it: only a known agent running in
+ * it ever gets one, and the client has no terminal activity of its own for a workspace that is not
+ * open. A provider subagent tab is not counted: its status lives in the client's subagent store,
+ * not in the session this model reads.
  */
-function countPaneStatuses(input: {
+function countTabStatuses(input: {
   workspace: WorkspaceDescriptor;
   agents: ReadonlyMap<string, Agent>;
   layout?: WorkspaceLayout;
-  explorerPaneId?: string | null;
 }): SidebarPaneStatusCounts {
-  // Without terminal buckets (an old daemon) the counts would leave out every terminal pane.
+  // Without terminal buckets (an old daemon) the counts would leave out every terminal tab.
   if (!input.layout || !input.workspace.terminalStatusBuckets) {
     return EMPTY_PANE_STATUS_COUNTS;
   }
-  const tabs = collectAllTabs(input.layout.root);
-  const explorerPaneId = resolveExplorerSidebarPaneId(input.layout, input.explorerPaneId);
   const counts: Record<SidebarPaneStatusBucket, number> = { ...EMPTY_PANE_STATUS_COUNTS };
-  for (const pane of collectAllPanes(input.layout.root)) {
-    if (pane.id === explorerPaneId) continue;
-    const target = deriveWorkspacePaneState({ pane, tabs }).activeTab?.descriptor.target;
-    const agent = target?.kind === "agent" ? input.agents.get(target.agentId) : undefined;
+  const counted = new Set<string>();
+  for (const { target } of collectAllTabs(input.layout.root)) {
     let bucket: SidebarStateBucket | undefined;
-    if (target?.kind === "terminal") {
-      bucket = input.workspace.terminalStatusBuckets?.[target.terminalId];
-    } else if (agent) {
-      bucket = deriveAgentStatusBucket(agent);
+    if (target.kind === "terminal" && !counted.has(`terminal:${target.terminalId}`)) {
+      counted.add(`terminal:${target.terminalId}`);
+      bucket = input.workspace.terminalStatusBuckets[target.terminalId];
+    } else if (target.kind === "agent" && !counted.has(`agent:${target.agentId}`)) {
+      counted.add(`agent:${target.agentId}`);
+      const agent = input.agents.get(target.agentId);
+      if (agent && isWorkspaceAgentRow(agent, input.workspace.id)) {
+        bucket = deriveAgentStatusBucket(agent);
+      }
     }
     if (isPaneStatusBucket(bucket)) {
       counts[bucket] += 1;
     }
   }
   return counts;
+}
+
+/** Which agents get a row under a workspace, given an open tab; shared so the counts match the rows. */
+function isWorkspaceAgentRow(agent: Agent, workspaceId: string): boolean {
+  return !agent.archivedAt && normalizeWorkspaceOpaqueId(agent.workspaceId) === workspaceId;
+}
+
+/**
+ * The dock badge: every workspace row's counts added up, so the badge never shows a number the
+ * sidebar cannot account for. An agent with no tab on this client has no row and is not counted.
+ */
+export function countAttentionTabs(input: {
+  sessions: readonly Pick<SidebarWorkspaceGroupSession, "serverId" | "workspaces" | "agents">[];
+  layoutsByWorkspace: Readonly<Record<string, WorkspaceLayout>>;
+}): number {
+  let total = 0;
+  for (const session of input.sessions) {
+    for (const workspace of session.workspaces.values()) {
+      const counts = countTabStatuses({
+        workspace,
+        agents: session.agents,
+        layout: input.layoutsByWorkspace[`${session.serverId}:${workspace.id}`],
+      });
+      total += counts.needs_input + counts.failed + counts.attention;
+    }
+  }
+  return total;
 }
 
 function collectOpenAgentTabIds(layout: WorkspaceLayout | undefined): Set<string> {

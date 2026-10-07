@@ -4,6 +4,7 @@ import {
   createPreviewAttachmentId,
   fileUriToPath,
   localFileSourceToPath,
+  markdownFilePathCandidates,
   parseDataUrl,
   parseImageDataUrl,
   pathToFileUri,
@@ -38,6 +39,52 @@ describe("fileUriToPath", () => {
 
   it("converts host-based file URIs back to UNC paths", () => {
     expect(fileUriToPath("file://server/share/shot%231.png")).toBe("\\\\server\\share\\shot#1.png");
+  });
+
+  it("decodes encoded spaces in a file URI that also has a bare percent", () => {
+    expect(fileUriToPath("file:///tmp/Porsche%20911%20GT3/100%done.jpg")).toBe(
+      "/tmp/Porsche 911 GT3/100%done.jpg",
+    );
+  });
+});
+
+describe("markdownFilePathCandidates", () => {
+  it("tries the filesystem spelling of a percent-encoded destination first", () => {
+    expect(
+      markdownFilePathCandidates(
+        "posts/Porsche%20911%20GT3/generated-instagram-samples/02_side_hotel.jpg",
+      ),
+    ).toEqual([
+      "posts/Porsche 911 GT3/generated-instagram-samples/02_side_hotel.jpg",
+      "posts/Porsche%20911%20GT3/generated-instagram-samples/02_side_hotel.jpg",
+    ]);
+  });
+
+  it("decodes a space in one segment when another segment has a bare percent", () => {
+    expect(markdownFilePathCandidates("posts/Porsche%20911%20GT3/100% done.jpg")).toEqual([
+      "posts/Porsche 911 GT3/100% done.jpg",
+      "posts/Porsche%20911%20GT3/100% done.jpg",
+    ]);
+  });
+
+  it("decodes a twice-encoded space through the intermediate spelling", () => {
+    expect(markdownFilePathCandidates("shots/a%2520b.png")).toEqual([
+      "shots/a b.png",
+      "shots/a%20b.png",
+      "shots/a%2520b.png",
+    ]);
+  });
+
+  it("leaves encoded slashes and dot segments written as they are", () => {
+    const sessionPath = "~/.grok/sessions/%2FUsers%2Ftest/images/1.jpg";
+    expect(markdownFilePathCandidates(sessionPath)).toEqual([sessionPath]);
+    expect(markdownFilePathCandidates("posts/%2e%2e/secret.jpg")).toEqual([
+      "posts/%2e%2e/secret.jpg",
+    ]);
+    expect(markdownFilePathCandidates("shots/caf%C3%A9.png")).toEqual([
+      "shots/café.png",
+      "shots/caf%C3%A9.png",
+    ]);
   });
 });
 

@@ -807,6 +807,12 @@ export class AgentManager {
   private readonly agents = new Map<string, LiveManagedAgent>();
   private readonly timelineStore = new InMemoryAgentTimelineStore();
   private readonly providerSubagents = new ProviderSubagentStore();
+  /**
+   * Last observed count of children that keep a parent "working": managed children whose
+   * lifecycle is `running`, plus provider subagents still `running`. Seeded, not raised,
+   * across hydration and teardown so a replay cannot mark the parent unread.
+   */
+  private readonly workingChildCountByParent = new Map<string, number>();
   private readonly agentsAwaitingInitialSnapshotPersist = new Set<string>();
   private readonly sessionEventTails = new Map<string, Promise<void>>();
   private readonly steerEventBarriers = new Map<string, SteerEventBarrier>();
@@ -1584,6 +1590,7 @@ export class AgentManager {
         const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
         this.dispatch({ type: "provider_subagent", event: update });
       }
+      this.seedWorkingChildCount(agent.id);
       return agent;
     } finally {
       if (!handedToRegistration) {
@@ -1810,6 +1817,7 @@ export class AgentManager {
         for (const event of this.providerSubagents.deleteParent(agentId)) {
           this.dispatch({ type: "provider_subagent", event });
         }
+        this.seedWorkingChildCount(agentId);
       }
 
       handedToRegistration = true;
@@ -1960,6 +1968,7 @@ export class AgentManager {
       });
       this.dispatch({ type: "provider_subagent", event });
     }
+    this.seedWorkingChildCount(parentAgentId);
   }
 
   async archiveAgent(agentId: string): Promise<{ archivedAt: string }> {
@@ -4208,6 +4217,7 @@ export class AgentManager {
     for (const event of this.providerSubagents.deleteParent(agentId)) {
       this.dispatch({ type: "provider_subagent", event });
     }
+    this.workingChildCountByParent.delete(agentId);
   }
 
   private emitClosedAgent(agent: ManagedAgentClosed, options?: { persist?: boolean }): void {
@@ -4310,6 +4320,9 @@ export class AgentManager {
     if (event.type === "provider_subagent") {
       const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
       this.dispatch({ type: "provider_subagent", event: update });
+      if (update.type !== "timeline") {
+        this.noteParentChildWork(agent.id);
+      }
       return;
     }
     const turnId = getAgentStreamEventTurnId(event);
@@ -4505,6 +4518,7 @@ export class AgentManager {
         this.dispatch({ type: "provider_subagent", event: update });
       }
     }
+    this.seedWorkingChildCount(agent.id);
     for (const event of historyEvents) {
       const row = this.recordTimeline(
         agent.id,
@@ -4573,6 +4587,7 @@ export class AgentManager {
       throw error;
     }
     agent.historyPrimed = true;
+    this.seedWorkingChildCount(agent.id);
 
     if (typeof broadcast !== "function" || !broadcast()) {
       return;
@@ -5257,10 +5272,61 @@ export class AgentManager {
     return row;
   }
 
+  private countWorkingChildren(parentAgentId: string): number {
+    let count = 0;
+    for (const agent of this.agents.values()) {
+      if (agent.internal || agent.lifecycle !== "running") continue;
+      if (getParentAgentIdFromLabels(agent.labels) !== parentAgentId) continue;
+      count += 1;
+    }
+    for (const subagent of this.providerSubagents.list(parentAgentId)) {
+      if (subagent.status === "running") count += 1;
+    }
+    return count;
+  }
+
+  /** Record the current child count without raising attention. Hydration and teardown use this. */
+  private seedWorkingChildCount(parentAgentId: string): void {
+    this.workingChildCountByParent.set(parentAgentId, this.countWorkingChildren(parentAgentId));
+  }
+
+  /**
+   * A parent's own turn can go idle and be marked read while a child is still running.
+   * Raise `finished` again only on the edge where the last working child stops, so a
+   * later quiet update cannot mark a parent unread after the user has already seen it.
+   */
+  private noteParentChildWork(parentAgentId: string): void {
+    const working = this.countWorkingChildren(parentAgentId);
+    const previous = this.workingChildCountByParent.get(parentAgentId) ?? 0;
+    this.workingChildCountByParent.set(parentAgentId, working);
+    if (previous === 0 || working > 0) return;
+    const parent = this.agents.get(parentAgentId);
+    if (!parent) return;
+    this.raiseFinishedAttention(parent);
+  }
+
+  private raiseFinishedAttention(agent: ManagedAgent): void {
+    if (agent.internal) return;
+    if (agent.lifecycle !== "idle") return;
+    if (agent.attention.requiresAttention) return;
+    if (agent.pendingPermissions.size > 0) return;
+    agent.attention = {
+      requiresAttention: true,
+      attentionReason: "finished",
+      attentionTimestamp: new Date(),
+    };
+    this.broadcastAgentAttention(agent, "finished");
+    this.emitState(agent);
+  }
+
   private emitState(agent: ManagedAgent, options?: { persist?: boolean }): void {
     // Keep attention as an edge-triggered unread signal, not a level signal.
     this.checkAndSetAttention(agent);
     this.syncFeaturesFromSession(agent);
+    const parentAgentId = getParentAgentIdFromLabels(agent.labels);
+    if (parentAgentId && parentAgentId !== agent.id) {
+      this.noteParentChildWork(parentAgentId);
+    }
 
     if (this.workspaceLabelStateHolds.has(agent.id)) {
       this.workspaceLabelStatesPendingAfterHold.add(agent.id);

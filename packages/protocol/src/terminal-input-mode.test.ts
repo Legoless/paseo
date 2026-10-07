@@ -125,4 +125,43 @@ describe("TerminalInputModeTracker", () => {
 
     expect(tracker.supportsModifiedEnter()).toBe(false);
   });
+
+  it("replays the active mouse protocol and SGR encoding after a fullscreen program enables them", () => {
+    const tracker = new TerminalInputModeTracker();
+
+    expect(
+      tracker.feed("\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1015h\x1b[?1006h\x1b[?2004h")
+        .changed,
+    ).toBe(true);
+
+    expect(tracker.getPreamble()).toBe("\x1b[?2004h\x1b[?1003h\x1b[?1006h");
+  });
+
+  it("keeps the last mouse protocol and encoding in a combined private-mode sequence", () => {
+    const tracker = new TerminalInputModeTracker();
+
+    tracker.feed("\x1b[?1000;1006;1003;1016h");
+
+    expect(tracker.getPreamble()).toBe("\x1b[?1003h\x1b[?1016h");
+  });
+
+  it("drops mouse tracking when the program resets the protocol or the encoding", () => {
+    const tracker = new TerminalInputModeTracker();
+
+    tracker.feed("\x1b[?1003h\x1b[?1006h");
+    expect(tracker.feed("\x1b[?1003l").changed).toBe(true);
+    expect(tracker.getPreamble()).toBe("\x1b[?1006h");
+
+    expect(tracker.feed("\x1b[?1006l").changed).toBe(true);
+    expect(tracker.getPreamble()).toBe("");
+  });
+
+  it("clears replayed mouse tracking on reset", () => {
+    const tracker = new TerminalInputModeTracker();
+
+    tracker.feed("\x1b[?9h\x1b[?1006h");
+    tracker.reset();
+
+    expect(tracker.getPreamble()).toBe("");
+  });
 });

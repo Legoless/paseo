@@ -1,5 +1,4 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import readline from "node:readline";
 import type { Logger } from "pino";
 import { z } from "zod";
 
@@ -168,7 +167,6 @@ function readProviderTurnId(params: unknown): string | undefined {
 }
 
 export class CodexAppServerClient {
-  private readonly rl: readline.Interface;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly requestHandlers = new Map<string, RequestHandler>();
   private notificationHandler: NotificationHandler | null = null;
@@ -176,17 +174,29 @@ export class CodexAppServerClient {
   private nextId = 1;
   private disposed = false;
   private stderrBuffer = "";
+  private stdoutBuffer = "";
 
   constructor(
     private readonly child: ChildProcessWithoutNullStreams,
     private readonly logger: Logger,
     private readonly getTraceContext: () => CodexAppServerTraceContext = () => ({}),
   ) {
-    this.rl = readline.createInterface({ input: child.stdout });
-    this.rl.on("line", (line) => {
-      void this.handleLine(line).catch((error) => {
-        this.logger.warn({ error, line }, "Failed to handle Codex app-server stdout line");
-      });
+    // Split on "\n" only. node:readline also breaks lines on U+2028/U+2029, which JSON leaves
+    // unescaped inside strings, so one such character in a thread made thread/resume unparseable.
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      if (this.disposed) return;
+      if (!chunk.includes("\n")) {
+        this.stdoutBuffer += chunk;
+        return;
+      }
+      const lines = (this.stdoutBuffer + chunk).split("\n");
+      this.stdoutBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        void this.handleLine(line).catch((error) => {
+          this.logger.warn({ error, line }, "Failed to handle Codex app-server stdout line");
+        });
+      }
     });
 
     child.stderr.on("data", (chunk) => {
@@ -259,7 +269,6 @@ export class CodexAppServerClient {
   async dispose(): Promise<void> {
     this.disposed = true;
     this.unexpectedTerminationHandler = null;
-    this.rl.close();
     this.rejectPending(new Error("Codex app-server client is closed"));
     try {
       this.child.stdin.end();
@@ -286,7 +295,6 @@ export class CodexAppServerClient {
       return;
     }
     this.disposed = true;
-    this.rl.close();
     this.rejectPending(error);
     const handler = this.unexpectedTerminationHandler;
     this.unexpectedTerminationHandler = null;

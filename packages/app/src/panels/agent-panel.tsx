@@ -67,7 +67,10 @@ import { definePanel, type PanelDescriptor } from "@/panels/panel-registry";
 import { RenderProfile } from "@/utils/render-profiler";
 import { useHasPluginComposerPills } from "@/plugins";
 import { buildDraftPanelDescriptor } from "@/panels/draft-panel-descriptor";
-import { resolveWorkspaceAgentTabLabel } from "@/panels/agent-panel-descriptor";
+import {
+  resolveAgentPanelStatusBucket,
+  resolveWorkspaceAgentTabLabel,
+} from "@/panels/agent-panel-descriptor";
 import {
   type HostRuntimeConnectionStatus,
   useHostRuntimeClient,
@@ -102,11 +105,11 @@ import type { PendingPermission } from "@/types/shared";
 import type { StreamItem, TodoEntry } from "@/types/stream";
 import type { ViewedTimelineStatus, ViewedTimelineUiBridge } from "@/timeline/viewed-timeline-sync";
 import { useArchiveFinishedSubagents, useSubagentsForParent } from "@/subagents";
+import { hasRunningSubagent } from "@/subagents/track-presentation";
 import { getInitDeferred, getInitKey } from "@/utils/agent-initialization";
 import { derivePendingPermissionKey, normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import { applyLegacyDaemonWorkspaceOwnership } from "@/workspace/legacy-daemon-workspaces";
 import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
-import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
 import {
   buildDraftAgentSetup,
   replaceOpenAgentWithDraft,
@@ -346,6 +349,11 @@ function useAgentPanelDescriptor(
       };
     }),
   );
+  const subagentRows = useSubagentsForParent(
+    { serverId: context.serverId, parentAgentId: target.agentId },
+    { demand: false },
+  );
+  const hasRunningChild = hasRunningSubagent(subagentRows);
   const provider = descriptorState.provider;
   const label = resolveWorkspaceAgentTabLabel(descriptorState.title);
   const icon = getProviderIcon(provider, context.serverId);
@@ -356,15 +364,15 @@ function useAgentPanelDescriptor(
     tooltip: label ?? `${formatProviderLabel(provider)} agent`,
     titleState: label ? "ready" : "loading",
     icon,
-    statusBucket: descriptorState.status
-      ? deriveSidebarStateBucket({
-          status: descriptorState.isTurnActive ? "running" : descriptorState.status,
-          pendingPermissionCount: descriptorState.pendingPermissionCount,
-          backgroundWorkCount: descriptorState.backgroundWorkCount,
-          requiresAttention: descriptorState.requiresAttention,
-          attentionReason: descriptorState.attentionReason,
-        })
-      : null,
+    statusBucket: resolveAgentPanelStatusBucket({
+      status: descriptorState.status,
+      isTurnActive: descriptorState.isTurnActive,
+      pendingPermissionCount: descriptorState.pendingPermissionCount,
+      backgroundWorkCount: descriptorState.backgroundWorkCount,
+      requiresAttention: descriptorState.requiresAttention,
+      attentionReason: descriptorState.attentionReason,
+      hasRunningChild,
+    }),
   };
 }
 

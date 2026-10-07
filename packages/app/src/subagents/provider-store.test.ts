@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   observeProviderSubagentTimeline,
   providerSubagentKey,
+  refreshRunningProviderSubagentParents,
   useProviderSubagentStore,
 } from "./provider-store";
 
@@ -115,6 +116,41 @@ describe("provider subagent client store", () => {
         ?.tail.map((item) => (item.kind === "assistant_message" ? item.text : ""))
         .join(""),
     ).toBe("Older history.New live output.");
+  });
+
+  test("a reconnect refetches only parents holding a running child and drops the stale row", async () => {
+    const store = useProviderSubagentStore.getState();
+    const child = (parentAgentId: string, status: "running" | "completed") => ({
+      id: `${parentAgentId}-child`,
+      parentAgentId,
+      provider: "opencode" as const,
+      title: "explore",
+      description: "Assess lap video export state",
+      status,
+      createdAt: "2026-07-12T10:00:00.000Z",
+      updatedAt: "2026-07-12T10:00:00.000Z",
+      toolCallId: `${parentAgentId}-call`,
+    });
+    store.applyUpdate(SERVER_ID, { kind: "upsert", subagent: child("stale-parent", "running") });
+    store.applyUpdate(SERVER_ID, { kind: "upsert", subagent: child("done-parent", "completed") });
+    const listed: string[] = [];
+    const daemon = {
+      listProviderSubagents: async (parentAgentId: string) => {
+        listed.push(parentAgentId);
+        return { requestId: "list-1", parentAgentId, subagents: [], error: null };
+      },
+    };
+
+    await refreshRunningProviderSubagentParents(daemon, SERVER_ID);
+
+    expect(listed).toEqual(["stale-parent"]);
+    const descriptors = useProviderSubagentStore.getState().descriptors;
+    expect(
+      descriptors.has(providerSubagentKey(SERVER_ID, "stale-parent", "stale-parent-child")),
+    ).toBe(false);
+    expect(
+      descriptors.has(providerSubagentKey(SERVER_ID, "done-parent", "done-parent-child")),
+    ).toBe(true);
   });
 
   test("removes timelines for children no longer returned by the provider", () => {

@@ -5080,10 +5080,14 @@ class ClaudeAgentSession implements AgentSession {
         return;
       }
       const content = fs.readFileSync(historyPath, "utf8");
-      const replay = this.ingestPersistedSidechains(
-        content,
-        readClaudeSidechainHistory(historyPath),
-      );
+      const sidechains = readClaudeSidechainHistory(historyPath);
+      if (sidechains.skippedTranscriptBytes) {
+        this.logger.warn(
+          { sessionId, transcriptBytes: sidechains.skippedTranscriptBytes },
+          "Skipping Claude sub-agent transcript replay over the memory budget",
+        );
+      }
+      const replay = this.ingestPersistedSidechains(content, sidechains);
       this.ingestPersistedHistory(content, replay);
     } catch {
       // ignore history load failures
@@ -6012,9 +6016,15 @@ interface ClaudeSidechainHistory {
   workflowSidechainContentsByRunId: Map<string, string[]>;
   /** agentId -> sidecar metadata, when Claude Code wrote one next to the transcript. */
   metaByAgentId: Map<string, ClaudeSubagentMeta>;
+  skippedTranscriptBytes?: number;
 }
 
 const CLAUDE_SUBAGENT_META_FILE = /^agent-(.+)\.meta\.json$/;
+
+// Replay holds every sub-agent transcript in memory at once; a 2 GB screenshot-heavy workflow
+// session OOM-crashed the daemon on resume.
+// ponytail: all-or-nothing byte budget; stream replay per workflow run if huge sessions need it.
+export const CLAUDE_SIDECHAIN_REPLAY_BUDGET_BYTES = 128 * 1024 * 1024;
 
 function readClaudeSidechainHistory(historyPath: string): ClaudeSidechainHistory {
   const sessionDirectory = path.join(
@@ -6043,6 +6053,8 @@ function readClaudeSidechainHistory(historyPath: string): ClaudeSidechainHistory
   }
   if (!fs.existsSync(sidechainDirectory)) return history;
 
+  const transcriptPaths: string[] = [];
+  let transcriptBytes = 0;
   const directories = [sidechainDirectory];
   while (directories.length > 0) {
     const directory = directories.pop();
@@ -6055,7 +6067,8 @@ function readClaudeSidechainHistory(historyPath: string): ClaudeSidechainHistory
       }
       if (!entry.isFile()) continue;
       if (entry.name.endsWith(".jsonl")) {
-        recordClaudeSidechainContents(history, sidechainDirectory, entryPath);
+        transcriptPaths.push(entryPath);
+        transcriptBytes += fs.statSync(entryPath).size;
         continue;
       }
       // The sidecar carries the Task tool_use id, which is the same id the live stream keys on.
@@ -6069,6 +6082,13 @@ function readClaudeSidechainHistory(historyPath: string): ClaudeSidechainHistory
         // Undocumented internals: a missing or unreadable sidecar must never fail ingestion.
       }
     }
+  }
+  if (transcriptBytes > CLAUDE_SIDECHAIN_REPLAY_BUDGET_BYTES) {
+    history.skippedTranscriptBytes = transcriptBytes;
+    return history;
+  }
+  for (const transcriptPath of transcriptPaths) {
+    recordClaudeSidechainContents(history, sidechainDirectory, transcriptPath);
   }
   return history;
 }

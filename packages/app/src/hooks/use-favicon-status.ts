@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { useAggregatedAgents } from "./use-aggregated-agents";
 import { getDesktopHost } from "@/desktop/host";
-import {
-  deriveDockBadgeCountFromAgents,
-  isAgentActionableForDesktopBadge,
-} from "@/utils/desktop-badge-state";
+import { countAttentionTabs } from "@/projects/workspace-groups";
+import { useSessionStore } from "@/stores/session-store";
+import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { getIsElectron, isNative } from "@/constants/platform";
 
 type FaviconStatus = "none" | "running" | "attention";
@@ -27,12 +26,13 @@ const FAVICON_IMAGES: Record<ColorScheme, Record<FaviconStatus, { uri: string } 
 
 function deriveFaviconStatus(
   agents: ReturnType<typeof useAggregatedAgents>["agents"],
+  attentionCount: number,
 ): FaviconStatus {
   const hasRunning = agents.some((agent) => agent.status === "running");
   if (hasRunning) {
     return "running";
   }
-  if (agents.some(isAgentActionableForDesktopBadge)) {
+  if (attentionCount > 0) {
     return "attention";
   }
   return "none";
@@ -95,7 +95,18 @@ async function updateDockBadge(count?: number): Promise<void> {
 export function useFaviconStatus() {
   const { agents } = useAggregatedAgents({ demand: !isNative });
   const [colorScheme, setColorScheme] = useState<ColorScheme>(getSystemColorScheme);
-  const dockBadgeCount = deriveDockBadgeCountFromAgents(agents);
+  const layoutsByWorkspace = useWorkspaceLayoutStore((state) => state.layoutByWorkspace);
+  const attentionCount = useSessionStore((state) =>
+    countAttentionTabs({
+      sessions: Object.entries(state.sessions).map(([serverId, session]) => ({
+        serverId,
+        workspaces: session.workspaces,
+        agents: session.agents,
+      })),
+      layoutsByWorkspace,
+    }),
+  );
+  const dockBadgeCount = attentionCount > 0 ? attentionCount : undefined;
 
   // Listen for system color scheme changes
   useEffect(() => {
@@ -114,9 +125,9 @@ export function useFaviconStatus() {
   useEffect(() => {
     if (isNative) return;
 
-    const status = deriveFaviconStatus(agents);
+    const status = deriveFaviconStatus(agents, attentionCount);
     updateFavicon(status, colorScheme);
-  }, [agents, colorScheme]);
+  }, [agents, attentionCount, colorScheme]);
 
   // Write on mount to clear any previous renderer's badge, then on every count change. A pending
   // IPC acknowledgement must not suppress a newer clear.

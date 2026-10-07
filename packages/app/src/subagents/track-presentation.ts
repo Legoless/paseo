@@ -69,6 +69,11 @@ export function buildSubagentRowPresentationData(
   };
 }
 
+/** Whether any child is still working, by the same bucket the pill counts as "working". */
+export function hasRunningSubagent(rows: readonly SubagentRow[]): boolean {
+  return rows.some((row) => buildSubagentRowPresentationData(row).statusBucket === "running");
+}
+
 type ActiveStatusBucket = Exclude<SidebarStateBucket, "done">;
 
 /** The sidebar's list order, minus the state that earns no mark. */

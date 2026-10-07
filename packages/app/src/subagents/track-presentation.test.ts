@@ -5,6 +5,7 @@ import {
   buildSubagentPillPresentation,
   buildSubagentRowPresentationData,
   countFinishedSubagents,
+  hasRunningSubagent,
   resolveRowLabel,
   resolveSubagentTabTitle,
 } from "./track-presentation";
@@ -97,6 +98,45 @@ describe("buildSubagentPillPresentation", () => {
       segments: [{ bucket: null, text: "0 subagents" }],
       accessibilityLabel: "0 subagents",
     });
+  });
+});
+
+describe("hasRunningSubagent", () => {
+  it("keeps the parent working while a managed child's turn is open", () => {
+    expect(hasRunningSubagent([row({ id: "done" }), row({ id: "busy", status: "running" })])).toBe(
+      true,
+    );
+  });
+
+  it("reads the child's turn, not a stale running status", () => {
+    const stale = row({
+      id: "stale",
+      status: "running",
+      turn: { phase: "idle", cancellationRequestId: null },
+    });
+    expect(hasRunningSubagent([stale])).toBe(false);
+  });
+
+  it("counts a running provider child", () => {
+    const provider: ProviderSubagentRow = {
+      kind: "provider",
+      id: "toolu_1",
+      parentAgentId: "parent",
+      provider: "claude",
+      title: null,
+      description: null,
+      subtitle: null,
+      status: "running",
+      requiresAttention: false,
+      createdAt: new Date("2026-07-26T00:00:00.000Z"),
+    };
+    expect(hasRunningSubagent([provider])).toBe(true);
+  });
+
+  it("is false once every child is finished", () => {
+    expect(hasRunningSubagent([row({ id: "idle" }), row({ id: "error", status: "error" })])).toBe(
+      false,
+    );
   });
 });
 

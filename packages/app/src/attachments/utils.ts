@@ -142,12 +142,120 @@ export function pathToFileUri(path: string): string {
   return `file:///${path.replace(/\\/g, "/")}`;
 }
 
-function decodeFilePathSource(source: string): string {
-  try {
-    return decodeURIComponent(source);
-  } catch {
-    return source;
+function isHexDigit(value: string | undefined): boolean {
+  return value !== undefined && /^[0-9A-Fa-f]$/.test(value);
+}
+
+function textFromPercentBytes(bytes: number[]): string | null {
+  let encoded = "";
+  for (const byte of bytes) {
+    encoded += `%${byte.toString(16).padStart(2, "0")}`;
   }
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return null;
+  }
+}
+
+function isUnsafeDecodedText(text: string, allowSeparators: boolean): boolean {
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) {
+      return true;
+    }
+    if (!allowSeparators && (char === "/" || char === "\\")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Decode complete %HH runs and leave a bare "%" in place. One broken escape used to keep the
+// whole path encoded, so a space later in the same destination never became a space.
+function decodePercentEscapes(segment: string, allowSeparators: boolean): string {
+  if (!segment.includes("%")) {
+    return segment;
+  }
+  let decoded = "";
+  for (let index = 0; index < segment.length; ) {
+    if (
+      !isHexDigit(segment[index + 1]) ||
+      !isHexDigit(segment[index + 2]) ||
+      segment[index] !== "%"
+    ) {
+      decoded += segment[index];
+      index += 1;
+      continue;
+    }
+    const start = index;
+    const bytes: number[] = [];
+    while (
+      segment[index] === "%" &&
+      isHexDigit(segment[index + 1]) &&
+      isHexDigit(segment[index + 2])
+    ) {
+      bytes.push(Number.parseInt(segment.slice(index + 1, index + 3), 16));
+      index += 3;
+    }
+    const text = textFromPercentBytes(bytes);
+    if (text === null || isUnsafeDecodedText(text, allowSeparators)) {
+      decoded += segment.slice(start, index);
+      continue;
+    }
+    decoded += text;
+  }
+  return decoded;
+}
+
+function decodeFilePathSource(source: string): string {
+  return source
+    .split("/")
+    .map((segment) => decodePercentEscapes(segment, true))
+    .join("/");
+}
+
+const MARKDOWN_FILE_PATH_DECODE_LIMIT = 2;
+
+function decodeMarkdownFilePath(path: string): string {
+  if (!path.includes("%")) {
+    return path;
+  }
+  return path
+    .split(/([\\/])/)
+    .map((part) => {
+      if (part === "/" || part === "\\") {
+        return part;
+      }
+      const decoded = decodePercentEscapes(part, false);
+      // An encoded dot segment would be a different path. Leave that segment written as it was.
+      return decoded === "." || decoded === ".." ? part : decoded;
+    })
+    .join("");
+}
+
+// Markdown destinations are URLs, so a space arrives as %20 and a twice-encoded space as %2520.
+// The most decoded spelling comes first. "%2F" and ".." stay as written: a Grok session directory
+// is named with encoded slashes, and decoding those would point at a different path.
+export function markdownFilePathCandidates(path: string): string[] {
+  const chain = [path];
+  let current = path;
+  for (let pass = 0; pass < MARKDOWN_FILE_PATH_DECODE_LIMIT; pass += 1) {
+    const decoded = decodeMarkdownFilePath(current);
+    if (decoded === current) {
+      break;
+    }
+    chain.push(decoded);
+    current = decoded;
+  }
+  const candidates: string[] = [];
+  for (let index = chain.length - 1; index >= 0; index -= 1) {
+    const candidate = chain[index];
+    if (candidate !== undefined && !candidates.includes(candidate)) {
+      candidates.push(candidate);
+    }
+  }
+  return candidates;
 }
 
 function normalizeWindowsDrivePath(path: string): string {
