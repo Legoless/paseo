@@ -82,9 +82,9 @@ tooltips behind the menu. The shared overlay scale keeps menus below toasts and
 lets tooltip portals paint above both.
 
 Electron `<webview>` guests are native compositor surfaces: they can paint under
-`overlay-root` and still receive the click. Resident browser surfaces drop
-pointer events while a web overlay is registered so a menu over a page stays
-clickable.
+`overlay-root` and still receive the click. Resident browser surfaces and
+terminal guests drop pointer events while a web overlay is registered, so a
+menu or confirmation over a page or a full-screen terminal stays clickable.
 
 The shared overlay scale is relative for interactive surfaces: a base floating
 panel is below a base modal, while a floating panel rendered from inside a modal

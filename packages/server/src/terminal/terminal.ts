@@ -1,6 +1,7 @@
 import * as pty from "node-pty";
 import xterm, { type Terminal as TerminalType } from "@xterm/headless";
 import { randomUUID } from "crypto";
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { hostname, tmpdir, userInfo } from "node:os";
 import { basename, delimiter, dirname, extname, join, resolve as resolvePath } from "node:path";
@@ -981,6 +982,125 @@ function resumeRestoredAgent(
   return target;
 }
 
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function signalPid(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // Already exited, or the reaper won the race.
+  }
+}
+
+function readProcessParents(): Map<number, number> | null {
+  if (process.platform === "win32") {
+    return null;
+  }
+  try {
+    const output = execFileSync("ps", ["-eo", "pid=,ppid="], {
+      encoding: "utf8",
+      maxBuffer: 4 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const parents = new Map<number, number>();
+    for (const line of output.split("\n")) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length !== 2) {
+        continue;
+      }
+      const pid = Number(parts[0]);
+      const ppid = Number(parts[1]);
+      if (!Number.isInteger(pid) || !Number.isInteger(ppid) || pid <= 0) {
+        continue;
+      }
+      parents.set(pid, ppid);
+    }
+    return parents;
+  } catch {
+    return null;
+  }
+}
+
+function descendantPids(rootPid: number, parents: Map<number, number>): number[] {
+  const childrenByParent = new Map<number, number[]>();
+  for (const [pid, ppid] of parents) {
+    const children = childrenByParent.get(ppid);
+    if (children) {
+      children.push(pid);
+    } else {
+      childrenByParent.set(ppid, [pid]);
+    }
+  }
+
+  const descendants: number[] = [];
+  const seen = new Set<number>([rootPid]);
+  const queue = [...(childrenByParent.get(rootPid) ?? [])];
+  while (queue.length > 0) {
+    const pid = queue.shift();
+    if (pid === undefined || seen.has(pid)) {
+      continue;
+    }
+    seen.add(pid);
+    descendants.push(pid);
+    const children = childrenByParent.get(pid);
+    if (children) {
+      for (const child of children) {
+        queue.push(child);
+      }
+    }
+  }
+  return descendants;
+}
+
+function listDescendantPids(rootPid: number): number[] {
+  const parents = readProcessParents();
+  if (!parents) {
+    return [];
+  }
+  return descendantPids(rootPid, parents);
+}
+
+// Includes new grandchildren of a process that is still alive, so a program
+// that forked after the first snapshot is still covered by the force kill.
+async function waitForPidsToExit(pids: readonly number[], timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (pids.every((pid) => !isPidAlive(pid))) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+function livingProcessTree(rootPids: readonly number[]): number[] {
+  const aliveRoots = rootPids.filter((pid) => isPidAlive(pid));
+  const parents = readProcessParents();
+  if (!parents) {
+    return aliveRoots;
+  }
+
+  const seen = new Set<number>();
+  const living: number[] = [];
+  for (const pid of aliveRoots) {
+    const branch = [pid, ...descendantPids(pid, parents)];
+    for (const candidate of branch) {
+      if (seen.has(candidate)) {
+        continue;
+      }
+      seen.add(candidate);
+      living.push(candidate);
+    }
+  }
+  return living;
+}
+
 export async function createTerminal(options: CreateTerminalOptions): Promise<TerminalSession> {
   const {
     cwd,
@@ -1646,19 +1766,46 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     return exitInfo;
   }
 
+  // Taken before the shell is signaled. A foreground program that called
+  // setpgrp (a profile TUI such as grok) is no longer in the shell's process
+  // group, and node-pty only signals the shell pid. Once that shell exits, the
+  // children are reparented and a later walk cannot find them.
+  let rememberedPids: number[] | null = null;
+
+  function rememberDescendants(): number[] {
+    if (rememberedPids === null) {
+      rememberedPids = listDescendantPids(ptyProcess.pid);
+    }
+    return rememberedPids;
+  }
+
+  function forceKillDescendants(): void {
+    if (!rememberedPids || rememberedPids.length === 0) {
+      return;
+    }
+    for (const pid of livingProcessTree(rememberedPids)) {
+      signalPid(pid, "SIGKILL");
+    }
+  }
+
   function kill(): void {
     if (!killed) {
       killed = true;
       if (!processExited) {
+        rememberDescendants();
         killPtyProcess();
       }
       emitExit(buildExitInfo());
     }
     if (processExited) {
+      forceKillDescendants();
       disposeResources();
       return;
     }
-    void waitForProcessExit(1000).finally(disposeResources);
+    void waitForProcessExit(1000).finally(() => {
+      forceKillDescendants();
+      disposeResources();
+    });
   }
 
   function killPtyProcess(signal?: NodeJS.Signals): void {
@@ -1666,7 +1813,19 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
       ptyProcess.kill();
       return;
     }
-    ptyProcess.kill(signal);
+    const treeSignal = signal ?? "SIGHUP";
+    const descendants = rememberDescendants();
+    for (let index = descendants.length - 1; index >= 0; index -= 1) {
+      const pid = descendants[index];
+      if (pid !== undefined) {
+        signalPid(pid, treeSignal);
+      }
+    }
+    try {
+      ptyProcess.kill(treeSignal);
+    } catch {
+      // process may already be gone
+    }
   }
 
   function waitForProcessExit(timeoutMs: number): Promise<boolean> {
@@ -1700,25 +1859,32 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     const gracefulTimeoutMs = killOptions?.gracefulTimeoutMs ?? 2000;
     const forceTimeoutMs = killOptions?.forceTimeoutMs ?? 1000;
 
-    if (processExited) {
-      kill();
-      return;
-    }
-
-    try {
-      killPtyProcess();
-    } catch {
-      // process may already be gone
-    }
-
-    const exitedGracefully = await waitForProcessExit(gracefulTimeoutMs);
-    if (!exitedGracefully) {
+    if (!processExited) {
+      rememberDescendants();
+      const signaledAt = Date.now();
       try {
-        killPtyProcess("SIGKILL");
+        killPtyProcess();
       } catch {
         // process may already be gone
       }
-      await waitForProcessExit(forceTimeoutMs);
+
+      const exitedGracefully = await waitForProcessExit(gracefulTimeoutMs);
+      const graceRemaining = gracefulTimeoutMs - (Date.now() - signaledAt);
+      if (exitedGracefully && graceRemaining > 0) {
+        await waitForPidsToExit(rememberedPids ?? [], graceRemaining);
+      }
+      const descendantsRemain = livingProcessTree(rememberedPids ?? []).length > 0;
+      if (!exitedGracefully || descendantsRemain) {
+        forceKillDescendants();
+        if (!processExited) {
+          try {
+            killPtyProcess("SIGKILL");
+          } catch {
+            // process may already be gone
+          }
+        }
+        await waitForProcessExit(forceTimeoutMs);
+      }
     }
 
     // Finalize bookkeeping (idempotent if ptyProcess.onExit already fired).

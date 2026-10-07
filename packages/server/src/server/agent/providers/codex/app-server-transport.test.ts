@@ -22,6 +22,20 @@ describe("Codex app-server transport", () => {
     child.stdin.end();
   });
 
+  test("parses responses whose strings contain raw U+2028/U+2029 split across chunks", async () => {
+    const child = createCodexAppServerChildProcess();
+    const client = new CodexAppServerClient(child, createTestLogger());
+
+    const request = client.request("thread/resume", {});
+    child.stdout.write('{"id":1,"result":{"text":"caption\u2028line\u2029');
+    child.stdout.write('end"}}\n');
+
+    await expect(request).resolves.toEqual({ text: "caption\u2028line\u2029end" });
+    child.stdout.end();
+    child.stderr.end();
+    child.stdin.end();
+  });
+
   test("dispose rejects pending requests instead of leaving them hanging", async () => {
     const child = createCodexAppServerChildProcess();
     const client = new CodexAppServerClient(child, createTestLogger());

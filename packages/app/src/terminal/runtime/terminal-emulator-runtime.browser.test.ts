@@ -162,6 +162,42 @@ function getBrowserTerminal(): BrowserTerminal {
   return terminal;
 }
 
+const TERMINAL_ESCAPE = String.fromCharCode(0x1b);
+const SGR_WHEEL_DOWN = `${TERMINAL_ESCAPE}[<65;`;
+
+function commitTerminalWrite(runtime: TerminalEmulatorRuntime, text: string): Promise<void> {
+  return new Promise((resolve) => {
+    runtime.write({
+      data: terminalOutput(text),
+      onCommitted: () => {
+        resolve();
+      },
+    });
+  });
+}
+
+function dispatchTerminalWheel(host: HTMLElement, deltaY: number): void {
+  const screen = host.querySelector<HTMLElement>(".xterm-screen");
+  if (!screen) {
+    throw new Error("Expected xterm screen to be mounted");
+  }
+  const rect = screen.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) {
+    throw new Error("Expected xterm screen to have a layout size");
+  }
+  screen.dispatchEvent(
+    new WheelEvent("wheel", {
+      deltaY,
+      deltaX: 0,
+      deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + Math.min(rect.height / 2, 40),
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
 function dispatchTerminalKey(input: {
   host: HTMLElement;
   key: string;
@@ -525,5 +561,59 @@ describe("terminal emulator runtime in a real browser", () => {
     await nextFrame();
 
     expect(reset).not.toHaveBeenCalled();
+  });
+
+  it("sends an SGR wheel report for a fullscreen program after snapshot replay", async () => {
+    await page.viewport(900, 600);
+    const mounted = createTerminalHost({ width: 720, height: 360 });
+
+    await waitFor({ predicate: () => mounted.sizes.length > 0 });
+    const terminal = getBrowserTerminal();
+    const mouseTracking = "\x1b[?1003h\x1b[?1006h";
+
+    await commitTerminalWrite(mounted.runtime, mouseTracking);
+    mounted.inputs.length = 0;
+    dispatchTerminalWheel(mounted.host, 120);
+    await waitFor({
+      predicate: () => mounted.inputs.some((data) => data.includes(SGR_WHEEL_DOWN)),
+    });
+    expect(mounted.inputs.join("")).toContain(SGR_WHEEL_DOWN);
+
+    await new Promise<void>((resolve) => {
+      mounted.runtime.renderSnapshot({
+        state: {
+          rows: terminal.rows,
+          cols: terminal.cols,
+          scrollback: [],
+          grid: [[{ char: "g" }, { char: "r" }, { char: "o" }, { char: "k" }]],
+          cursor: { row: 0, col: 4 },
+        },
+        onCommitted: () => {
+          resolve();
+        },
+      });
+    });
+
+    mounted.inputs.length = 0;
+    dispatchTerminalWheel(mounted.host, 120);
+    await nextFrame();
+    expect(mounted.inputs.join("")).not.toContain(`${TERMINAL_ESCAPE}[<`);
+
+    await commitTerminalWrite(mounted.runtime, mouseTracking);
+    mounted.inputs.length = 0;
+    dispatchTerminalWheel(mounted.host, 120);
+    await waitFor({
+      predicate: () => mounted.inputs.some((data) => data.includes(SGR_WHEEL_DOWN)),
+    });
+    expect(mounted.inputs.join("")).toContain(SGR_WHEEL_DOWN);
+
+    mounted.inputs.length = 0;
+    for (let step = 0; step < 8; step += 1) {
+      dispatchTerminalWheel(mounted.host, 40);
+    }
+    await waitFor({
+      predicate: () => mounted.inputs.some((data) => data.includes(SGR_WHEEL_DOWN)),
+    });
+    expect(mounted.inputs.join("")).toContain(SGR_WHEEL_DOWN);
   });
 });

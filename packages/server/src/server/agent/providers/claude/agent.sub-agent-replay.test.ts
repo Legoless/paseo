@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
 import type { AgentStreamEvent } from "../../agent-sdk-types.js";
+import { CLAUDE_SIDECHAIN_REPLAY_BUDGET_BYTES } from "./agent.js";
 import { TestClaudeAgentClient as ClaudeAgentClient } from "./test-utils/catalog.js";
 import { claudeProjectDirSync } from "./project-dir.js";
 
@@ -645,5 +646,22 @@ describe("ClaudeAgentSession persisted subagent replay", () => {
       .filter((event) => event.type === "timeline");
     expect(timeline.length).toBeGreaterThan(0);
     expect(timeline[0]).toMatchObject({ id: TOOL_USE_ID });
+  });
+
+  test("skips sub-agent transcripts over the replay budget but keeps the parent timeline", async () => {
+    const subagentDir = writeParentSession([taskToolUse(), taskToolResult()]);
+    writeSubagent({ subagentDir, meta: JSON.stringify({ toolUseId: TOOL_USE_ID }) });
+    const hugeTranscript = path.join(subagentDir, "agent-huge.jsonl");
+    writeFileSync(hugeTranscript, "");
+    truncateSync(hugeTranscript, CLAUDE_SIDECHAIN_REPLAY_BUDGET_BYTES);
+
+    const events = await replayEvents();
+    expect(events.filter((event) => event.type === "provider_subagent")).toEqual([]);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "timeline",
+        item: expect.objectContaining({ type: "tool_call", callId: TOOL_USE_ID }),
+      }),
+    );
   });
 });

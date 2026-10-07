@@ -487,16 +487,16 @@ const PANE_STATUS_COUNT_ORDER: readonly SidebarPaneStatusBucket[] = [
 // would need _few and _many keys for Russian and Arabic, which the locale files do not carry.
 const PANE_STATUS_COUNT_LABEL_KEYS = {
   needs_input: {
-    one: "sidebar.workspace.status.paneNeedsInputOne",
-    many: "sidebar.workspace.status.paneNeedsInputMany",
+    one: "sidebar.workspace.status.tabNeedsInputOne",
+    many: "sidebar.workspace.status.tabNeedsInputMany",
   },
   failed: {
-    one: "sidebar.workspace.status.paneFailedOne",
-    many: "sidebar.workspace.status.paneFailedMany",
+    one: "sidebar.workspace.status.tabFailedOne",
+    many: "sidebar.workspace.status.tabFailedMany",
   },
   attention: {
-    one: "sidebar.workspace.status.paneReadyOne",
-    many: "sidebar.workspace.status.paneReadyMany",
+    one: "sidebar.workspace.status.tabReadyOne",
+    many: "sidebar.workspace.status.tabReadyMany",
   },
 } as const satisfies Record<SidebarPaneStatusBucket, { one: string; many: string }>;
 
@@ -507,10 +507,9 @@ function paneStatusDotStyle(bucket: SidebarPaneStatusBucket) {
 }
 
 /**
- * How many of the workspace's panes glow orange (needs input), red (failed) and green (finished,
+ * How many of the workspace's open tabs are orange (needs input), red (failed) and green (finished,
  * not looked at yet): the same dots as the agent rows underneath, each with its count, sitting
- * just before the kebab. It counts every pane in the layout, so a compact window, which shows only
- * the focused pane, can show fewer.
+ * just before the kebab. A tab behind its pane's front tab counts too, though it lights no pane.
  */
 export function SidebarWorkspacePaneStatusCounts({ counts }: { counts: SidebarPaneStatusCounts }) {
   const { t } = useTranslation();

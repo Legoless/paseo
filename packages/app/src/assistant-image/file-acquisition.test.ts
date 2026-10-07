@@ -85,6 +85,109 @@ describe("assistant image file acquisition", () => {
     expect(port.reads).toEqual([{ cwd: "/workspace", path: "images/paywall.png" }]);
   });
 
+  it("reads a markdown path whose spaces were percent-encoded", async () => {
+    const encoded = "posts/Porsche%20911%20GT3/generated-instagram-samples/02_side_hotel.jpg";
+    const decoded = "posts/Porsche 911 GT3/generated-instagram-samples/02_side_hotel.jpg";
+    const port = new MemoryFileAcquisitionPort(new Set([encoded]));
+    const acquisition = createAssistantImageFileAcquisition({
+      port,
+      resolution: {
+        kind: "file_rpc",
+        cwd: "/Users/legoless/Projects/legoless/Instagram",
+        path: encoded,
+      },
+      serverId: "server",
+      occurrenceKey: "agent:message:gt3",
+      unavailableMessage: "Image unavailable",
+    });
+
+    await expect(acquisition?.locate()).resolves.toMatchObject({ fileName: "02_side_hotel.jpg" });
+    expect(port.reads).toEqual([
+      { cwd: "/Users/legoless/Projects/legoless/Instagram", path: decoded },
+    ]);
+  });
+
+  it("decodes a space even when another segment has a bare percent", async () => {
+    const encoded = "posts/Porsche%20911%20GT3/100% done.jpg";
+    const decoded = "posts/Porsche 911 GT3/100% done.jpg";
+    const port = new MemoryFileAcquisitionPort(new Set([encoded]));
+    await expect(
+      createAssistantImageFileAcquisition({
+        port,
+        resolution: { kind: "file_rpc", cwd: "/workspace", path: encoded },
+        serverId: "server",
+        occurrenceKey: "agent:message:gt3-bare-percent",
+        unavailableMessage: "Image unavailable",
+      })?.locate(),
+    ).resolves.toMatchObject({ fileName: "100% done.jpg" });
+    expect(port.reads).toEqual([{ cwd: "/workspace", path: decoded }]);
+  });
+
+  it("reports the decoded path when every spelling is missing", async () => {
+    const encoded = "posts/Porsche%20911%20GT3/missing.jpg";
+    const decoded = "posts/Porsche 911 GT3/missing.jpg";
+    const port = new MemoryFileAcquisitionPort(new Set([encoded, decoded]));
+    await expect(
+      createAssistantImageFileAcquisition({
+        port,
+        resolution: { kind: "file_rpc", cwd: "/workspace", path: encoded },
+        serverId: "server",
+        occurrenceKey: "agent:message:gt3-missing",
+        unavailableMessage: "Image unavailable",
+      })?.locate(),
+    ).rejects.toThrow(`ENOENT: no such file or directory, open '${decoded}'`);
+    expect(port.reads).toEqual([
+      { cwd: "/workspace", path: decoded },
+      { cwd: "/workspace", path: encoded },
+    ]);
+  });
+
+  it("keeps a filename that literally contains %20", async () => {
+    const path = "/tmp/image%20with%20literal%20percent.png";
+    const decoded = "/tmp/image with literal percent.png";
+    const port = new MemoryFileAcquisitionPort(new Set([decoded]));
+    await createAssistantImageFileAcquisition({
+      port,
+      resolution: { kind: "file_rpc", cwd: "/", path },
+      serverId: "server",
+      occurrenceKey: "agent:message:literal-percent",
+      unavailableMessage: "Image unavailable",
+    })?.locate();
+    expect(port.reads).toEqual([
+      { cwd: "/", path: decoded },
+      { cwd: "/", path },
+    ]);
+  });
+
+  it("does not decode an encoded slash or a dot segment into another path", async () => {
+    const sessionPath = "~/.grok/sessions/%2Fworkspace/s1/images/paywall.png";
+    const traversalPath = "posts/%2e%2e/secret.jpg";
+    const port = new MemoryFileAcquisitionPort(new Set([sessionPath, traversalPath]));
+
+    await expect(
+      createAssistantImageFileAcquisition({
+        port,
+        resolution: { kind: "file_rpc", cwd: "~", path: sessionPath },
+        serverId: "server",
+        occurrenceKey: "agent:message:session-slashes",
+        unavailableMessage: "Image unavailable",
+      })?.locate(),
+    ).rejects.toThrow(`ENOENT: no such file or directory, open '${sessionPath}'`);
+    await expect(
+      createAssistantImageFileAcquisition({
+        port,
+        resolution: { kind: "file_rpc", cwd: "/workspace", path: traversalPath },
+        serverId: "server",
+        occurrenceKey: "agent:message:dot-segment",
+        unavailableMessage: "Image unavailable",
+      })?.locate(),
+    ).rejects.toThrow(`ENOENT: no such file or directory, open '${traversalPath}'`);
+    expect(port.reads).toEqual([
+      { cwd: "~", path: sessionPath },
+      { cwd: "/workspace", path: traversalPath },
+    ]);
+  });
+
   it("reports the workspace error when neither has the image", async () => {
     const port = new MemoryFileAcquisitionPort(
       new Set(["images/paywall.png", "~/.grok/sessions/%2Fworkspace/s1/images/paywall.png"]),

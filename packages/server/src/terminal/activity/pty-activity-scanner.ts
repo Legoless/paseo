@@ -169,10 +169,20 @@ export function isClaudeBusyScreen(lines: string[]): boolean {
 // Grok prints "Worked for …" when the turn ends and leaves the ❯ composer up.
 // Work that is still running is the dock row above that composer. Its mark is
 // the four-dot ⸬ (a braille spinner is the other running mark) and the row
-// ends with a live elapsed time: `⸬ Run …  1h04m`. A blank line separates that
-// row from the composer box. The ◎ status line counts too. The window is only
-// the lines near the composer, so a braille logo higher in the scrollback does not.
-const GROK_RUNNING_ROW = /^(?:[\u2800-\u28FF]|⸬).*(?:\d+h\d+m(?:\d+s)?|\d+m\d+s|\d+[hms])$/;
+// ends with a live elapsed time: `⸬ Run …  1h04m`. A reasoning block that is
+// still open is a spinner frame plus `Thinking` or `Thinking…`. That frame
+// cycles through `⋅` `:` `⸬` `⁙` and braille, so the mark is whatever single
+// glyph is in front of the word. `Thought for` rewrites the header when the
+// block ends. A `Thinking` line above that, or above `Worked for`, is an
+// older block. A blank line separates the dock row from the composer box.
+// The ◎ status line counts too. The window is only the lines near the composer,
+// so a braille logo higher in the scrollback does not.
+const GROK_RUNNING_MARK = "(?:[\\u2800-\\u28FF]|⸬)";
+const GROK_RUNNING_ROW = new RegExp(
+  `^${GROK_RUNNING_MARK}.*(?:\\d+h\\d+m(?:\\d+s)?|\\d+m\\d+s|\\d+[hms])$`,
+);
+const GROK_THINKING_ROW = /^(?:[^\s\w]\s+)?Thinking(?:\.{1,3}|…|⋯)?$/;
+const GROK_REASONING_CLOSED = /^(?:[^\s\w]\s+)?(?:Thought for|Worked for)\b/;
 const GROK_STILL_RUNNING = /^◎\s+(?:waiting\b|\d+\b.*\bstill running\b)/;
 const GROK_DOCK_LINE_LIMIT = 12;
 
@@ -188,7 +198,20 @@ export function isGrokBusyScreen(lines: string[]): boolean {
     if (line.length === 0) continue;
     dock.push(line);
   }
-  return dock.some((line) => GROK_RUNNING_ROW.test(line) || GROK_STILL_RUNNING.test(line));
+  // `dock` is nearest-to-composer first. `Thought for 12s` can wear the same
+  // spinner and end in a duration, and that header is finished. A dock row or
+  // ◎ still counts on either side of it; an older Thinking line does not.
+  let reasoningClosed = false;
+  for (const line of dock) {
+    if (GROK_REASONING_CLOSED.test(line)) {
+      reasoningClosed = true;
+      continue;
+    }
+    if (GROK_RUNNING_ROW.test(line) || GROK_STILL_RUNNING.test(line)) return true;
+    if (reasoningClosed) continue;
+    if (GROK_THINKING_ROW.test(line)) return true;
+  }
+  return false;
 }
 
 // Agents that keep their idle-looking composer up while work still runs.
@@ -512,7 +535,28 @@ export class PtyActivityScanner {
       this.setWorking();
     }
 
+    this.promoteWorkingGrokScreen();
     this.scheduleStillnessCheck();
+  }
+
+  // Finished attention ignores a later spinner frame, and that frame keeps
+  // repainting, so the stillness check would not get a quiet gap in which
+  // to look. Any later Grok output can be the next frame of an open
+  // Thinking header; that screen clears the green. Quota stays red.
+  private promoteWorkingGrokScreen(): void {
+    if (
+      this.initialLaunch ||
+      this.isInsideInterruptWindow() ||
+      this.activeAgent !== "grok" ||
+      this.currentActivity === "working" ||
+      this.options.getActivity().attentionReason === "quota"
+    ) {
+      return;
+    }
+    const lines = this.options.readLastLines(15);
+    if (isGrokBusyScreen(lines) && !isSpendLimitScreen(lines)) {
+      this.setWorking();
+    }
   }
 
   private isInsideInterruptWindow(): boolean {

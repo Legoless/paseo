@@ -4649,6 +4649,156 @@ test("force provider hydration removes children absent from current history", as
   });
 });
 
+test("the last provider subagent to finish marks an idle parent unread", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-provider-child-finished-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  let activeSession: TestAgentSession | null = null;
+  class ProviderChildClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      activeSession = new TestAgentSession(config);
+      return activeSession;
+    }
+  }
+  const attentionAgentIds: string[] = [];
+  const manager = new AgentManager({
+    clients: { codex: new ProviderChildClient() },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000171",
+    onAgentAttention: ({ agentId }) => {
+      attentionAgentIds.push(agentId);
+    },
+  });
+  const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+  expect(manager.getAgent(snapshot.id)?.lifecycle).toBe("idle");
+  expect(manager.getAgent(snapshot.id)?.attention).toEqual({ requiresAttention: false });
+
+  activeSession?.pushEvent({
+    type: "provider_subagent",
+    provider: "codex",
+    event: { type: "upsert", id: "child-a", title: "Child A", status: "running" },
+  });
+  activeSession?.pushEvent({
+    type: "provider_subagent",
+    provider: "codex",
+    event: { type: "upsert", id: "child-b", title: "Child B", status: "running" },
+  });
+  await vi.waitFor(() => expect(manager.listProviderSubagents(snapshot.id)).toHaveLength(2));
+  expect(manager.getAgent(snapshot.id)?.attention).toEqual({ requiresAttention: false });
+
+  activeSession?.pushEvent({
+    type: "provider_subagent",
+    provider: "codex",
+    event: { type: "upsert", id: "child-a", status: "completed" },
+  });
+  await vi.waitFor(() =>
+    expect(manager.getProviderSubagent(snapshot.id, "child-a")?.status).toBe("completed"),
+  );
+  expect(manager.getAgent(snapshot.id)?.attention).toEqual({ requiresAttention: false });
+
+  activeSession?.pushEvent({
+    type: "provider_subagent",
+    provider: "codex",
+    event: { type: "upsert", id: "child-b", status: "completed" },
+  });
+  await vi.waitFor(() =>
+    expect(manager.getAgent(snapshot.id)?.attention.requiresAttention).toBe(true),
+  );
+  await manager.flush();
+
+  expect(manager.getAgent(snapshot.id)?.attention).toMatchObject({
+    requiresAttention: true,
+    attentionReason: "finished",
+  });
+  expect(attentionAgentIds).toEqual([snapshot.id]);
+  const persisted = await storage.get(snapshot.id);
+  expect(persisted?.requiresAttention).toBe(true);
+  expect(persisted?.attentionReason).toBe("finished");
+});
+
+test("hydrating a finished provider subagent does not mark the parent unread", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-provider-child-history-attention-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  class FinishedChildHistorySession extends TestAgentSession {
+    override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+      yield {
+        type: "provider_subagent",
+        provider: "codex",
+        event: { type: "upsert", id: "old-child", status: "running" },
+      };
+      yield {
+        type: "provider_subagent",
+        provider: "codex",
+        event: { type: "upsert", id: "old-child", status: "completed" },
+      };
+    }
+  }
+  class FinishedChildHistoryClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new FinishedChildHistorySession(config);
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new FinishedChildHistoryClient() },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000172",
+  });
+  const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+
+  await manager.hydrateTimelineFromProvider(snapshot.id, { force: true, broadcast: true });
+
+  expect(manager.getProviderSubagent(snapshot.id, "old-child")?.status).toBe("completed");
+  expect(manager.getAgent(snapshot.id)?.attention).toEqual({ requiresAttention: false });
+});
+
+test("the last managed child to finish marks an idle parent unread", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-child-finished-attention-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    registry: storage,
+    logger,
+  });
+  const parent = await manager.createAgent(
+    { provider: "codex", cwd: workdir, title: "Parent" },
+    undefined,
+    { workspaceId: undefined },
+  );
+  const child = await manager.createAgent(
+    { provider: "codex", cwd: workdir, title: "Child" },
+    undefined,
+    { labels: { [PARENT_AGENT_ID_LABEL]: parent.id }, workspaceId: undefined },
+  );
+
+  await manager.runAgent(parent.id, "parent turn");
+  await manager.flush();
+  expect(manager.getAgent(parent.id)?.attention).toMatchObject({
+    requiresAttention: true,
+    attentionReason: "finished",
+  });
+
+  await manager.clearAgentAttention(parent.id);
+  await manager.flush();
+  expect(manager.getAgent(parent.id)?.attention).toEqual({ requiresAttention: false });
+
+  await manager.runAgent(child.id, "child turn");
+  await manager.flush();
+
+  expect(manager.getAgent(parent.id)?.lifecycle).toBe("idle");
+  expect(manager.getAgent(parent.id)?.attention).toMatchObject({
+    requiresAttention: true,
+    attentionReason: "finished",
+  });
+  const persisted = await storage.get(parent.id);
+  expect(persisted?.requiresAttention).toBe(true);
+  expect(persisted?.attentionReason).toBe("finished");
+});
+
 test("reloadAgentSession preserves current title when config title is unset", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-reload-title-"));
   const storagePath = join(workdir, "agents");

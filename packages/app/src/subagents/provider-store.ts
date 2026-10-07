@@ -97,6 +97,27 @@ export function refreshProviderSubagents(
   return request;
 }
 
+/**
+ * Updates sent while disconnected are lost, so a reconnect refetches every parent that still holds
+ * a running row. Only those parents: each list request loads its parent agent on the daemon.
+ */
+export async function refreshRunningProviderSubagentParents(
+  client: ProviderSubagentListClient,
+  serverId: string,
+): Promise<void> {
+  const parentAgentIds = new Set<string>();
+  for (const [key, subagent] of useProviderSubagentStore.getState().descriptors) {
+    if (key.startsWith(`${serverId}\0`) && subagent.status === "running") {
+      parentAgentIds.add(subagent.parentAgentId);
+    }
+  }
+  await Promise.all(
+    [...parentAgentIds].map((parentAgentId) =>
+      refreshProviderSubagents(client, serverId, parentAgentId).catch(() => undefined),
+    ),
+  );
+}
+
 function parentPrefix(serverId: string, parentAgentId: string): string {
   return `${serverId}\0${parentAgentId}\0`;
 }

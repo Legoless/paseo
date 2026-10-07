@@ -1,6 +1,6 @@
 import type { FileReadResult } from "@getpaseo/client/internal/daemon-client";
 import type { AttachmentMetadata } from "@/attachments/types";
-import { getFileNameFromPath } from "@/attachments/utils";
+import { getFileNameFromPath, markdownFilePathCandidates } from "@/attachments/utils";
 import type { AssistantImageSourceResolution } from "@/utils/assistant-image-source";
 import {
   createAssistantImageFileAcquisitionKey,
@@ -20,6 +20,21 @@ export interface AssistantImageFileAcquisitionPort {
 export interface AssistantImageAcquisition {
   key: string;
   locate: () => Promise<AttachmentMetadata>;
+}
+
+function isMissingFileError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const code = "code" in error && typeof error.code === "string" ? error.code : "";
+  if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
+    return true;
+  }
+  return /\bENOENT\b|\bENOTDIR\b|\bELOOP\b|no such file|not a directory/.test(error.message);
+}
+
+function pathsToTry(target: { path: string; literalPath?: string }): string[] {
+  return markdownFilePathCandidates(target.literalPath ?? target.path);
 }
 
 export function createAssistantImageFileAcquisition(input: {
@@ -51,15 +66,32 @@ export function createAssistantImageFileAcquisition(input: {
         }
         return read;
       };
+      const readImagePath = async (target: { cwd: string; path: string; literalPath?: string }) => {
+        const candidates = pathsToTry(target);
+        let firstError: unknown;
+        for (const candidate of candidates) {
+          try {
+            return await readImage({ cwd: target.cwd, path: candidate });
+          } catch (error) {
+            if (firstError === undefined) {
+              firstError = error;
+            }
+            if (!isMissingFileError(error)) {
+              throw error;
+            }
+          }
+        }
+        throw firstError;
+      };
       let file: Awaited<ReturnType<typeof readImage>>;
       try {
-        file = await readImage(resolution);
+        file = await readImagePath(resolution);
       } catch (error) {
         // The workspace wins; the fallback only fills in a file the workspace does not have. The
         // tradeoff: a workspace file at the same relative path shadows the fallback's. When both
         // miss, the workspace's error is the one worth showing.
         if (!resolution.fallback) throw error;
-        file = await readImage(resolution.fallback).catch(() => {
+        file = await readImagePath(resolution.fallback).catch(() => {
           throw error;
         });
       }

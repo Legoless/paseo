@@ -49,7 +49,10 @@ import { useToast } from "@/contexts/toast-context";
 import { toErrorMessage } from "@/utils/error-messages";
 import { showProviderNoticeToast } from "@/utils/provider-notice-toast";
 import { applyCheckoutStatusUpdateFromEvent } from "@/git/checkout-status-cache";
-import { useProviderSubagentStore } from "@/subagents/provider-store";
+import {
+  refreshRunningProviderSubagentParents,
+  useProviderSubagentStore,
+} from "@/subagents/provider-store";
 
 // Re-export types from session-store and draft-store for backward compatibility
 export type { DraftInput } from "@/stores/draft-store";
@@ -381,6 +384,11 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       setInitializingAgents(serverId, new Map());
     }
   }, [flushAgentLastActivity, serverId, isConnected, setInitializingAgents]);
+
+  // A stale running provider row keeps its parent's tab glowing, mounted or not.
+  useEffect(() => {
+    if (isConnected) void refreshRunningProviderSubagentParents(client, serverId);
+  }, [client, isConnected, serverId]);
 
   const applyWorkspaceSetupProgress = useCallback(
     (payload: WorkspaceSetupProgressPayload) => {

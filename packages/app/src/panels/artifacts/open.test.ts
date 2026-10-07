@@ -11,6 +11,17 @@ describe("resolveArtifactFileLocation", () => {
     ).toEqual({ path: "/tmp/paseo-codex-screenshot.png" });
   });
 
+  it("opens a percent-encoded markdown path as the filesystem path", () => {
+    expect(
+      resolveArtifactFileLocation({
+        source: "posts/Porsche%20911%20GT3/generated-instagram-samples/02_side_hotel.jpg",
+        workspaceRoot: "/Users/test/project",
+      }),
+    ).toEqual({
+      path: "posts/Porsche 911 GT3/generated-instagram-samples/02_side_hotel.jpg",
+    });
+  });
+
   it("opens workspace-relative screenshots as file tabs", () => {
     expect(
       resolveArtifactFileLocation({

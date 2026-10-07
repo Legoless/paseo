@@ -21,6 +21,8 @@ const ESC = String.fromCharCode(0x1b);
 const APPLICATION_CURSOR_KEYS_MODE = 1;
 const WIN32_INPUT_MODE = 9001;
 const BRACKETED_PASTE_MODE = 2004;
+const MOUSE_PROTOCOL_MODES = new Set([9, 1000, 1002, 1003]);
+const MOUSE_ENCODING_MODES = new Set([1006, 1016]);
 const CSI_INPUT_MODE_SEQUENCE = new RegExp(
   `${ESC}\\[(?:([<>=?]?)([0-9;]*)u|\\?([0-9;]*)([hl]))`,
   "g",
@@ -74,6 +76,8 @@ export class TerminalInputModeTracker {
   private win32InputMode = false;
   private applicationCursorKeys = false;
   private bracketedPaste = false;
+  private mouseProtocol = 0;
+  private mouseEncoding = 0;
   private readonly kittyKeyboardStack: number[] = [];
   private pending = "";
 
@@ -124,6 +128,8 @@ export class TerminalInputModeTracker {
     this.win32InputMode = false;
     this.applicationCursorKeys = false;
     this.bracketedPaste = false;
+    this.mouseProtocol = 0;
+    this.mouseEncoding = 0;
     this.kittyKeyboardStack.length = 0;
     this.pending = "";
   }
@@ -158,6 +164,15 @@ export class TerminalInputModeTracker {
     }
     if (this.bracketedPaste) {
       parts.push("\x1b[?2004h");
+    }
+    // Snapshot replay writes RIS (ESC c) before this preamble. RIS clears
+    // mouse tracking, and the wheel then becomes cursor keys. Fullscreen
+    // programs scroll only when those wheel events arrive as mouse reports.
+    if (this.mouseProtocol !== 0) {
+      parts.push(`\x1b[?${this.mouseProtocol}h`);
+    }
+    if (this.mouseEncoding !== 0) {
+      parts.push(`\x1b[?${this.mouseEncoding}h`);
     }
     return parts.join("");
   }
@@ -221,6 +236,21 @@ export class TerminalInputModeTracker {
       const previous = this.bracketedPaste;
       this.bracketedPaste = final === "h";
       changed = this.bracketedPaste !== previous || changed;
+    }
+
+    const enabled = final === "h";
+    for (const mode of modes) {
+      if (MOUSE_PROTOCOL_MODES.has(mode)) {
+        const next = enabled ? mode : 0;
+        changed = next !== this.mouseProtocol || changed;
+        this.mouseProtocol = next;
+        continue;
+      }
+      if (MOUSE_ENCODING_MODES.has(mode)) {
+        const next = enabled ? mode : 0;
+        changed = next !== this.mouseEncoding || changed;
+        this.mouseEncoding = next;
+      }
     }
 
     return changed;

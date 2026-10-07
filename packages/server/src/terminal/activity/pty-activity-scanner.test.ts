@@ -1185,6 +1185,25 @@ describe("PtyActivityScanner — full lifecycle", () => {
     ).toBe(true);
     expect(isGrokBusyScreen(["◎ waiting · send a message to interrupt", "❯"])).toBe(true);
     expect(isGrokBusyScreen(["see ◎ 1 command still running in the docs", "❯"])).toBe(false);
+    expect(isGrokBusyScreen(["⠋ Thinking", "", "╭", "❯"])).toBe(true);
+    expect(isGrokBusyScreen(["⸬ Thinking...", "", "❯"])).toBe(true);
+    expect(isGrokBusyScreen(["⋅ Thinking…", "", "❯"])).toBe(true);
+    expect(isGrokBusyScreen([": Thinking", "", "❯"])).toBe(true);
+    expect(isGrokBusyScreen(["⁙ Thinking⋯", "", "❯"])).toBe(true);
+    expect(isGrokBusyScreen(["Thinking", "", "❯"])).toBe(true);
+    expect(isGrokBusyScreen(["Thought for 12s", "", "❯"])).toBe(false);
+    expect(isGrokBusyScreen(["⠋ Thought for 12s", "", "❯"])).toBe(false);
+    expect(isGrokBusyScreen(["The model is Thinking about the tests", "❯"])).toBe(false);
+    // An older Thinking header sits above the turn marker. The dock row below
+    // a closed header is still running.
+    expect(isGrokBusyScreen(["⠋ Thinking", "Search files", "Thought for 12s", "", "❯"])).toBe(
+      false,
+    );
+    expect(isGrokBusyScreen(["⠋ Thinking", "Search files", "Worked for 2s", "", "❯"])).toBe(false);
+    expect(isGrokBusyScreen(["Worked for 2s", "⋅ Thinking…", "", "❯"])).toBe(true);
+    expect(
+      isGrokBusyScreen(["Thought for 12s", "⸬ Run Start the supervisor  1m04s", "", "❯"]),
+    ).toBe(true);
 
     const tracker = new TerminalActivityTracker();
     let screenLines = running;
@@ -1216,6 +1235,70 @@ describe("PtyActivityScanner — full lifecycle", () => {
       state: "idle",
       attentionReason: "finished",
     });
+  });
+
+  it("keeps Grok blue while a Thinking row is still on screen", () => {
+    const thinking = [
+      "⋅ Thinking…",
+      "Search maskActionRail|actionCenter|actionSize",
+      "Read /Users/legoless/Projects/legoless/Matisse/app/MatisseTests/ChatTool.swift",
+      "⸬ Thinking",
+      "3/3 tasks",
+      "",
+      "╭────────────────────╮",
+      "❯",
+      "Grok 4.7 (xhigh) · Extra high",
+    ];
+    const answered = ["Thought for 12s", "Done.", "", "╭────────────────────╮", "❯"];
+    expect(isGrokBusyScreen(thinking)).toBe(true);
+    expect(isIdleAgentScreen(thinking, "❯", "grok")).toBe(false);
+
+    const tracker = new TerminalActivityTracker();
+    let screenLines = answered;
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screenLines,
+      readCursorLine: () => "❯",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("grok");
+    scanner.feedInput("\r");
+    scanner.feedOutput("reply");
+    screenLines = answered;
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "finished",
+    });
+
+    // The spinner keeps repainting, so this has to clear the green without
+    // waiting for a quiet gap. The tick is one frame (`⋅`), not the word.
+    screenLines = thinking;
+    scanner.feedOutput("⋅");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    screenLines = answered;
+    scanner.feedOutput("Thought for 12s");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "finished",
+    });
+
+    // A quota stop stays red while the Thinking row is still painted.
+    screenLines = ["You've hit your monthly spend limit", "⋅ Thinking…", "", "❯"];
+    scanner.feedOutput("limit");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "quota",
+    });
+    screenLines = thinking;
+    scanner.feedOutput("⋅");
+    expect(tracker.getSnapshot().attentionReason).toBe("quota");
   });
 
   it("keeps Antigravity working while its status line still shows a running task", () => {

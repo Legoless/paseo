@@ -17,6 +17,40 @@ describe("resolveAssistantImageSource", () => {
     });
   });
 
+  it("opens a percent-encoded relative destination as the filesystem path", () => {
+    expect(
+      resolveAssistantImageSource({
+        source: "posts/Porsche%20911%20GT3/generated-instagram-samples/02_side_hotel.jpg",
+        workspaceRoot: "/Users/legoless/Projects/legoless/Instagram",
+        fallbackRoot: "~/.grok/sessions/%2FUsers%2Flegoless%2FProjects/session",
+      }),
+    ).toEqual({
+      kind: "file_rpc",
+      cwd: "/Users/legoless/Projects/legoless/Instagram",
+      path: "posts/Porsche 911 GT3/generated-instagram-samples/02_side_hotel.jpg",
+      literalPath: "posts/Porsche%20911%20GT3/generated-instagram-samples/02_side_hotel.jpg",
+      fallback: {
+        cwd: "~/.grok/sessions/%2FUsers%2Flegoless%2FProjects/session",
+        path: "posts/Porsche 911 GT3/generated-instagram-samples/02_side_hotel.jpg",
+        literalPath: "posts/Porsche%20911%20GT3/generated-instagram-samples/02_side_hotel.jpg",
+      },
+    });
+  });
+
+  it("keeps a Grok session directory's encoded slashes", () => {
+    const source = "~/.grok/sessions/%2FUsers%2Ftest/images/1.jpg";
+    expect(
+      resolveAssistantImageSource({
+        source,
+        workspaceRoot: "/Users/test/project",
+      }),
+    ).toEqual({
+      kind: "file_rpc",
+      cwd: "~",
+      path: source,
+    });
+  });
+
   it("uses the workspace root for relative paths", () => {
     expect(
       resolveAssistantImageSource({

@@ -5,6 +5,7 @@ import type { WorkspaceTab, WorkspaceTabTarget } from "@/workspace-tabs/model";
 import { TURN_LIVENESS_IDLE } from "@/timeline/turn-liveness";
 import {
   buildSidebarWorkspaceGroupModel,
+  countAttentionTabs,
   preserveSidebarWorkspaceGroupModelIdentity,
   type SidebarWorkspaceGroupSession,
 } from "./workspace-groups";
@@ -594,7 +595,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
     expect(buckets.get("review")).toBe("attention");
   });
 
-  it("counts the panes whose front tab is an unseen finish, leaving out the Explorer dock", () => {
+  it("counts every open unseen tab, including one behind its pane's front tab", () => {
     const finished = (id: string) =>
       agent({
         id,
@@ -614,6 +615,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
             finished("done-b"),
             finished("behind"),
             finished("docked"),
+            { ...finished("archived"), archivedAt: new Date(2_000) },
             agent({
               id: "busy",
               workspaceId: "ws-1",
@@ -628,20 +630,77 @@ describe("buildSidebarWorkspaceGroupModel", () => {
           { id: "left", tabs: [agentTab("done-a")], focusedTabId: "agent_done-a" },
           {
             id: "middle",
-            tabs: [agentTab("busy"), agentTab("behind")],
+            tabs: [agentTab("busy"), agentTab("behind"), agentTab("archived")],
             focusedTabId: "agent_busy",
           },
           { id: "right", tabs: [agentTab("done-b")], focusedTabId: null },
           { id: "side", tabs: [agentTab("docked")], focusedTabId: "agent_docked" },
         ]),
       },
-      explorerPaneIdByWorkspace: { "srv:ws-1": "side" },
     });
 
-    expect(model.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts.attention).toBe(2);
+    expect(model.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts.attention).toBe(4);
   });
 
-  it("counts each pane by the color its front tab glows, agent or terminal", () => {
+  it("totals the dock badge from the workspace rows' counts, leaving out agents with no tab", () => {
+    const finished = (id: string, workspaceId: string) =>
+      agent({
+        id,
+        workspaceId,
+        cwd: "/repo",
+        requiresAttention: true,
+        attentionReason: "finished",
+      });
+    const agentTab = (agentId: string) =>
+      tab({ tabId: `agent_${agentId}`, target: { kind: "agent", agentId }, createdAt: 1 });
+    const terminalTab = tab({
+      tabId: "terminal_term-asking",
+      target: { kind: "terminal", terminalId: "term-asking" },
+      createdAt: 1,
+    });
+    const sessions = [
+      session({
+        workspaces: [
+          TWO_PROJECT_WORKSPACE,
+          {
+            ...workspace({ id: "ws-2", members: TWO_PROJECT_WORKSPACE.members }),
+            terminalStatusBuckets: { "term-asking": "needs_input" },
+          },
+        ],
+        agents: [
+          finished("front", "ws-1"),
+          finished("behind", "ws-1"),
+          finished("tabless", "ws-1"),
+          finished("front-2", "ws-2"),
+        ],
+      }),
+    ];
+    const layoutsByWorkspace = {
+      "srv:ws-1": splitLayout([
+        { id: "main", tabs: [agentTab("front"), agentTab("behind")], focusedTabId: "agent_front" },
+      ]),
+      "srv:ws-2": splitLayout([
+        { id: "left", tabs: [agentTab("front-2")], focusedTabId: "agent_front-2" },
+        { id: "right", tabs: [terminalTab], focusedTabId: terminalTab.tabId },
+      ]),
+    };
+    const sections = buildSidebarWorkspaceGroupModel({
+      sessions,
+      layoutsByWorkspace,
+    }).sectionsByWorkspaceKey;
+    const shown = [...sections.values()].reduce(
+      (sum, { paneStatusCounts: counts }) =>
+        sum + counts.needs_input + counts.failed + counts.attention,
+      0,
+    );
+
+    const badge = countAttentionTabs({ sessions, layoutsByWorkspace });
+
+    expect(badge).toBe(4);
+    expect(badge).toBe(shown);
+  });
+
+  it("counts each open tab by its own color, agent or terminal", () => {
     const terminalTab = (terminalId: string) =>
       tab({
         tabId: `terminal_${terminalId}`,
@@ -711,17 +770,16 @@ describe("buildSidebarWorkspaceGroupModel", () => {
           front("side", terminalTab("term-docked")),
         ]),
       },
-      explorerPaneIdByWorkspace: { "srv:ws-1": "side" },
     });
 
     expect(model.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts).toEqual({
-      needs_input: 2,
-      failed: 2,
+      needs_input: 3,
+      failed: 3,
       attention: 2,
     });
   });
 
-  it("counts no panes against a daemon that sends no terminal buckets", () => {
+  it("counts no tabs against a daemon that sends no terminal buckets", () => {
     const { terminalStatusBuckets: _omitted, ...oldDaemonWorkspace } = TWO_PROJECT_WORKSPACE;
     const model = buildSidebarWorkspaceGroupModel({
       sessions: [
@@ -748,7 +806,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
     });
   });
 
-  it("counts no panes for a workspace this client has never laid out", () => {
+  it("counts no tabs for a workspace this client has never laid out", () => {
     const model = buildSidebarWorkspaceGroupModel({
       sessions: [
         session({
@@ -975,27 +1033,23 @@ describe("preserveSidebarWorkspaceGroupModelIdentity", () => {
     ).toBe("Renamed");
   });
 
-  it("rebuilds a section when a pane's front tab changes its green count", () => {
-    const agents = [
-      agent({
-        id: "done",
-        workspaceId: "ws-1",
-        cwd: "/repo/project-a/ws-1",
-        requiresAttention: true,
-        attentionReason: "finished",
+  it("rebuilds a section when only its green count changes", () => {
+    const tabs = [
+      tab({
+        tabId: "terminal_term",
+        target: { kind: "terminal", terminalId: "term" },
+        createdAt: 1,
       }),
-      agent({ id: "idle", workspaceId: "ws-1", cwd: "/repo/project-a/ws-1" }),
     ];
-    const tabs = agentTabs("done", "idle");
-    const build = (focusedTabId: string) =>
+    const build = (terminalStatusBuckets: WorkspaceDescriptor["terminalStatusBuckets"]) =>
       buildSidebarWorkspaceGroupModel({
-        sessions: [session({ workspaces: [TWO_PROJECT_WORKSPACE], agents })],
-        layoutsByWorkspace: { "srv:ws-1": splitLayout([{ id: "main", tabs, focusedTabId }]) },
+        sessions: [session({ workspaces: [{ ...TWO_PROJECT_WORKSPACE, terminalStatusBuckets }] })],
+        layoutsByWorkspace: layoutsFor("ws-1", tabs),
       });
-    const green = build("agent_done");
+    const green = build({ term: "attention" });
     expect(green.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts.attention).toBe(1);
 
-    const preserved = preserveSidebarWorkspaceGroupModelIdentity(green, build("agent_idle"));
+    const preserved = preserveSidebarWorkspaceGroupModelIdentity(green, build({}));
     expect(preserved).not.toBe(green);
     expect(preserved.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts.attention).toBe(0);
   });

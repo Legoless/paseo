@@ -14,6 +14,7 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -128,6 +129,40 @@ afterEach(async () => {
 function trackSession(session: TerminalSession): TerminalSession {
   sessions.push(session);
   return session;
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function signalIfAlive(pid: number): void {
+  if (!isPidAlive(pid)) {
+    return;
+  }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // already gone
+  }
+}
+
+async function waitForLivePid(pidPath: string, timeoutMs = 5000): Promise<number> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (existsSync(pidPath)) {
+      const pid = Number.parseInt(readFileSync(pidPath, "utf8").trim(), 10);
+      if (Number.isInteger(pid) && pid > 0 && isPidAlive(pid)) {
+        return pid;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for a live pid in ${pidPath}`);
 }
 
 const DA_HELPER_SCRIPT = `process.stdin.setRawMode(true);
@@ -1275,6 +1310,59 @@ describe.skipIf(isPlatform("win32"))("terminal POSIX-only", () => {
       // Should not throw when trying to get state after kill
       const state = session.getState();
       expect(state).toBeDefined();
+    });
+
+    it("kills a foreground job that left the shell process group", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "paseo-terminal-tree-kill-"));
+      temporaryDirs.push(dir);
+      const parentPidPath = join(dir, "parent.pid");
+      const childPidPath = join(dir, "child.pid");
+      const scriptPath = join(dir, "linger.js");
+      writeFileSync(
+        scriptPath,
+        `
+          const { spawn } = require("node:child_process");
+          const fs = require("node:fs");
+          process.on("SIGHUP", () => {});
+          process.on("SIGTERM", () => {});
+          const child = spawn(process.execPath, ["-e", ${JSON.stringify(`
+            const fs = require("node:fs");
+            process.on("SIGHUP", () => {});
+            process.on("SIGTERM", () => {});
+            fs.writeFileSync(${JSON.stringify(childPidPath)}, String(process.pid));
+            setInterval(() => {}, 1000);
+          `)}], { detached: true, stdio: "ignore" });
+          child.unref();
+          fs.writeFileSync(${JSON.stringify(parentPidPath)}, String(process.pid));
+          setInterval(() => {}, 1000);
+        `,
+      );
+
+      const session = trackSession(
+        await createTerminal({
+          workspaceId: "ws-test",
+          cwd: dir,
+          shell: "/bin/sh",
+          env: { PS1: "$ " },
+        }),
+      );
+      await waitForLines(session, ["$"]);
+      session.send({
+        type: "input",
+        data: `${JSON.stringify(process.execPath)} ${JSON.stringify(scriptPath)}\r`,
+      });
+
+      const parentPid = await waitForLivePid(parentPidPath);
+      const childPid = await waitForLivePid(childPidPath);
+
+      try {
+        await session.killAndWait({ gracefulTimeoutMs: 300, forceTimeoutMs: 1000 });
+        expect(isPidAlive(parentPid)).toBe(false);
+        expect(isPidAlive(childPid)).toBe(false);
+      } finally {
+        signalIfAlive(parentPid);
+        signalIfAlive(childPid);
+      }
     });
 
     it("send after kill is a no-op", async () => {
