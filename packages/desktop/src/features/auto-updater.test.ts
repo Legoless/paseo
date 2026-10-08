@@ -2,11 +2,12 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { UUID } from "builder-util-runtime";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { autoUpdaterMock } = vi.hoisted(() => {
+const { autoUpdaterMock, variantMock } = vi.hoisted(() => {
   const handlers = new Map<string, (value: unknown) => void>();
   return {
+    variantMock: { isNeo: false },
     autoUpdaterMock: {
       handlers,
       logger: {
@@ -25,6 +26,8 @@ const { autoUpdaterMock } = vi.hoisted(() => {
   };
 });
 
+vi.mock("../variant.js", () => variantMock);
+
 vi.mock("electron", () => ({
   app: {
     getPath: vi.fn(),
@@ -40,11 +43,97 @@ import {
   bucketFromStagingUserId,
   checkForAppUpdate,
   createAppUpdateLifecycleLogger,
+  downloadAndInstallUpdate,
+  installAppUpdateOnQuit,
   resolveStagingUserId,
   rolloutManifestSchema,
   shouldAdmitToRollout,
   shouldInstallAppUpdateOnQuit,
 } from "./auto-updater";
+
+beforeEach(() => {
+  variantMock.isNeo = false;
+  vi.clearAllMocks();
+});
+
+describe("Paseo Neo updates", () => {
+  it.each(["automatic", "manual"] as const)(
+    "does not offer updates or initialize the upstream updater for a %s check",
+    async (intent) => {
+      variantMock.isNeo = true;
+
+      const result = await checkForAppUpdate({
+        currentVersion: "1.2.3",
+        releaseChannel: "stable",
+        intent,
+      });
+
+      expect(result).toEqual({
+        hasUpdate: false,
+        readyToInstall: false,
+        currentVersion: "1.2.3",
+        latestVersion: "1.2.3",
+        body: null,
+        date: null,
+        errorMessage: null,
+      });
+      expect(autoUpdaterMock.on).not.toHaveBeenCalled();
+      expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
+      expect(autoUpdaterMock.downloadUpdate).not.toHaveBeenCalled();
+      expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses an upstream installation without running the before-quit callback", async () => {
+    variantMock.isNeo = true;
+    const beforeQuit = vi.fn(async () => {});
+
+    const result = await downloadAndInstallUpdate(
+      { currentVersion: "1.2.3", releaseChannel: "stable" },
+      beforeQuit,
+    );
+
+    expect(result).toEqual({
+      installed: false,
+      version: "1.2.3",
+      message: "Updates are disabled for Paseo Neo. Install a rebuilt Neo DMG manually.",
+    });
+    expect(beforeQuit).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.on).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.downloadUpdate).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+  });
+
+  it("does not validate or install a downloaded update when Neo quits", async () => {
+    const updateInfo = { version: "1.2.4" };
+    autoUpdaterMock.checkForUpdates.mockImplementationOnce(async () => {
+      autoUpdaterMock.handlers.get("update-downloaded")?.(updateInfo);
+      return { isUpdateAvailable: true, updateInfo };
+    });
+    const available = await checkForAppUpdate({
+      currentVersion: "1.2.3",
+      releaseChannel: "stable",
+      intent: "manual",
+    });
+    expect(available.hasUpdate).toBe(true);
+    expect(available.readyToInstall).toBe(true);
+    vi.clearAllMocks();
+    variantMock.isNeo = true;
+
+    const installed = await installAppUpdateOnQuit({
+      currentVersion: "1.2.3",
+      releaseChannel: "stable",
+      signal: new AbortController().signal,
+    });
+
+    expect(installed).toBe(false);
+    expect(autoUpdaterMock.on).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.downloadUpdate).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+  });
+});
 
 describe("checkForAppUpdate", () => {
   it("treats an unpublished channel manifest as an unavailable update", async () => {
