@@ -1617,6 +1617,8 @@ export const en = {
     openPath: "Open path",
   },
   branchSwitcher: {
+    shellDirectoryUnreported: "This shell hasn't reported its current directory.",
+    updateHostForShellCwd: "Update this host to follow the terminal's current directory.",
     updateHostForWorktrees: "Update the host to select worktrees.",
     branchOrWorktreeTitle: "Switch branch or worktree",
     branchOrWorktreeSearchPlaceholder: "Filter branches and worktrees...",

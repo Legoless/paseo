@@ -18,6 +18,7 @@ export interface WorkerTerminalInfo {
   id: string;
   name: string;
   cwd: string;
+  shellCwd?: string;
   workspaceId?: string;
   title?: string;
   activity: TerminalActivity | null;
@@ -152,6 +153,11 @@ export type TerminalWorkerEvent =
       type: "terminalTitleChange";
       terminalId: string;
       title?: string;
+    }
+  | {
+      type: "terminalShellCwdChange";
+      terminalId: string;
+      shellCwd: string;
     }
   | {
       type: "terminalCommandFinished";

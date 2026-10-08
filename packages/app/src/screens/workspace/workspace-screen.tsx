@@ -1,5 +1,6 @@
 import {
   buildTerminalCwdById,
+  collectReportedTerminalCwdIds,
   tryInstallTerminalReplacement,
   completeTerminalReplacement,
   type TerminalReplacementLayoutPort,
@@ -1816,6 +1817,10 @@ function WorkspaceScreenContent({
   });
   const terminalCwdById = useMemo(
     () => buildTerminalCwdById(terminalsQuery.data),
+    [terminalsQuery.data],
+  );
+  const reportedTerminalCwdIds = useMemo(
+    () => collectReportedTerminalCwdIds(terminalsQuery.data),
     [terminalsQuery.data],
   );
   const { archiveAgent } = useArchiveAgent();
@@ -4261,6 +4266,7 @@ function WorkspaceScreenContent({
         primaryWorkspaceRoot={workspaceDirectory}
         agentCwdById={agentCwdById}
         terminalCwdById={terminalCwdById}
+        reportedTerminalCwdIds={reportedTerminalCwdIds}
         explorerProjectScope={explorerProjectScope}
         isExplorerSidebarOpen={isExplorerSidebarShowing}
         onToggleExplorerSidebar={handleToggleExplorerSidebar}
@@ -4304,6 +4310,7 @@ function WorkspaceScreenContent({
     workspaceDirectory,
     agentCwdById,
     terminalCwdById,
+    reportedTerminalCwdIds,
     explorerProjectScope,
     isExplorerSidebarShowing,
     handleToggleExplorerSidebar,

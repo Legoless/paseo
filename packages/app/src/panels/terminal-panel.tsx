@@ -13,10 +13,12 @@ import { queryClient } from "@/data/query-client";
 import {
   buildTerminalsQueryKey,
   resolveTerminalListRoot,
+  resolveTerminalContextCwd,
 } from "@/screens/workspace/terminals/state";
 import { usePanelStore } from "@/stores/panel-store";
 import { useSessionStore } from "@/stores/session-store";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
+import { useCheckoutStatusQuery } from "@/git/use-status-query";
 
 type ListTerminalsPayload = ListTerminalsResponse["payload"];
 
@@ -117,18 +119,18 @@ function TerminalPanel() {
     queryClient,
   );
   const terminal = terminalsQuery.data?.terminals.find((entry) => entry.id === target.terminalId);
-  const workspaceDirectory = terminal?.cwd ?? primaryWorkspaceDirectory;
-  const isGitCheckout =
-    workspaceFields?.members.find((member) => member.workspaceDirectory === workspaceDirectory)
-      ?.projectKind === "git";
+  const launchDirectory = terminal?.cwd ?? primaryWorkspaceDirectory;
+  const contextDirectory = resolveTerminalContextCwd(terminal, launchDirectory);
+  const { status } = useCheckoutStatusQuery({ serverId, cwd: contextDirectory ?? "" });
+  const isGitCheckout = status?.isGit === true;
   const openCompactFileExplorer = usePanelStore((state) => state.openCompactFileExplorer);
   const handleOpenFileExplorer = useCallback(() => {
-    if (!workspaceDirectory) {
+    if (!contextDirectory) {
       return;
     }
-    openCompactFileExplorer({ serverId, cwd: workspaceDirectory, isGit: isGitCheckout });
-  }, [isGitCheckout, openCompactFileExplorer, serverId, workspaceDirectory]);
-  if (!workspaceDirectory) {
+    openCompactFileExplorer({ serverId, cwd: contextDirectory, isGit: isGitCheckout });
+  }, [contextDirectory, isGitCheckout, openCompactFileExplorer, serverId]);
+  if (!launchDirectory) {
     return (
       <View style={CENTERED_PADDED_STYLE}>
         <Text>Workspace directory not found.</Text>
@@ -139,7 +141,8 @@ function TerminalPanel() {
   return (
     <TerminalPane
       serverId={serverId}
-      cwd={workspaceDirectory}
+      cwd={launchDirectory}
+      contextCwd={contextDirectory ?? launchDirectory}
       terminalId={target.terminalId}
       isWorkspaceFocused={isWorkspaceFocused}
       isPaneFocused={isPaneFocused}

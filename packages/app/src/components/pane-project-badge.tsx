@@ -9,7 +9,8 @@ import { buildWorkspaceProjectPickerOptions } from "@/components/workspace-proje
 import { useHostHomeDirectory } from "@/workspace-tabs/launcher/project-selector";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
-import { matchWorkspaceProject } from "@/projects/match-workspace-project";
+import { matchPaneWorkspaceProject } from "@/projects/match-workspace-project";
+import { useCheckoutStatusQuery } from "@/git/use-status-query";
 import { canSwitchTabProject } from "@/workspace-tabs/switch-tab-project";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
@@ -56,7 +57,18 @@ export function PaneProjectBadge({
   const openAddProject = useOpenAddProject();
   const homeDirectory = useHostHomeDirectory(serverId);
   const projects = useMemo(() => buildWorkspaceProjectPickerOptions(members ?? []), [members]);
-  const matched = useMemo(() => matchWorkspaceProject(projects, cwd), [cwd, projects]);
+  const { status } = useCheckoutStatusQuery({ serverId, cwd });
+  const projectRoot = status?.isGit ? (status.mainRepoRoot ?? status.repoRoot) : null;
+  const matched = useMemo(
+    () =>
+      matchPaneWorkspaceProject({
+        options: projects,
+        members: members ?? [],
+        cwd,
+        projectRoot,
+      }),
+    [cwd, members, projectRoot, projects],
+  );
   const switchable = activeTab !== null && canSwitchTabProject(activeTab.target);
 
   // The cwd is the option id: it is what the switch needs, and it is already unique per member.

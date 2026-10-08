@@ -87,6 +87,8 @@ import {
 interface TerminalPaneProps {
   serverId: string;
   cwd: string;
+  /** Current shell directory for project actions; `cwd` remains the stream's stable identity. */
+  contextCwd?: string;
   terminalId: string;
   isWorkspaceFocused: boolean;
   isPaneFocused: boolean;
@@ -208,6 +210,7 @@ function KeyboardToggleButton({
 export function TerminalPane({
   serverId,
   cwd,
+  contextCwd = cwd,
   terminalId,
   isWorkspaceFocused,
   isPaneFocused,
@@ -902,7 +905,7 @@ export function TerminalPane({
     async (source: TerminalLocalFileLinkSource): Promise<TerminalLocalFileLinkTarget | null> => {
       const resolution = classifyForResolution(
         { href: source.text, text: source.text, sourceType: "inline-code" },
-        { workspaceRoot: cwd },
+        { workspaceRoot: contextCwd },
       );
       if (resolution.kind === "resolved") {
         return resolution.value.kind === "file" ? resolution.value.target : null;
@@ -915,14 +918,14 @@ export function TerminalPane({
           ambiguousQuery: resolution.ambiguousQuery,
           token: resolution.token,
           target: resolution.target,
-          workspaceRoot: cwd,
+          workspaceRoot: contextCwd,
           getDirectorySuggestions: (input) => client.getDirectorySuggestions(input),
         });
       } catch {
         return null;
       }
     },
-    [client, cwd],
+    [client, contextCwd],
   );
   const handleOpenLocalFileLink = useCallback(
     (target: TerminalLocalFileLinkTarget, disposition: OpenFileDisposition) => {

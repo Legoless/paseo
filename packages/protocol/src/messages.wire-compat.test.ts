@@ -29,6 +29,35 @@ test("terminal listings accept older rows and retain new per-terminal directorie
     },
   };
   expect(SessionOutboundMessageSchema.parse(withDirectory)).toEqual(withDirectory);
+
+  const withShellDirectory = {
+    ...withDirectory,
+    payload: {
+      ...withDirectory.payload,
+      terminals: [{ ...withDirectory.payload.terminals[0], shellCwd: "/worktrees/feature" }],
+    },
+  };
+  expect(SessionOutboundMessageSchema.parse(withShellDirectory)).toEqual(withShellDirectory);
+});
+
+test("terminal creation and push snapshots keep launch and shell directories separate", () => {
+  const terminal = {
+    id: "terminal",
+    name: "Shell",
+    cwd: "/repo",
+    shellCwd: "/worktrees/feature",
+    workspaceId: "workspace",
+  };
+  const created = {
+    type: "create_terminal_response",
+    payload: { terminal, error: null, requestId: "terminal-create" },
+  };
+  const changed = {
+    type: "terminals_changed",
+    payload: { cwd: "/repo", workspaceId: "workspace", terminals: [terminal] },
+  };
+  expect(SessionOutboundMessageSchema.parse(created)).toEqual(created);
+  expect(SessionOutboundMessageSchema.parse(changed)).toEqual(changed);
 });
 
 const LegacySubAgentToolCallSchema = z.object({

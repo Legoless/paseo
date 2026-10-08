@@ -1359,6 +1359,7 @@ describe("terminal restore", () => {
     const moved = join(cwd, "terminal-shell-cwd", "moved here");
     const output = [
       osc7(moved),
+      "\x1b]633;A\x07",
       // A shell inside ssh reports the remote host's path; a broken encoding names no path.
       osc7(join(cwd, "remote"), "elsewhere.example"),
       "\x1b]7;file:///bad%E9\x07",
@@ -1409,6 +1410,84 @@ describe("terminal restore", () => {
     expect(session.getShellCwd?.()).toBe(moved);
   });
 
+  it("keeps the shell directory unknown until its first valid OSC7 report, including the launch directory", async () => {
+    const cwd = realpathSync(tmpdir());
+    const outputs = [
+      `${osc7(cwd)}bare-report\r\n`,
+      "\x1b]633;A\x07first-report\r\n",
+      `${osc7(cwd)}\x1b]633;D;0\x07duplicate-report\r\n`,
+    ];
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd,
+        command: process.execPath,
+        args: [
+          "-e",
+          `let next = 0; const outputs = ${JSON.stringify(outputs)}; process.stdin.on("data", () => process.stdout.write(outputs[next++])); setInterval(() => {}, 1000);`,
+        ],
+      }),
+    );
+    const changes: string[] = [];
+    session.onShellCwdChange?.((directory) => changes.push(directory));
+    expect(session.getShellCwd?.()).toBeNull();
+
+    session.send({ type: "input", data: "bare\r" });
+    await waitForState(session, (state) => getLines(state).join("\n").includes("bare-report"));
+    expect(session.getShellCwd?.()).toBe(cwd);
+    expect(changes).toEqual([cwd]);
+
+    session.send({ type: "input", data: "commit\r" });
+    await waitForState(session, (state) => getLines(state).join("\n").includes("first-report"));
+    expect(session.getShellCwd?.()).toBe(cwd);
+    expect(changes).toEqual([cwd]);
+
+    session.send({ type: "input", data: "duplicate\r" });
+    await waitForState(session, (state) => getLines(state).join("\n").includes("duplicate-report"));
+    expect(changes).toEqual([cwd]);
+    expect(session.cwd).toBe(cwd);
+  });
+
+  it("publishes changed shell directories at command completion without changing ownership", async () => {
+    const cwd = realpathSync(tmpdir());
+    const moved = join(cwd, "terminal-shell-cwd", "moved");
+    const outputs = [
+      `${osc7(moved)}\x1b]633;D;0\x07${osc7(join(cwd, "printed-by-a-program"))}cwd-one\r\n`,
+      `${osc7(moved)}\x1b]633;D;0\x07cwd-two\r\n`,
+      `${osc7(join(cwd, "another"))}\x1b]633;D;0\x07cwd-three\r\n`,
+    ];
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd,
+        command: process.execPath,
+        args: [
+          "-e",
+          `let next = 0; const outputs = ${JSON.stringify(outputs)}; process.stdout.write("\\x1b]633;A\\x07"); process.stdin.on("data", () => process.stdout.write(outputs[next++])); setInterval(() => {}, 1000);`,
+        ],
+      }),
+    );
+    const changes: string[] = [];
+    const unsubscribe = session.onShellCwdChange?.((shellCwd) => changes.push(shellCwd));
+
+    session.send({ type: "input", data: "one\r" });
+    await waitForState(session, (state) => getLines(state).join("\n").includes("cwd-one"));
+    expect(changes).toEqual([moved]);
+    expect(session.getShellCwd?.()).toBe(moved);
+    expect(session.cwd).toBe(cwd);
+    expect(session.workspaceId).toBe("ws-test");
+
+    session.send({ type: "input", data: "two\r" });
+    await waitForState(session, (state) => getLines(state).join("\n").includes("cwd-two"));
+    expect(changes).toEqual([moved]);
+
+    unsubscribe?.();
+    session.send({ type: "input", data: "three\r" });
+    await waitForState(session, (state) => getLines(state).join("\n").includes("cwd-three"));
+    expect(changes).toEqual([moved]);
+    expect(session.getShellCwd?.()).toBe(join(cwd, "another"));
+  });
+
   it("ignores directory reports printed by a directly spawned agent", async () => {
     const cwd = realpathSync(tmpdir());
     const command = writeClaudeExecutable(
@@ -1418,7 +1497,7 @@ describe("terminal restore", () => {
 
     await waitForState(session, (state) => getLines(state).join("\n").includes("Claude Code"));
 
-    expect(session.getShellCwd?.()).toBe(cwd);
+    expect(session.getShellCwd?.()).toBeNull();
     expect(session.cwd).toBe(cwd);
   });
 
@@ -1445,7 +1524,7 @@ describe("terminal restore", () => {
     await waitForState(session, (state) => getLines(state).join("\n").includes("pwd:"));
     // A whole line: `moved` is a prefix of `cwd`, so a substring would match the wrong directory.
     expect(getLines(session.getState()).map((line) => line.trimEnd())).toContain(`pwd:${moved}`);
-    expect(session.getShellCwd?.()).toBe(moved);
+    expect(session.getShellCwd?.()).toBeNull();
     expect(session.cwd).toBe(cwd);
   });
 

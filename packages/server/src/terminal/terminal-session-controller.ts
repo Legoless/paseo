@@ -311,23 +311,26 @@ export class TerminalSessionController {
   private toTerminalInfo(
     terminal: Pick<
       TerminalSession,
-      "id" | "name" | "cwd" | "workspaceId" | "getTitle" | "getActivity"
+      "id" | "name" | "cwd" | "workspaceId" | "getTitle" | "getActivity" | "getShellCwd"
     >,
     includeCwd = false,
   ): {
     id: string;
     name: string;
     cwd?: string;
+    shellCwd?: string;
     workspaceId: string;
     title?: string;
     activity: TerminalActivity | null;
   } {
     const title = terminal.getTitle();
     const activity = terminal.getActivity();
+    const shellCwd = terminal.getShellCwd?.();
     return {
       id: terminal.id,
       name: terminal.name,
       ...(includeCwd ? { cwd: terminal.cwd } : {}),
+      ...(shellCwd ? { shellCwd } : {}),
       workspaceId: terminal.workspaceId,
       ...(title ? { title } : {}),
       activity,
@@ -602,14 +605,7 @@ export class TerminalSessionController {
       this.emit({
         type: "create_terminal_response",
         payload: {
-          terminal: {
-            id: session.id,
-            name: session.name,
-            cwd: session.cwd,
-            workspaceId: session.workspaceId,
-            ...(session.getTitle() ? { title: session.getTitle() } : {}),
-            activity: session.getActivity(),
-          },
+          terminal: Object.assign(this.toTerminalInfo(session), { cwd: session.cwd }),
           error: null,
           requestId: msg.requestId,
         },

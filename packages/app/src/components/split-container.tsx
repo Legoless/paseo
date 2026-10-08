@@ -120,6 +120,7 @@ interface SplitContainerProps {
   primaryWorkspaceRoot: string | null;
   agentCwdById: ReadonlyMap<string, string>;
   terminalCwdById: ReadonlyMap<string, string>;
+  reportedTerminalCwdIds: ReadonlySet<string>;
   explorerProjectScope: "tab" | "pane";
   isExplorerSidebarOpen: boolean;
   onToggleExplorerSidebar: () => void;
@@ -209,6 +210,7 @@ function PaneProjectTray({
   workspaceId,
   cwd,
   activeTab,
+  reportedTerminalCwdIds,
   open,
   onPress,
   onSwitchTabProject,
@@ -217,6 +219,7 @@ function PaneProjectTray({
   workspaceId: string;
   cwd: string | null;
   activeTab: WorkspaceTabDescriptor | null;
+  reportedTerminalCwdIds: ReadonlySet<string>;
   open: boolean;
   onPress: () => void;
   onSwitchTabProject: (input: {
@@ -267,6 +270,7 @@ function PaneProjectTray({
           workspaceId={workspaceId}
           cwd={cwd}
           activeTab={activeTab}
+          reportedTerminalCwdIds={reportedTerminalCwdIds}
           onSwitchProject={switchTabProject}
         />
       ) : null}
@@ -499,6 +503,7 @@ export function SplitContainer({
   primaryWorkspaceRoot,
   agentCwdById,
   terminalCwdById,
+  reportedTerminalCwdIds,
   explorerProjectScope,
   isExplorerSidebarOpen,
   onToggleExplorerSidebar,
@@ -785,6 +790,7 @@ export function SplitContainer({
                   primaryWorkspaceRoot={primaryWorkspaceRoot}
                   agentCwdById={agentCwdById}
                   terminalCwdById={terminalCwdById}
+                  reportedTerminalCwdIds={reportedTerminalCwdIds}
                   explorerProjectScope={explorerProjectScope}
                   isExplorerSidebarOpen={isExplorerSidebarOpen}
                   onToggleExplorerSidebar={onToggleExplorerSidebar}
@@ -1037,6 +1043,7 @@ function SplitNodeView({
   primaryWorkspaceRoot,
   agentCwdById,
   terminalCwdById,
+  reportedTerminalCwdIds,
   explorerProjectScope,
   isExplorerSidebarOpen,
   onToggleExplorerSidebar,
@@ -1186,6 +1193,7 @@ function SplitNodeView({
             primaryWorkspaceRoot={primaryWorkspaceRoot}
             agentCwdById={agentCwdById}
             terminalCwdById={terminalCwdById}
+            reportedTerminalCwdIds={reportedTerminalCwdIds}
             explorerProjectScope={explorerProjectScope}
             isExplorerSidebarOpen={isExplorerSidebarOpen}
             onToggleExplorerSidebar={onToggleExplorerSidebar}
@@ -1251,6 +1259,7 @@ function SplitNodeView({
               primaryWorkspaceRoot={primaryWorkspaceRoot}
               agentCwdById={agentCwdById}
               terminalCwdById={terminalCwdById}
+              reportedTerminalCwdIds={reportedTerminalCwdIds}
               explorerProjectScope={explorerProjectScope}
               isExplorerSidebarOpen={isExplorerSidebarOpen}
               onToggleExplorerSidebar={onToggleExplorerSidebar}
@@ -1322,6 +1331,7 @@ function SplitPaneView({
   primaryWorkspaceRoot,
   agentCwdById,
   terminalCwdById,
+  reportedTerminalCwdIds,
   explorerProjectScope,
   isExplorerSidebarOpen,
   onToggleExplorerSidebar,
@@ -1602,6 +1612,7 @@ function SplitPaneView({
               workspaceId={normalizedWorkspaceId}
               cwd={paneWorkspaceRoot}
               activeTab={activeTabDescriptor}
+              reportedTerminalCwdIds={reportedTerminalCwdIds}
               open={explorerOpenForPane}
               onPress={handleTogglePaneExplorer}
               onSwitchTabProject={onSwitchTabProject}

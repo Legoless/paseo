@@ -1,10 +1,14 @@
 import { it, expect, afterEach } from "vitest";
 import { isPlatform } from "../test-utils/platform.js";
 import { createTerminalManager, type TerminalManager } from "./terminal-manager.js";
-import type { TerminalWorkspaceContributionChangedEvent } from "./terminal-manager.js";
+import type {
+  TerminalWorkspaceContributionChangedEvent,
+  TerminalsChangedEvent,
+} from "./terminal-manager.js";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 
 if (isPlatform("win32") && !process.env.ComSpec && !process.env.COMSPEC) {
   process.env.ComSpec = "C:\\Windows\\System32\\cmd.exe";
@@ -71,6 +75,51 @@ it("returns existing terminals on subsequent calls", async () => {
   expect(first.length).toBe(1);
   expect(first[0].id).toBe(created.id);
   expect(second.length).toBe(1);
+});
+
+it("publishes a manual-title shell's current directory without re-bucketing ownership", async () => {
+  manager = createTerminalManager();
+  const cwd = realpathSync(tmpdir());
+  const moved = join(cwd, "shell-cwd-moved");
+  const output = `\x1b]7;file://${hostname()}${pathToFileURL(moved).pathname}\x07\x1b]633;D;0\x07`;
+  const session = await manager.createTerminal({
+    cwd,
+    workspaceId: "ws-test",
+    title: "Pinned title",
+    command: process.execPath,
+    args: [
+      "-e",
+      `process.stdout.write("\\x1b]633;A\\x07"); process.stdin.once("data", () => process.stdout.write(${JSON.stringify(output)})); setInterval(() => {}, 1000);`,
+    ],
+  });
+  const events: TerminalsChangedEvent[] = [];
+  manager.subscribeTerminalsChanged((event) => events.push(event));
+  session.send({ type: "input", data: "move\r" });
+
+  await waitForCondition(
+    () => events.some((event) => event.terminals[0]?.shellCwd === moved),
+    5000,
+  );
+  expect(events.at(-1)).toEqual({
+    cwd,
+    terminals: [
+      {
+        id: session.id,
+        name: session.name,
+        cwd,
+        shellCwd: moved,
+        workspaceId: "ws-test",
+        title: "Pinned title",
+        activity: null,
+      },
+    ],
+  });
+  expect(session.cwd).toBe(cwd);
+  expect(
+    (await manager.getTerminals(cwd, { workspaceId: "ws-test" })).map((entry) => entry.id),
+  ).toEqual([session.id]);
+  expect(await manager.getTerminals(moved)).toEqual([]);
+  expect(manager.listDirectories()).toEqual([cwd]);
 });
 
 it("throws for relative paths", async () => {

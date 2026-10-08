@@ -15,8 +15,10 @@ import { useHostFeature } from "@/runtime/host-features";
 import { useSessionStore } from "@/stores/session-store";
 import { useCheckoutStatusQuery } from "@/git/use-status-query";
 import { useBranchSwitcher } from "@/hooks/use-branch-switcher";
-import { buildBranchWorktreeOptions } from "@/utils/branch-suggestions";
-import { canSwitchTabProject } from "@/workspace-tabs/switch-tab-project";
+import {
+  buildBranchWorktreeOptions,
+  resolvePaneBranchCapabilities,
+} from "@/utils/branch-suggestions";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import type { Theme } from "@/styles/theme";
 
@@ -27,18 +29,44 @@ const mutedIconMapping = (theme: Theme) => ({ color: theme.colors.foregroundMute
 const branchOptionIcon = <ThemedGitBranch size={14} uniProps={mutedIconMapping} />;
 const worktreeOptionIcon = <ThemedFolderGit2 size={14} uniProps={mutedIconMapping} />;
 
+function usePaneBranchCapabilities(
+  serverId: string,
+  activeTab: WorkspaceTabDescriptor | null,
+  reportedTerminalCwdIds: ReadonlySet<string>,
+) {
+  // COMPAT(checkoutWorktreeList): added in v0.9.2, remove gate after 2027-04-08.
+  const supportsWorktreeList = useHostFeature(serverId, "checkoutWorktreeList");
+  // COMPAT(terminalShellCwd): added in v0.9.2, remove gate after 2027-04-08.
+  const supportsShellCwd = useHostFeature(serverId, "terminalShellCwd");
+  const hasShellCwdReport =
+    activeTab?.target.kind === "terminal"
+      ? reportedTerminalCwdIds.has(activeTab.target.terminalId)
+      : false;
+  return {
+    supportsWorktreeList,
+    ...resolvePaneBranchCapabilities({
+      target: activeTab?.target ?? null,
+      supportsWorktreeList,
+      supportsShellCwd,
+      hasShellCwdReport,
+    }),
+  };
+}
+
 /** The active pane's directory owns both the branch operation and worktree choice. */
 export function PaneBranchBadge({
   serverId,
   workspaceId,
   cwd,
   activeTab,
+  reportedTerminalCwdIds,
   onSwitchProject,
 }: {
   serverId: string;
   workspaceId: string;
   cwd: string;
   activeTab: WorkspaceTabDescriptor | null;
+  reportedTerminalCwdIds: ReadonlySet<string>;
   onSwitchProject: (input: { tabId: string; cwd: string; projectId?: string }) => void;
 }) {
   const { t } = useTranslation();
@@ -62,10 +90,14 @@ export function PaneBranchBadge({
       null,
     [cwd, members, root],
   );
-  // COMPAT(checkoutWorktreeList): added in v0.9.2, remove gate after 2027-04-08.
-  const supportsWorktreeList = useHostFeature(serverId, "checkoutWorktreeList");
-  const canSwitchWorktree = activeTab !== null && canSwitchTabProject(activeTab.target);
-  const canSelectWorktree = canSwitchWorktree && supportsWorktreeList;
+  const {
+    supportsWorktreeList,
+    needsHostUpdate,
+    needsShellCwdReport,
+    canSwitchWorktree,
+    canSelectBranch,
+    canSelectWorktree,
+  } = usePaneBranchCapabilities(serverId, activeTab, reportedTerminalCwdIds);
   const {
     branchOptions,
     isOpen,
@@ -80,7 +112,7 @@ export function PaneBranchBadge({
     normalizedWorkspaceId: workspaceId,
     workspaceDirectory: cwd,
     currentBranchName: branch,
-    isGitCheckout: status?.isGit === true,
+    isGitCheckout: status?.isGit === true && canSelectBranch,
     isConnected,
     toast,
     queryClient,
@@ -99,18 +131,17 @@ export function PaneBranchBadge({
     dataShape: "list",
   });
   const worktrees = worktreeQuery.isPlaceholderData ? undefined : worktreeQuery.data;
-  const options = useMemo(
-    () =>
-      buildBranchWorktreeOptions({
-        branches: branchOptions,
-        cwd,
-        projectId: project?.projectId ?? null,
-        projectRootPath: project?.projectRootPath ?? root,
-        worktrees: canSelectWorktree ? (worktrees ?? []) : [],
-        members: canSelectWorktree ? members : [],
-      }),
-    [branchOptions, canSelectWorktree, cwd, members, project, root, worktrees],
-  );
+  const options = useMemo(() => {
+    if (!canSelectBranch) return [];
+    return buildBranchWorktreeOptions({
+      branches: branchOptions,
+      cwd,
+      projectId: project?.projectId ?? null,
+      projectRootPath: project?.projectRootPath ?? root,
+      worktrees: canSelectWorktree ? (worktrees ?? []) : [],
+      members: canSelectWorktree ? members : [],
+    });
+  }, [branchOptions, canSelectBranch, canSelectWorktree, cwd, members, project, root, worktrees]);
   const handleSelect = useCallback(
     (id: string) => {
       if (id.startsWith("worktree:") && activeTab && canSelectWorktree) {
@@ -149,6 +180,20 @@ export function PaneBranchBadge({
   );
   const error = branchError ?? worktreeQuery.error;
   const footer = useMemo(() => {
+    if (needsHostUpdate) {
+      return (
+        <Text style={styles.pickerHint} testID="pane-branch-picker-update-host">
+          {t("branchSwitcher.updateHostForShellCwd")}
+        </Text>
+      );
+    }
+    if (needsShellCwdReport) {
+      return (
+        <Text style={styles.pickerHint} testID="pane-branch-picker-unreported-shell">
+          {t("branchSwitcher.shellDirectoryUnreported")}
+        </Text>
+      );
+    }
     if (error) {
       return (
         <Alert variant="error" description={error.message} testID="pane-branch-picker-error">
@@ -162,7 +207,18 @@ export function PaneBranchBadge({
       return <Text style={styles.pickerHint}>{t("branchSwitcher.updateHostForWorktrees")}</Text>;
     }
     return null;
-  }, [canSwitchWorktree, error, retry, supportsWorktreeList, t]);
+  }, [
+    canSwitchWorktree,
+    error,
+    needsHostUpdate,
+    needsShellCwdReport,
+    retry,
+    supportsWorktreeList,
+    t,
+  ]);
+  const emptyText = t(
+    isLoadingBranches || worktreeQuery.isFetching ? "common.loading" : "branchSwitcher.empty",
+  );
 
   if (!branch || branch === "HEAD") return null;
   return (
@@ -188,9 +244,7 @@ export function PaneBranchBadge({
         onSelect={handleSelect}
         searchable
         searchPlaceholder={t("branchSwitcher.branchOrWorktreeSearchPlaceholder")}
-        emptyText={t(
-          isLoadingBranches || worktreeQuery.isFetching ? "common.loading" : "branchSwitcher.empty",
-        )}
+        emptyText={canSelectBranch ? emptyText : ""}
         title={t("branchSwitcher.branchOrWorktreeTitle")}
         open={isOpen}
         onOpenChange={setIsOpen}
