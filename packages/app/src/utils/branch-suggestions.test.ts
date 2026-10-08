@@ -3,6 +3,7 @@ import {
   buildBranchComboOptions,
   buildBranchWorktreeOptions,
   normalizeBranchOptionName,
+  resolvePaneBranchCapabilities,
 } from "./branch-suggestions";
 
 describe("normalizeBranchOptionName", () => {
@@ -18,6 +19,55 @@ describe("normalizeBranchOptionName", () => {
     expect(normalizeBranchOptionName("   ")).toBeNull();
     expect(normalizeBranchOptionName("HEAD")).toBeNull();
     expect(normalizeBranchOptionName("origin/HEAD")).toBeNull();
+  });
+});
+
+describe("terminal branch actions", () => {
+  const input = {
+    target: { kind: "terminal" as const, terminalId: "shell" },
+    supportsWorktreeList: true,
+    supportsShellCwd: true,
+    hasShellCwdReport: false,
+  };
+
+  it("waits for a shell directory report even when the daemon supports reporting", () => {
+    expect(resolvePaneBranchCapabilities(input)).toEqual({
+      needsHostUpdate: false,
+      needsShellCwdReport: true,
+      canSwitchWorktree: true,
+      canSelectBranch: false,
+      canSelectWorktree: false,
+    });
+  });
+
+  it("enables reported shells and preserves the update hint for older hosts", () => {
+    expect(resolvePaneBranchCapabilities({ ...input, hasShellCwdReport: true })).toEqual({
+      needsHostUpdate: false,
+      needsShellCwdReport: false,
+      canSwitchWorktree: true,
+      canSelectBranch: true,
+      canSelectWorktree: true,
+    });
+    expect(resolvePaneBranchCapabilities({ ...input, supportsShellCwd: false })).toEqual({
+      needsHostUpdate: true,
+      needsShellCwdReport: false,
+      canSwitchWorktree: true,
+      canSelectBranch: false,
+      canSelectWorktree: false,
+    });
+    expect(
+      resolvePaneBranchCapabilities({
+        ...input,
+        target: { kind: "agent", agentId: "agent" },
+        supportsShellCwd: false,
+      }),
+    ).toEqual({
+      needsHostUpdate: false,
+      needsShellCwdReport: false,
+      canSwitchWorktree: true,
+      canSelectBranch: true,
+      canSelectWorktree: true,
+    });
   });
 });
 

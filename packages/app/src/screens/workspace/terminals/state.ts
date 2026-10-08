@@ -129,10 +129,29 @@ export function buildTerminalCwdById(
 ): Map<string, string> {
   const result = new Map<string, string>();
   for (const terminal of payload?.terminals ?? []) {
-    const cwd = terminal.cwd ?? payload?.cwd;
+    const cwd = resolveTerminalContextCwd(terminal, payload?.cwd);
     if (cwd) result.set(terminal.id, cwd);
   }
   return result;
+}
+
+export function resolveTerminalContextCwd(
+  terminal: Pick<TerminalEntry, "cwd" | "shellCwd"> | undefined,
+  fallbackCwd?: string | null,
+): string | null {
+  // COMPAT(terminalShellCwd): added in v0.9.2, remove old-host allowance after 2027-04-08.
+  // A shell that has not reported its directory also starts with its launch directory.
+  return terminal?.shellCwd ?? terminal?.cwd ?? fallbackCwd ?? null;
+}
+
+export function collectReportedTerminalCwdIds(
+  payload: ListTerminalsResponse["payload"] | undefined,
+): ReadonlySet<string> {
+  return new Set(
+    payload?.terminals
+      .filter((terminal) => Boolean(terminal.shellCwd))
+      .map((terminal) => terminal.id) ?? [],
+  );
 }
 
 export interface TerminalReplacementLayoutPort {

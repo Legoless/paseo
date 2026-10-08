@@ -21,6 +21,7 @@ export interface TerminalListItem {
   id: string;
   name: string;
   cwd: string;
+  shellCwd?: string;
   workspaceId: string;
   title?: string;
   activity: TerminalActivity | null;
@@ -123,6 +124,7 @@ export function createTerminalManager(
   const terminalsById = new Map<string, TerminalSession>();
   const terminalExitUnsubscribeById = new Map<string, () => void>();
   const terminalTitleUnsubscribeById = new Map<string, () => void>();
+  const terminalShellCwdUnsubscribeById = new Map<string, () => void>();
   const terminalActivityUnsubscribeById = new Map<string, () => void>();
   const terminalActivityTokenById = new Map<string, string>();
   const terminalsChangedListeners = new Set<TerminalsChangedListener>();
@@ -148,6 +150,8 @@ export function createTerminalManager(
       terminalTitleUnsubscribeById.delete(id);
     }
     const unsubscribeActivity = terminalActivityUnsubscribeById.get(id);
+    terminalShellCwdUnsubscribeById.get(id)?.();
+    terminalShellCwdUnsubscribeById.delete(id);
     if (unsubscribeActivity) {
       unsubscribeActivity();
       terminalActivityUnsubscribeById.delete(id);
@@ -209,6 +213,9 @@ export function createTerminalManager(
     const unsubscribeTitle = session.onTitleChange(() => {
       emitTerminalsChanged({ cwd: session.cwd });
     });
+    const unsubscribeShellCwd = session.onShellCwdChange?.(() => {
+      emitTerminalsChanged({ cwd: session.cwd });
+    });
     const unsubscribeActivity = session.onActivityChange((transition) => {
       emitTerminalActivityTransition({ session, transition });
       emitTerminalsChanged({ cwd: session.cwd });
@@ -224,15 +231,18 @@ export function createTerminalManager(
     });
     terminalExitUnsubscribeById.set(session.id, unsubscribeExit);
     terminalTitleUnsubscribeById.set(session.id, unsubscribeTitle);
+    if (unsubscribeShellCwd) terminalShellCwdUnsubscribeById.set(session.id, unsubscribeShellCwd);
     terminalActivityUnsubscribeById.set(session.id, unsubscribeActivity);
     return session;
   }
 
   function toTerminalListItem(input: { session: TerminalSession }): TerminalListItem {
+    const shellCwd = input.session.getShellCwd?.();
     return {
       id: input.session.id,
       name: input.session.name,
       cwd: input.session.cwd,
+      ...(shellCwd ? { shellCwd } : {}),
       workspaceId: input.session.workspaceId,
       title: input.session.getTitle(),
       activity: input.session.getActivity(),

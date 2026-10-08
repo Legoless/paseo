@@ -188,6 +188,7 @@ function listSession(input: {
   id: string;
   name: string;
   cwd: string;
+  shellCwd?: string;
   workspaceId?: string;
 }): TerminalSession {
   return {
@@ -207,6 +208,7 @@ function listSession(input: {
     getReplayPreamble: () => "",
     getTitle: () => undefined,
     getActivity: () => null,
+    ...(input.shellCwd ? { getShellCwd: () => input.shellCwd! } : {}),
     setActivity: vi.fn(),
     setTitle: vi.fn(),
     getExitInfo: () => null,
@@ -227,6 +229,7 @@ describe("terminal-session-controller legacy terminal creation", () => {
           id: "term-1",
           name: options.name ?? "Terminal 1",
           cwd: options.cwd,
+          shellCwd: options.cwd,
           workspaceId: options.workspaceId,
         }),
     );
@@ -285,6 +288,7 @@ describe("terminal-session-controller legacy terminal creation", () => {
             id: "term-1",
             name: "App Shell",
             cwd: terminalCwd,
+            shellCwd: terminalCwd,
             workspaceId: "ws-app",
             activity: null,
           },
@@ -462,9 +466,15 @@ describe("terminal-session-controller subdirectory aggregation", () => {
     // contract, covered by terminal-manager.test.ts. Here we only assert the
     // controller re-fetches by root and keys the snapshot by root, so the fake
     // returns a fixed aggregated list for the root and nothing otherwise.
+    const subdirTerminal = {
+      id: "subdir-term",
+      name: "Mobile",
+      cwd: subdirCwd,
+      shellCwd: subdirCwd,
+    };
     const aggregatedRootTerminals = [
       listSession({ id: "root-term", name: "Terminal 1", cwd: rootCwd }),
-      listSession({ id: "subdir-term", name: "Mobile", cwd: subdirCwd }),
+      listSession(subdirTerminal),
     ];
 
     let changedListener: ((event: TerminalsChangedEvent) => void) | null = null;
@@ -504,7 +514,23 @@ describe("terminal-session-controller subdirectory aggregation", () => {
 
     controller.dispatch({ type: "subscribe_terminals_request", cwd: rootCwd });
     await flushMicrotasks();
+    await controller.dispatch({
+      type: "list_terminals_request",
+      cwd: rootCwd,
+      requestId: "list-cwd",
+    });
+    expect(outboundMessages.at(-1)).toMatchObject({
+      type: "list_terminals_response",
+      payload: {
+        cwd: rootCwd,
+        terminals: [
+          { id: "root-term", cwd: rootCwd },
+          { id: "subdir-term", cwd: subdirCwd, shellCwd: subdirCwd },
+        ],
+      },
+    });
     outboundMessages.length = 0;
+    subdirTerminal.shellCwd = "/another/worktree";
 
     changedListener?.({
       cwd: subdirCwd,
@@ -529,6 +555,7 @@ describe("terminal-session-controller subdirectory aggregation", () => {
               id: "subdir-term",
               name: "Mobile",
               cwd: subdirCwd,
+              shellCwd: "/another/worktree",
               workspaceId: "ws-test",
               activity: null,
             },

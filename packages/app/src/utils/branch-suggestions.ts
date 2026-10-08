@@ -2,10 +2,32 @@ import type { WorkspaceMemberDescriptor } from "@/stores/session-store";
 import type { ComboboxOptionModel } from "@/components/ui/combobox-options";
 import type { PaseoWorktreeListResponse } from "@getpaseo/protocol/messages";
 import { normalizeWorkspacePath } from "@/utils/workspace-identity";
+import { canSwitchTabProject } from "@/workspace-tabs/switch-tab-project";
+import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 
 export interface BranchComboOption {
   id: string;
   label: string;
+}
+
+export function resolvePaneBranchCapabilities(input: {
+  target: WorkspaceTabTarget | null;
+  supportsWorktreeList: boolean;
+  supportsShellCwd: boolean;
+  hasShellCwdReport: boolean;
+}) {
+  const isTerminal = input.target?.kind === "terminal";
+  const needsHostUpdate = isTerminal && !input.supportsShellCwd;
+  const needsShellCwdReport = isTerminal && input.supportsShellCwd && !input.hasShellCwdReport;
+  const canSwitchWorktree = input.target !== null && canSwitchTabProject(input.target);
+  const canSelectBranch = !needsHostUpdate && !needsShellCwdReport;
+  return {
+    needsHostUpdate,
+    needsShellCwdReport,
+    canSwitchWorktree,
+    canSelectBranch,
+    canSelectWorktree: canSwitchWorktree && input.supportsWorktreeList && canSelectBranch,
+  };
 }
 
 export function normalizeBranchOptionName(input: string | null | undefined): string | null {

@@ -1,5 +1,6 @@
 import { normalizeWorkspacePath } from "@/utils/workspace-identity";
 import type { WorkspaceProjectPickerOption } from "@/components/workspace-project-picker";
+import type { WorkspaceMemberDescriptor } from "@/stores/session-store";
 
 /**
  * The workspace project a directory belongs to, or null when it belongs to none. Matching is the
@@ -15,4 +16,21 @@ export function matchWorkspaceProject(
     return null;
   }
   return options.find((option) => normalizeWorkspacePath(option.cwd) === normalized) ?? null;
+}
+
+/** A pane may follow a shell into a worktree without changing the terminal's membership. */
+export function matchPaneWorkspaceProject(input: {
+  options: readonly WorkspaceProjectPickerOption[];
+  members: readonly Pick<WorkspaceMemberDescriptor, "workspaceDirectory" | "projectRootPath">[];
+  cwd: string;
+  projectRoot: string | null;
+}): WorkspaceProjectPickerOption | null {
+  const exact = matchWorkspaceProject(input.options, input.cwd);
+  if (exact) return exact;
+  const projectRoot = normalizeWorkspacePath(input.projectRoot);
+  if (!projectRoot) return null;
+  const member = input.members.find(
+    (candidate) => normalizeWorkspacePath(candidate.projectRootPath) === projectRoot,
+  );
+  return member ? matchWorkspaceProject(input.options, member.workspaceDirectory) : null;
 }

@@ -27,6 +27,8 @@ const recordsDirectory = process.argv[2] ?? null;
 
 interface SavedTerminal {
   workspaceId: string;
+  // A restored shell still launches here before it can publish a fresh prompt report.
+  shellCwd?: string;
   // Only a title the user typed; the session's own title also follows the shell.
   title?: string;
   restoreKey: string;
@@ -85,10 +87,12 @@ function buildTerminalStateResult(
 }
 
 function toTerminalInfo(session: TerminalSession): WorkerTerminalInfo {
+  const shellCwd = session.getShellCwd?.();
   return {
     id: session.id,
     name: session.name,
     cwd: session.cwd,
+    ...(shellCwd ? { shellCwd } : {}),
     workspaceId: session.workspaceId,
     ...(session.getTitle() ? { title: session.getTitle() } : {}),
     activity: session.getActivity(),
@@ -106,7 +110,7 @@ function saveTerminal(session: TerminalSession): void {
     return;
   }
   const resume = session.getResumeTarget?.() ?? null;
-  const shellCwd = session.getShellCwd?.();
+  const shellCwd = session.getShellCwd?.() ?? saved.shellCwd;
   const state = resume ? null : (session.getRestoreState?.() ?? null);
   try {
     writeTerminalRecord(recordsDirectory, {
@@ -123,6 +127,7 @@ function saveTerminal(session: TerminalSession): void {
       ...(state ? { scrollback: renderRestoreScrollback(state) } : {}),
     });
     saved.restoreKey = restoreKeyOf(session);
+    saved.shellCwd = shellCwd;
   } catch (error) {
     console.error("Failed to save terminal record:", error);
   }
@@ -290,6 +295,11 @@ function watchTerminal(session: TerminalSession): void {
       info,
     });
   });
+  const unsubscribeShellCwd = session.onShellCwdChange?.((shellCwd) => {
+    saveTerminalIfRestoreChanged(session);
+    outputCoalescer.flush();
+    sendToParent({ type: "terminalShellCwdChange", terminalId: session.id, shellCwd });
+  });
   const unsubscribeActivity = session.onActivityChange((transition) => {
     sendToParent({
       type: "terminalActivityChange",
@@ -304,6 +314,7 @@ function watchTerminal(session: TerminalSession): void {
     unsubscribeExit,
     unsubscribeTitle,
     unsubscribeCommandFinished,
+    ...(unsubscribeShellCwd ? [unsubscribeShellCwd] : []),
     unsubscribeActivity,
   ]);
 }
@@ -334,6 +345,9 @@ async function handleCreateTerminalRequest(message: TerminalCreateRequest): Prom
     if (message.options.persist && recordsDirectory) {
       savedTerminalById.set(session.id, {
         workspaceId,
+        ...(message.options.restore?.shellCwd
+          ? { shellCwd: message.options.restore.shellCwd }
+          : {}),
         ...(message.options.title?.trim() ? { title: message.options.title.trim() } : {}),
         restoreKey: "",
       });

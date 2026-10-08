@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { matchWorkspaceProject } from "./match-workspace-project";
+import { matchWorkspaceProject, matchPaneWorkspaceProject } from "./match-workspace-project";
 
 describe("matchWorkspaceProject", () => {
   const options = [
@@ -24,5 +24,55 @@ describe("matchWorkspaceProject", () => {
 
   test("has nothing to match against in a workspace with no members", () => {
     expect(matchWorkspaceProject([], "/repos/polypep")).toBeNull();
+  });
+});
+
+describe("pane project presentation", () => {
+  const options = [
+    { cwd: "/repos/belle", label: "Belle", path: "~/repos/belle" },
+    {
+      cwd: "/repos/belle/.worktrees/registered",
+      label: "Registered worktree",
+      path: "~/registered",
+    },
+  ];
+  const members = [
+    { workspaceDirectory: "/repos/belle", projectRootPath: "/repos/belle" },
+    { workspaceDirectory: "/repos/belle/.worktrees/registered", projectRootPath: "/repos/belle" },
+  ];
+
+  test("names a worktree's repository while keeping exact workspace membership unchanged", () => {
+    const cwd = "/repos/belle/.worktrees/docs";
+    expect(
+      matchPaneWorkspaceProject({ options, members, cwd, projectRoot: "/repos/belle/" }),
+    ).toEqual(options[0]);
+    expect(matchWorkspaceProject(options, cwd)).toBeNull();
+  });
+
+  test("prefers an exact member and leaves unrelated repositories unassigned", () => {
+    expect(
+      matchPaneWorkspaceProject({
+        options,
+        members,
+        cwd: "/repos/belle/.worktrees/registered",
+        projectRoot: "/repos/belle",
+      }),
+    ).toEqual(options[1]);
+    expect(
+      matchPaneWorkspaceProject({
+        options,
+        members,
+        cwd: "/repos/other/.worktrees/docs",
+        projectRoot: "/repos/other",
+      }),
+    ).toBeNull();
+    expect(
+      matchPaneWorkspaceProject({
+        options,
+        members,
+        cwd: "/repos/belle/.worktrees/docs",
+        projectRoot: null,
+      }),
+    ).toBeNull();
   });
 });

@@ -20,6 +20,7 @@ import type {
   TerminalActivityTransitionEvent,
   TerminalManager,
   TerminalWorkspaceContributionChangedEvent,
+  TerminalsChangedEvent,
 } from "./terminal-manager.js";
 import {
   resolvePaseoCliBinDir,
@@ -246,11 +247,24 @@ it("brings a terminal back in the directory its shell last reported", async () =
   });
   const readRecord = () =>
     JSON.parse(readFileSync(terminalRecordPath(recordsDirectory, session.id), "utf8"));
-  expect(readRecord()).toMatchObject({ cwd, shellCwd: cwd });
+  expect(readRecord()).toMatchObject({ cwd });
+  expect(readRecord()).not.toHaveProperty("shellCwd");
+  expect(session.getShellCwd?.()).toBeNull();
+  const directoryEvents: TerminalsChangedEvent[] = [];
+  previousDaemon.subscribeTerminalsChanged((event) => directoryEvents.push(event));
 
   // Saved when the command ends, so a crash or power loss keeps it too.
   session.send({ type: "input", data: "x\r" });
   await waitForCondition(() => readRecord().shellCwd === moved, 10000);
+  await waitForCondition(() => session.getShellCwd?.() === moved, 10000);
+  expect(directoryEvents.at(-1)).toMatchObject({
+    cwd,
+    terminals: [{ id: session.id, cwd, shellCwd: moved, workspaceId: "ws-test" }],
+  });
+  expect(
+    (await previousDaemon.getTerminals(cwd, { workspaceId: "ws-test" })).map((entry) => entry.id),
+  ).toEqual([session.id]);
+  expect(await previousDaemon.getTerminals(moved)).toEqual([]);
   await previousDaemon.killAll();
   const saved = readRecord();
   expect(saved).toMatchObject({ cwd, shellCwd: moved });
@@ -1211,6 +1225,112 @@ it("removes worker terminals after killAndWait", async () => {
 
   expect(manager.getTerminal(session.id)).toBeUndefined();
   expect(manager.listDirectories()).not.toContain(cwd);
+});
+
+it("keeps an unreported worker directory unknown until its first report at the launch directory", async () => {
+  const worker = new FakeTerminalWorker();
+  manager = createWorkerTerminalManager({ requestTimeoutMs: 50, forkWorker: () => worker });
+  worker.emitWorkerMessage({
+    type: "terminalCreated",
+    terminal: {
+      id: "terminal-a",
+      name: "Shell",
+      cwd: "/workspace",
+      workspaceId: "ws-test",
+      activity: null,
+    },
+    state: createTerminalState(),
+  });
+  const session = manager.getTerminal("terminal-a")!;
+  expect(session.getShellCwd?.()).toBeNull();
+  const changes: string[] = [];
+  session.onShellCwdChange?.((directory) => changes.push(directory));
+  const events: TerminalsChangedEvent[] = [];
+  manager.subscribeTerminalsChanged((event) => events.push(event));
+
+  worker.emitWorkerMessage({
+    type: "terminalShellCwdChange",
+    terminalId: session.id,
+    shellCwd: "/workspace",
+  });
+  worker.emitWorkerMessage({
+    type: "terminalShellCwdChange",
+    terminalId: session.id,
+    shellCwd: "/workspace",
+  });
+
+  expect(session.getShellCwd?.()).toBe("/workspace");
+  expect(changes).toEqual(["/workspace"]);
+  expect(events).toEqual([
+    {
+      cwd: "/workspace",
+      terminals: [
+        {
+          id: session.id,
+          name: "Shell",
+          cwd: "/workspace",
+          shellCwd: "/workspace",
+          workspaceId: "ws-test",
+          activity: null,
+        },
+      ],
+    },
+  ]);
+});
+
+it("replays shell cwd metadata and publishes worker directory changes under the launch directory", async () => {
+  const worker = new FakeTerminalWorker();
+  manager = createWorkerTerminalManager({ requestTimeoutMs: 50, forkWorker: () => worker });
+  worker.emitWorkerMessage({
+    type: "terminalCreated",
+    terminal: {
+      id: "terminal-a",
+      name: "Shell",
+      cwd: "/workspace",
+      shellCwd: "/workspace/restored",
+      workspaceId: "ws-test",
+      activity: null,
+    },
+    state: createTerminalState(),
+  });
+  const session = manager.getTerminal("terminal-a")!;
+  expect(session.getShellCwd?.()).toBe("/workspace/restored");
+  const changes: string[] = [];
+  session.onShellCwdChange?.((cwd) => changes.push(cwd));
+  const events: TerminalsChangedEvent[] = [];
+  manager.subscribeTerminalsChanged((event) => events.push(event));
+
+  worker.emitWorkerMessage({
+    type: "terminalShellCwdChange",
+    terminalId: session.id,
+    shellCwd: "/other/worktree",
+  });
+  worker.emitWorkerMessage({
+    type: "terminalShellCwdChange",
+    terminalId: session.id,
+    shellCwd: "/other/worktree",
+  });
+
+  expect(changes).toEqual(["/other/worktree"]);
+  expect(session.getShellCwd?.()).toBe("/other/worktree");
+  expect(session.cwd).toBe("/workspace");
+  expect(events).toEqual([
+    {
+      cwd: "/workspace",
+      terminals: [
+        {
+          id: "terminal-a",
+          name: "Shell",
+          cwd: "/workspace",
+          shellCwd: "/other/worktree",
+          workspaceId: "ws-test",
+          activity: null,
+        },
+      ],
+    },
+  ]);
+  expect((await manager.getTerminals("/workspace")).map((entry) => entry.id)).toEqual([session.id]);
+  expect(await manager.getTerminals("/other/worktree")).toEqual([]);
 });
 
 it("produces one terminals-changed snapshot per title change", async () => {

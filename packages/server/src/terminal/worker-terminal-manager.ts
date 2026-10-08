@@ -79,6 +79,7 @@ interface WorkerTerminalRecord {
   exitListeners: Set<(info: TerminalExitInfo) => void>;
   commandFinishedListeners: Set<(info: TerminalCommandFinishedInfo) => void>;
   titleChangeListeners: Set<(title?: string) => void>;
+  shellCwdChangeListeners: Set<(shellCwd: string) => void>;
   activityChangeListeners: Set<(transition: TerminalActivityTransition) => void>;
   session: TerminalSession;
 }
@@ -140,6 +141,7 @@ function cloneTerminalInfo(info: RequiredWorkerTerminalInfo): RequiredWorkerTerm
     id: info.id,
     name: info.name,
     cwd: info.cwd,
+    ...(info.shellCwd ? { shellCwd: info.shellCwd } : {}),
     workspaceId: info.workspaceId,
     ...(info.title ? { title: info.title } : {}),
     activity: info.activity,
@@ -220,6 +222,7 @@ export function createWorkerTerminalManager(
         id: record.info.id,
         name: record.info.name,
         cwd: record.info.cwd,
+        ...(record.info.shellCwd ? { shellCwd: record.info.shellCwd } : {}),
         workspaceId: record.info.workspaceId,
         ...(record.info.title ? { title: record.info.title } : {}),
         activity: record.activity,
@@ -249,6 +252,7 @@ export function createWorkerTerminalManager(
       exitListeners: new Set(),
       commandFinishedListeners: new Set(),
       titleChangeListeners: new Set(),
+      shellCwdChangeListeners: new Set(),
       activityChangeListeners: new Set(),
       session: undefined as unknown as TerminalSession,
     };
@@ -320,6 +324,13 @@ export function createWorkerTerminalManager(
         return () => {
           record.titleChangeListeners.delete(listener);
         };
+      },
+      onShellCwdChange(listener: (shellCwd: string) => void): () => void {
+        record.shellCwdChangeListeners.add(listener);
+        return () => record.shellCwdChangeListeners.delete(listener);
+      },
+      getShellCwd(): string | null {
+        return record.info.shellCwd ?? null;
       },
       onActivityChange(listener: (transition: TerminalActivityTransition) => void): () => void {
         record.activityChangeListeners.add(listener);
@@ -522,6 +533,21 @@ export function createWorkerTerminalManager(
     });
   }
 
+  function handleTerminalShellCwdChangeEvent(
+    message: Extract<TerminalWorkerToParentMessage, { type: "terminalShellCwdChange" }>,
+  ): void {
+    const record = recordsById.get(message.terminalId);
+    if (!record || record.info.shellCwd === message.shellCwd) return;
+    record.info = { ...record.info, shellCwd: message.shellCwd };
+    for (const listener of Array.from(record.shellCwdChangeListeners)) {
+      listener(message.shellCwd);
+    }
+    emitTerminalsChanged({
+      cwd: record.info.cwd,
+      terminals: listTerminalItemsForCwd(record.info.cwd),
+    });
+  }
+
   function handleTerminalCommandFinishedEvent(
     message: Extract<TerminalWorkerToParentMessage, { type: "terminalCommandFinished" }>,
   ): void {
@@ -604,6 +630,10 @@ export function createWorkerTerminalManager(
 
       case "terminalCommandFinished": {
         handleTerminalCommandFinishedEvent(message);
+        return;
+      }
+      case "terminalShellCwdChange": {
+        handleTerminalShellCwdChangeEvent(message);
         return;
       }
 

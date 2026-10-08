@@ -8,10 +8,11 @@ import {
   openChangesPanel,
   switchBranchFromChangesPanel,
 } from "../support/helpers/branch-switcher";
-import { seedWorkspace } from "../support/helpers/seed-client";
+import { seedWorkspace, type SeedDaemonClient } from "../support/helpers/seed-client";
 import { getServerId } from "../support/helpers/server-id";
 import { createTempDirectory, readWorktreeBranchInfo } from "../support/helpers/workspace";
 import { clickNewTerminal, gotoWorkspace } from "../support/helpers/launcher";
+import { selectWorkspaceTab } from "../support/helpers/workspace-tabs";
 import {
   switchWorkspaceViaSidebar,
   waitForSidebarHydration,
@@ -46,6 +47,25 @@ async function renameWorkspaceViaSidebar(
 
 function terminalCwds(terminals: Array<{ cwd: string }>): string[] {
   return terminals.map((terminal) => terminal.cwd);
+}
+
+async function reportTerminalDirectory(
+  client: SeedDaemonClient,
+  input: { workspaceId: string; terminalId: string; cwd: string },
+): Promise<void> {
+  await client.subscribeTerminal(input.terminalId);
+  // Report the actual shell directory on every test host, including shells without OSC7 hooks.
+  client.sendTerminalInput(input.terminalId, {
+    type: "input",
+    data: "node -e \"process.stdout.write(String.fromCharCode(27)+']7;file://localhost'+require('node:url').pathToFileURL(process.cwd()).pathname+String.fromCharCode(7)+String.fromCharCode(27)+']633;D;0'+String.fromCharCode(7))\"\n",
+  });
+  await expect
+    .poll(
+      async () =>
+        (await client.listTerminals(undefined, undefined, { workspaceId: input.workspaceId }))
+          .terminals,
+    )
+    .toMatchObject([{ id: input.terminalId, shellCwd: input.cwd }]);
 }
 
 test.describe("Branch switcher", () => {
@@ -138,6 +158,15 @@ test.describe("Branch switcher", () => {
       await clickNewTerminal(page);
       const pill = page.getByTestId("pane-branch-badge").filter({ visible: true }).first();
       await expect(pill).toHaveText("main");
+      const initialTerminals = await workspace.client.listTerminals(undefined, undefined, {
+        workspaceId: workspace.workspaceId,
+      });
+      expect(initialTerminals.terminals).toHaveLength(1);
+      await reportTerminalDirectory(workspace.client, {
+        workspaceId: workspace.workspaceId,
+        terminalId: initialTerminals.terminals[0]!.id,
+        cwd: workspace.repoPath,
+      });
       await pill.click();
       const branchOption = page.getByTestId("pane-branch-option-branch:dev");
       await expect(branchOption).toBeVisible();
@@ -200,6 +229,126 @@ test.describe("Branch switcher", () => {
       await workspace.client.archiveWorkspace(workspace.workspaceId);
       await workspace.cleanup();
       await external.cleanup();
+    }
+  });
+
+  test("a terminal's reported worktree directory updates pane context without recreating the shell", async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const workspace = await seedWorkspace({
+      repoPrefix: "pane-shell-directory-",
+      repo: { branches: ["main"] },
+    });
+    const external = await createTempDirectory("pane-shell-worktree-");
+    const worktreePath = join(external.path, "checkout");
+    try {
+      execFileSync("git", ["worktree", "add", worktreePath, "-b", "feature/current-worktree"], {
+        cwd: workspace.repoPath,
+      });
+      await gotoWorkspace(page, workspace.workspaceId);
+      await clickNewTerminal(page);
+      const pill = page.getByTestId("pane-branch-badge").filter({ visible: true }).first();
+      await expect(pill).toHaveText("main");
+      const surface = page.getByTestId("terminal-surface").filter({ visible: true }).first();
+      await expect(surface).toBeVisible();
+      const originalSurface = await surface.elementHandle();
+      expect(originalSurface).not.toBeNull();
+      const before = await workspace.client.listTerminals(undefined, undefined, {
+        workspaceId: workspace.workspaceId,
+      });
+      expect(before.terminals).toHaveLength(1);
+      const terminalId = before.terminals[0]!.id;
+      await workspace.client.subscribeTerminal(terminalId);
+      workspace.client.sendTerminalInput(terminalId, {
+        type: "input",
+        data: `cd "${worktreePath}"\n`,
+      });
+      await reportTerminalDirectory(workspace.client, {
+        workspaceId: workspace.workspaceId,
+        terminalId,
+        cwd: worktreePath,
+      });
+      await expect(pill).toHaveText("feature/current-worktree");
+      await expect(
+        page.getByTestId("pane-project-badge-label").filter({ visible: true }).first(),
+      ).toContainText(workspace.projectDisplayName);
+      await expect
+        .poll(
+          async () =>
+            (
+              await workspace.client.listTerminals(undefined, undefined, {
+                workspaceId: workspace.workspaceId,
+              })
+            ).terminals,
+        )
+        .toMatchObject([{ id: terminalId, cwd: workspace.repoPath, shellCwd: worktreePath }]);
+      expect(await originalSurface!.evaluate((element) => element.isConnected)).toBe(true);
+      const source = (await workspace.client.fetchWorkspaces()).entries.find(
+        (entry) => entry.id === workspace.workspaceId,
+      );
+      expect(source).toMatchObject({ members: [{ workspaceDirectory: workspace.repoPath }] });
+    } finally {
+      await workspace.client.archiveWorkspace(workspace.workspaceId);
+      await workspace.cleanup();
+      await external.cleanup();
+    }
+  });
+
+  test("terminal branch actions wait for the first directory report", async ({ page }) => {
+    const workspace = await seedWorkspace({
+      repoPrefix: "pane-unreported-shell-",
+      repo: { branches: ["main"] },
+    });
+    try {
+      const created = await workspace.client.createTerminal(
+        workspace.repoPath,
+        "Directory report",
+        undefined,
+        {
+          workspaceId: workspace.workspaceId,
+          command: process.execPath,
+          args: [
+            "-e",
+            "process.stdin.setEncoding('utf8'); process.stdin.on('data',()=>process.stdout.write(String.fromCharCode(27)+']7;file://localhost'+require('node:url').pathToFileURL(process.cwd()).pathname+String.fromCharCode(7)+String.fromCharCode(27)+']633;D;0'+String.fromCharCode(7)));",
+          ],
+        },
+      );
+      expect(created.error).toBeNull();
+      expect(created.terminal).not.toBeNull();
+      const terminalId = created.terminal!.id;
+      await gotoWorkspace(page, workspace.workspaceId);
+      const tab = page
+        .getByTestId(`workspace-tab-terminal_${terminalId}`)
+        .filter({ visible: true })
+        .first();
+      await expect(tab).toBeVisible();
+      await selectWorkspaceTab(tab);
+      const pill = page.getByTestId("pane-branch-badge").filter({ visible: true }).first();
+      await expect(pill).toHaveText("main");
+      await pill.click();
+      await expect(page.getByTestId("pane-branch-picker-unreported-shell")).toBeVisible();
+      await expect(page.locator('[data-testid^="pane-branch-option-"]')).toHaveCount(0);
+      await page.keyboard.press("Escape");
+
+      await workspace.client.subscribeTerminal(terminalId);
+      workspace.client.sendTerminalInput(terminalId, { type: "input", data: "report\n" });
+      await expect
+        .poll(
+          async () =>
+            (
+              await workspace.client.listTerminals(undefined, undefined, {
+                workspaceId: workspace.workspaceId,
+              })
+            ).terminals,
+        )
+        .toMatchObject([{ id: terminalId, shellCwd: workspace.repoPath }]);
+      await pill.click();
+      await expect(page.getByTestId("pane-branch-option-branch:main")).toBeVisible();
+      await expect(page.getByTestId("pane-branch-picker-unreported-shell")).toHaveCount(0);
+    } finally {
+      await workspace.client.archiveWorkspace(workspace.workspaceId);
+      await workspace.cleanup();
     }
   });
 });

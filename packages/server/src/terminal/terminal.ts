@@ -95,6 +95,7 @@ export interface TerminalSession {
   onExit(listener: (info: TerminalExitInfo) => void): () => void;
   onCommandFinished(listener: (info: TerminalCommandFinishedInfo) => void): () => void;
   onTitleChange(listener: (title?: string) => void): () => void;
+  onShellCwdChange?(listener: (shellCwd: string) => void): () => void;
   onActivityChange(listener: (transition: TerminalActivityTransition) => void): () => void;
   getSize(): { rows: number; cols: number };
   getState(): TerminalState;
@@ -110,10 +111,10 @@ export interface TerminalSession {
   clearActivityAttention(): boolean;
   setTitle(title: string): void;
   getExitInfo(): TerminalExitInfo | null;
-  // Only the process that owns the PTY can answer these; the daemon-side mirror leaves them out.
+  // Only the process that owns the PTY knows the provider resume handle.
   getResumeTarget?(): TerminalResumeTarget | null;
-  /** The directory the shell last reported (OSC 7), or the one it started in. */
-  getShellCwd?(): string;
+  /** The directory a shell reported at a trusted prompt, or null before its first report. */
+  getShellCwd?(): string | null;
   /** The screen a restore seeds from. Null while a full-screen app holds the alternate screen. */
   getRestoreState?(): TerminalState | null;
   kill(): void;
@@ -1122,6 +1123,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   const exitListeners = new Set<(info: TerminalExitInfo) => void>();
   const commandFinishedListeners = new Set<(info: TerminalCommandFinishedInfo) => void>();
   const titleChangeListeners = new Set<(title?: string) => void>();
+  const shellCwdChangeListeners = new Set<(shellCwd: string) => void>();
   let killed = false;
   let disposed = false;
   let exitEmitted = false;
@@ -1168,7 +1170,8 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   let shellReportsCommands = false;
   const commandAgent = detectAgentFromCommand(command);
   let shellCwd = resolveShellStartCwd(cwd, options.restore);
-  // A running program can print OSC 7 too. Once the shell reports its prompts, a report waits for
+  let hasReportedShellCwd = false;
+  // A running program can print OSC 7 too. Once the shell reports its prompts, reports wait for
   // the next prompt or command end, where the shell's own report replaces anything printed before.
   let promptShellCwd: string | null = null;
   // Captured with the shell, which fixes its $HOST at startup too.
@@ -1309,8 +1312,21 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     });
   }
 
+  function updateShellCwd(nextCwd: string): void {
+    if (hasReportedShellCwd && shellCwd === nextCwd) return;
+    shellCwd = nextCwd;
+    hasReportedShellCwd = true;
+    for (const listener of Array.from(shellCwdChangeListeners)) {
+      try {
+        listener(shellCwd);
+      } catch {
+        // no-op
+      }
+    }
+  }
+
   function commitPromptShellCwd(): void {
-    shellCwd = promptShellCwd ?? shellCwd;
+    if (promptShellCwd !== null) updateShellCwd(promptShellCwd);
     promptShellCwd = null;
   }
 
@@ -1357,7 +1373,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     if (reported && shellReportsCommands) {
       promptShellCwd = reported;
     } else if (reported) {
-      shellCwd = reported;
+      updateShellCwd(reported);
     }
     return true;
   });
@@ -1438,6 +1454,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     exitListeners.clear();
     commandFinishedListeners.clear();
     titleChangeListeners.clear();
+    shellCwdChangeListeners.clear();
     activityChangeListeners.clear();
   }
 
@@ -1686,6 +1703,13 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     };
   }
 
+  function onShellCwdChange(listener: (shellCwd: string) => void): () => void {
+    shellCwdChangeListeners.add(listener);
+    return () => {
+      shellCwdChangeListeners.delete(listener);
+    };
+  }
+
   function onTitleChange(listener: (title?: string) => void): () => void {
     titleChangeListeners.add(listener);
     if (title !== undefined) {
@@ -1745,8 +1769,8 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     return exitVisible ? resumeTarget : null;
   }
 
-  function getShellCwd(): string {
-    return shellCwd;
+  function getShellCwd(): string | null {
+    return hasReportedShellCwd ? shellCwd : null;
   }
 
   function getRestoreState(): TerminalState | null {
@@ -1907,6 +1931,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     onExit,
     onCommandFinished,
     onTitleChange,
+    onShellCwdChange,
     onActivityChange,
     getSize,
     getState,

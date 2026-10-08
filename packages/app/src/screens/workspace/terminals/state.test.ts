@@ -3,6 +3,8 @@ import {
   buildTerminalCwdById,
   buildTerminalsQueryKey,
   resolveTerminalListRoot,
+  resolveTerminalContextCwd,
+  collectReportedTerminalCwdIds,
   canCreateWorkspaceTerminal,
   collectKnownTerminalIds,
   collectScriptTerminalIds,
@@ -145,6 +147,36 @@ describe("workspace terminal state", () => {
 });
 
 describe("terminal project directories", () => {
+  it("follows a shell's current directory without changing its launch directory", () => {
+    const terminal = {
+      ...listedTerminal("shell"),
+      cwd: "/repo",
+      shellCwd: "/repo/.worktrees/docs",
+    };
+    expect(
+      buildTerminalCwdById({
+        terminals: [terminal],
+        requestId: "shell-cd",
+      }),
+    ).toEqual(new Map([["shell", "/repo/.worktrees/docs"]]));
+    expect(resolveTerminalContextCwd(terminal, "/fallback")).toBe("/repo/.worktrees/docs");
+    expect(terminal.cwd).toBe("/repo");
+  });
+
+  it("uses the launch directory before the shell reports or with an older payload", () => {
+    expect(resolveTerminalContextCwd({ cwd: "/repo" }, "/fallback")).toBe("/repo");
+    expect(resolveTerminalContextCwd(listedTerminal("legacy"), "/fallback")).toBe("/fallback");
+    expect(resolveTerminalContextCwd(undefined, "/fallback")).toBe("/fallback");
+    expect(
+      collectReportedTerminalCwdIds({
+        terminals: [
+          listedTerminal("unknown"),
+          { ...listedTerminal("reported"), cwd: "/repo", shellCwd: "/repo" },
+        ],
+        requestId: "first-prompt",
+      }),
+    ).toEqual(new Set(["reported"]));
+  });
   it("keeps the project tray attached after a directory-scoped terminal refresh", () => {
     expect(
       buildTerminalCwdById({
