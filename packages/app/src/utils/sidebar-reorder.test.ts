@@ -141,4 +141,15 @@ describe("memberOrderAfterMove", () => {
       }),
     ).toEqual([movedMemberKey, "srv:wks-b#/a"]);
   });
+
+  it("keeps an existing project's position when a move merges into it", () => {
+    expect(
+      memberOrderAfterMove({
+        storedOrder: ["srv:wks-b#/a", movedMemberKey, "srv:wks-b#/b"],
+        baselineMemberKeys: ["srv:wks-b#/a", movedMemberKey, "srv:wks-b#/b"],
+        movedMemberKey,
+        dropOnMemberKey: null,
+      }),
+    ).toEqual(["srv:wks-b#/a", movedMemberKey, "srv:wks-b#/b"]);
+  });
 });

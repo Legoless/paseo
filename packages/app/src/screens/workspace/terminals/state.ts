@@ -1,5 +1,6 @@
 import type { CreateTerminalResponse, ListTerminalsResponse } from "@getpaseo/protocol/messages";
 import { upsertTerminalListEntry } from "@/utils/terminal-list";
+import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 
 export const TERMINALS_QUERY_STALE_TIME = 5_000;
 
@@ -12,7 +13,20 @@ export function buildTerminalsQueryKey(
   workspaceDirectory: string | null,
   workspaceId?: string | null,
 ) {
-  return ["terminals", serverId, workspaceDirectory, workspaceId ?? null] as const;
+  return [
+    "terminals",
+    serverId,
+    resolveTerminalListRoot(workspaceDirectory, workspaceId),
+    workspaceId ?? null,
+  ] as const;
+}
+
+/** Workspace ownership remains fixed when projects are added, removed, or moved. */
+export function resolveTerminalListRoot(
+  workspaceDirectory: string | null,
+  workspaceId?: string | null,
+): string | null {
+  return workspaceId ? null : workspaceDirectory;
 }
 
 /** `workspaceDirectory` is the cwd the caller works in — for a create, the terminal's launch cwd. */
@@ -119,4 +133,54 @@ export function buildTerminalCwdById(
     if (cwd) result.set(terminal.id, cwd);
   }
   return result;
+}
+
+export interface TerminalReplacementLayoutPort {
+  getTabTarget(workspaceKey: string, tabId: string): WorkspaceTabTarget | null;
+  replaceTab(workspaceKey: string, tabId: string, target: WorkspaceTabTarget): string | null;
+}
+
+interface TerminalReplacementInput {
+  workspaceKey: string;
+  tabId: string;
+  expectedTerminalId: string;
+  createdTerminalId: string;
+}
+
+function targetsTerminal(target: WorkspaceTabTarget | null, terminalId: string): boolean {
+  return target?.kind === "terminal" && target.terminalId === terminalId;
+}
+
+/** A delayed create must not retarget a tab the user moved, closed, or changed meanwhile. */
+export function tryInstallTerminalReplacement(
+  layout: TerminalReplacementLayoutPort,
+  input: TerminalReplacementInput,
+): boolean {
+  if (
+    !targetsTerminal(layout.getTabTarget(input.workspaceKey, input.tabId), input.expectedTerminalId)
+  ) {
+    return false;
+  }
+  const tabId = layout.replaceTab(input.workspaceKey, input.tabId, {
+    kind: "terminal",
+    terminalId: input.createdTerminalId,
+  });
+  return (
+    tabId !== null &&
+    targetsTerminal(layout.getTabTarget(input.workspaceKey, input.tabId), input.createdTerminalId)
+  );
+}
+
+/** Creation success alone does not authorize stopping the original shell. */
+export async function completeTerminalReplacement(
+  layout: Pick<TerminalReplacementLayoutPort, "getTabTarget">,
+  input: TerminalReplacementInput,
+  stopTerminal: (terminalId: string) => Promise<void>,
+): Promise<boolean> {
+  const installed = targetsTerminal(
+    layout.getTabTarget(input.workspaceKey, input.tabId),
+    input.createdTerminalId,
+  );
+  await stopTerminal(installed ? input.expectedTerminalId : input.createdTerminalId);
+  return installed;
 }

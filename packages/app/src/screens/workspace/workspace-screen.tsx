@@ -1,4 +1,9 @@
-import { buildTerminalCwdById } from "@/screens/workspace/terminals/state";
+import {
+  buildTerminalCwdById,
+  tryInstallTerminalReplacement,
+  completeTerminalReplacement,
+  type TerminalReplacementLayoutPort,
+} from "@/screens/workspace/terminals/state";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import type { JsonValue } from "@getpaseo/protocol/agent-types";
 import { getOpenAgentTabLabel } from "@getpaseo/protocol/agent-labels";
@@ -112,6 +117,7 @@ import { useSelectedWorkspaceProject } from "@/stores/workspace-project-selectio
 import { useWorkspaceTerminalSessionRetention } from "@/terminal/hooks/use-workspace-terminal-session-retention";
 import type { CheckoutStatusPayload } from "@/git/use-status-query";
 import { confirmDialog } from "@/utils/confirm-dialog";
+import { addWorkspaceMemberDirectory } from "@/workspaces/workspace-members";
 import { useArchiveAgent } from "@/hooks/use-archive-agent";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { removeResidentBrowserWebview } from "@/desktop/browser/resident-webviews";
@@ -1489,6 +1495,16 @@ interface WorkspaceTerminalTabActions {
   handleTerminalCreateFailed: (reason: string) => void;
 }
 
+const terminalReplacementLayout: TerminalReplacementLayoutPort = {
+  getTabTarget: (workspaceKey, tabId) =>
+    useWorkspaceLayoutStore
+      .getState()
+      .getWorkspaceTabs(workspaceKey)
+      .find((tab) => tab.tabId === tabId)?.target ?? null,
+  replaceTab: (workspaceKey, tabId, target) =>
+    useWorkspaceLayoutStore.getState().replaceTab(workspaceKey, tabId, target),
+};
+
 function useWorkspaceTerminalTabActions({
   persistenceKey,
   openWorkspaceTabFocused,
@@ -1502,6 +1518,15 @@ function useWorkspaceTerminalTabActions({
         return;
       }
       if (destination.kind === "replace") {
+        if (destination.expectedTerminalId) {
+          tryInstallTerminalReplacement(terminalReplacementLayout, {
+            workspaceKey: persistenceKey,
+            tabId: destination.tabId,
+            expectedTerminalId: destination.expectedTerminalId,
+            createdTerminalId: terminalId,
+          });
+          return;
+        }
         replaceWorkspaceTabTarget(persistenceKey, destination.tabId, {
           kind: "terminal",
           terminalId,
@@ -2708,6 +2733,125 @@ function WorkspaceScreenContent({
     ],
   );
 
+  const ensureWorktreeMembership = useCallback(
+    async (input: { cwd: string; projectId?: string }): Promise<boolean> => {
+      if (!input.projectId) return true;
+      const workspace = useSessionStore
+        .getState()
+        .sessions[normalizedServerId]?.workspaces.get(normalizedWorkspaceId);
+      if (workspace?.members.some((member) => member.workspaceDirectory === input.cwd)) return true;
+      if (!client) {
+        toast.error(t("common.errors.daemonClientUnavailable"));
+        return false;
+      }
+      try {
+        const result = await addWorkspaceMemberDirectory({
+          client,
+          workspaceId: normalizedWorkspaceId,
+          source: { kind: "directory", path: input.cwd, projectId: input.projectId },
+        });
+        if (!result.ok) {
+          toast.error(result.error ?? t("branchSwitcher.failedToSwitch"));
+          return false;
+        }
+        return true;
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : t("branchSwitcher.failedToSwitch"));
+        return false;
+      }
+    },
+    [client, normalizedServerId, normalizedWorkspaceId, t, toast],
+  );
+
+  const replaceTerminalForProject = useCallback(
+    async (input: { tabId: string; cwd: string }, terminalId: string) => {
+      if (!persistenceKey || createTerminalMutation.isPending) return;
+      const created = await createTerminalMutation
+        .mutateAsync({
+          destination: { kind: "replace", tabId: input.tabId, expectedTerminalId: terminalId },
+          cwd: input.cwd,
+        })
+        .catch(() => null);
+      if (!created?.terminal) return;
+      const stopTerminal = async (id: string) => {
+        await killTerminalMutation.mutateAsync(id);
+        removeTerminalFromCache(id);
+      };
+      try {
+        await completeTerminalReplacement(
+          terminalReplacementLayout,
+          {
+            workspaceKey: persistenceKey,
+            tabId: input.tabId,
+            expectedTerminalId: terminalId,
+            createdTerminalId: created.terminal.id,
+          },
+          stopTerminal,
+        );
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : t("branchSwitcher.failedToSwitch"));
+      }
+    },
+    [
+      createTerminalMutation,
+      killTerminalMutation,
+      persistenceKey,
+      removeTerminalFromCache,
+      t,
+      toast,
+    ],
+  );
+
+  const relaunchAgentForProject = useCallback(
+    async (input: { tabId: string; cwd: string; projectId?: string }, agentId: string) => {
+      if (!persistenceKey) return;
+      const session = useSessionStore.getState().sessions[normalizedServerId];
+      const agent = session?.agents?.get(agentId) ?? session?.agentDetails?.get(agentId) ?? null;
+      if (
+        switchTabProjectNeedsConfirm({
+          target: { kind: "agent", agentId },
+          lastUserMessageAt: agent?.lastUserMessageAt ?? null,
+        })
+      ) {
+        const confirmed = await confirmDialog({
+          title: t("workspace.tabs.confirmations.switchProjectTitle"),
+          message: t("workspace.tabs.confirmations.switchProjectMessage"),
+          confirmLabel: t("workspace.tabs.confirmations.switchProject"),
+          cancelLabel: t("workspace.tabs.confirmations.cancel"),
+          destructive: true,
+        });
+        if (!confirmed) return;
+      }
+      if (!(await ensureWorktreeMembership(input))) return;
+      unpinWorkspaceAgent(persistenceKey, agentId);
+      hideWorkspaceAgent(persistenceKey, agentId);
+      replaceWorkspaceTabTarget(
+        persistenceKey,
+        input.tabId,
+        repointDraftTarget(
+          {
+            kind: "draft",
+            draftId: generateDraftId(),
+            ...(agent ? { setup: buildDraftAgentSetup(agent) } : {}),
+          },
+          input.cwd,
+        ),
+      );
+      // Errors (e.g. timeout) are handled by the mutation's onSettled callback.
+      void archiveAgent({ serverId: normalizedServerId, agentId }).catch(() => {});
+    },
+    [
+      archiveAgent,
+      ensureWorktreeMembership,
+      hideWorkspaceAgent,
+      normalizedServerId,
+      persistenceKey,
+      replaceWorkspaceTabTarget,
+      t,
+      unpinWorkspaceAgent,
+    ],
+  );
+
   /**
    * Re-points a tab at another project from the pane's project badge. A draft carries its own cwd,
    * so it just moves. An agent's cwd is fixed on the daemon, so it is relaunched: the tab becomes a
@@ -2716,7 +2860,7 @@ function WorkspaceScreenContent({
    * tab, because a non-archived workspace agent is always auto-opened.
    */
   const handleSwitchTabProject = useCallback(
-    async (input: { tabId: string; cwd: string }) => {
+    async (input: { tabId: string; cwd: string; projectId?: string }) => {
       if (!persistenceKey || !normalizedServerId) {
         return;
       }
@@ -2729,7 +2873,14 @@ function WorkspaceScreenContent({
         return;
       }
 
+      let currentCwd: string | undefined;
+      if (target.kind === "draft") currentCwd = target.setup?.cwd ?? target.cwd;
+      else if (target.kind === "agent") currentCwd = agentCwdById.get(target.agentId);
+      else currentCwd = terminalCwdById.get(target.terminalId);
+      if (currentCwd === input.cwd) return;
+
       if (target.kind === "draft") {
+        if (!(await ensureWorktreeMembership(input))) return;
         replaceWorkspaceTabTarget(
           persistenceKey,
           input.tabId,
@@ -2751,57 +2902,23 @@ function WorkspaceScreenContent({
         if (!confirmed) {
           return;
         }
-        createTerminal({ destination: { kind: "replace", tabId: input.tabId }, cwd: input.cwd });
+        if (!(await ensureWorktreeMembership(input))) return;
+        await replaceTerminalForProject(input, target.terminalId);
         return;
       }
 
-      const session = useSessionStore.getState().sessions[normalizedServerId];
-      const agent =
-        session?.agents?.get(target.agentId) ?? session?.agentDetails?.get(target.agentId) ?? null;
-      if (
-        switchTabProjectNeedsConfirm({
-          target,
-          lastUserMessageAt: agent?.lastUserMessageAt ?? null,
-        })
-      ) {
-        const confirmed = await confirmDialog({
-          title: t("workspace.tabs.confirmations.switchProjectTitle"),
-          message: t("workspace.tabs.confirmations.switchProjectMessage"),
-          confirmLabel: t("workspace.tabs.confirmations.switchProject"),
-          cancelLabel: t("workspace.tabs.confirmations.cancel"),
-          destructive: true,
-        });
-        if (!confirmed) {
-          return;
-        }
-      }
-
-      unpinWorkspaceAgent(persistenceKey, target.agentId);
-      hideWorkspaceAgent(persistenceKey, target.agentId);
-      replaceWorkspaceTabTarget(
-        persistenceKey,
-        input.tabId,
-        repointDraftTarget(
-          {
-            kind: "draft",
-            draftId: generateDraftId(),
-            ...(agent ? { setup: buildDraftAgentSetup(agent) } : {}),
-          },
-          input.cwd,
-        ),
-      );
-      // Errors (e.g. timeout) are handled by the mutation's onSettled callback
-      void archiveAgent({ serverId: normalizedServerId, agentId: target.agentId }).catch(() => {});
+      await relaunchAgentForProject(input, target.agentId);
     },
     [
-      archiveAgent,
-      hideWorkspaceAgent,
-      createTerminal,
+      agentCwdById,
+      ensureWorktreeMembership,
       normalizedServerId,
       persistenceKey,
       replaceWorkspaceTabTarget,
+      replaceTerminalForProject,
+      relaunchAgentForProject,
       t,
-      unpinWorkspaceAgent,
+      terminalCwdById,
     ],
   );
 

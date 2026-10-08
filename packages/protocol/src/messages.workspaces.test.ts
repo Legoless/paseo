@@ -10,6 +10,19 @@ import {
 } from "./messages.js";
 
 describe("workspace message schemas", () => {
+  test("keeps managed worktree list requests compatible while accepting external discovery", () => {
+    const request = {
+      type: "paseo_worktree_list_request",
+      cwd: "/repo",
+      requestId: "list-worktrees",
+    };
+    expect(SessionInboundMessageSchema.parse(request)).toEqual(request);
+    expect(SessionInboundMessageSchema.parse({ ...request, includeExternal: true })).toEqual({
+      ...request,
+      includeExternal: true,
+    });
+  });
+
   test("accepts an empty workspace without a synthetic project identity", () => {
     const workspace = WorkspaceDescriptorPayloadSchema.parse({
       id: "wks_empty",

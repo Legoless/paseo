@@ -1726,6 +1726,98 @@ export function closeTabInLayout(input: CloseTabInLayoutInput): WorkspaceLayout 
   return nextLayoutWithParentMap;
 }
 
+/** Carries existing tab instances across workspaces without changing the target's selection. */
+export function transferTabsBetweenLayouts(input: {
+  source: WorkspaceLayout;
+  target: WorkspaceLayout;
+  tabs: readonly WorkspaceTab[];
+  sourceParentTabIdByTabId?: Record<string, string>;
+  sourceExplorerPaneId: string | null;
+  targetExplorerPaneId: string | null;
+}): { source: WorkspaceLayout; target: WorkspaceLayout } {
+  let source = input.source;
+  let target = input.target;
+  const sourceFocusedPane = findPaneById(source.root, source.focusedPaneId);
+  const transferredTabIds = new Set<string>();
+  for (const capturedTab of input.tabs) {
+    const tab =
+      collectAllTabs(source.root).find((entry) => entry.tabId === capturedTab.tabId) ?? capturedTab;
+    const targetLayout = asInternalLayout(target);
+    const existing = collectAllTabs(targetLayout.root).find(
+      (entry) =>
+        entry.tabId === tab.tabId ||
+        ((tab.target.kind === "agent" ||
+          tab.target.kind === "terminal" ||
+          tab.target.kind === "provider_subagent") &&
+          panelResourceKey(entry.target) === panelResourceKey(tab.target)),
+    );
+    const targetPane = existing
+      ? (findPaneContainingTab(targetLayout.root, existing.tabId) as SplitPaneInternal | null)
+      : resolvePlacementPane({
+          layout: targetLayout,
+          target: tab.target,
+          placement: AMBIENT_PLACEMENT,
+          explorerSidebarPaneId: input.targetExplorerPaneId,
+        });
+    if (!targetPane) continue;
+    let root = targetLayout.root;
+    let targetParents = target.parentTabIdByTabId;
+    if (existing && existing.tabId !== tab.tabId) {
+      root = detachTabFromTree(root, { tabId: existing.tabId, keepEmpty: true }).root;
+      targetParents = transferReplacedTabParent({
+        parentTabIdByTabId: targetParents,
+        replacedTabId: existing.tabId,
+        replacementTabId: tab.tabId,
+      });
+    }
+    root = insertTabIntoPane(root, {
+      paneId: targetPane.id,
+      tab,
+      focusTabId: targetPane.focusedTabId === existing?.tabId ? tab.tabId : targetPane.focusedTabId,
+    });
+    target = withNormalizedParentTabMap({
+      root,
+      focusedPaneId: targetLayout.focusedPaneId,
+      parentTabIdByTabId: targetParents,
+    });
+    transferredTabIds.add(tab.tabId);
+    source =
+      closeTabInLayout({
+        layout: source,
+        tabId: tab.tabId,
+        explorerSidebarPaneId: input.sourceExplorerPaneId,
+      }) ?? source;
+  }
+  target = normalizeLayout({
+    ...target,
+    parentTabIdByTabId: {
+      ...Object.fromEntries(
+        Object.entries(input.sourceParentTabIdByTabId ?? {}).filter(
+          ([child, parent]) => transferredTabIds.has(child) && transferredTabIds.has(parent),
+        ),
+      ),
+      ...target.parentTabIdByTabId,
+    },
+  });
+  const survivingSourcePane = sourceFocusedPane && findPaneById(source.root, sourceFocusedPane.id);
+  if (
+    sourceFocusedPane &&
+    sourceFocusedPane.id !== input.sourceExplorerPaneId &&
+    survivingSourcePane &&
+    survivingSourcePane.hidden !== true
+  ) {
+    source = {
+      ...source,
+      focusedPaneId: sourceFocusedPane.id,
+    };
+    if (sourceFocusedPane.focusedTabId) {
+      source =
+        focusTabInLayout({ layout: source, tabId: sourceFocusedPane.focusedTabId }) ?? source;
+    }
+  }
+  return { source, target };
+}
+
 function isLastVisibleOrdinaryPane(
   layout: WorkspaceLayout,
   paneId: string,

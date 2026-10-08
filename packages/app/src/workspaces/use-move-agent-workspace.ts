@@ -3,9 +3,13 @@ import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { useToast } from "@/contexts/toast-context";
 import { moveAgentWorkspaceErrorMessage } from "@/workspaces/move-agent-workspace-message";
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
+import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
+import { selectAgentWorkspaceTabs } from "@/workspaces/workspace-tab-move";
 
 export interface MoveAgentWorkspaceInput {
   client: Pick<DaemonClient, "moveAgentWorkspace"> | null;
+  serverId: string;
+  sourceWorkspaceId: string;
   agentId: string;
   targetWorkspaceId: string;
   agentTitle: string;
@@ -28,6 +32,8 @@ export function useMoveAgentWorkspace(): (input: MoveAgentWorkspaceInput) => Pro
       if (!input.client) {
         return false;
       }
+      const sourceKey = `${input.serverId}:${input.sourceWorkspaceId}`;
+      const sourceLayout = useWorkspaceLayoutStore.getState().layoutByWorkspace[sourceKey];
       const fail = (errorCode: string | null, error: string | null) => {
         toast.error(
           moveAgentWorkspaceErrorMessage({
@@ -47,6 +53,17 @@ export function useMoveAgentWorkspace(): (input: MoveAgentWorkspaceInput) => Pro
         if (payload.error || payload.targetWorkspaceId === null) {
           return fail(payload.errorCode ?? null, payload.error);
         }
+        useWorkspaceLayoutStore.getState().transferTabs({
+          sourceWorkspaceKey: sourceKey,
+          targetWorkspaceKey: `${input.serverId}:${input.targetWorkspaceId}`,
+          tabs: selectAgentWorkspaceTabs(
+            useWorkspaceLayoutStore.getState().layoutByWorkspace[sourceKey],
+            [input.agentId],
+            sourceLayout,
+          ),
+          sourceParentTabIdByTabId: sourceLayout?.parentTabIdByTabId,
+          agentIds: [input.agentId],
+        });
         moveStoredAgentSlot(input);
         return true;
       } catch (error) {

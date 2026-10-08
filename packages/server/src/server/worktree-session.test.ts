@@ -35,6 +35,7 @@ import type { TerminalSession } from "../terminal/terminal.js";
 import type { AgentStorage, StoredAgentRecord } from "./agent/agent-storage.js";
 import {
   createPersistedProjectRecord,
+  createPersistedWorkspaceRecord,
   type PersistedProjectRecord,
   type PersistedWorkspaceRecord,
   type ProjectRegistry,
@@ -426,6 +427,73 @@ describe("handlePaseoWorktreeListRequest", () => {
         requestId: "request-worktrees",
       },
     });
+  });
+
+  test("includes external worktrees and the main checkout only for inclusive requests", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const externalPath = path.join(tempDir, "external");
+    execFileSync("git", ["worktree", "add", "-b", "external", externalPath], {
+      cwd: repoDir,
+      stdio: "pipe",
+    });
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoDir, stdio: "pipe" })
+      .toString()
+      .trim();
+    const emitted: SessionOutboundMessage[] = [];
+    const workspaceGitService = new WorkspaceGitServiceImpl({
+      logger: createLogger(),
+      paseoHome: path.join(tempDir, "paseo-home"),
+      deps: { forgeOverrides: { github: createGitHubServiceStub() } },
+    });
+    const dependencies = {
+      emit: (message: SessionOutboundMessage) => emitted.push(message),
+      workspaceGitService,
+    };
+
+    try {
+      await handlePaseoWorktreeListRequest(dependencies, {
+        type: "paseo_worktree_list_request",
+        cwd: externalPath,
+        requestId: "request-managed",
+      });
+      await handlePaseoWorktreeListRequest(dependencies, {
+        type: "paseo_worktree_list_request",
+        cwd: externalPath,
+        includeExternal: true,
+        requestId: "request-inclusive",
+      });
+
+      expect(emitted).toEqual([
+        {
+          type: "paseo_worktree_list_response",
+          payload: { requestId: "request-managed", worktrees: [], error: null },
+        },
+        {
+          type: "paseo_worktree_list_response",
+          payload: {
+            requestId: "request-inclusive",
+            error: null,
+            worktrees: [
+              {
+                worktreePath: repoDir,
+                branchName: "main",
+                head,
+                createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+              },
+              {
+                worktreePath: externalPath,
+                branchName: "external",
+                head,
+                createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+              },
+            ],
+          },
+        },
+      ]);
+    } finally {
+      workspaceGitService.dispose();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1354,18 +1422,31 @@ describe("runWorktreeSetupInBackground", () => {
         emit: (message) => emitted.push(message),
         workspaceSetupSnapshots: new Map(),
         getWorkspace: async () =>
-          ({
+          createPersistedWorkspaceRecord({
             workspaceId: "ws-fork",
-            cwd: "/repo/fork",
-            worktreeRoot: "/repo/fork",
-            branch: "fork-branch",
+            displayName: "fork-branch",
+            createdAt: "2026-04-12T00:00:00.000Z",
+            updatedAt: "2026-04-12T00:00:00.000Z",
+            members: [
+              {
+                projectId: "proj-fork",
+                cwd: "/repo/fork",
+                kind: "worktree",
+                displayName: "fork-branch",
+                worktreeRoot: "/repo/fork",
+                branch: "fork-branch",
+                baseBranch: null,
+                isPaseoOwnedWorktree: true,
+                mainRepoRoot: "/repo",
+              },
+            ],
             untrustedSource: {
               kind: "change_request",
               forge: "github",
               number: 42,
               headRepository: "contributor/paseo",
             },
-          }) as PersistedWorkspaceRecord,
+          }),
       },
       {
         type: "workspace_setup_status_request",
@@ -1402,14 +1483,25 @@ describe("runWorktreeSetupInBackground", () => {
     const emitted: SessionOutboundMessage[] = [];
     let blocked = true;
     const operations: Array<(signal: AbortSignal) => Promise<void>> = [];
-    const workspace = {
+    const workspace = createPersistedWorkspaceRecord({
       workspaceId: "ws-fork",
-      cwd: tempDir,
-      worktreeRoot: tempDir,
-      branch: "fork-branch",
-      mainRepoRoot: tempDir,
-      archivedAt: null,
-    } as PersistedWorkspaceRecord;
+      displayName: "fork-branch",
+      createdAt: "2026-04-12T00:00:00.000Z",
+      updatedAt: "2026-04-12T00:00:00.000Z",
+      members: [
+        {
+          projectId: "proj-fork",
+          cwd: tempDir,
+          kind: "worktree",
+          displayName: "fork-branch",
+          worktreeRoot: tempDir,
+          branch: "fork-branch",
+          mainRepoRoot: tempDir,
+          baseBranch: null,
+          isPaseoOwnedWorktree: true,
+        },
+      ],
+    });
     const terminalManager = createTerminalManagerStub();
     const dependencies = {
       getWorkspace: async () => workspace,

@@ -209,7 +209,7 @@ export interface WorkspaceGitService {
   ): Promise<WorkspaceGitStashEntry[]>;
   listWorktrees(
     cwdOrRepoRoot: string,
-    options?: WorkspaceGitReadOptions,
+    options?: WorkspaceGitWorktreeListOptions,
   ): Promise<WorkspaceGitWorktreeInfo[]>;
   getProjectSlug(cwd: string, options?: WorkspaceGitReadOptions): Promise<string>;
   resolveRepoRoot(cwd: string, options?: WorkspaceGitReadOptions): Promise<string>;
@@ -264,6 +264,10 @@ export type WorkspaceGitReadOptions =
       force: true;
       reason: string;
     };
+
+export type WorkspaceGitWorktreeListOptions = WorkspaceGitReadOptions & {
+  includeExternal?: boolean;
+};
 
 export interface WorkspaceGitBranchSuggestionsOptions {
   query?: string;
@@ -826,16 +830,17 @@ export class WorkspaceGitServiceImpl implements WorkspaceGitService {
 
   async listWorktrees(
     cwdOrRepoRoot: string,
-    options?: WorkspaceGitReadOptions,
+    options?: WorkspaceGitWorktreeListOptions,
   ): Promise<WorkspaceGitWorktreeInfo[]> {
     this.assertNotDisposed();
     const repoRoot = await this.resolveRepoRoot(cwdOrRepoRoot, options);
-    const key = JSON.stringify(["worktrees", repoRoot]);
+    const key = JSON.stringify(["worktrees", repoRoot, options?.includeExternal === true]);
     return this.readAuxiliaryCache(this.worktreeListCache, key, options, () =>
       this.deps.listPaseoWorktrees({
         cwd: repoRoot,
         paseoHome: this.paseoHome,
         worktreesRoot: this.worktreesRoot,
+        ...(options?.includeExternal ? { includeExternal: true } : {}),
       }),
     );
   }

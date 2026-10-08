@@ -18,7 +18,13 @@ export type WorkspaceMemberOperationResult =
   | { ok: false; errorCode: string | null; error: string | null };
 
 export type WorkspaceMemberMoveResult =
-  | { ok: true; source: WorkspaceDescriptorPayload; target: WorkspaceDescriptorPayload }
+  | {
+      ok: true;
+      source: WorkspaceDescriptorPayload;
+      target: WorkspaceDescriptorPayload;
+      movedAgentIds: string[];
+      movedTerminalIds: string[];
+    }
   | { ok: false; errorCode: string | null; error: string | null };
 
 export async function addWorkspaceMemberDirectory(input: {
@@ -59,5 +65,11 @@ export async function moveWorkspaceMember(input: {
   if (payload.error || !payload.source || !payload.target) {
     return { ok: false, errorCode: payload.errorCode ?? null, error: payload.error };
   }
-  return { ok: true, source: payload.source, target: payload.target };
+  return {
+    ok: true,
+    source: payload.source,
+    target: payload.target,
+    movedAgentIds: payload.movedAgentIds,
+    movedTerminalIds: payload.movedTerminalIds,
+  };
 }

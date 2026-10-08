@@ -27,7 +27,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { View, Text, type LayoutChangeEvent } from "react-native";
-import { Ellipsis, GitBranch, PanelRight } from "lucide-react-native";
+import { Ellipsis, PanelRight } from "lucide-react-native";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -43,7 +43,6 @@ import { ContextMenuTrigger } from "@/components/ui/context-menu";
 import { WorkspaceActions } from "@/git/workspace-actions";
 import { WorkspaceCommandsButton } from "@/commands/workspace-commands-button";
 import { useCustomCommandsSupported } from "@/commands/use-custom-commands-supported";
-import { useCheckoutStatusQuery } from "@/git/use-status-query";
 import { WorkspaceOpenInEditorButton } from "@/workspace/open-in-editor/button";
 import {
   resolveExplorerSidebarDockSizes,
@@ -96,6 +95,7 @@ import {
 import { WorkspacePaneStatusGlow } from "@/screens/workspace/pane-status-glow";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import { PaneProjectBadge } from "@/components/pane-project-badge";
+import { PaneBranchBadge } from "@/components/pane-branch-badge";
 import {
   createDefaultLayout,
   findPaneById,
@@ -135,7 +135,11 @@ interface SplitContainerProps {
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
-  onSwitchTabProject: (input: { tabId: string; cwd: string }) => Promise<void> | void;
+  onSwitchTabProject: (input: {
+    tabId: string;
+    cwd: string;
+    projectId?: string;
+  }) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor, currentLabel?: string) => void;
   onCloseTabsToLeft: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string, paneTabs: WorkspaceTabDescriptor[]) => Promise<void> | void;
@@ -179,37 +183,8 @@ const EMPTY_SPLIT_NODES: SplitNode[] = [];
 const EMPTY_SPLIT_SIZES: number[] = [];
 const EXPLORER_SIDEBAR_RESIZE_GROUP_ID = "explorer-sidebar";
 
-const accentForegroundIconMapping = (theme: Theme) => ({ color: theme.colors.accentForeground });
 const extraMutedIconMapping = (theme: Theme) => ({ color: theme.colors.foregroundExtraMuted });
-const ThemedGitBranch = withUnistyles(GitBranch);
 const ThemedEllipsis = withUnistyles(Ellipsis);
-
-/**
- * The branch of the checkout this pane is actually pointed at — its active tab's agent or
- * terminal cwd, resolved by `resolvePaneProjectRoot`. Panes in one workspace can sit in
- * different repositories, so this is per-pane and never a workspace-wide value.
- */
-function PaneBranchBadge({ serverId, cwd }: { serverId: string; cwd: string }) {
-  const { t } = useTranslation();
-  const { status } = useCheckoutStatusQuery({ serverId, cwd });
-  const branch = status?.isGit ? status.currentBranch : null;
-  if (!branch || branch === "HEAD") {
-    return null;
-  }
-  return (
-    <View
-      pointerEvents="none"
-      style={styles.paneBranchBadge}
-      testID="pane-branch-badge"
-      accessibilityLabel={`${t("sidebar.display.titleSource.branch")}: ${branch}`}
-    >
-      <ThemedGitBranch size={12} uniProps={accentForegroundIconMapping} />
-      <Text numberOfLines={1} ellipsizeMode="tail" style={styles.paneBranchBadgeText}>
-        {branch}
-      </Text>
-    </View>
-  );
-}
 
 function PaneExplorerToggle({ open, onPress }: { open: boolean; onPress: () => void }) {
   const { t } = useTranslation();
@@ -244,7 +219,11 @@ function PaneProjectTray({
   activeTab: WorkspaceTabDescriptor | null;
   open: boolean;
   onPress: () => void;
-  onSwitchTabProject: (input: { tabId: string; cwd: string }) => Promise<void> | void;
+  onSwitchTabProject: (input: {
+    tabId: string;
+    cwd: string;
+    projectId?: string;
+  }) => Promise<void> | void;
 }) {
   const { t } = useTranslation();
   const visibleActions = usePanelStore((state) => state.paneProjectActions);
@@ -259,7 +238,7 @@ function PaneProjectTray({
     [activeTab],
   );
   const switchTabProject = useCallback(
-    (input: { tabId: string; cwd: string }) => {
+    (input: { tabId: string; cwd: string; projectId?: string }) => {
       void onSwitchTabProject(input);
     },
     [onSwitchTabProject],
@@ -282,7 +261,15 @@ function PaneProjectTray({
           onSwitchProject={switchTabProject}
         />
       ) : null}
-      {visibleActions.branch && cwd ? <PaneBranchBadge serverId={serverId} cwd={cwd} /> : null}
+      {visibleActions.branch && cwd ? (
+        <PaneBranchBadge
+          serverId={serverId}
+          workspaceId={workspaceId}
+          cwd={cwd}
+          activeTab={activeTab}
+          onSwitchProject={switchTabProject}
+        />
+      ) : null}
       <View style={styles.paneProjectActions}>
         {visibleActions.editor && cwd ? (
           <WorkspaceOpenInEditorButton serverId={serverId} cwd={cwd} hideLabels />
@@ -1825,25 +1812,6 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[1],
-  },
-  paneBranchBadge: {
-    minWidth: 0,
-    maxWidth: "70%",
-    flexShrink: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[1],
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: 2,
-    borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.accent,
-  },
-  paneBranchBadgeText: {
-    minWidth: 0,
-    flexShrink: 1,
-    color: theme.colors.accentForeground,
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
   },
   dragOverlayChip: {
     flexDirection: "row",

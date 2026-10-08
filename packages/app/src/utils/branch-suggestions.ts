@@ -1,3 +1,8 @@
+import type { WorkspaceMemberDescriptor } from "@/stores/session-store";
+import type { ComboboxOptionModel } from "@/components/ui/combobox-options";
+import type { PaseoWorktreeListResponse } from "@getpaseo/protocol/messages";
+import { normalizeWorkspacePath } from "@/utils/workspace-identity";
+
 export interface BranchComboOption {
   id: string;
   label: string;
@@ -48,4 +53,48 @@ export function buildBranchComboOptions(input: {
   }
 
   return Array.from(branchSet).map((name) => ({ id: name, label: name }));
+}
+
+export function buildBranchWorktreeOptions(input: {
+  branches: BranchComboOption[];
+  cwd: string;
+  projectId: string | null;
+  projectRootPath: string | null;
+  worktrees: readonly Pick<
+    PaseoWorktreeListResponse["payload"]["worktrees"][number],
+    "worktreePath" | "branchName"
+  >[];
+  members: readonly Pick<
+    WorkspaceMemberDescriptor,
+    "projectId" | "projectRootPath" | "workspaceDirectory" | "branch"
+  >[];
+}): ComboboxOptionModel[] {
+  const options: ComboboxOptionModel[] = input.branches.map((branch) => ({
+    id: `branch:${branch.id}`,
+    label: branch.label,
+  }));
+  const seen = new Set([normalizeWorkspacePath(input.cwd)]);
+  const appendWorktree = (cwd: string, branch: string | null) => {
+    const key = normalizeWorkspacePath(cwd);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    options.push({
+      id: `worktree:${cwd}`,
+      label: branch && branch !== "HEAD" ? branch : cwd.split(/[\\/]/).at(-1) || cwd,
+      description: cwd,
+      kind: "directory",
+    });
+  };
+  for (const worktree of input.worktrees) {
+    appendWorktree(worktree.worktreePath, worktree.branchName ?? null);
+  }
+  for (const member of input.members) {
+    if (
+      (input.projectId && member.projectId === input.projectId) ||
+      (input.projectRootPath && member.projectRootPath === input.projectRootPath)
+    ) {
+      appendWorktree(member.workspaceDirectory, member.branch);
+    }
+  }
+  return options;
 }

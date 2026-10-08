@@ -1428,16 +1428,10 @@ function WorkspaceSectionBlock({
     [placement.workspaceKey],
   );
   const memberMoveDragState = useSidebarMemberMoveDragState();
-  // A workspace that already holds the dragged project is not a target: the daemon refuses
-  // the duplicate, so highlighting it would promise a drop that can only fail.
-  const alreadyHoldsDraggedProject =
-    memberMoveDragState.activeCwd !== null &&
-    orderedMembers.some((member) => member.workspaceDirectory === memberMoveDragState.activeCwd);
   const isMemberMoveTarget =
-    memberMoveDragState.activeKind === "member" &&
+    (memberMoveDragState.activeKind === "member" || memberMoveDragState.activeKind === "agent") &&
     memberMoveDragState.overWorkspaceKey === placement.workspaceKey &&
-    memberMoveDragState.activeWorkspaceKey !== placement.workspaceKey &&
-    !alreadyHoldsDraggedProject;
+    memberMoveDragState.activeWorkspaceKey !== placement.workspaceKey;
   const renderMember = useCallback(
     ({
       item,
@@ -1918,15 +1912,10 @@ function WorkspaceSectionList({
         refuse("unsupported_host");
         return;
       }
-      // The daemon refuses a duplicate too, but it would arrive as an error toast after a
-      // round trip for a drop the sidebar could have declined outright.
       const targetSection = sectionsByWorkspaceKey.get(target.workspaceKey);
-      if (targetSection?.members.some((member) => member.workspaceDirectory === input.cwd)) {
-        refuse("duplicate_member");
-        return;
-      }
       const moved = await moveWorkspaceMember({
         client: getHostRuntimeStore().getClient(source.serverId),
+        serverId: source.serverId,
         sourceWorkspaceId: source.workspaceId,
         targetWorkspaceId: target.workspaceId,
         cwd: input.cwd,
@@ -1938,9 +1927,6 @@ function WorkspaceSectionList({
       }
       const movedMemberKey = `${input.targetWorkspaceKey}#${input.cwd}`;
       const orderStore = useSidebarOrderStore.getState();
-      // A member key embeds its workspace, so the bucket is renamed by the move. Carry the
-      // remembered agent order over rather than leaving the old entry to leak.
-      orderStore.rekeyAgentOrder(`${input.sourceWorkspaceKey}#${input.cwd}`, movedMemberKey);
       orderStore.setMemberOrder(
         input.targetWorkspaceKey,
         memberOrderAfterMove({
@@ -1990,6 +1976,8 @@ function WorkspaceSectionList({
       }
       void moveAgentWorkspace({
         client: getHostRuntimeStore().getClient(source.serverId),
+        serverId: source.serverId,
+        sourceWorkspaceId: source.workspaceId,
         agentId: input.agentId,
         targetWorkspaceId: target.workspaceId,
         agentTitle: input.label,
@@ -2004,6 +1992,11 @@ function WorkspaceSectionList({
     (workspace: SidebarWorkspacePlacement) => ({
       kind: "workspace",
       workspaceKey: workspace.workspaceKey,
+      memberCwds:
+        useSessionStore
+          .getState()
+          .sessions[workspace.serverId]?.workspaces.get(workspace.workspaceId)
+          ?.members.map((member) => member.workspaceDirectory) ?? [],
       label: workspace.name,
     }),
     [],

@@ -21,6 +21,10 @@ import { buildWorkspaceTabPersistenceKey, type WorkspaceTab } from "@/workspace-
 import { defaultChangesState, type ChangesState } from "@/panels/changes/state";
 import { defaultFileState, type FileState } from "@/panels/file/state";
 import {
+  selectAgentWorkspaceTabs,
+  selectWorkspaceMemberTabs,
+} from "@/workspaces/workspace-tab-move";
+import {
   canDismissPaneInLayout,
   collectAllPanes,
   collectAllTabs,
@@ -74,6 +78,291 @@ function createDeterministicWorkspaceLayoutIds() {
 
 const workspaceLayoutIds = createDeterministicWorkspaceLayoutIds();
 const workspaceLayoutStore = createWorkspaceLayoutStore(workspaceLayoutIds);
+
+describe("moving tabs between workspaces", () => {
+  it("keeps the active source pane selected when a background pane chooses its close successor", () => {
+    const store = createWorkspaceLayoutStore();
+    const sourceKey = "server-1:source";
+    const targetKey = "server-1:target";
+    store.setState({
+      layoutByWorkspace: {
+        [sourceKey]: {
+          focusedPaneId: "active",
+          root: {
+            kind: "group",
+            group: {
+              id: "source-split",
+              direction: "horizontal",
+              sizes: [0.5, 0.5],
+              children: [
+                createPane({
+                  id: "active",
+                  tabIds: ["active-tab"],
+                  targetsByTabId: {
+                    "active-tab": { kind: "agent", agentId: "staying" },
+                  },
+                }),
+                createPane({
+                  id: "background",
+                  tabIds: ["moving-tab", "successor"],
+                  focusedTabId: "moving-tab",
+                  targetsByTabId: {
+                    "moving-tab": { kind: "agent", agentId: "moving" },
+                    successor: { kind: "agent", agentId: "other" },
+                  },
+                }),
+              ],
+            },
+          },
+        },
+      },
+    });
+    const layout = store.getState().layoutByWorkspace[sourceKey];
+    store.getState().transferTabs({
+      sourceWorkspaceKey: sourceKey,
+      targetWorkspaceKey: targetKey,
+      tabs: selectAgentWorkspaceTabs(layout, ["moving"]),
+      agentIds: ["moving"],
+    });
+    const source = store.getState().layoutByWorkspace[sourceKey];
+    expect(source.focusedPaneId).toBe("active");
+    expect(findPaneById(source.root, "active")?.focusedTabId).toBe("active-tab");
+    expect(findPaneById(source.root, "background")?.focusedTabId).toBe("successor");
+  });
+
+  it("uses current project choices while recovering only reconciled entity tabs from the RPC snapshot", () => {
+    const store = createWorkspaceLayoutStore();
+    const sourceKey = "server-1:source";
+    const actions = store.getState();
+    const repointedDraft = actions.openTab({
+      workspaceKey: sourceKey,
+      target: { kind: "draft", draftId: "repointed", cwd: "/repo" },
+      intent: "new",
+    })!;
+    const closedDraft = actions.openTab({
+      workspaceKey: sourceKey,
+      target: { kind: "draft", draftId: "closed", cwd: "/repo" },
+      intent: "new",
+    })!;
+    const reconciledAgent = actions.openTab({
+      workspaceKey: sourceKey,
+      target: { kind: "agent", agentId: "moving" },
+      intent: "new",
+    })!;
+    const oldAgentInstance = actions.openTab({
+      workspaceKey: sourceKey,
+      target: { kind: "agent", agentId: "reopened" },
+      intent: "new",
+    })!;
+    const capturedLayout = store.getState().layoutByWorkspace[sourceKey];
+    actions.replaceTab(sourceKey, repointedDraft, {
+      kind: "draft",
+      draftId: "repointed",
+      cwd: "/other",
+    });
+    actions.closeTab(sourceKey, closedDraft);
+    actions.closeTab(sourceKey, reconciledAgent);
+    actions.closeTab(sourceKey, oldAgentInstance);
+    const newAgentInstance = actions.openTab({
+      workspaceKey: sourceKey,
+      target: { kind: "agent", agentId: "reopened" },
+      intent: "new",
+      state: { selectedMessage: "fresh-state" },
+    })!;
+    const newDraft = actions.openTab({
+      workspaceKey: sourceKey,
+      target: { kind: "draft", draftId: "new-draft", cwd: "/repo" },
+      intent: "new",
+    })!;
+    const newFile = actions.openTab({
+      workspaceKey: sourceKey,
+      target: { kind: "file", path: "/repo/new-file.ts" },
+      intent: "new",
+    })!;
+    const selected = selectWorkspaceMemberTabs({
+      layout: store.getState().layoutByWorkspace[sourceKey],
+      capturedLayout,
+      cwd: "/repo",
+      agentIds: ["moving", "reopened"],
+      terminalIds: [],
+    });
+    expect(selected.map((tab) => tab.tabId)).toEqual([
+      newAgentInstance,
+      newDraft,
+      newFile,
+      reconciledAgent,
+    ]);
+    actions.transferTabs({
+      sourceWorkspaceKey: sourceKey,
+      targetWorkspaceKey: "server-1:target",
+      tabs: selected,
+      agentIds: ["moving", "reopened"],
+    });
+    expect(
+      actions.getWorkspaceTabs(sourceKey).find((tab) => tab.tabId === repointedDraft)?.target,
+    ).toEqual({ kind: "draft", draftId: "repointed", cwd: "/other" });
+    expect(
+      actions.getWorkspaceTabs("server-1:target").some((tab) => tab.tabId === closedDraft),
+    ).toBe(false);
+    expect(
+      actions.getWorkspaceTabs("server-1:target").some((tab) => tab.tabId === oldAgentInstance),
+    ).toBe(false);
+    expect(
+      actions.getWorkspaceTabs("server-1:target").find((tab) => tab.tabId === newAgentInstance)
+        ?.state,
+    ).toEqual({ selectedMessage: "fresh-state" });
+  });
+
+  it("merges project tabs while preserving target focus, source tabs, draft identity and tab state", () => {
+    const store = createWorkspaceLayoutStore();
+    const sourceKey = "server-1:source";
+    const targetKey = "server-1:target";
+    const actions = store.getState();
+    const agent = actions.openTab({
+      workspaceKey: sourceKey,
+      target: { kind: "agent", agentId: "moving" },
+      intent: "new",
+    })!;
+    const terminal = actions.openTab({
+      workspaceKey: sourceKey,
+      target: { kind: "terminal", terminalId: "moving-terminal" },
+      intent: "new",
+      parentTabId: agent,
+    })!;
+    const draft = actions.openTab({
+      workspaceKey: sourceKey,
+      target: { kind: "draft", draftId: "draft-moving", cwd: "/repo" },
+      intent: "new",
+    })!;
+    actions.setTabTitle(sourceKey, draft, "Unfinished work");
+    actions.setTabState(sourceKey, terminal, { scroll: 42 });
+    const sourceOther = actions.openTab({
+      workspaceKey: sourceKey,
+      target: { kind: "agent", agentId: "staying" },
+      intent: "new",
+    })!;
+    const targetOther = actions.openTab({
+      workspaceKey: targetKey,
+      target: { kind: "agent", agentId: "target-existing" },
+      intent: "new",
+    })!;
+    const source = store.getState().layoutByWorkspace[sourceKey];
+    const captured = selectWorkspaceMemberTabs({
+      layout: source,
+      cwd: "/repo",
+      agentIds: ["moving"],
+      terminalIds: ["moving-terminal"],
+    });
+    actions.transferTabs({
+      sourceWorkspaceKey: sourceKey,
+      targetWorkspaceKey: targetKey,
+      tabs: captured,
+      sourceParentTabIdByTabId: source.parentTabIdByTabId,
+      agentIds: ["moving"],
+    });
+    const state = store.getState();
+    expect(
+      actions
+        .getWorkspaceTabs(sourceKey)
+        .filter((tab) => tab.target.kind === "agent")
+        .map((tab) => tab.tabId),
+    ).toEqual([sourceOther]);
+    const targetTabs = actions
+      .getWorkspaceTabs(targetKey)
+      .filter((tab) => ["agent", "terminal", "draft"].includes(tab.target.kind));
+    expect(targetTabs.map((tab) => tab.tabId)).toEqual([targetOther, agent, terminal, draft]);
+    expect(targetTabs.find((tab) => tab.tabId === draft)?.title).toBe("Unfinished work");
+    expect(targetTabs.find((tab) => tab.tabId === terminal)?.state).toEqual({ scroll: 42 });
+    expect(state.layoutByWorkspace[targetKey].parentTabIdByTabId?.[terminal]).toBe(agent);
+    expect(
+      findPaneContainingTab(state.layoutByWorkspace[targetKey].root, targetOther)?.focusedTabId,
+    ).toBe(targetOther);
+    expect(
+      findPaneContainingTab(state.layoutByWorkspace[sourceKey].root, sourceOther)?.focusedTabId,
+    ).toBe(sourceOther);
+  });
+
+  it("recovers captured tabs after directory reconciliation and replaces an automatic target duplicate", () => {
+    const store = createWorkspaceLayoutStore();
+    const sourceKey = "server-1:source";
+    const targetKey = "server-1:target";
+    const actions = store.getState();
+    const tabId = actions.openTab({
+      workspaceKey: sourceKey,
+      target: { kind: "agent", agentId: "moving" },
+      intent: "new",
+    })!;
+    actions.setTabState(sourceKey, tabId, { selectedMessage: "message-1" });
+    const captured = selectAgentWorkspaceTabs(store.getState().layoutByWorkspace[sourceKey], [
+      "moving",
+    ]);
+    actions.closeTab(sourceKey, tabId);
+    actions.openTab({
+      workspaceKey: targetKey,
+      target: { kind: "agent", agentId: "moving" },
+      intent: "background",
+    });
+    actions.transferTabs({
+      sourceWorkspaceKey: sourceKey,
+      targetWorkspaceKey: targetKey,
+      tabs: captured,
+      agentIds: ["moving"],
+    });
+    expect(
+      actions.getWorkspaceTabs(targetKey).filter((tab) => tab.target.kind === "agent"),
+    ).toEqual(captured);
+    expect(actions.getWorkspaceTabs(sourceKey).some((tab) => tab.target.kind === "agent")).toBe(
+      false,
+    );
+    expect(actions.getWorkspaceTabs(sourceKey).some((tab) => tab.target.kind === "new_tab")).toBe(
+      true,
+    );
+  });
+
+  it("carries closed-agent visibility and project drafts without reopening closed agents", () => {
+    const store = createWorkspaceLayoutStore();
+    const sourceKey = "server-1:source";
+    const targetKey = "server-1:target";
+    const actions = store.getState();
+    actions.openTab({
+      workspaceKey: sourceKey,
+      target: { kind: "draft", draftId: "draft-moving", cwd: "/repo" },
+      intent: "new",
+    });
+    const otherDraft = actions.openTab({
+      workspaceKey: sourceKey,
+      target: { kind: "draft", draftId: "other-draft", cwd: "/repo-other" },
+      intent: "new",
+    });
+    actions.hideAgent(sourceKey, "closed");
+    const tabs = selectWorkspaceMemberTabs({
+      layout: store.getState().layoutByWorkspace[sourceKey],
+      cwd: "/repo",
+      agentIds: ["closed"],
+      terminalIds: [],
+    });
+    actions.transferTabs({
+      sourceWorkspaceKey: sourceKey,
+      targetWorkspaceKey: targetKey,
+      tabs,
+      agentIds: ["closed"],
+    });
+    expect(
+      actions
+        .getWorkspaceTabs(targetKey)
+        .filter((tab) => tab.target.kind === "draft")
+        .map((tab) => tab.target),
+    ).toEqual([{ kind: "draft", draftId: "draft-moving", cwd: "/repo" }]);
+    expect(
+      actions
+        .getWorkspaceTabs(sourceKey)
+        .filter((tab) => tab.target.kind === "draft")
+        .map((tab) => tab.tabId),
+    ).toEqual([otherDraft]);
+    expect(store.getState().hiddenAgentIdsByWorkspace[sourceKey]?.has("closed")).toBe(false);
+    expect(store.getState().hiddenAgentIdsByWorkspace[targetKey]?.has("closed")).toBe(true);
+  });
+});
 
 it("observes open chats across unmounted workspaces until their tabs close", () => {
   const store = createWorkspaceLayoutStore(workspaceLayoutIds);

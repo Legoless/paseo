@@ -10,7 +10,10 @@ import { TerminalPane } from "@/components/terminal-pane";
 import { usePaneContext, usePaneFocus } from "@/panels/pane-context";
 import { definePanel, type PanelDescriptor } from "@/panels/panel-registry";
 import { queryClient } from "@/data/query-client";
-import { buildTerminalsQueryKey } from "@/screens/workspace/terminals/state";
+import {
+  buildTerminalsQueryKey,
+  resolveTerminalListRoot,
+} from "@/screens/workspace/terminals/state";
 import { usePanelStore } from "@/stores/panel-store";
 import { useSessionStore } from "@/stores/session-store";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
@@ -48,7 +51,7 @@ function useTerminalPanelDescriptor(
     }),
   );
   const workspaceDirectory = workspaceFields?.workspaceDirectory ?? null;
-  const terminalListRoot = workspaceFields?.memberCount === 1 ? workspaceDirectory : null;
+  const terminalListRoot = resolveTerminalListRoot(workspaceDirectory, context.workspaceId);
   const terminalsQuery = useQuery(
     {
       queryKey: buildTerminalsQueryKey(
@@ -95,9 +98,7 @@ function TerminalPanel() {
     memberCount: w.members.length,
   }));
   const primaryWorkspaceDirectory = workspaceFields?.workspaceDirectory || null;
-  // A workspace with no single project root has nothing to scope the listing by; the terminal's
-  // own cwd — read off the listing below — is the one this pane runs in.
-  const terminalListRoot = workspaceFields?.memberCount === 1 ? primaryWorkspaceDirectory : null;
+  const terminalListRoot = resolveTerminalListRoot(primaryWorkspaceDirectory, workspaceId);
   const terminalsQuery = useQuery(
     {
       queryKey: buildTerminalsQueryKey(serverId, terminalListRoot, workspaceId || null),

@@ -1045,12 +1045,16 @@ export async function listPaseoWorktrees({
   cwd,
   paseoHome,
   worktreesRoot,
+  includeExternal,
 }: {
   cwd: string;
   paseoHome?: string;
   worktreesRoot?: string;
+  includeExternal?: boolean;
 }): Promise<PaseoWorktreeInfo[]> {
-  const projectWorktreesRoot = await getPaseoWorktreesRoot(cwd, paseoHome, worktreesRoot);
+  const projectWorktreesRoot = includeExternal
+    ? null
+    : await getPaseoWorktreesRoot(cwd, paseoHome, worktreesRoot);
   const { stdout } = await runGitCommand(["worktree", "list", "--porcelain"], {
     cwd,
     envOverlay: READ_ONLY_GIT_ENV,
@@ -1058,7 +1062,11 @@ export async function listPaseoWorktrees({
 
   return parseWorktreeList(stdout)
     .map((entry) => Object.assign({}, entry, { path: normalizePathForOwnership(entry.path) }))
-    .filter((entry) => getRealpathAwareRelativePath(projectWorktreesRoot, entry.path) !== null)
+    .filter(
+      (entry) =>
+        projectWorktreesRoot === null ||
+        getRealpathAwareRelativePath(projectWorktreesRoot, entry.path) !== null,
+    )
     .map((entry) =>
       Object.assign({}, entry, { createdAt: resolveWorktreeCreatedAtIso(entry.path) }),
     );

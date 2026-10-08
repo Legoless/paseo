@@ -257,7 +257,8 @@ export const useSidebarOrderStore = create<SidebarOrderStoreState>()(
           const carried = state.agentOrderByMember[from];
           if (!carried) return state;
           const { [from]: _dropped, ...rest } = state.agentOrderByMember;
-          return { agentOrderByMember: { ...rest, [to]: carried } };
+          const target = state.agentOrderByMember[to] ?? [];
+          return { agentOrderByMember: { ...rest, [to]: dedupeKeys([...target, ...carried]) } };
         });
       },
     }),

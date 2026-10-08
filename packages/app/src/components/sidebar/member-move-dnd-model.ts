@@ -27,10 +27,7 @@ export interface SidebarMemberMoveDragState {
   activeKind: "workspace" | "member" | "agent" | null;
   /** The dragged row's own workspace — never a drop target. */
   activeWorkspaceKey: string | null;
-  /**
-   * The dragged member's or agent's project directory. A workspace that already holds this
-   * directory is not a move target, so the row must not light up as one.
-   */
+  /** The dragged member's or agent's project directory. */
   activeCwd: string | null;
   /** The other workspace's row a member drag is hovering, when it is a move target. */
   overWorkspaceKey: string | null;
@@ -40,7 +37,7 @@ export interface SidebarMemberMoveDragState {
 
 /** dnd-kit item data carried by every sortable row the shared sidebar context routes. */
 export type SidebarDndItemData =
-  | { kind: "workspace"; workspaceKey: string; label: string }
+  | { kind: "workspace"; workspaceKey: string; memberCwds: readonly string[]; label: string }
   | {
       kind: "member";
       workspaceKey: string;
@@ -93,16 +90,21 @@ export type SidebarDragEndRoute =
  * its project, so the two buckets must name the same directory in different workspaces.
  * The uncategorized bucket has no directory and is excluded by the empty-string check.
  */
-function isAgentMoveTarget(
+export function sidebarAgentMoveTarget(
   active: Extract<SidebarDndItemData, { kind: "agent" }>,
-  over: { workspaceKey: string; cwd: string },
-): boolean {
-  return (
-    active.agentId !== null &&
-    active.cwd.length > 0 &&
-    over.cwd === active.cwd &&
-    over.workspaceKey !== active.workspaceKey
-  );
+  over: SidebarDndItemData,
+): string | null {
+  if (
+    active.agentId === null ||
+    active.cwd.length === 0 ||
+    over.workspaceKey === active.workspaceKey
+  ) {
+    return null;
+  }
+  if (over.kind === "workspace") {
+    return over.memberCwds.includes(active.cwd) ? `${over.workspaceKey}#${active.cwd}` : null;
+  }
+  return over.cwd === active.cwd ? over.memberKey : null;
 }
 
 /**
@@ -126,15 +128,11 @@ export function routeSidebarDragEnd(input: {
   }
 
   if (active.kind === "agent") {
-    // A workspace row is not an agent target: its data names no directory, so accepting the
-    // drop would mean guessing which of its projects the agent belongs to.
-    if (over.kind === "workspace") {
-      return { kind: "none" };
-    }
     if (over.kind === "agent" && over.memberKey === active.memberKey) {
       return { kind: "reorder", listId: sidebarAgentListId(active.memberKey) };
     }
-    if (!isAgentMoveTarget(active, over) || active.agentId === null) {
+    const targetMemberKey = sidebarAgentMoveTarget(active, over);
+    if (targetMemberKey === null || active.agentId === null) {
       return { kind: "none" };
     }
     return {
@@ -144,7 +142,7 @@ export function routeSidebarDragEnd(input: {
         sourceWorkspaceKey: active.workspaceKey,
         targetWorkspaceKey: over.workspaceKey,
         sourceMemberKey: active.memberKey,
-        targetMemberKey: over.memberKey,
+        targetMemberKey,
         label: active.label,
       },
     };

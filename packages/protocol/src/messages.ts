@@ -2522,6 +2522,7 @@ export const PaseoWorktreeListRequestSchema = z.object({
   type: z.literal("paseo_worktree_list_request"),
   cwd: z.string().optional(),
   repoRoot: z.string().optional(),
+  includeExternal: z.boolean().optional(),
   requestId: z.string(),
 });
 
@@ -3760,6 +3761,7 @@ export const ServerInfoStatusPayloadSchema = z
         workspaceMemberMove: z.boolean().optional(),
         // COMPAT(agentWorkspaceMove): added in v0.8.0, remove gate after 2028-03-01.
         agentWorkspaceMove: z.boolean().optional(),
+        checkoutWorktreeList: z.boolean().optional(),
         // COMPAT(workspaceProjectless): added in v0.8.0, remove gate after 2028-03-01.
         workspaceProjectless: z.boolean().optional(),
         // COMPAT(projectRemove): added in v0.1.97, drop the gate when floor >= v0.1.97.

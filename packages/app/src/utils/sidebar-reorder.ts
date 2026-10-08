@@ -61,6 +61,9 @@ export function memberOrderAfterMove(input: {
   dropOnMemberKey: string | null;
 }): string[] {
   const baseline = input.storedOrder.length > 0 ? input.storedOrder : input.baselineMemberKeys;
+  if (input.baselineMemberKeys.includes(input.movedMemberKey)) {
+    return baseline;
+  }
   const next = baseline.filter((key) => key !== input.movedMemberKey);
   const dropIndex = input.dropOnMemberKey === null ? -1 : next.indexOf(input.dropOnMemberKey);
   next.splice(dropIndex < 0 ? next.length : dropIndex, 0, input.movedMemberKey);

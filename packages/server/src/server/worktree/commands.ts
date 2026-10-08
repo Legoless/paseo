@@ -21,14 +21,18 @@ export interface ListPaseoWorktreesCommandDependencies {
 export interface ListPaseoWorktreesCommandInput {
   cwd: string;
   reason?: string;
+  includeExternal?: boolean;
 }
 
 export async function listPaseoWorktreesCommand(
   dependencies: ListPaseoWorktreesCommandDependencies,
   input: ListPaseoWorktreesCommandInput,
 ): Promise<WorkspaceGitWorktreeInfo[]> {
-  if (input.reason) {
-    return dependencies.workspaceGitService.listWorktrees(input.cwd, { reason: input.reason });
+  if (input.reason || input.includeExternal) {
+    return dependencies.workspaceGitService.listWorktrees(input.cwd, {
+      ...(input.reason ? { reason: input.reason } : {}),
+      ...(input.includeExternal ? { includeExternal: true } : {}),
+    });
   }
   return dependencies.workspaceGitService.listWorktrees(input.cwd);
 }

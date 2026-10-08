@@ -26,6 +26,9 @@ interface UseBranchSwitcherResult {
   setIsOpen: (open: boolean) => void;
   handleBranchSelect: (branchId: string) => void;
   invalidateStashAndCheckout: () => Promise<void>;
+  branchError: Error | null;
+  isLoadingBranches: boolean;
+  refetchBranches: () => void;
 }
 
 export function useBranchSwitcher({
@@ -53,7 +56,7 @@ export function useBranchSwitcher({
   );
 
   const branchSuggestionsQuery = useQuery({
-    queryKey: ["branchSuggestions", normalizedServerId, normalizedWorkspaceId],
+    queryKey: ["branchSuggestions", normalizedServerId, normalizedWorkspaceId, workspaceDirectory],
     queryFn: async () => {
       if (!operations) {
         throw new Error(t("common.errors.daemonClientUnavailable"));
@@ -75,8 +78,8 @@ export function useBranchSwitcher({
   }, [branchSuggestionsQuery.data]);
 
   const stashListQueryKey = useMemo(
-    () => ["stashList", normalizedServerId, normalizedWorkspaceId] as const,
-    [normalizedServerId, normalizedWorkspaceId],
+    () => ["stashList", normalizedServerId, normalizedWorkspaceId, workspaceDirectory] as const,
+    [normalizedServerId, normalizedWorkspaceId, workspaceDirectory],
   );
 
   const invalidateStashAndCheckout = useCallback(async () => {
@@ -185,5 +188,19 @@ export function useBranchSwitcher({
     ],
   );
 
-  return { branchOptions, isOpen, setIsOpen, handleBranchSelect, invalidateStashAndCheckout };
+  const { refetch: refetchBranchSuggestions } = branchSuggestionsQuery;
+  const refetchBranches = useCallback(() => {
+    void refetchBranchSuggestions();
+  }, [refetchBranchSuggestions]);
+
+  return {
+    branchOptions,
+    isOpen,
+    setIsOpen,
+    handleBranchSelect,
+    invalidateStashAndCheckout,
+    branchError: branchSuggestionsQuery.error,
+    isLoadingBranches: branchSuggestionsQuery.isFetching,
+    refetchBranches,
+  };
 }

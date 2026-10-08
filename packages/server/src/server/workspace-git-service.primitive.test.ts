@@ -22,6 +22,10 @@ import {
   snapshotGitCommandRuntimeMetrics,
 } from "../utils/run-git-command.js";
 import {
+  getPaseoWorktreesRoot,
+  listPaseoWorktrees as listPaseoWorktreesUncached,
+} from "../utils/worktree.js";
+import {
   getWorkspaceGitSelfHealPhaseMs,
   WorkspaceGitServiceImpl,
   type WorkspaceGitRuntimeSnapshot,
@@ -1817,6 +1821,69 @@ describe("WorkspaceGitServiceImpl D2 read methods", () => {
     expect(listPaseoWorktrees).toHaveBeenCalledTimes(2);
 
     service.dispose();
+  });
+
+  test("listWorktrees keeps managed and inclusive lists in separate caches", async () => {
+    vi.useRealTimers();
+    const tempDir = realpathSync(mkdtempSync(join(tmpdir(), "workspace-git-worktree-list-")));
+    const repoDir = join(tempDir, "repo");
+    const paseoHome = join(tempDir, "paseo-home");
+    mkdirSync(repoDir, { recursive: true });
+    execFileSync("git", ["init", "-b", "main"], { cwd: repoDir, stdio: "pipe" });
+    execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoDir, stdio: "pipe" });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repoDir, stdio: "pipe" });
+    writeFileSync(join(repoDir, "README.md"), "hello\n");
+    execFileSync("git", ["add", "."], { cwd: repoDir, stdio: "pipe" });
+    execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "initial"], {
+      cwd: repoDir,
+      stdio: "pipe",
+    });
+    const managedPath = join(await getPaseoWorktreesRoot(repoDir, paseoHome), "managed");
+    const externalPath = join(tempDir, "external");
+    execFileSync("git", ["worktree", "add", "-b", "managed", managedPath], {
+      cwd: repoDir,
+      stdio: "pipe",
+    });
+    execFileSync("git", ["worktree", "add", "-b", "external", externalPath], {
+      cwd: repoDir,
+      stdio: "pipe",
+    });
+    const listPaseoWorktrees = vi.fn(listPaseoWorktreesUncached);
+    const service = new WorkspaceGitServiceImpl({
+      logger: createLogger() as never,
+      paseoHome,
+      deps: buildServiceDeps({
+        getCheckoutSnapshotFacts: getCheckoutSnapshotFactsUncached as never,
+        getCheckoutStatus: getCheckoutStatusUncached as never,
+        listPaseoWorktrees,
+      }),
+    });
+
+    try {
+      const managed = await service.listWorktrees(repoDir);
+      const inclusive = await service.listWorktrees(repoDir, { includeExternal: true });
+      expect(managed.map((entry) => entry.path)).toEqual([managedPath]);
+      expect(inclusive.map((entry) => entry.path).sort()).toEqual(
+        [repoDir, managedPath, externalPath].sort(),
+      );
+      expect(listPaseoWorktrees).toHaveBeenCalledTimes(2);
+      await expect(service.listWorktrees(repoDir, { includeExternal: false })).resolves.toEqual(
+        managed,
+      );
+      await expect(service.listWorktrees(repoDir, { includeExternal: true })).resolves.toEqual(
+        inclusive,
+      );
+      expect(listPaseoWorktrees).toHaveBeenCalledTimes(2);
+      await expect(
+        service.listWorktrees(repoDir, { includeExternal: true, force: true, reason: "test" }),
+      ).resolves.toEqual(inclusive);
+      expect(listPaseoWorktrees).toHaveBeenCalledTimes(3);
+      await expect(service.listWorktrees(repoDir)).resolves.toEqual(managed);
+      expect(listPaseoWorktrees).toHaveBeenCalledTimes(3);
+    } finally {
+      service.dispose();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   test("listWorktrees shares one repo-root scoped read across sibling workspace cwds", async () => {

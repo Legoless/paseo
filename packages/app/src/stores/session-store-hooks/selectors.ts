@@ -116,6 +116,21 @@ export function selectWorkspaceDirectory(
   return workspace?.members.length === 1 ? workspace.members[0]!.workspaceDirectory || null : null;
 }
 
+export function selectAgentMoveWorkspaceTargets(
+  state: SessionsSnapshot,
+  input: { serverId: string; sourceWorkspaceId: string; cwd: string },
+): WorkspaceDescriptor[] {
+  if (!input.cwd) return [];
+  return [...(state.sessions[input.serverId]?.workspaces.values() ?? [])]
+    .filter(
+      (workspace) =>
+        workspace.id !== input.sourceWorkspaceId &&
+        workspace.archivingAt === null &&
+        workspace.members.some((member) => member.workspaceDirectory === input.cwd),
+    )
+    .sort((a, b) => (a.title?.trim() || a.name).localeCompare(b.title?.trim() || b.name));
+}
+
 export function selectWorkspaceExists(
   state: SessionsSnapshot,
   serverId: string | null,

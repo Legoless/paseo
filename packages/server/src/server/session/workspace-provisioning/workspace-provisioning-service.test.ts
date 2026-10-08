@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import { getCheckoutStatus } from "../../../utils/checkout-git.js";
 import { createTestLogger } from "../../../test-utils/test-logger.js";
-import { checkoutLiteFromGitSnapshot, workspaceMembers } from "../../workspace-registry-model.js";
+import { checkoutLiteFromGitSnapshot } from "../../workspace-registry-model.js";
 import {
   createNoGitWorkspaceRuntimeSnapshot,
   createNoopWorkspaceGitService,
@@ -1047,7 +1047,7 @@ test("moveWorkspaceMember lands the member in the target and strips it from the 
   expect((await reloaded.get(target.workspaceId))?.members).toHaveLength(2);
 });
 
-test("moveWorkspaceMember refuses a member cwd the target already holds", async () => {
+test("moveWorkspaceMember merges a shared directory while preserving the target membership", async () => {
   const memberDir = path.join(tmpDir, "member");
   const source = await provisioning.createWorkspaceForDirectory(path.join(tmpDir, "primary"));
   await provisioning.addWorkspaceMember({
@@ -1055,20 +1055,68 @@ test("moveWorkspaceMember refuses a member cwd the target already holds", async 
     source: { kind: "directory", path: memberDir },
   });
   const target = await provisioning.createWorkspaceForDirectory(memberDir);
+  const targetMember = { ...target.members[0], baseBranch: "refs/remotes/upstream/main" };
+  await workspaceRegistry.upsert({ ...target, members: [targetMember] });
+  const projectsBeforeMove = await projectRegistry.list();
+  checkoutFailure = new Error("Git metadata is unavailable");
+
+  const moved = await provisioning.moveWorkspaceMember({
+    sourceWorkspaceId: source.workspaceId,
+    targetWorkspaceId: target.workspaceId,
+    cwd: `${memberDir}${path.sep}`,
+  });
+
+  expect(moved.source.members).toEqual(source.members);
+  expect(moved.source.displayName).toBe(source.displayName);
+  expect(moved.target.members).toEqual([targetMember]);
+  expect(moved.target.displayName).toBe(target.displayName);
+  expect(await projectRegistry.list()).toEqual(projectsBeforeMove);
+
+  const reloaded = new FileBackedWorkspaceRegistry(
+    path.join(tmpDir, "projects", "workspaces.json"),
+    logger,
+  );
+  expect((await reloaded.get(source.workspaceId))?.members).toEqual(source.members);
+  expect((await reloaded.get(target.workspaceId))?.members).toEqual([targetMember]);
+});
+
+test("moveWorkspaceMember preserves project identity and the recorded base when the target is new", async () => {
+  const memberDir = path.join(tmpDir, "member");
+  const source = await provisioning.createWorkspaceForDirectory(memberDir);
+  const target = await provisioning.createProjectlessWorkspace("Target");
+  const member = {
+    ...source.members[0],
+    baseBranch: "refs/remotes/upstream/develop",
+    displayName: "Feature project",
+  };
+  await workspaceRegistry.upsert({ ...source, members: [member] });
+  const projectsBeforeMove = await projectRegistry.list();
+  checkoutFailure = new Error("Git metadata is unavailable");
+
+  const moved = await provisioning.moveWorkspaceMember({
+    sourceWorkspaceId: source.workspaceId,
+    targetWorkspaceId: target.workspaceId,
+    cwd: memberDir,
+  });
+
+  expect(moved.source.members).toEqual([]);
+  expect(moved.target.members).toEqual([member]);
+  expect(await projectRegistry.list()).toEqual(projectsBeforeMove);
+});
+
+test("moveWorkspaceMember rejects its own workspace without removing the project", async () => {
+  const cwd = path.join(tmpDir, "member");
+  const source = await provisioning.createWorkspaceForDirectory(cwd);
 
   await expect(
     provisioning.moveWorkspaceMember({
       sourceWorkspaceId: source.workspaceId,
-      targetWorkspaceId: target.workspaceId,
-      cwd: `${memberDir}${path.sep}`,
+      targetWorkspaceId: source.workspaceId,
+      cwd,
     }),
-  ).rejects.toMatchObject({
-    code: "duplicate_member",
-  } satisfies Partial<WorkspaceProvisioningError>);
+  ).rejects.toMatchObject({ code: "same_workspace" });
 
-  expect((await workspaceRegistry.get(source.workspaceId))?.members).toHaveLength(2);
-  const untouchedTarget = await workspaceRegistry.get(target.workspaceId);
-  expect(untouchedTarget && workspaceMembers(untouchedTarget)).toHaveLength(1);
+  expect(await workspaceRegistry.get(source.workspaceId)).toEqual(source);
 });
 
 test("moveWorkspaceMember preserves both container names when the first member moves", async () => {
