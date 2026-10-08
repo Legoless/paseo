@@ -6,6 +6,10 @@ user-invocable: true
 
 # Build Neo
 
+Read [preserve-running-paseo](../preserve-running-paseo/SKILL.md) before this
+workflow. Deliver the copied DMG as the completed build; follow that skill before
+any requested installation or app, window, or daemon lifecycle change.
+
 Run `packages/desktop/scripts/build-neo.sh`. Do not run `npm run build:neo` directly:
 electron-builder silently skips notarization when `APPLE_*` env vars are missing, and
 unnotarized builds silently lose macOS features (dock badge renders nothing).
