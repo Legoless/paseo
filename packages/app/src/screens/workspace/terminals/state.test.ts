@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildTerminalCwdById,
+  buildTerminalsQueryKey,
+  resolveTerminalListRoot,
   canCreateWorkspaceTerminal,
   collectKnownTerminalIds,
   collectScriptTerminalIds,
@@ -8,9 +10,13 @@ import {
   reconcilePendingScriptTerminals,
   removeTerminalFromPayload,
   upsertCreatedTerminalPayload,
+  tryInstallTerminalReplacement,
+  completeTerminalReplacement,
   type ListTerminalsPayload,
+  type TerminalReplacementLayoutPort,
 } from "@/screens/workspace/terminals/state";
 import type { CreateTerminalResponse } from "@getpaseo/protocol/messages";
+import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 
 function listedTerminal(id: string): ListTerminalsPayload["terminals"][number] {
   return { id, name: id, title: id };
@@ -21,6 +27,34 @@ function createdTerminal(id: string): NonNullable<CreateTerminalResponse["payloa
 }
 
 describe("workspace terminal state", () => {
+  it("keeps an identified workspace's terminal listing stable when its project memberships change", () => {
+    expect(buildTerminalsQueryKey("host", "/project-a", "workspace")).toEqual([
+      "terminals",
+      "host",
+      null,
+      "workspace",
+    ]);
+    expect(buildTerminalsQueryKey("host", "/project-b", "workspace")).toEqual([
+      "terminals",
+      "host",
+      null,
+      "workspace",
+    ]);
+    expect(buildTerminalsQueryKey("host", null, "workspace")).toEqual([
+      "terminals",
+      "host",
+      null,
+      "workspace",
+    ]);
+    expect(resolveTerminalListRoot("/project-a", "workspace")).toBeNull();
+    expect(buildTerminalsQueryKey("host", "/project-a")).toEqual([
+      "terminals",
+      "host",
+      "/project-a",
+      null,
+    ]);
+    expect(resolveTerminalListRoot("/project-a")).toBe("/project-a");
+  });
   it("creates a terminal whenever a launch cwd resolves, workspace directory or not", () => {
     const connected = { isRouteFocused: true, client: {}, isConnected: true };
 
@@ -136,5 +170,118 @@ describe("terminal project directories", () => {
         ["second", "/second"],
       ]),
     );
+  });
+});
+
+class TerminalReplacementLayout implements TerminalReplacementLayoutPort {
+  targets = new Map<string, WorkspaceTabTarget>();
+  replacements: string[] = [];
+  refuseReplacement = false;
+
+  getTabTarget(workspaceKey: string, tabId: string): WorkspaceTabTarget | null {
+    return this.targets.get(`${workspaceKey}:${tabId}`) ?? null;
+  }
+
+  replaceTab(workspaceKey: string, tabId: string, target: WorkspaceTabTarget): string | null {
+    const key = `${workspaceKey}:${tabId}`;
+    if (this.refuseReplacement || !this.targets.has(key)) return null;
+    this.replacements.push(key);
+    this.targets.set(key, target);
+    return tabId;
+  }
+}
+
+const replacement = {
+  workspaceKey: "host:source",
+  tabId: "tab",
+  expectedTerminalId: "original",
+  createdTerminalId: "replacement",
+};
+
+describe("terminal replacement during a pending creation", () => {
+  it("stops the original shell after the new shell is installed in its tab", async () => {
+    const layout = new TerminalReplacementLayout();
+    layout.targets.set("host:source:tab", { kind: "terminal", terminalId: "original" });
+    const stopped: string[] = [];
+
+    expect(tryInstallTerminalReplacement(layout, replacement)).toBe(true);
+    expect(
+      await completeTerminalReplacement(layout, replacement, async (id) => {
+        stopped.push(id);
+      }),
+    ).toBe(true);
+    expect(layout.getTabTarget("host:source", "tab")).toEqual({
+      kind: "terminal",
+      terminalId: "replacement",
+    });
+    expect(stopped).toEqual(["original"]);
+  });
+
+  it.each([
+    {
+      name: "moved to another workspace",
+      remaining: new Map<string, WorkspaceTabTarget>([
+        ["host:destination:tab", { kind: "terminal", terminalId: "original" }],
+      ]),
+    },
+    { name: "closed", remaining: new Map<string, WorkspaceTabTarget>() },
+    {
+      name: "retargeted",
+      remaining: new Map<string, WorkspaceTabTarget>([
+        ["host:source:tab", { kind: "terminal", terminalId: "another-shell" }],
+      ]),
+    },
+  ])("cleans the new shell when the source tab was $name", async ({ remaining }) => {
+    const layout = new TerminalReplacementLayout();
+    layout.targets = new Map(remaining);
+    const stopped: string[] = [];
+
+    expect(tryInstallTerminalReplacement(layout, replacement)).toBe(false);
+    expect(
+      await completeTerminalReplacement(layout, replacement, async (id) => {
+        stopped.push(id);
+      }),
+    ).toBe(false);
+    expect(layout.targets).toEqual(remaining);
+    expect(layout.replacements).toEqual([]);
+    expect(stopped).toEqual(["replacement"]);
+  });
+
+  it("preserves the original shell when installation returns no tab", async () => {
+    const layout = new TerminalReplacementLayout();
+    layout.targets.set("host:source:tab", { kind: "terminal", terminalId: "original" });
+    layout.refuseReplacement = true;
+    const stopped: string[] = [];
+
+    expect(tryInstallTerminalReplacement(layout, replacement)).toBe(false);
+    expect(
+      await completeTerminalReplacement(layout, replacement, async (id) => {
+        stopped.push(id);
+      }),
+    ).toBe(false);
+    expect(layout.getTabTarget("host:source", "tab")).toEqual({
+      kind: "terminal",
+      terminalId: "original",
+    });
+    expect(stopped).toEqual(["replacement"]);
+  });
+
+  it("checks the installed target again before stopping the original shell", async () => {
+    const layout = new TerminalReplacementLayout();
+    layout.targets.set("host:source:tab", { kind: "terminal", terminalId: "original" });
+    expect(tryInstallTerminalReplacement(layout, replacement)).toBe(true);
+    layout.targets.set("host:source:tab", { kind: "terminal", terminalId: "another-shell" });
+    const stopped: string[] = [];
+
+    expect(
+      await completeTerminalReplacement(layout, replacement, async (id) => {
+        stopped.push(id);
+      }),
+    ).toBe(false);
+    expect(layout.getTabTarget("host:source", "tab")).toEqual({
+      kind: "terminal",
+      terminalId: "another-shell",
+    });
+    expect(stopped).toEqual(["replacement"]);
   });
 });

@@ -36,6 +36,7 @@ import {
 import {
   asSidebarDndItemData,
   routeSidebarDragEnd,
+  sidebarAgentMoveTarget,
   type SidebarAgentMoveInput,
   type SidebarMemberMoveDragState,
   type SidebarMemberMoveInput,
@@ -83,7 +84,7 @@ const sidebarCollisionDetection: CollisionDetection = (args) => {
     if (agentHits.length > 0) {
       return agentHits;
     }
-    return memberHits;
+    return memberHits.length > 0 ? memberHits : workspaceHits;
   }
   if (activeKind === "member") {
     if (memberHits.length > 0) {
@@ -167,15 +168,14 @@ export function SidebarMemberMoveDndProvider({
       if (current.activeKind === "agent") {
         // Only the same project's bucket in another workspace lights up, so the highlight
         // never promises a drop `routeSidebarDragEnd` will refuse.
-        const isTarget =
-          over !== null &&
-          over.kind !== "workspace" &&
-          current.activeCwd !== null &&
-          current.activeCwd.length > 0 &&
-          over.cwd === current.activeCwd &&
-          over.workspaceKey !== current.activeWorkspaceKey;
-        const overMemberKey = isTarget && over !== null ? over.memberKey : null;
-        return current.overMemberKey === overMemberKey ? current : { ...current, overMemberKey };
+        const active = asSidebarDndItemData(event.active.data.current);
+        const overMemberKey =
+          active?.kind === "agent" && over ? sidebarAgentMoveTarget(active, over) : null;
+        const overWorkspaceKey =
+          overMemberKey !== null && over?.kind === "workspace" ? over.workspaceKey : null;
+        const unchanged =
+          current.overMemberKey === overMemberKey && current.overWorkspaceKey === overWorkspaceKey;
+        return unchanged ? current : { ...current, overMemberKey, overWorkspaceKey };
       }
       return current;
     });

@@ -434,7 +434,7 @@ describe("server data push router", () => {
     const queryClient = new QueryClient();
     const fake = createFakeClient();
     const serverId = "server-1";
-    const cwd = "/repo";
+    const cwd = "";
     const workspaceId = "workspace-a";
     const queryKey = buildTerminalsQueryKey(serverId, cwd, workspaceId);
     const observer = new QueryObserver(queryClient, {
@@ -446,35 +446,39 @@ describe("server data push router", () => {
       meta: workspaceTerminalsPushRoute({
         enabled: true,
         serverId,
-        cwd,
+        cwd: "",
         workspaceId,
       }),
     });
     const unsubscribeObserver = observer.subscribe(() => undefined);
     const unmount = mountServerDataPushRouter({ client: fake.client, queryClient, serverId });
 
-    expect(fake.subscribeTerminalCalls).toEqual([{ cwd, workspaceId }]);
+    expect(fake.subscribeTerminalCalls).toEqual([{ cwd: "", workspaceId }]);
 
     fake.emit({
       type: "terminals_changed",
       payload: {
-        cwd,
+        cwd: "",
         terminals: [
           { id: "terminal-a", name: "Main", workspaceId },
           { id: "terminal-b", name: "Sibling", workspaceId: "workspace-b" },
+          { id: "terminal-c", name: "Other project", cwd: "/other-repo", workspaceId },
         ],
       },
     });
 
     expect(queryClient.getQueryData(queryKey)).toEqual({
       cwd,
-      terminals: [{ id: "terminal-a", name: "Main", workspaceId }],
+      terminals: [
+        { id: "terminal-a", name: "Main", workspaceId },
+        { id: "terminal-c", name: "Other project", cwd: "/other-repo", workspaceId },
+      ],
       requestId: expect.stringMatching(/^terminals-changed-/),
     });
 
     unsubscribeObserver();
 
-    expect(fake.unsubscribeTerminalCalls).toEqual([{ cwd, workspaceId }]);
+    expect(fake.unsubscribeTerminalCalls).toEqual([{ cwd: "", workspaceId }]);
 
     unmount();
   });
@@ -511,7 +515,7 @@ describe("server data push router", () => {
       meta: workspaceTerminalsPushRoute({
         enabled: true,
         serverId,
-        cwd,
+        cwd: "",
         workspaceId,
       }),
     });
@@ -546,12 +550,12 @@ describe("server data push router", () => {
         subscriptionId: "server-diff-1",
       },
     ]);
-    expect(fake.subscribeTerminalCalls).toEqual([{ cwd, workspaceId }]);
+    expect(fake.subscribeTerminalCalls).toEqual([{ cwd: "", workspaceId }]);
 
     fake.emit({
       type: "terminals_changed",
       payload: {
-        cwd,
+        cwd: "",
         terminals: [
           { id: "terminal-a", name: "Main", workspaceId },
           { id: "terminal-b", name: "Sibling", workspaceId: "workspace-b" },
@@ -560,7 +564,7 @@ describe("server data push router", () => {
     });
 
     expect(queryClient.getQueryData(terminalKey)).toEqual({
-      cwd,
+      cwd: "",
       terminals: [{ id: "terminal-a", name: "Main", workspaceId }],
       requestId: expect.stringMatching(/^terminals-changed-/),
     });
@@ -573,11 +577,11 @@ describe("server data push router", () => {
   });
 
   it.each([
-    { scope: "a project root", listRoot: "/repo", cwd: "/repo" },
-    { scope: "a whole multi-project workspace", listRoot: null, cwd: "" },
+    { scope: "a single-project workspace", listRoot: "/repo" },
+    { scope: "a whole multi-project workspace", listRoot: null },
   ])(
     "routes terminal pushes for $scope after another observer attaches without push metadata",
-    ({ listRoot, cwd }) => {
+    ({ listRoot }) => {
       const queryClient = new QueryClient();
       const fake = createFakeClient();
       const serverId = "server-1";
@@ -592,13 +596,13 @@ describe("server data push router", () => {
         meta: workspaceTerminalsPushRoute({
           enabled: true,
           serverId,
-          cwd,
+          cwd: "",
           workspaceId,
         }),
       });
       const unsubscribePushObserver = pushObserver.subscribe(() => undefined);
       const unmount = mountServerDataPushRouter({ client: fake.client, queryClient, serverId });
-      expect(fake.subscribeTerminalCalls).toEqual([{ cwd, workspaceId }]);
+      expect(fake.subscribeTerminalCalls).toEqual([{ cwd: "", workspaceId }]);
 
       const plainObserver = new QueryObserver(queryClient, {
         queryKey,
@@ -612,7 +616,7 @@ describe("server data push router", () => {
       fake.emit({
         type: "terminals_changed",
         payload: {
-          cwd,
+          cwd: "",
           terminals: [
             {
               id: "terminal-a",
@@ -625,7 +629,7 @@ describe("server data push router", () => {
       });
 
       expect(queryClient.getQueryData(queryKey)).toEqual({
-        cwd,
+        cwd: "",
         terminals: [
           {
             id: "terminal-a",

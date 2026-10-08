@@ -4,6 +4,7 @@ import {
   deriveWorktreeProjectHash,
   deletePaseoWorktree,
   isPaseoOwnedWorktreeCwd,
+  listPaseoWorktrees,
   mapWorkspaceCwdToWorktree,
   slugify,
   type CreateWorktreeOptions,
@@ -75,6 +76,39 @@ describe("paseo worktree manager", () => {
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("includes the main checkout and external worktrees only when requested", async () => {
+    const managed = await createLegacyWorktreeForTest({
+      branchName: "managed",
+      cwd: repoDir,
+      baseBranch: "main",
+      worktreeSlug: "managed",
+      runSetup: false,
+      paseoHome,
+    });
+    const externalPath = join(tempDir, "external-worktree");
+    execFileSync("git", ["worktree", "add", "-b", "external", externalPath], {
+      cwd: repoDir,
+      stdio: "pipe",
+    });
+
+    const managedOnly = await listPaseoWorktrees({ cwd: repoDir, paseoHome });
+    const all = await listPaseoWorktrees({ cwd: repoDir, paseoHome, includeExternal: true });
+
+    expect(managedOnly.map(({ path, branchName }) => ({ path, branchName }))).toEqual([
+      { path: managed.worktreePath, branchName: "managed" },
+    ]);
+    expect(all.map(({ path, branchName }) => ({ path, branchName }))).toEqual([
+      { path: repoDir, branchName: "main" },
+      { path: externalPath, branchName: "external" },
+      { path: managed.worktreePath, branchName: "managed" },
+    ]);
+    expect(all.map((entry) => entry.createdAt)).toEqual([
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    ]);
   });
 
   it("treats a worktree as paseo-owned even when its .git admin is missing", async () => {

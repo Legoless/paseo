@@ -71,6 +71,7 @@ function MoveMemberPage({ target }: { target: MoveMemberMenuTarget }): React.Rea
       }
       void moveMember({
         client,
+        serverId: target.serverId,
         sourceWorkspaceId: target.sourceWorkspaceId,
         targetWorkspaceId: workspace.id,
         cwd: target.cwd,

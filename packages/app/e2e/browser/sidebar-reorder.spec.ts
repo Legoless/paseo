@@ -3,7 +3,7 @@ import { expect, test } from "../support/fixtures";
 import { gotoAppShell } from "../support/helpers/app";
 import { getServerId } from "../support/helpers/server-id";
 import { seedWorkspace } from "../support/helpers/seed-client";
-import { seedMockAgentWorkspace } from "../support/helpers/mock-agent";
+import { openAgentRoute, seedMockAgentWorkspace } from "../support/helpers/mock-agent";
 
 async function rowTestIds(rows: Locator) {
   return rows.evaluateAll((elements) =>
@@ -289,6 +289,110 @@ test("an agent drags to the same project in another workspace, and stays put els
     } finally {
       await stranger.cleanup();
     }
+  } finally {
+    await project.cleanup();
+  }
+});
+
+test("a project merges into its existing destination and preserves both agents", async ({
+  page,
+}) => {
+  const project = await seedMockAgentWorkspace({
+    repoPrefix: "sidebar-project-merge-",
+    title: "Moving agent",
+  });
+  const other = await seedWorkspace({ repoPrefix: "sidebar-project-merge-other-" });
+  try {
+    const added = await project.client.addWorkspaceMember(project.workspaceId, {
+      kind: "directory",
+      path: other.repoPath,
+      projectId: other.projectId,
+    });
+    if (!added.workspace) throw new Error(added.error ?? "Failed to add source member");
+    const mirror = await project.client.createWorkspace({
+      source: { kind: "directory", path: project.cwd },
+      title: "Merge target",
+    });
+    if (!mirror.workspace) throw new Error(mirror.error ?? "Failed to create destination");
+    const destinationAgent = await project.client.createAgent({
+      provider: "mock",
+      cwd: project.cwd,
+      workspaceId: mirror.workspace.id,
+      title: "Existing agent",
+      modeId: "load-test",
+      model: "e2e-fast-stream",
+    });
+    await openAgentRoute(page, { workspaceId: mirror.workspace.id, agentId: destinationAgent.id });
+    await openAgentRoute(page, { workspaceId: project.workspaceId, agentId: project.agentId });
+    const serverId = getServerId();
+    const source = page.getByTestId(
+      `sidebar-member-row-${serverId}:${project.workspaceId}#${project.cwd}`,
+    );
+    const destination = page.getByTestId(
+      `sidebar-member-row-${serverId}:${mirror.workspace.id}#${project.cwd}`,
+    );
+    await expect(source).toBeVisible();
+    await expect(destination).toBeVisible();
+    await dragRowOnto(source, destination, pressProjectRow);
+    await expect(source).toHaveCount(0);
+    await expect(destination).toHaveCount(1);
+    const agents = page.getByTestId(
+      `sidebar-agent-list-${serverId}:${mirror.workspace.id}#${project.cwd}`,
+    );
+    await expect(agents.getByTestId(`sidebar-agent-row-${project.agentId}`)).toBeVisible();
+    await expect(agents.getByTestId(`sidebar-agent-row-${destinationAgent.id}`)).toBeVisible();
+    await page.reload();
+    await expect(source).toHaveCount(0);
+    await expect(agents.getByTestId(`sidebar-agent-row-${project.agentId}`)).toBeVisible();
+    await expect(agents.getByTestId(`sidebar-agent-row-${destinationAgent.id}`)).toBeVisible();
+  } finally {
+    await project.cleanup();
+    await other.cleanup();
+  }
+});
+
+test("an agent moves through a collapsed workspace header and its workspace menu", async ({
+  page,
+}) => {
+  const project = await seedMockAgentWorkspace({
+    repoPrefix: "sidebar-agent-header-move-",
+    title: "Moving tab",
+  });
+  try {
+    const mirror = await project.client.createWorkspace({
+      source: { kind: "directory", path: project.cwd },
+      title: "Collapsed destination",
+    });
+    if (!mirror.workspace) throw new Error(mirror.error ?? "Failed to create destination");
+    await openAgentRoute(page, { workspaceId: project.workspaceId, agentId: project.agentId });
+    const serverId = getServerId();
+    const destination = page.getByTestId(
+      `sidebar-workspace-row-${serverId}:${mirror.workspace.id}`,
+    );
+    await expect(destination).toBeVisible();
+    const collapse = page.getByTestId(
+      `sidebar-workspace-collapse-toggle-${serverId}:${mirror.workspace.id}`,
+    );
+    await collapse.hover();
+    await collapse.click();
+    await expect(
+      page.getByTestId(`sidebar-member-row-${serverId}:${mirror.workspace.id}#${project.cwd}`),
+    ).toBeHidden();
+    const agent = page.getByTestId(`sidebar-agent-row-${project.agentId}`);
+    await dragRowOnto(agent, destination, pressProjectRow);
+    await collapse.click();
+    const targetAgents = page.getByTestId(
+      `sidebar-agent-list-${serverId}:${mirror.workspace.id}#${project.cwd}`,
+    );
+    await expect(targetAgents.getByTestId(`sidebar-agent-row-${project.agentId}`)).toBeVisible();
+    await agent.click({ button: "right" });
+    await page.getByTestId(`sidebar-agent-menu-move-${project.agentId}`).click();
+    await page.getByTestId(`sidebar-agent-menu-move-${project.workspaceId}`).click();
+    const sourceAgents = page.getByTestId(
+      `sidebar-agent-list-${serverId}:${project.workspaceId}#${project.cwd}`,
+    );
+    await expect(sourceAgents.getByTestId(`sidebar-agent-row-${project.agentId}`)).toBeVisible();
+    await expect(targetAgents.getByTestId(`sidebar-agent-row-${project.agentId}`)).toHaveCount(0);
   } finally {
     await project.cleanup();
   }

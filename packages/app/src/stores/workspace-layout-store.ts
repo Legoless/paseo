@@ -53,6 +53,7 @@ import {
   splitWorkspaceRootRightInLayout,
   splitPaneInLayout,
   stripEphemeralTabsFromLayout,
+  transferTabsBetweenLayouts,
   type SplitGroup,
   type SplitNode,
   type SplitPane,
@@ -132,6 +133,13 @@ interface WorkspaceLayoutStore {
   /** Returns the ordinary right-side workspace pane, creating it when absent. */
   ensureSidePane: (workspaceKey: string, options?: { focus: boolean }) => string | null;
   closeTab: (workspaceKey: string, tabId: string) => void;
+  transferTabs: (input: {
+    sourceWorkspaceKey: string;
+    targetWorkspaceKey: string;
+    tabs: readonly WorkspaceTab[];
+    sourceParentTabIdByTabId?: Record<string, string>;
+    agentIds: readonly string[];
+  }) => void;
   focusTab: (workspaceKey: string, tabId: string) => void;
   selectTabInPane: (workspaceKey: string, paneId: string, tabId: string) => void;
   replaceTab: (
@@ -1035,6 +1043,73 @@ export function createWorkspaceLayoutStore(
                 ...state.layoutByWorkspace,
                 [normalizedWorkspaceKey]: nextLayout,
               },
+            };
+          });
+        },
+        transferTabs: (input) => {
+          const sourceKey = trimNonEmpty(input.sourceWorkspaceKey);
+          const targetKey = trimNonEmpty(input.targetWorkspaceKey);
+          if (!sourceKey || !targetKey || sourceKey === targetKey) return;
+          set((state) => {
+            const sourceLayout = getWorkspaceLayout(state.layoutByWorkspace, sourceKey);
+            const targetLayout = getWorkspaceLayout(state.layoutByWorkspace, targetKey);
+            const sourceExplorerPaneId = resolveExplorerSidebarPaneId(
+              sourceLayout,
+              state.explorerSidebarPaneIdByWorkspace[sourceKey],
+            );
+            const targetExplorerPaneId = resolveExplorerSidebarPaneId(
+              targetLayout,
+              state.explorerSidebarPaneIdByWorkspace[targetKey],
+            );
+            const layouts = transferTabsBetweenLayouts({
+              source: sourceLayout,
+              target: targetLayout,
+              tabs: input.tabs,
+              sourceParentTabIdByTabId: input.sourceParentTabIdByTabId,
+              sourceExplorerPaneId,
+              targetExplorerPaneId,
+            });
+            const transferAgentSet = (sets: Record<string, Set<string>>) => {
+              const source = new Set(sets[sourceKey] ?? []);
+              const target = new Set(sets[targetKey] ?? []);
+              for (const agentId of input.agentIds) {
+                if (source.delete(agentId)) target.add(agentId);
+              }
+              return { ...sets, [sourceKey]: source, [targetKey]: target };
+            };
+            const sourceExplorerOpen = { ...state.explorerSidebarOpenByTab[sourceKey] };
+            const targetExplorerOpen = { ...state.explorerSidebarOpenByTab[targetKey] };
+            for (const tab of input.tabs) {
+              if (sourceExplorerOpen[tab.tabId]) targetExplorerOpen[tab.tabId] = true;
+              delete sourceExplorerOpen[tab.tabId];
+            }
+            const {
+              [sourceKey]: _sourceFocus,
+              [targetKey]: _targetFocus,
+              ...focusRestorationByWorkspace
+            } = state.focusRestorationByWorkspace;
+            return {
+              layoutByWorkspace: {
+                ...state.layoutByWorkspace,
+                [sourceKey]: keepWorkspaceFocusOutOfExplorerSidebar(
+                  restoreEmptyPanesInLayout(layouts.source, sourceExplorerPaneId),
+                  sourceExplorerPaneId,
+                  sourceLayout.focusedPaneId,
+                ),
+                [targetKey]: keepWorkspaceFocusOutOfExplorerSidebar(
+                  layouts.target,
+                  targetExplorerPaneId,
+                  targetLayout.focusedPaneId,
+                ),
+              },
+              pinnedAgentIdsByWorkspace: transferAgentSet(state.pinnedAgentIdsByWorkspace),
+              hiddenAgentIdsByWorkspace: transferAgentSet(state.hiddenAgentIdsByWorkspace),
+              explorerSidebarOpenByTab: {
+                ...state.explorerSidebarOpenByTab,
+                [sourceKey]: sourceExplorerOpen,
+                [targetKey]: targetExplorerOpen,
+              },
+              focusRestorationByWorkspace,
             };
           });
         },

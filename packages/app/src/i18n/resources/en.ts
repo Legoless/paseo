@@ -1617,6 +1617,9 @@ export const en = {
     openPath: "Open path",
   },
   branchSwitcher: {
+    updateHostForWorktrees: "Update the host to select worktrees.",
+    branchOrWorktreeTitle: "Switch branch or worktree",
+    branchOrWorktreeSearchPlaceholder: "Filter branches and worktrees...",
     triggerTooltip: "Switch workspace branch",
     currentBranch: "Current branch: {{branchName}}. Press to switch branch.",
     placeholder: "Switch branch...",

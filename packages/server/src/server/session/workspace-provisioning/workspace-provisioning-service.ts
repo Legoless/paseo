@@ -115,6 +115,7 @@ export type WorkspaceProvisioningErrorCode =
   | "archived_project"
   | "workspace_not_found"
   | "archived_workspace"
+  | "same_workspace"
   | "duplicate_member"
   | "member_not_found"
   | "member_has_active_agents"
@@ -689,6 +690,12 @@ export function createWorkspaceProvisioningService(deps: {
   async function moveWorkspaceMember(
     input: MoveWorkspaceMemberInput,
   ): Promise<MoveWorkspaceMemberResult> {
+    if (input.sourceWorkspaceId === input.targetWorkspaceId) {
+      throw new WorkspaceProvisioningError(
+        "same_workspace",
+        `Project already belongs to workspace ${input.targetWorkspaceId}`,
+      );
+    }
     const normalizedCwd = resolve(input.cwd);
     const source = await workspaceRegistry.get(input.sourceWorkspaceId);
     if (!source) {
@@ -716,34 +723,17 @@ export function createWorkspaceProvisioningService(deps: {
         `Archived workspace: ${input.targetWorkspaceId}`,
       );
     }
-    // Fast-path guards ahead of the git/project side effects; the updaters below
-    // repeat them under the registry's mutation queue.
-    if (
-      !workspaceMembers(source).some((candidate) =>
-        areEquivalentPaths(candidate.cwd, normalizedCwd),
-      )
-    ) {
+    const member = workspaceMembers(source).find((candidate) =>
+      areEquivalentPaths(candidate.cwd, normalizedCwd),
+    );
+    if (!member) {
       throw new WorkspaceProvisioningError(
         "member_not_found",
         `Workspace ${input.sourceWorkspaceId} has no member at ${normalizedCwd}`,
       );
     }
-    if (
-      workspaceMembers(target).some((candidate) => areEquivalentPaths(candidate.cwd, normalizedCwd))
-    ) {
-      throw new WorkspaceProvisioningError(
-        "duplicate_member",
-        `Workspace ${input.targetWorkspaceId} already has a member at ${normalizedCwd}`,
-      );
-    }
-    const checkout = await workspaceGitService.getCheckout(normalizedCwd);
-    const project = await findOrCreateProjectForDirectory(normalizedCwd);
-    const member: PersistedWorkspaceMember = {
-      projectId: project.projectId,
-      ...initialWorkspacePlacement({ source: "checkout", cwd: normalizedCwd, checkout }),
-    };
     const timestamp = new Date().toISOString();
-    // Append before strip: a concurrent failure mid-move leaves the member in
+    // Ensure the target holds the member before stripping the source: a concurrent failure leaves it in
     // both workspaces (removable) rather than in neither (lost).
     const updatedTarget = await workspaceRegistry.update(input.targetWorkspaceId, (current) => {
       if (current.archivedAt) {
@@ -754,10 +744,8 @@ export function createWorkspaceProvisioningService(deps: {
       }
       const members = workspaceMembers(current);
       if (members.some((candidate) => areEquivalentPaths(candidate.cwd, normalizedCwd))) {
-        throw new WorkspaceProvisioningError(
-          "duplicate_member",
-          `Workspace ${input.targetWorkspaceId} already has a member at ${normalizedCwd}`,
-        );
+        // A shared directory merges into the existing placement; its project identity and base stay put.
+        return { ...current, updatedAt: timestamp };
       }
       return { ...current, members: [...members, member], updatedAt: timestamp };
     });

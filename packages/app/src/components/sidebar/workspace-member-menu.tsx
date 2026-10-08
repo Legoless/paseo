@@ -30,6 +30,7 @@ import {
   MOVE_MEMBER_PAGE_ID,
   useMoveMemberMenuPages,
 } from "@/workspaces/move-member-menu-page";
+import { MOVE_AGENT_PAGE_ID } from "@/workspaces/move-agent-menu-page";
 import { TerminalProfileIcon } from "@/components/terminal-profile-icon";
 import { useLaunchProjectTab } from "@/hooks/use-launch-project-tab";
 
@@ -229,6 +230,7 @@ export interface WorkspaceAgentMenuItemsProps {
   onClose?: () => void;
   closeDisabled?: boolean;
   showAgentActions?: boolean;
+  canMoveWorkspace?: boolean;
 }
 
 export function WorkspaceAgentMenuItems({
@@ -243,6 +245,7 @@ export function WorkspaceAgentMenuItems({
   onClose,
   closeDisabled = false,
   showAgentActions = true,
+  canMoveWorkspace = false,
 }: WorkspaceAgentMenuItemsProps) {
   const { t } = useTranslation();
   const Separator = surface === "context" ? ContextMenuSeparator : DropdownMenuSeparator;
@@ -283,6 +286,15 @@ export function WorkspaceAgentMenuItems({
       />
       {showAgentActions ? (
         <>
+          {canMoveWorkspace ? (
+            <DropdownMenuSubTrigger
+              id={MOVE_AGENT_PAGE_ID}
+              leading={MOVE_MEMBER_ICON}
+              testID={`sidebar-agent-menu-move-${agent.agentId}`}
+            >
+              {t("sidebar.project.actions.moveToWorkspace")}
+            </DropdownMenuSubTrigger>
+          ) : null}
           <DropdownMenuSubTrigger
             id={WORKSPACE_LABEL_PAGE_ID}
             leading={labelLeadingIcon}
@@ -315,14 +327,14 @@ export function WorkspaceAgentKebabMenu({
   onOpenChange,
   onFocus,
   onBlur,
-  labelPages,
+  pages,
   ...items
 }: Omit<WorkspaceAgentMenuItemsProps, "surface"> & {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onFocus: () => void;
   onBlur: () => void;
-  labelPages: readonly MenuPageDefinition[];
+  pages: readonly MenuPageDefinition[];
 }) {
   const { t } = useTranslation();
   return (
@@ -343,7 +355,7 @@ export function WorkspaceAgentKebabMenu({
         width={220}
         sheetTitle={t("sidebar.agent.actions.menu")}
         testID={`sidebar-agent-dropdown-${items.agent.agentId}`}
-        pages={labelPages}
+        pages={pages}
       >
         <WorkspaceAgentMenuItems {...items} surface="dropdown" />
       </DropdownMenuContent>

@@ -110,6 +110,25 @@ describe("rekeyAgentOrder", () => {
     ]);
   });
 
+  it("merges agent orders without replacing the destination or duplicating rows", () => {
+    const store = useSidebarOrderStore.getState();
+    store.setAgentOrder("srv:wks-a#/repo/one", ["agent:2", "agent:1", "agent:9"]);
+    store.setAgentOrder("srv:wks-b#/repo/one", ["agent:9", "agent:8"]);
+    store.setAgentOrder("srv:wks-b#/repo/two", ["agent:other"]);
+
+    store.rekeyAgentOrder("srv:wks-a#/repo/one", "srv:wks-b#/repo/one");
+
+    const next = useSidebarOrderStore.getState();
+    expect(next.getAgentOrder("srv:wks-a#/repo/one")).toEqual([]);
+    expect(next.getAgentOrder("srv:wks-b#/repo/one")).toEqual([
+      "agent:9",
+      "agent:8",
+      "agent:2",
+      "agent:1",
+    ]);
+    expect(next.getAgentOrder("srv:wks-b#/repo/two")).toEqual(["agent:other"]);
+  });
+
   it("ignores a no-op rename and blank keys", () => {
     const store = useSidebarOrderStore.getState();
     store.setAgentOrder("srv:wks-a#/repo/one", ["agent:1"]);

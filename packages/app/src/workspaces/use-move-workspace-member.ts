@@ -2,9 +2,13 @@ import { useCallback } from "react";
 import { useToast } from "@/contexts/toast-context";
 import { moveWorkspaceMemberErrorMessage } from "@/workspaces/move-workspace-member-message";
 import { moveWorkspaceMember, type WorkspaceMembersClient } from "@/workspaces/workspace-members";
+import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
+import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
+import { selectWorkspaceMemberTabs } from "@/workspaces/workspace-tab-move";
 
 export interface MoveWorkspaceMemberInput {
   client: WorkspaceMembersClient | null;
+  serverId: string;
   sourceWorkspaceId: string;
   targetWorkspaceId: string;
   cwd: string;
@@ -14,9 +18,7 @@ export interface MoveWorkspaceMemberInput {
 
 /**
  * Moves one project membership to another workspace, taking its agents and terminals along.
- * Unlike removal nothing is archived, so there is nothing to confirm; a refusal (the target
- * already holds the project) surfaces as a toast, which also keeps this honest on web where
- * `Alert.alert` renders nothing.
+ * Existing target membership is merged. Tabs and remembered sidebar order follow the project.
  */
 export function useMoveWorkspaceMember(): (input: MoveWorkspaceMemberInput) => Promise<boolean> {
   const toast = useToast();
@@ -25,6 +27,10 @@ export function useMoveWorkspaceMember(): (input: MoveWorkspaceMemberInput) => P
       if (!input.client) {
         return false;
       }
+      const sourceKey = `${input.serverId}:${input.sourceWorkspaceId}`;
+      const targetKey = `${input.serverId}:${input.targetWorkspaceId}`;
+      // Directory updates may reconcile the moved tabs out before the RPC response arrives.
+      const sourceLayout = useWorkspaceLayoutStore.getState().layoutByWorkspace[sourceKey];
       try {
         const result = await moveWorkspaceMember({
           client: input.client,
@@ -42,6 +48,31 @@ export function useMoveWorkspaceMember(): (input: MoveWorkspaceMemberInput) => P
             }),
           );
           return false;
+        }
+        useWorkspaceLayoutStore.getState().transferTabs({
+          sourceWorkspaceKey: sourceKey,
+          targetWorkspaceKey: targetKey,
+          tabs: selectWorkspaceMemberTabs({
+            layout: useWorkspaceLayoutStore.getState().layoutByWorkspace[sourceKey],
+            capturedLayout: sourceLayout,
+            cwd: input.cwd,
+            agentIds: result.movedAgentIds,
+            terminalIds: result.movedTerminalIds,
+          }),
+          sourceParentTabIdByTabId: sourceLayout?.parentTabIdByTabId,
+          agentIds: result.movedAgentIds,
+        });
+        const order = useSidebarOrderStore.getState();
+        const sourceMemberKey = `${sourceKey}#${input.cwd}`;
+        const targetMemberKey = `${targetKey}#${input.cwd}`;
+        order.rekeyAgentOrder(sourceMemberKey, targetMemberKey);
+        order.setMemberOrder(
+          sourceKey,
+          order.getMemberOrder(sourceKey).filter((key) => key !== sourceMemberKey),
+        );
+        const targetOrder = order.getMemberOrder(targetKey);
+        if (!targetOrder.includes(targetMemberKey)) {
+          order.setMemberOrder(targetKey, [...targetOrder, targetMemberKey]);
         }
         return true;
       } catch (error) {

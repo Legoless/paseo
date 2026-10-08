@@ -4,11 +4,13 @@ import { routeSidebarDragEnd, type SidebarDndItemData } from "./member-move-dnd-
 const workspaceA: SidebarDndItemData = {
   kind: "workspace",
   workspaceKey: "srv1:wks-a",
+  memberCwds: ["/repo/one", "/repo/two"],
   label: "Main",
 };
 const workspaceB: SidebarDndItemData = {
   kind: "workspace",
   workspaceKey: "srv1:wks-b",
+  memberCwds: ["/repo/three"],
   label: "Secondary",
 };
 const memberA1: SidebarDndItemData = {
@@ -234,6 +236,44 @@ describe("routeSidebarDragEnd: agent stays inside its project (R3)", () => {
 });
 
 describe("routeSidebarDragEnd: agent moves to the same project elsewhere (R3)", () => {
+  it("moves onto a collapsed workspace containing the same project", () => {
+    expect(
+      routeSidebarDragEnd({
+        active: agentA1,
+        over: { ...workspaceB, memberCwds: ["/repo/three", "/repo/one"] },
+        overId: workspaceB.workspaceKey,
+      }),
+    ).toEqual({
+      kind: "moveAgent",
+      input: {
+        agentId: "agent-1",
+        sourceWorkspaceKey: "srv1:wks-a",
+        targetWorkspaceKey: "srv1:wks-b",
+        sourceMemberKey: "srv1:wks-a#/repo/one",
+        targetMemberKey: "srv1:wks-b#/repo/one",
+        label: "First agent",
+      },
+    });
+  });
+
+  it("refuses a draft or uncategorized agent on a workspace header", () => {
+    const matchingWorkspace = { ...workspaceB, memberCwds: ["/repo/one"] };
+    expect(
+      routeSidebarDragEnd({
+        active: draftA,
+        over: matchingWorkspace,
+        overId: workspaceB.workspaceKey,
+      }),
+    ).toEqual({ kind: "none" });
+    expect(
+      routeSidebarDragEnd({
+        active: { ...agentA1, cwd: "" },
+        over: matchingWorkspace,
+        overId: workspaceB.workspaceKey,
+      }),
+    ).toEqual({ kind: "none" });
+  });
+
   it("moves onto the same project's row in another workspace", () => {
     expect(
       routeSidebarDragEnd({ active: agentA1, over: memberB_one, overId: memberB_one.memberKey }),
@@ -267,6 +307,23 @@ describe("routeSidebarDragEnd: agent moves to the same project elsewhere (R3)", 
   it("does nothing when the drag ends outside any row", () => {
     expect(routeSidebarDragEnd({ active: agentA1, over: null, overId: null })).toEqual({
       kind: "none",
+    });
+  });
+});
+
+describe("routeSidebarDragEnd: project merge", () => {
+  it("routes a project onto its existing placement in another workspace", () => {
+    expect(
+      routeSidebarDragEnd({ active: memberA1, over: memberB_one, overId: memberB_one.memberKey }),
+    ).toEqual({
+      kind: "move",
+      input: {
+        sourceWorkspaceKey: "srv1:wks-a",
+        targetWorkspaceKey: "srv1:wks-b",
+        cwd: "/repo/one",
+        projectName: "one",
+        targetMemberKey: memberB_one.memberKey,
+      },
     });
   });
 });

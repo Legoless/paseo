@@ -10246,34 +10246,94 @@ test("workspace.member.move.request leaves the source projectless when its last 
   expect(registries.workspaces.get("ws-2")?.members).toHaveLength(2);
 });
 
-test("workspace.member.move.request refuses a member the target already holds", async () => {
+test("workspace.member.move.request merges a shared project and moves only the source resources", async () => {
   const emitted: SessionOutboundMessage[] = [];
+  const memberCwd = mkdtempSync(path.join(tmpdir(), "paseo-member-merge-"));
+  const terminalManager = createTerminalManager();
+  terminalManagers.push(terminalManager);
+  const agents = [
+    { id: "source-agent", cwd: memberCwd, workspaceId: "ws-1", archivedAt: null },
+    {
+      id: "archived-source-agent",
+      cwd: memberCwd,
+      workspaceId: "ws-1",
+      archivedAt: "2026-03-01T12:00:00.000Z",
+    },
+    { id: "target-agent", cwd: memberCwd, workspaceId: "ws-2", archivedAt: null },
+    { id: "other-source-agent", cwd: REPO_CWD, workspaceId: "ws-1", archivedAt: null },
+  ];
   const session = asTestSession(
-    createSessionForWorkspaceTests({ onMessage: (message) => emitted.push(message) }),
+    createSessionForWorkspaceTests({
+      onMessage: (message) => emitted.push(message),
+      terminalManager,
+      agentStorage: {
+        listByWorkspace: async (workspaceId: string) =>
+          agents.filter((agent) => agent.workspaceId === workspaceId),
+      },
+      agentManager: {
+        setAgentWorkspaceId: async (agentId: string, workspaceId: string) => {
+          const agent = agents.find((record) => record.id === agentId);
+          if (!agent) return null;
+          agent.workspaceId = workspaceId;
+          return agent;
+        },
+      },
+    }),
   );
-  const registries = createMemberTestRegistries({ withMember: true });
-  addTargetWorkspaceToMemberRegistries(registries, { cwd: MEMBER_CWD });
+  const registries = createMemberTestRegistries({ withMember: true, memberCwd });
+  addTargetWorkspaceToMemberRegistries(registries, { cwd: memberCwd });
+  const targetMembers = registries.workspaces.get("ws-2")?.members;
   registries.apply(session);
-
-  await session.handleMessage({
-    type: "workspace.member.move.request",
-    sourceWorkspaceId: "ws-1",
-    targetWorkspaceId: "ws-2",
-    cwd: MEMBER_CWD,
-    requestId: "req-member-move-duplicate",
+  await activateWorkspaceUpdatesSubscription(session);
+  const sourceTerminal = await terminalManager.createTerminal({
+    cwd: memberCwd,
+    workspaceId: "ws-1",
+  });
+  const targetTerminal = await terminalManager.createTerminal({
+    cwd: memberCwd,
+    workspaceId: "ws-2",
   });
 
-  const response = findByType(emitted, "workspace.member.move.response");
-  expect(response?.payload).toMatchObject({
-    requestId: "req-member-move-duplicate",
-    source: null,
-    target: null,
-    movedAgentIds: [],
-    movedTerminalIds: [],
-    errorCode: "duplicate_member",
-  });
-  expect(response?.payload.error).toBeTruthy();
-  expect(registries.workspaces.get("ws-1")?.members).toHaveLength(2);
+  try {
+    await session.handleMessage({
+      type: "workspace.member.move.request",
+      sourceWorkspaceId: "ws-1",
+      targetWorkspaceId: "ws-2",
+      cwd: memberCwd,
+      requestId: "req-member-move-merge",
+    });
+
+    const response = findByType(emitted, "workspace.member.move.response");
+    expect(response?.payload).toMatchObject({
+      requestId: "req-member-move-merge",
+      source: { id: "ws-1", members: [expect.objectContaining({ workspaceDirectory: REPO_CWD })] },
+      target: {
+        id: "ws-2",
+        members: [expect.objectContaining({ projectId: "proj-3", workspaceDirectory: memberCwd })],
+      },
+      movedAgentIds: ["source-agent", "archived-source-agent"],
+      movedTerminalIds: [sourceTerminal.id],
+      error: null,
+    });
+    expect(agents.map((agent) => ({ id: agent.id, workspaceId: agent.workspaceId }))).toEqual([
+      { id: "source-agent", workspaceId: "ws-2" },
+      { id: "archived-source-agent", workspaceId: "ws-2" },
+      { id: "target-agent", workspaceId: "ws-2" },
+      { id: "other-source-agent", workspaceId: "ws-1" },
+    ]);
+    expect(sourceTerminal.workspaceId).toBe("ws-2");
+    expect(targetTerminal.workspaceId).toBe("ws-2");
+    expect(await terminalManager.getTerminals(memberCwd, { workspaceId: "ws-1" })).toEqual([]);
+    expect(
+      (await terminalManager.getTerminals(memberCwd, { workspaceId: "ws-2" })).map(
+        (terminal) => terminal.id,
+      ),
+    ).toEqual([sourceTerminal.id, targetTerminal.id]);
+    expect(registries.workspaces.get("ws-1")?.members).toHaveLength(1);
+    expect(registries.workspaces.get("ws-2")?.members).toEqual(targetMembers);
+  } finally {
+    rmSync(memberCwd, { recursive: true, force: true });
+  }
 });
 
 /**

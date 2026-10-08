@@ -11,6 +11,7 @@ import { useSidebarRowItems } from "@/components/sidebar/display-preferences/mod
 import { useSidebarWorkspaceTrailing } from "@/components/sidebar/workspace-trailing";
 import { useCheckoutStatusQuery } from "@/git/use-status-query";
 import { useWorkspaceLabelMenuPages } from "@/workspace-labels/picker";
+import { useMoveAgentMenuPages } from "@/workspaces/move-agent-menu-page";
 import { useWorkspaceLabelDefinitions } from "@/workspace-labels";
 import type {
   SidebarWorkspaceAgentRow,
@@ -398,7 +399,7 @@ export function WorkspaceNewAgentRow({
                 onOpenChange={handleDropdownMenuOpenChange}
                 onFocus={handleKebabFocus}
                 onBlur={handleKebabBlur}
-                labelPages={labelPages}
+                pages={labelPages}
                 onOpen={handlePress}
                 onCopyPath={handleCopyPath}
                 onCopyBranchName={handleCopyBranchName}
@@ -468,6 +469,19 @@ export function WorkspaceAgentRow({
   const [dropdownMenuOpen, setDropdownMenuOpen] = useState(false);
   const { branch, branchReady, refreshBranch, labelPages, labelDefinitions } =
     useAgentCheckoutPresentation(agent, serverId);
+  const moveTarget = useMemo(
+    () => ({
+      serverId,
+      sourceWorkspaceId: workspaceId,
+      agentId: agent.agentId,
+      cwd: agent.cwd,
+      agentTitle: agent.title,
+    }),
+    [agent.agentId, agent.cwd, agent.title, serverId, workspaceId],
+  );
+  const movePages = useMoveAgentMenuPages(moveTarget);
+  const menuPages = useMemo(() => [...labelPages, ...movePages], [labelPages, movePages]);
+  const canMoveWorkspace = movePages.length > 0;
   const isCompact = useIsCompactFormFactor();
   const actionsVisible = showAgentActions({
     hovered: isHovered,
@@ -627,7 +641,8 @@ export function WorkspaceAgentRow({
                 onOpenChange={handleDropdownMenuOpenChange}
                 onFocus={handleKebabFocus}
                 onBlur={handleKebabBlur}
-                labelPages={labelPages}
+                pages={menuPages}
+                canMoveWorkspace={canMoveWorkspace}
                 onOpen={handlePress}
                 onCopyPath={handleCopyPath}
                 onCopyBranchName={handleCopyBranchName}
@@ -639,7 +654,7 @@ export function WorkspaceAgentRow({
             align="start"
             width={220}
             testID={`sidebar-agent-context-menu-${agent.agentId}`}
-            pages={labelPages}
+            pages={menuPages}
           >
             <WorkspaceAgentMenuItems
               agent={agent}
@@ -651,6 +666,7 @@ export function WorkspaceAgentRow({
               onCopyPath={handleCopyPath}
               onCopyBranchName={handleCopyBranchName}
               onClose={handleArchive}
+              canMoveWorkspace={canMoveWorkspace}
             />
           </ContextMenuContent>
         </ContextMenu>

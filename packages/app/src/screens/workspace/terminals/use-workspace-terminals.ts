@@ -11,6 +11,7 @@ import { useReplicaQuery } from "@/data/query";
 import { workspaceTerminalsPushRoute } from "@/data/push-router";
 import {
   buildTerminalsQueryKey,
+  resolveTerminalListRoot,
   canCreateWorkspaceTerminal,
   collectKnownTerminalIds,
   collectScriptTerminalIds,
@@ -23,7 +24,7 @@ import {
 
 export type TerminalTabDestination =
   | { kind: "open"; paneId?: string }
-  | { kind: "replace"; tabId: string };
+  | { kind: "replace"; tabId: string; expectedTerminalId?: string };
 
 interface PendingTerminalCreateInput {
   destination: TerminalTabDestination;
@@ -80,9 +81,7 @@ export function useWorkspaceTerminals(input: UseWorkspaceTerminalsInput) {
   // home — the same path the launcher's "No project" option resolves to.
   const homeDirectory = useHostHomeDirectory(normalizedServerId);
   const terminalCreateCwd = selectedProject.cwd ?? workspaceDirectory ?? homeDirectory;
-  // Only a single-project workspace has one root to scope the listing by; with none or several,
-  // terminals live in unrelated directories and the workspace id is the only thing they share.
-  const terminalListRoot = workspaceMemberCount === 1 ? workspaceDirectory : null;
+  const terminalListRoot = resolveTerminalListRoot(workspaceDirectory, normalizedWorkspaceId);
   const [pendingCreateInput, setPendingCreateInput] = useState<PendingTerminalCreateInput | null>(
     null,
   );
@@ -180,6 +179,10 @@ export function useWorkspaceTerminals(input: UseWorkspaceTerminalsInput) {
     onSuccess: (payload, createInput) => {
       const createdTerminal = payload.terminal;
       if (createdTerminal) {
+        onTerminalCreated({
+          terminalId: createdTerminal.id,
+          destination: createInput.destination,
+        });
         queryClient.setQueryData<ListTerminalsPayload>(queryKey, (current) =>
           upsertCreatedTerminalPayload({
             current,
@@ -190,12 +193,6 @@ export function useWorkspaceTerminals(input: UseWorkspaceTerminalsInput) {
       }
 
       void queryClient.invalidateQueries({ queryKey });
-      if (createdTerminal) {
-        onTerminalCreated({
-          terminalId: createdTerminal.id,
-          destination: createInput.destination,
-        });
-      }
     },
     onError: (error: unknown) => {
       onTerminalCreateFailed(error instanceof Error ? error.message : String(error));

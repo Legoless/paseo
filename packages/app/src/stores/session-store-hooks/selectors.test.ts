@@ -12,6 +12,7 @@ import {
   selectRecommendedProjectPaths,
   selectWorkspace,
   selectWorkspaceDirectory,
+  selectAgentMoveWorkspaceTargets,
   selectWorkspaceFields,
   selectWorkspaceKeys,
   selectWorkspaceOrderByScope,
@@ -141,6 +142,65 @@ function selectWorkspaceStructureProjectViewKeys(
 
 afterEach(() => {
   useSessionStore.getState().clearSession(SERVER_ID);
+});
+
+describe("agent workspace move targets", () => {
+  it("offers other workspaces on the same host that hold the exact project directory", () => {
+    const source = createWorkspace({ id: "source" });
+    const target = createWorkspace({ id: "target", name: "Target" });
+    const otherWorktree = createWorkspace({
+      id: "other-worktree",
+      workspaceDirectory: "/repo-worktree",
+    });
+    const state = {
+      sessions: {
+        [SERVER_ID]: {
+          workspaces: new Map(
+            [source, target, otherWorktree].map((workspace) => [workspace.id, workspace]),
+          ),
+        },
+        "other-host": {
+          workspaces: new Map([["remote-target", createWorkspace({ id: "remote-target" })]]),
+        },
+      },
+    };
+
+    expect(
+      selectAgentMoveWorkspaceTargets(state, {
+        serverId: SERVER_ID,
+        sourceWorkspaceId: "source",
+        cwd: "/repo",
+      }),
+    ).toEqual([target]);
+  });
+
+  it("uses memberships in multi-project workspaces and excludes closing workspaces", () => {
+    const target = createWorkspace({ id: "multi-project", workspaceDirectory: "/other" });
+    target.members.push(createWorkspace({ id: "member" }).members[0]!);
+    const closing = createWorkspace({ id: "closing", archivingAt: "2026-10-08T00:00:00Z" });
+    const state = {
+      sessions: {
+        [SERVER_ID]: {
+          workspaces: new Map([target, closing].map((workspace) => [workspace.id, workspace])),
+        },
+      },
+    };
+
+    expect(
+      selectAgentMoveWorkspaceTargets(state, {
+        serverId: SERVER_ID,
+        sourceWorkspaceId: "source",
+        cwd: "/repo",
+      }),
+    ).toEqual([target]);
+    expect(
+      selectAgentMoveWorkspaceTargets(state, {
+        serverId: SERVER_ID,
+        sourceWorkspaceId: "source",
+        cwd: "",
+      }),
+    ).toEqual([]);
+  });
 });
 
 describe("workspace replica authority", () => {

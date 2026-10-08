@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "../support/fixtures";
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 import { gotoAppShell } from "../support/helpers/app";
 import {
   expectNoBranchSwitcherInWorkspaceHeader,
@@ -8,7 +10,8 @@ import {
 } from "../support/helpers/branch-switcher";
 import { seedWorkspace } from "../support/helpers/seed-client";
 import { getServerId } from "../support/helpers/server-id";
-import { readWorktreeBranchInfo } from "../support/helpers/workspace";
+import { createTempDirectory, readWorktreeBranchInfo } from "../support/helpers/workspace";
+import { clickNewTerminal, gotoWorkspace } from "../support/helpers/launcher";
 import {
   switchWorkspaceViaSidebar,
   waitForSidebarHydration,
@@ -39,6 +42,10 @@ async function renameWorkspaceViaSidebar(
   await renameInput.fill(input.title);
   await page.getByTestId(`${modalPrefix}-submit`).click();
   await expect(renameInput).toHaveCount(0, { timeout: 15_000 });
+}
+
+function terminalCwds(terminals: Array<{ cwd: string }>): string[] {
+  return terminals.map((terminal) => terminal.cwd);
 }
 
 test.describe("Branch switcher", () => {
@@ -97,6 +104,102 @@ test.describe("Branch switcher", () => {
         .toBe("dev");
     } finally {
       await workspace.cleanup();
+    }
+  });
+
+  test("the pane branch pill switches branches and confirms before moving a terminal into a worktree", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const workspace = await seedWorkspace({
+      repoPrefix: "pane-branch-worktree-",
+      repo: { branches: ["main", "dev", "feature/worktree"] },
+    });
+    const external = await createTempDirectory("pane-external-worktree-");
+    const externalWorktreePath = join(external.path, "checkout");
+    try {
+      execFileSync("git", ["worktree", "add", externalWorktreePath, "-b", "feature/external"], {
+        cwd: workspace.repoPath,
+      });
+      const created = await workspace.client.createWorkspace({
+        source: {
+          kind: "worktree",
+          cwd: workspace.repoPath,
+          projectId: workspace.projectId,
+          action: "checkout",
+          refName: "feature/worktree",
+        },
+      });
+      expect(created.error).toBeNull();
+      expect(created.workspace).not.toBeNull();
+      const worktreePath = created.workspace!.workspaceDirectory;
+
+      await gotoWorkspace(page, workspace.workspaceId);
+      await clickNewTerminal(page);
+      const pill = page.getByTestId("pane-branch-badge").filter({ visible: true }).first();
+      await expect(pill).toHaveText("main");
+      await pill.click();
+      const branchOption = page.getByTestId("pane-branch-option-branch:dev");
+      await expect(branchOption).toBeVisible();
+      await expect(
+        page.getByTestId(`pane-branch-option-worktree:${externalWorktreePath}`),
+      ).toContainText("feature/external");
+      await branchOption.click();
+      await expect(pill).toHaveText("dev");
+      await expect
+        .poll(
+          async () =>
+            (await readWorktreeBranchInfo({ worktreePath: workspace.repoPath })).currentBranch,
+        )
+        .toBe("dev");
+
+      await pill.click();
+      const worktreeOption = page.getByTestId(`pane-branch-option-worktree:${worktreePath}`);
+      await expect(worktreeOption).toContainText("feature/worktree");
+      await worktreeOption.click();
+      await page.getByTestId("confirm-dialog-cancel").click();
+      await expect(pill).toHaveText("dev");
+      const sourceBefore = (await workspace.client.fetchWorkspaces()).entries.find(
+        (entry) => entry.id === workspace.workspaceId,
+      );
+      expect(sourceBefore).toMatchObject({
+        members: [{ workspaceDirectory: workspace.repoPath }],
+      });
+      const before = await workspace.client.listTerminals(undefined, undefined, {
+        workspaceId: workspace.workspaceId,
+      });
+      expect(terminalCwds(before.terminals)).toEqual([workspace.repoPath]);
+
+      await pill.click();
+      await worktreeOption.click();
+      await page.getByTestId("confirm-dialog-confirm").click();
+      await expect(pill).toHaveText("feature/worktree");
+      await expect(
+        page.getByTestId("pane-project-badge-label").filter({ visible: true }).first(),
+      ).toContainText(workspace.projectDisplayName);
+      await expect
+        .poll(
+          async () =>
+            (
+              await workspace.client.listTerminals(undefined, undefined, {
+                workspaceId: workspace.workspaceId,
+              })
+            ).terminals,
+        )
+        .toMatchObject([{ cwd: worktreePath }]);
+      const sourceAfter = (await workspace.client.fetchWorkspaces()).entries.find(
+        (entry) => entry.id === workspace.workspaceId,
+      );
+      expect(sourceAfter).toMatchObject({
+        members: [
+          { workspaceDirectory: workspace.repoPath },
+          { workspaceDirectory: worktreePath, projectId: workspace.projectId },
+        ],
+      });
+    } finally {
+      await workspace.client.archiveWorkspace(workspace.workspaceId);
+      await workspace.cleanup();
+      await external.cleanup();
     }
   });
 });

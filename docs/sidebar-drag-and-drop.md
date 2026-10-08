@@ -2,16 +2,22 @@
 
 The global sidebar drags three kinds of row. What each one may land on:
 
-| Drag      | Reorder                | Move                                                                 |
-| --------- | ---------------------- | -------------------------------------------------------------------- |
-| Workspace | among workspaces       | never                                                                |
-| Project   | within its workspace   | onto another workspace's row or any of its rows                      |
-| Agent     | within its own project | onto the same project's rows under another workspace, and only there |
+| Drag      | Reorder                | Move                                                                         |
+| --------- | ---------------------- | ---------------------------------------------------------------------------- |
+| Workspace | among workspaces       | never                                                                        |
+| Project   | within its workspace   | onto another workspace's row or any of its rows                              |
+| Agent     | within its own project | onto the same project's rows or its workspace header under another workspace |
 
 An agent stays in its project. A project's directory is fixed on the daemon and an agent's cwd
 with it, so the only cross-workspace drop that means anything is the same directory mounted
 twice. `routeSidebarDragEnd` in `packages/app/src/components/sidebar/member-move-dnd-model.ts`
-is the whole decision, and the daemon repeats the check rather than trusting it.
+is the whole decision, and the daemon repeats the check rather than trusting it. A workspace
+header carries its project directories, so an agent can land there even while it is collapsed.
+
+Moving a project into a workspace that already holds its directory merges into that placement.
+Keep the destination's project metadata, tabs, and order; append the moved tabs. A different
+worktree remains a separate placement because its directory differs. The client moves saved
+tabs after the daemon reparents the resources; the daemon does not own pane layouts.
 
 ## One DndContext, or none of it works
 
@@ -23,7 +29,7 @@ a target. That is why `DraggableList` takes `externalDndContext` and registers t
 under the provider silently reduces that list to reorder-only.
 
 Collision detection is hit-test first (`pointerWithin`), then a kind-specific narrowing. An
-agent prefers an agent row and falls back to the project header behind it, with no center
+agent prefers an agent row and falls back to the project header or workspace header behind it, with no center
 fallback — a release over blank canvas must not re-parent anything. A workspace falls back to
 the nearest _workspace_, because the nearest droppable of any kind is usually a member row,
 which routes to nothing and silently discards the drop.
@@ -36,7 +42,7 @@ which routes to nothing and silently discards the drop.
 - The same project in two workspaces has two member keys that differ only in the workspace. That
   is what makes an agent's move target addressable.
 - Moving a project between workspaces **renames** its key, so the remembered agent order under
-  it is orphaned. `rekeyAgentOrder` carries it over; without that the project's agents come back
+  it is orphaned. `rekeyAgentOrder` merges it into the destination order; without that the project's agents come back
   in name order and the old entry leaks for the life of the install.
 
 ## Order is merged, never overwritten
