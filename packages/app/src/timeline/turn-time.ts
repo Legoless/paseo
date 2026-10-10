@@ -9,6 +9,9 @@ export interface TurnTiming {
 export interface StreamTurnTiming {
   byAssistantId: Map<string, TurnTiming>;
   runningStartedAt: Date | null;
+  // True while a turn is open but nothing has streamed back yet — the shape of a
+  // provider that accepted the prompt and then wedged (e.g. a silent quota hang).
+  runningAwaitingFirstResponse: boolean;
 }
 
 export function deriveStreamTurnTiming(params: {
@@ -21,6 +24,7 @@ export function deriveStreamTurnTiming(params: {
   let currentUserAt: Date | null = null;
   let currentLastItemAt: Date | null = null;
   let currentAssistantIds: string[] = [];
+  let currentSawResponse = false;
   let previousItem: StreamItem | null = null;
 
   const flushCompletedTurn = () => {
@@ -44,6 +48,9 @@ export function deriveStreamTurnTiming(params: {
       currentUserAt = item.kind === "user_message" ? item.timestamp : null;
       currentLastItemAt = null;
       currentAssistantIds = [];
+      currentSawResponse = item.kind !== "user_message";
+    } else if (item.kind !== "user_message") {
+      currentSawResponse = true;
     }
     currentLastItemAt = item.timestamp;
     if (item.kind === "assistant_message") {
@@ -60,6 +67,7 @@ export function deriveStreamTurnTiming(params: {
   }
 
   const runningStartedAt = params.isTurnActive ? params.activeTurnStartedAt : null;
+  const runningAwaitingFirstResponse = params.isTurnActive && !currentSawResponse;
   if (!params.isTurnActive) {
     flushCompletedTurn();
   }
@@ -67,5 +75,6 @@ export function deriveStreamTurnTiming(params: {
   return {
     byAssistantId,
     runningStartedAt,
+    runningAwaitingFirstResponse,
   };
 }
