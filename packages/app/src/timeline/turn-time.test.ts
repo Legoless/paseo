@@ -125,4 +125,70 @@ describe("deriveStreamTurnTiming", () => {
       durationMs: null,
     });
   });
+
+  it("marks an active turn with only the submitted prompt as awaiting first response", () => {
+    const timing = deriveStreamTurnTiming({
+      isTurnActive: true,
+      activeTurnStartedAt: new Date("2026-05-15T00:00:00.000Z"),
+      tail: [],
+      head: [user("u1", new Date("2026-05-15T00:00:00.000Z"))],
+    });
+
+    assert.equal(timing.runningAwaitingFirstResponse, true);
+  });
+
+  it("clears awaiting-first-response once any non-prompt item streams", () => {
+    const timing = deriveStreamTurnTiming({
+      isTurnActive: true,
+      activeTurnStartedAt: new Date("2026-05-15T00:00:00.000Z"),
+      tail: [],
+      head: [
+        user("u1", new Date("2026-05-15T00:00:00.000Z")),
+        assistant("a1", new Date("2026-05-15T00:00:04.000Z")),
+      ],
+    });
+
+    assert.equal(timing.runningAwaitingFirstResponse, false);
+  });
+
+  it("does not mark a system-opened turn as awaiting first response", () => {
+    const timing = deriveStreamTurnTiming({
+      isTurnActive: true,
+      activeTurnStartedAt: new Date("2026-05-15T00:00:00.000Z"),
+      tail: [
+        { ...user("u1", new Date("2026-05-15T00:00:00.000Z")), turnId: "turn-1" },
+        { ...assistant("a1", new Date("2026-05-15T00:00:03.000Z")), turnId: "turn-1" },
+        { ...assistant("bg1", new Date("2026-05-15T00:01:00.000Z")), turnId: "turn-2" },
+      ],
+      head: [],
+    });
+
+    assert.equal(timing.runningAwaitingFirstResponse, false);
+  });
+
+  it("marks a steered prompt that has not been answered yet", () => {
+    const timing = deriveStreamTurnTiming({
+      isTurnActive: true,
+      activeTurnStartedAt: new Date("2026-05-15T00:01:00.000Z"),
+      tail: [
+        user("u1", new Date("2026-05-15T00:00:00.000Z")),
+        assistant("a1", new Date("2026-05-15T00:00:05.000Z")),
+        user("u2", new Date("2026-05-15T00:01:00.000Z")),
+      ],
+      head: [],
+    });
+
+    assert.equal(timing.runningAwaitingFirstResponse, true);
+  });
+
+  it("never marks an idle turn as awaiting first response", () => {
+    const timing = deriveStreamTurnTiming({
+      isTurnActive: false,
+      activeTurnStartedAt: null,
+      tail: [user("u1", new Date("2026-05-15T00:00:00.000Z"))],
+      head: [],
+    });
+
+    assert.equal(timing.runningAwaitingFirstResponse, false);
+  });
 });

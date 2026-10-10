@@ -1030,6 +1030,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           <TurnFooter
             isRunning={isTurnActive}
             inFlightTurnStartedAt={baseRenderModel.turnTiming.runningStartedAt}
+            awaitingFirstResponse={baseRenderModel.turnTiming.runningAwaitingFirstResponse}
             host={bottomTurnFooterHost}
             strategy={streamRenderStrategy}
             supportsTimelineCursor={supportsAgentForkContextCursor}
@@ -1043,6 +1044,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         readOnly,
         isTurnActive,
         baseRenderModel.turnTiming.runningStartedAt,
+        baseRenderModel.turnTiming.runningAwaitingFirstResponse,
         bottomTurnFooterHost,
         streamRenderStrategy,
         supportsAgentForkContextCursor,
