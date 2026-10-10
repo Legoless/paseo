@@ -2052,7 +2052,15 @@ export class ACPAgentSession implements AgentSession, ACPClient {
         return;
       })
       .catch((error) => {
-        if (this.closed || this.activeForegroundTurnId !== turnId) return;
+        // A turn replaced by a newer message resolves late; its failure would
+        // otherwise vanish without a trace, so at least keep it in the log.
+        if (this.closed || this.activeForegroundTurnId !== turnId) {
+          this.logger.debug(
+            { turnId, closed: this.closed, err: error },
+            "discarding late prompt failure from a replaced turn",
+          );
+          return;
+        }
         const summary = summarizeACPRequestError(error);
         this.finishTurn({
           type: "turn_failed",

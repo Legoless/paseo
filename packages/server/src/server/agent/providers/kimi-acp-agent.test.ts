@@ -304,6 +304,32 @@ describe("Kimi ACP native prompt failures", () => {
     });
   });
 
+  test("reclassifies a usage-limit 403 as quota instead of Kimi's misleading auth name", async () => {
+    const quotaError = {
+      code: "internal",
+      message:
+        "403 You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends.",
+      name: "Authentication required",
+    };
+    await withKimiJournal(async ({ context, journalPath }) => {
+      await writeFile(
+        journalPath,
+        `${JSON.stringify({
+          type: "turn.ended",
+          time: context.startedAt,
+          turnId: "native-turn",
+          reason: "failed",
+          error: quotaError,
+        })}\n`,
+      );
+      await expect(validateKimiPromptResponse(context)).rejects.toMatchObject({
+        name: "KimiNativeTurnError",
+        message: quotaError.message,
+        code: "quota",
+      });
+    });
+  });
+
   test.each(["completed", "cancelled", "blocked"])(
     "does not replay a previous failure after the current turn is %s",
     async (reason) => {
