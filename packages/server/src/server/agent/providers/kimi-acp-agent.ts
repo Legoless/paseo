@@ -34,11 +34,17 @@ class KimiNativeTurnError extends Error {
 
   constructor(error: z.infer<typeof KimiTurnEndSchema>["error"]) {
     const message = error?.message?.trim() || "Kimi failed to complete the turn";
-    super(error?.name ? `${error.name}: ${message}` : message);
+    const name = error?.name?.trim();
+    // Kimi labels its 403 usage-limit failures "Authentication required" in the
+    // journal; relaying that name sends the user to re-login, which never helps.
+    const quota = KIMI_QUOTA_MESSAGE.test(message);
+    super(quota || !name ? message : `${name}: ${message}`);
     this.name = "KimiNativeTurnError";
-    this.code = error?.code;
+    this.code = quota ? "quota" : error?.code;
   }
 }
+
+const KIMI_QUOTA_MESSAGE = /usage limit|\bquota\b|rate limit/i;
 
 // COMPAT(kimiSilentTurnFailure): added in v0.9.1, remove after 2027-01-03 once Kimi
 // reports non-auth failures through ACP instead of mapping them to end_turn.
