@@ -9,6 +9,7 @@ import {
   isGrokBusyScreen,
   isIdleAgentScreen,
   isIdlePromptLine,
+  isKimiBusyScreen,
   isNeedsInputScreen,
   isSpendLimitScreen,
   KNOWN_AGENT_NAMES,
@@ -51,6 +52,13 @@ describe("detectAgentFromCommand", () => {
     expect(detectAgentFromCommand("amp")).toBe("amp");
   });
 
+  it("detects Kimi commands", () => {
+    expect(detectAgentFromCommand("kimi")).toBe("kimi");
+    expect(detectAgentFromCommand("kimi --yolo")).toBe("kimi");
+    expect(detectAgentFromCommand("/Users/test/.kimi-code/bin/kimi")).toBe("kimi");
+    expect(detectAgentFromCommand("kimi-code")).toBe("kimi");
+  });
+
   it("returns null for non-agent commands", () => {
     expect(detectAgentFromCommand("zsh")).toBeNull();
     expect(detectAgentFromCommand("bash")).toBeNull();
@@ -90,6 +98,12 @@ describe("detectAgentFromOutput", () => {
     expect(detectAgentFromOutput("Welcome to the Antigravity CLI")).toBe("antigravity");
     expect(detectAgentFromOutput("OpenCode v1.18.31")).toBe("opencode");
     expect(detectAgentFromOutput("  Cursor Agent\r\n  v2026.09.18-9a7762b")).toBe("cursor");
+    expect(detectAgentFromOutput("▐█▛█▛█▌  Welcome to Kimi Code!")).toBe("kimi");
+    expect(
+      detectAgentFromOutput(
+        "Ask When Needed  K3 thinking: max  ~/proj  main  context: 29% (290k/1M)",
+      ),
+    ).toBe("kimi");
   });
 
   it("returns null for ordinary output", () => {
@@ -274,6 +288,17 @@ describe("isIdlePromptLine", () => {
     expect(isIdlePromptLine(">", "antigravity")).toBe(true);
   });
 
+  it("detects Kimi's boxed composer (│ > …)", () => {
+    expect(isIdlePromptLine("│ >", "kimi")).toBe(true);
+    expect(isIdlePromptLine("│ > draft text", "kimi")).toBe(true);
+    expect(isIdlePromptLine("│ >", "kimi")).toBe(true);
+    // Approval options and bare prompts are not the composer.
+    expect(isIdlePromptLine("> Allow once", "kimi")).toBe(false);
+    expect(isIdlePromptLine(">", "kimi")).toBe(false);
+    expect(isIdlePromptLine("", "kimi")).toBe(false);
+    expect(isIdlePromptLine("still working…", "kimi")).toBe(false);
+  });
+
   it("does not match prose ending in a prompt character", () => {
     expect(isIdlePromptLine("const tag = <Widget>", "antigravity")).toBe(false);
     expect(isIdlePromptLine("still working…", "claude")).toBe(false);
@@ -294,6 +319,38 @@ describe("isIdleAgentScreen", () => {
         "cursor",
       ),
     ).toBe(true);
+  });
+
+  it("keeps Kimi working while its status bar shows a running background task", () => {
+    const composer = ["╭──────╮", "│ >", "╰──────╯"];
+    const running = [
+      ...composer,
+      "Ask When Needed  K3 thinking: max  [1 task running]  ~/proj  main",
+    ];
+    const runningWrapped = [
+      ...composer,
+      "Ask When Needed  K3 thinking: max  [2 tasks running]",
+      "context: 29% (290k/1M)",
+    ];
+    const settled = [...composer, "Ask When Needed  K3 thinking: max  ~/proj  main"];
+
+    expect(isKimiBusyScreen(running)).toBe(true);
+    expect(isKimiBusyScreen(runningWrapped)).toBe(true);
+    expect(isIdleAgentScreen(running, "│ > ", "kimi")).toBe(false);
+    expect(isKimiBusyScreen(settled)).toBe(false);
+    expect(isIdleAgentScreen(settled, "│ > ", "kimi")).toBe(true);
+  });
+
+  it("ignores a Kimi reply quoting the task badge outside the status bar", () => {
+    expect(
+      isKimiBusyScreen([
+        "● The status bar showed [1 task running] while it worked.",
+        "╭──────╮",
+        "│ >",
+        "╰──────╯",
+        "Ask When Needed  K3 thinking: max  ~/proj  main",
+      ]),
+    ).toBe(false);
   });
 
   it("does not treat Cursor's submitted composer as idle", () => {
@@ -670,6 +727,130 @@ describe("PtyActivityScanner — full lifecycle", () => {
       state: "idle",
       attentionReason: "finished",
     });
+  });
+
+  it("tracks Kimi Code lifecycle from launch to finished turn", () => {
+    const tracker = new TerminalActivityTracker();
+    let screenLines: string[] = [];
+    let cursorLine = "";
+
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screenLines,
+      readCursorLine: () => cursorLine,
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("kimi");
+    expect(tracker.getSnapshot().state).toBeNull();
+
+    screenLines = [
+      "▐█▛█▛█▌  Welcome to Kimi Code!",
+      "╭──────╮",
+      "│ >",
+      "╰──────╯",
+      "Ask When Needed  K3 thinking: max  ~/proj  main  context: 0% (0/1M)",
+    ];
+    cursorLine = "│ > ";
+    scanner.feedOutput("Welcome to Kimi Code!\n");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot().state).toBeNull();
+
+    scanner.feedInput("run sleep 25");
+    scanner.feedInput("\r");
+    expect(tracker.getSnapshot().state).toBe("working");
+
+    // The turn's braille spinner repaints while the cursor is outside the composer.
+    cursorLine = "";
+    screenLines = ["✨ run sleep 25", "⠹ thinking…", ""];
+    scanner.feedOutput("⠹ thinking…\n");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot().state).toBe("working");
+
+    // An approval dialog waits on the user.
+    screenLines = [
+      "Allow Kimi Code to run Bash: rm -rf /tmp/probe",
+      "> Allow once",
+      "  Always allow",
+      "  Deny",
+    ];
+    cursorLine = "> Allow once";
+    scanner.feedOutput("Allow Kimi Code to run Bash\n");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+
+    scanner.feedInput("\r");
+    expect(tracker.getSnapshot().state).toBe("working");
+
+    // The turn ends but a background task keeps the status-bar badge: still working.
+    screenLines = [
+      "● Command ran.",
+      "╭──────╮",
+      "│ >",
+      "╰──────╯",
+      "Ask When Needed  K3 thinking: max  [1 task running]  ~/proj  main",
+    ];
+    cursorLine = "│ > ";
+    scanner.feedOutput("● Command ran.\n");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    // The task finishes, the badge goes away, and the settled composer finishes green.
+    screenLines = [
+      "● Command ran.",
+      "╭──────╮",
+      "│ >",
+      "╰──────╯",
+      "Ask When Needed  K3 thinking: max  ~/proj  main  context: 3% (31k/1M)",
+    ];
+    scanner.feedOutput(" ");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+
+    scanner.handleCommandFinished();
+    expect(tracker.getSnapshot().state).toBeNull();
+  });
+
+  it("paints a Kimi quota screen red", () => {
+    const tracker = new TerminalActivityTracker();
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => [
+        "● Model request failed",
+        "  Model rate limit reached",
+        "  https://www.kimi.com/membership/subscription?tab=quota",
+        "│ >",
+      ],
+      readCursorLine: () => "│ > ",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("kimi");
+    scanner.feedInput("\r");
+    scanner.feedOutput("Model rate limit reached\n");
+    vi.advanceTimersByTime(500);
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "quota" });
+  });
+
+  it("starts working for kimi -p without waiting for Enter", () => {
+    const tracker = new TerminalActivityTracker();
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => [],
+      readCursorLine: () => "",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("kimi -p summarize this repo");
+
+    expect(tracker.getSnapshot().state).toBe("working");
   });
 
   it("finishes a Codex turn at its placeholder composer", () => {

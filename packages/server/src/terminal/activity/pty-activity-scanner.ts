@@ -32,6 +32,7 @@ export const KNOWN_AGENT_NAMES = [
   "cursor",
   "gemini",
   "amp",
+  "kimi",
 ] as const;
 
 export type KnownAgentName = (typeof KNOWN_AGENT_NAMES)[number];
@@ -118,6 +119,10 @@ const IDLE_PROMPT_PATTERNS = {
   cursor: [],
   gemini: [/^>$/],
   amp: [/^>$/],
+  // Kimi's composer is a bordered box, so the cursor line reads `│ > draft`; while a
+  // turn runs the cursor leaves the box, which keeps this from lighting mid-turn. The
+  // border is required: approval options start with "> " too ("│ >" vs "> Allow once").
+  kimi: [/^│\s*>(?:\s|$)/],
 } satisfies Record<KnownAgentName, readonly RegExp[]>;
 
 export function isIdlePromptLine(line: string, agent: KnownAgentName): boolean {
@@ -214,12 +219,25 @@ export function isGrokBusyScreen(lines: string[]): boolean {
   return false;
 }
 
+// Kimi's composer comes back when the turn ends, but work that outlives the turn keeps
+// a "[1 task running]" badge in the status bar. The badge shares the row with the
+// model/context segments ("K3 thinking: max", "context: 29%"), so require one of them
+// on the same line — a reply quoting the badge text does not keep the pane working.
+const KIMI_RUNNING_TASKS = /\[\d+ tasks? running\]/;
+const KIMI_STATUS_BAR_SEGMENT = /(?:\bthinking:\s*\w+|\bcontext:\s*\d{1,3}%)/;
+
+export function isKimiBusyScreen(lines: string[]): boolean {
+  const tail = lines.slice(-6).map((line) => stripAnsi(line).trim());
+  return tail.some((line) => KIMI_RUNNING_TASKS.test(line) && KIMI_STATUS_BAR_SEGMENT.test(line));
+}
+
 // Agents that keep their idle-looking composer up while work still runs.
 function isAgentBusyScreen(lines: string[], agent: KnownAgentName): boolean {
   if (agent === "antigravity") return isAntigravityBusyScreen(lines);
   if (agent === "codex") return isCodexBusyScreen(lines);
   if (agent === "claude") return isClaudeBusyScreen(lines);
   if (agent === "grok") return isGrokBusyScreen(lines);
+  if (agent === "kimi") return isKimiBusyScreen(lines);
   return false;
 }
 
@@ -260,6 +278,7 @@ const AGENT_EXECUTABLES: readonly AgentExecutable[] = [
   { agent: "cursor", names: ["cursor", "cursor-agent"] },
   { agent: "gemini", names: ["gemini"] },
   { agent: "amp", names: ["amp"] },
+  { agent: "kimi", names: ["kimi", "kimi-code"] },
 ];
 
 const AGENT_DISPLAY_TITLES: readonly { agent: KnownAgentName; pattern: RegExp }[] = [
@@ -392,6 +411,10 @@ export function detectAgentFromOutput(chunk: string): KnownAgentName | null {
   }
   if (/\bopencode\s+v\d/i.test(stripped)) return "opencode";
   if (/\bcursor agent\s+v\d{4}\./i.test(stripped.replace(/\r?\n/g, " "))) return "cursor";
+  if (/\bwelcome to kimi code\b/i.test(stripped)) return "kimi";
+  // The welcome banner is not reprinted on resume/restore; the status bar's context
+  // meter ("context: 29% (290k/1M)") is the stable marker on those screens.
+  if (/\bcontext:\s*\d{1,3}%\s*\(\d[\d.,]*[km]?\/\d+[km]\)/i.test(stripped)) return "kimi";
 
   return null;
 }
