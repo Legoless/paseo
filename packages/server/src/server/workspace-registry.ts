@@ -117,6 +117,8 @@ const PersistedWorkspaceRecordSchema = z.preprocess(
       .transform((value) => value ?? null),
     labels: z.array(z.string()).optional(),
     untrustedSource: UntrustedWorkspaceSourceSchema.optional(),
+    // Public discovery visibility. Contents retain their ordinary lifecycle.
+    background: z.boolean().optional().default(false),
   }),
 );
 
@@ -694,9 +696,12 @@ export function createPersistedWorkspaceRecord(input: {
   pinnedAt?: string | null;
   labels?: string[];
   untrustedSource?: UntrustedWorkspaceSource;
+  background?: boolean;
 }): PersistedWorkspaceRecord {
+  const { background, ...rest } = input;
   return PersistedWorkspaceRecordSchema.parse({
-    ...input,
+    ...rest,
+    background: background ?? false,
     title: input.title ?? null,
     archivedAt: input.archivedAt ?? null,
     autoArchivedChangeRequestUrl: input.autoArchivedChangeRequestUrl ?? null,

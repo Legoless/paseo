@@ -8,10 +8,10 @@ import { projectTimelineRows } from "./timeline-projection.js";
 const DEFAULT_MAX_ITEMS = 0;
 const MAX_TOOL_INPUT_CHARS = 400;
 const MAX_TOOL_SUMMARY_CHARS = 200;
-// Carried chat history rides inside the new agent's first prompt. Providers reject oversized
-// prompts outright (Codex caps input at 1 MiB), and a failed first prompt strands the draft,
-// so the history keeps its newest entries within this budget (~50k tokens).
-export const MAX_FORK_CONTEXT_BODY_CHARS = 200_000;
+export const MAX_FORK_CONTEXT_BODY_CHARS = 100_000;
+const MAX_FORK_CONTEXT_CHARS = MAX_FORK_CONTEXT_BODY_CHARS;
+const MAX_FORK_METADATA_CHARS = 1_000;
+const FORK_HISTORY_OMITTED = "[Earlier chat history omitted]\n";
 
 interface ActivityCuratorOptions {
   maxItems?: number;
@@ -26,36 +26,20 @@ interface ActivityEntry {
 
 type TextAgentAttachment = Extract<AgentAttachment, { type: "text" }>;
 
-function appendText(buffer: string, text: string): string {
-  const normalized = text.trim();
-  if (!normalized) {
-    return buffer;
-  }
-  if (!buffer) {
-    return normalized;
-  }
-  return `${buffer}\n${normalized}`;
-}
-
 function activityEntry(text: string): ActivityEntry {
   return { text };
 }
 
-function flushBuffers(
+function appendTextEntry(
   entries: ActivityEntry[],
-  buffers: { message: string; thought: string },
+  item: Extract<AgentTimelineItem, { type: "assistant_message" | "reasoning" }>,
   options?: ActivityCuratorOptions,
 ) {
-  if (buffers.message.trim()) {
-    const text = buffers.message.trim();
-    entries.push(activityEntry(options?.labelAssistantMessages ? `[Assistant] ${text}` : text));
-  }
-  if (buffers.thought.trim()) {
-    const text = buffers.thought.trim();
-    entries.push(activityEntry(`[Thought] ${text}`));
-  }
-  buffers.message = "";
-  buffers.thought = "";
+  const text = item.text.trim();
+  if (!text) return;
+  let prefix = options?.labelAssistantMessages ? "[Assistant] " : "";
+  if (item.type === "reasoning") prefix = "[Thought] ";
+  entries.push(activityEntry(`${prefix}${text}`));
 }
 
 function formatToolInputJson(input: unknown): string | null {
@@ -148,7 +132,6 @@ function curateProjectedActivityEntries(
   const recentItems = maxItems > 0 && items.length > maxItems ? items.slice(-maxItems) : items;
 
   const entries: ActivityEntry[] = [];
-  const buffers = { message: "", thought: "" };
 
   for (const item of recentItems) {
     if (!shouldIncludeItem(item, options)) {
@@ -157,17 +140,13 @@ function curateProjectedActivityEntries(
 
     switch (item.type) {
       case "user_message":
-        flushBuffers(entries, buffers, options);
         entries.push(activityEntry(`[User] ${item.text.trim()}`));
         break;
       case "assistant_message":
-        buffers.message = appendText(buffers.message, item.text);
-        break;
       case "reasoning":
-        buffers.thought = appendText(buffers.thought, item.text);
+        appendTextEntry(entries, item, options);
         break;
       case "tool_call": {
-        flushBuffers(entries, buffers, options);
         entries.push(formatToolCallEntry(item, options));
         if (item.detail.type === "sub_agent" && item.detail.log.trim()) {
           entries.push(activityEntry(item.detail.log.trim()));
@@ -175,7 +154,6 @@ function curateProjectedActivityEntries(
         break;
       }
       case "todo":
-        flushBuffers(entries, buffers, options);
         entries.push(activityEntry("[Tasks]"));
         for (const entry of item.items) {
           const checkbox = entry.completed ? "[x]" : "[ ]";
@@ -184,17 +162,13 @@ function curateProjectedActivityEntries(
         }
         break;
       case "error":
-        flushBuffers(entries, buffers, options);
         entries.push(activityEntry(`[Error] ${item.message}`));
         break;
       case "compaction":
-        flushBuffers(entries, buffers, options);
         entries.push(activityEntry("[Compacted]"));
         break;
     }
   }
-
-  flushBuffers(entries, buffers, options);
 
   return entries;
 }
@@ -280,33 +254,7 @@ function selectForkContextRows(input: {
 
 function trimContextMetadata(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
-}
-
-/** Keeps the newest entries that fit `budget` characters; older ones collapse into one notice. */
-function joinEntriesWithinBudget(entries: readonly ActivityEntry[], budget: number): string {
-  const kept: string[] = [];
-  let used = 0;
-  let index = entries.length - 1;
-  for (; index >= 0; index -= 1) {
-    const text = entries[index].text;
-    const cost = text.length + (kept.length > 0 ? 1 : 0);
-    if (used + cost > budget) break;
-    kept.push(text);
-    used += cost;
-  }
-  if (index >= 0 && kept.length === 0) {
-    // The newest entry alone is over budget. Its tail holds the latest state.
-    kept.push(`...${entries[index].text.slice(-(budget - 3))}`);
-    index -= 1;
-  }
-  kept.reverse();
-  const omitted = index + 1;
-  if (omitted > 0) {
-    const noun = omitted === 1 ? "entry" : "entries";
-    kept.unshift(`[${omitted} earlier ${noun} omitted to fit the context limit]`);
-  }
-  return kept.join("\n");
+  return trimmed ? trimmed.slice(0, MAX_FORK_METADATA_CHARS) : null;
 }
 
 function buildForkContextText(input: {
@@ -324,6 +272,41 @@ function buildForkContextText(input: {
     header.push(`Source directory: ${cwd}`);
   }
   return `<chat-history-summary>\n${header.join("\n")}\n\n${input.body}\n</chat-history-summary>`;
+}
+
+function fitForkContextEntries(entries: ActivityEntry[], budget: number): string {
+  const length = entries.reduce((total, entry) => total + entry.text.length + 1, -1);
+  if (length <= budget) return entries.map((entry) => entry.text).join("\n");
+
+  const prefixFor = (omitted: number) => {
+    const countNotice =
+      omitted > 0
+        ? `[${omitted} earlier ${omitted === 1 ? "entry" : "entries"} omitted to fit the context limit]\n`
+        : "";
+    return FORK_HISTORY_OMITTED + countNotice;
+  };
+  const selected: string[] = [];
+  let used = 0;
+  let omitted = entries.length;
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const text = entries[index]!.text;
+    const size = text.length + (selected.length > 0 ? 1 : 0);
+    const remaining = budget - used - prefixFor(index).length;
+    if (size > remaining) {
+      if (selected.length === 0) {
+        const marker = "\n[Message truncated]\n";
+        const available = remaining - marker.length;
+        const head = Math.ceil(available / 2);
+        selected.push(text.slice(0, head) + marker + text.slice(-(available - head)));
+        omitted = index;
+      }
+      break;
+    }
+    selected.push(text);
+    used += size;
+    omitted = index;
+  }
+  return prefixFor(omitted) + selected.toReversed().join("\n");
 }
 
 export function buildAgentForkContextAttachment(input: {
@@ -349,10 +332,10 @@ export function buildAgentForkContextAttachment(input: {
     includeKinds: ["user_message", "assistant_message", "tool_call"],
     includeExternalToolInput: false,
   });
+  const metadata = { agentTitle: input.agentTitle, cwd: input.cwd };
+  const budget = MAX_FORK_CONTEXT_CHARS - buildForkContextText({ body: "", ...metadata }).length;
   const body =
-    entries.length > 0
-      ? joinEntriesWithinBudget(entries, MAX_FORK_CONTEXT_BODY_CHARS)
-      : "No chat history to display.";
+    entries.length > 0 ? fitForkContextEntries(entries, budget) : "No chat history to display.";
   return {
     attachment: {
       type: "text",

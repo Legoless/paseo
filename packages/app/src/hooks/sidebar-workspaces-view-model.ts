@@ -35,6 +35,7 @@ export interface SidebarWorkspacePlacement {
   workspaceDirectory?: string;
   projectKind: WorkspaceStructureProject["projectKind"];
   workspaceKind: WorkspaceDescriptor["workspaceKind"];
+  background?: boolean;
   name: string;
 }
 
@@ -178,6 +179,7 @@ export function createSidebarWorkspaceEntry(input: {
     projectCount: input.workspace.members.length,
     projectKind: member?.projectKind ?? "unknown",
     workspaceKind: archiveRisk.workspaceKind,
+    background: input.workspace.background,
     name: input.workspace.name,
     title: input.workspace.title ?? null,
     pinnedAt: input.workspace.pinnedAt,

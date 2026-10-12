@@ -2,7 +2,7 @@ import React, { useCallback, useMemo } from "react";
 import { View } from "react-native";
 import { useRouter, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { Ellipsis, Globe, Import as ImportIcon, Settings, SquarePen } from "lucide-react-native";
+import { Ellipsis, Globe, Import as ImportIcon, Settings } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { TerminalProfile } from "@getpaseo/protocol/messages";
 import {
@@ -17,6 +17,7 @@ import {
   extraMutedIconColorMapping,
   iconButtonChromeGlyphSize,
   iconButtonChromeStyle,
+  useIconButtonChromeStyle,
 } from "@/components/ui/icon-button-chrome";
 import { TerminalProfileIcon } from "@/components/terminal-profile-icon";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
@@ -31,16 +32,13 @@ import { usePaneLayoutMenuPages, type PaneLayoutTarget } from "@/workspace-layou
 import type { Theme } from "@/styles/theme";
 
 const ThemedEllipsis = withUnistyles(Ellipsis);
-const ThemedSquarePen = withUnistyles(SquarePen);
 const ThemedGlobe = withUnistyles(Globe);
 const ThemedImport = withUnistyles(ImportIcon);
 const ThemedSettings = withUnistyles(Settings);
 
 const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
-const MENU_NEW_AGENT_ICON = <ThemedSquarePen size={16} uniProps={mutedColorMapping} />;
 const MENU_NEW_BROWSER_ICON = <ThemedGlobe size={16} uniProps={mutedColorMapping} />;
-const MENU_NEW_TERMINAL_ICON = <TerminalProfileIcon iconKey={undefined} size={16} />;
 const MENU_IMPORT_ICON = <ThemedImport size={16} uniProps={mutedColorMapping} />;
 const MENU_SETTINGS_ICON = <ThemedSettings size={16} uniProps={mutedColorMapping} />;
 function WorkspaceHeaderMenuTriggerIcon() {
@@ -232,28 +230,25 @@ export interface WorkspaceHeaderMenuMobileProps extends WorkspaceHeaderWorkspace
   normalizedServerId: string;
   showCreateBrowserTab: boolean;
   createTerminalDisabled: boolean;
-  onCreateDraftTab: () => void;
-  onCreateTerminal: () => void;
   onCreateTerminalWithProfile: (profile: TerminalProfile) => void;
   onCreateBrowser: () => void;
 }
 
 /**
- * Compact layouts have no tab strip to launch from, so new tabs live here alongside the workspace
- * actions.
+ * Compact layouts have no tab strip. New agent and New terminal sit in the tab switcher's footer;
+ * the rarer launches stay here alongside the workspace actions.
  */
 export function WorkspaceHeaderMenuMobile({
   normalizedServerId,
   showCreateBrowserTab,
   createTerminalDisabled,
-  onCreateDraftTab,
-  onCreateTerminal,
   onCreateTerminalWithProfile,
   onCreateBrowser,
   ...workspaceActions
 }: WorkspaceHeaderMenuMobileProps) {
   const { t } = useTranslation();
   const router = useRouter();
+  const triggerStyle = useIconButtonChromeStyle({ size: "large" });
   const { config } = useDaemonConfig(normalizedServerId);
   const profiles = useMemo(
     () => resolveTerminalProfiles(config?.terminalProfiles),
@@ -269,7 +264,7 @@ export function WorkspaceHeaderMenuMobile({
     <DropdownMenu compactMode="sheet">
       <DropdownMenuTrigger
         testID="workspace-header-menu-trigger"
-        style={workspaceHeaderMenuButtonStyle}
+        style={triggerStyle}
         hitSlop={COMPACT_HEADER_BUTTON_HIT_SLOP}
         accessibilityRole="button"
         accessibilityLabel={t("workspace.header.actions.workspaceActions")}
@@ -283,13 +278,6 @@ export function WorkspaceHeaderMenuMobile({
         testID="workspace-header-menu"
         sheetTitle={t("workspace.header.actions.workspaceActions")}
       >
-        <DropdownMenuItem
-          testID="workspace-header-new-agent"
-          leading={MENU_NEW_AGENT_ICON}
-          onSelect={onCreateDraftTab}
-        >
-          {t("workspace.header.actions.newAgent")}
-        </DropdownMenuItem>
         {showCreateBrowserTab ? (
           <DropdownMenuItem
             testID="workspace-header-new-browser"
@@ -302,14 +290,6 @@ export function WorkspaceHeaderMenuMobile({
         <WorkspaceHeaderWorkspaceActionItems {...workspaceActions} />
         <DropdownMenuSeparator />
         <DropdownMenuLabel>{t("workspace.tabs.actions.terminalProfilesMenu")}</DropdownMenuLabel>
-        <DropdownMenuItem
-          testID="workspace-header-new-terminal"
-          leading={MENU_NEW_TERMINAL_ICON}
-          disabled={createTerminalDisabled}
-          onSelect={onCreateTerminal}
-        >
-          {t("workspace.header.actions.newTerminal")}
-        </DropdownMenuItem>
         {profiles.map((profile) => (
           <HeaderMenuProfileItem
             key={profile.id}

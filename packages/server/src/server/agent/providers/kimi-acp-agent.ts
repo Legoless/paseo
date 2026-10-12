@@ -122,7 +122,6 @@ interface KimiACPAgentClientOptions {
   env?: Record<string, string>;
   providerId?: string;
   label?: string;
-  providerParams?: unknown;
 }
 
 // Kimi exposes thinking options only for the selected model. Keep its model-switching
@@ -195,7 +194,6 @@ export class KimiACPAgentClient extends GenericACPAgentClient {
       env: options.env,
       providerId: options.providerId,
       label: options.label,
-      providerParams: options.providerParams,
       catalogModelResolver: resolveKimiCatalogModels,
       promptResponseValidator: validateKimiPromptResponse,
     });

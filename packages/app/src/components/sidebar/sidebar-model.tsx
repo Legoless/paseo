@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 import {
   useSidebarWorkspacesList,
@@ -61,7 +62,9 @@ export function SidebarModelProvider({
   active?: boolean;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   const list = useSidebarWorkspacesList({ enabled: active });
+  const showBackground = useSidebarViewStore((state) => state.showBackground);
   const groupMode = useSidebarViewStore((state) => state.groupMode);
   const labelFilter = useSidebarViewStore((state) => state.labelFilter);
   const projectFilters = useSidebarViewStore((state) => state.projectFilters);
@@ -140,9 +143,13 @@ export function SidebarModelProvider({
       projectFilters: resolvedProjectFilters,
       projectViewKeysByWorkspaceKey: memberProjectViewKeysByWorkspaceKey,
     });
-    const filtered = filterWorkspacesByLabels({ workspaces: byProject, ...labelFilter });
+    const filtered = filterWorkspacesByLabels({
+      workspaces: byProject.filter((workspace) => showBackground || !workspace.background),
+      ...labelFilter,
+    });
     return new Map(filtered.map((workspace) => [workspace.workspaceKey, workspace]));
   }, [
+    showBackground,
     labelFilter,
     memberProjectViewKeysByWorkspaceKey,
     resolvedProjectFilters,
@@ -156,13 +163,14 @@ export function SidebarModelProvider({
   // the rows themselves don't need. Once one is active the workspace set narrows to what the
   // filtered entries cover.
   const visiblePlacements = useMemo(() => {
-    if (!hasActiveProjectFilter && !hasActiveLabelFilter) {
+    if (showBackground && !hasActiveProjectFilter && !hasActiveLabelFilter) {
       return list.workspacePlacements;
     }
     return list.workspacePlacements.filter((placement) =>
       visibleWorkspaceKeys.has(placement.workspaceKey),
     );
   }, [
+    showBackground,
     hasActiveLabelFilter,
     hasActiveProjectFilter,
     list.workspacePlacements,
@@ -187,6 +195,7 @@ export function SidebarModelProvider({
       groupMode,
       pinnedCollapsed,
       collapsedWorkspaceGroupKeys,
+      t,
     }),
     [
       collapsedWorkspaceGroupKeys,
@@ -199,6 +208,7 @@ export function SidebarModelProvider({
       pinnedWorkspaceOrder,
       topLevelWorkspaceOrder,
       filteredWorkspaceEntriesByKey,
+      t,
     ],
   );
   const projection = useMemo(() => buildSidebarProjection(projectionInput), [projectionInput]);

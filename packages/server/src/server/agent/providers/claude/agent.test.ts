@@ -424,6 +424,119 @@ describe("convertClaudeHistoryEntry", () => {
 // "interrupting message should produce coherent text without garbling from race condition"
 // in daemon.e2e.test.ts which exercises the full flow through the WebSocket API.
 
+describe("ClaudeAgentClient.fetchCatalog", () => {
+  const logger = createTestLogger();
+
+  test("returns models advertised by the native catalog", async () => {
+    const emptyConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "paseo-claude-models-empty-"));
+    try {
+      const client = new ClaudeAgentClient({
+        logger,
+        discoverModels: async () => [
+          {
+            value: "mythos",
+            resolvedModel: "claude-mythos-5-1",
+            displayName: "Mythos",
+            description: "",
+          },
+        ],
+        resolveBinary: async () => "/test/claude/bin",
+        resolveVersion: async () => "2.1.219",
+        runtimeSettings: { env: { CLAUDE_CONFIG_DIR: emptyConfigDir } },
+      });
+      const { models } = await client.fetchCatalog({
+        scope: "workspace",
+        cwd: "/tmp/claude-models",
+        force: false,
+      });
+
+      expect(models.map((m) => m.id)).toEqual(["mythos"]);
+      expect(models[0]?.aliases).toEqual(["claude-mythos-5-1"]);
+
+      for (const model of models) {
+        expect(model.provider).toBe("claude");
+        expect(model.label.length).toBeGreaterThan(0);
+      }
+
+      const defaultModel = models.find((m) => m.isDefault);
+      expect(defaultModel).toBeUndefined();
+    } finally {
+      await fs.rm(emptyConfigDir, { recursive: true, force: true });
+    }
+  });
+
+  test("preserves the catalog when Claude Code version detection fails", async () => {
+    const emptyConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "paseo-claude-models-empty-"));
+    try {
+      const client = new ClaudeAgentClient({
+        logger,
+        discoverModels: async () => [
+          {
+            value: "mythos",
+            resolvedModel: "claude-mythos-5-1",
+            displayName: "Mythos",
+            description: "",
+          },
+        ],
+        resolveVersion: async () => {
+          throw new Error("unrecognized version output");
+        },
+        runtimeSettings: { env: { CLAUDE_CONFIG_DIR: emptyConfigDir } },
+      });
+      const { models } = await client.fetchCatalog({
+        scope: "workspace",
+        cwd: "/tmp/claude-models",
+        force: false,
+      });
+
+      expect(models.map((model) => model.id)).toEqual(["mythos"]);
+    } finally {
+      await fs.rm(emptyConfigDir, { recursive: true, force: true });
+    }
+  });
+
+  test("exposes Ultra Code on xhigh-capable Claude models", async () => {
+    const emptyConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "paseo-claude-models-empty-"));
+    try {
+      const client = new ClaudeAgentClient({
+        logger,
+        discoverModels: async () => [
+          {
+            value: "mythos",
+            resolvedModel: "claude-mythos-5-1",
+            displayName: "Mythos",
+            description: "",
+            supportsEffort: true,
+            supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
+          },
+        ],
+        resolveBinary: async () => "/test/claude/bin",
+        resolveVersion: async () => "2.1.283",
+        runtimeSettings: { env: { CLAUDE_CONFIG_DIR: emptyConfigDir } },
+      });
+      const { models } = await client.fetchCatalog({
+        scope: "workspace",
+        cwd: "/tmp/claude-models",
+        force: false,
+      });
+      const getThinkingIds = (modelId: string) => {
+        return models.find((model) => model.id === modelId)?.thinkingOptions?.map(({ id }) => id);
+      };
+
+      expect(getThinkingIds("mythos")).toEqual([
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultracode",
+      ]);
+    } finally {
+      await fs.rm(emptyConfigDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("ClaudeAgentClient binary resolution", () => {
   const logger = createTestLogger();
 
@@ -755,6 +868,29 @@ describe("ClaudeAgentSession features", () => {
       sandbox: { enabled: true, failIfUnavailable: true },
     });
     expect(queryFactory.mock.calls[0]?.[0].options.allowedTools).not.toContain("mcp__hub__reply");
+    await session.close();
+  });
+
+  test("passes extra Claude Code CLI arguments to the SDK", async () => {
+    const { queryFactory, launches } = createQueryMock();
+    const client = new ClaudeAgentClient({
+      logger,
+      queryFactory,
+      resolveBinary: async () => "/test/claude/bin",
+    });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      providerOptions: {
+        extraArgs: { chrome: null, model: "x" },
+      },
+    });
+
+    await expect(session.startTurn("hello")).resolves.toEqual({
+      turnId: expect.stringMatching(/^foreground-turn-/),
+    });
+
+    expect(launches[0]?.options.extraArgs).toEqual({ chrome: null, model: "x" });
     await session.close();
   });
 
@@ -1251,11 +1387,40 @@ describe("ClaudeAgentSession features", () => {
 
     expect(queryFactory.mock.calls[0]?.[0].options).toMatchObject({
       effort: "xhigh",
-      thinking: { type: "adaptive" },
+      thinking: { type: "adaptive", display: "summarized" },
       settings: { ultracode: true },
     });
 
     await session.close();
+  });
+
+  test("disables Claude hooks for internal agents only", async () => {
+    const { queryFactory } = createQueryMock();
+    const client = new ClaudeAgentClient({
+      logger,
+      queryFactory,
+      resolveBinary: async () => "/test/claude/bin",
+    });
+    const internalSession = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      internal: true,
+    });
+    const userSession = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+    });
+
+    await internalSession.startTurn("hello");
+    await userSession.startTurn("hello");
+
+    expect(queryFactory.mock.calls[0]?.[0].options.settings).toMatchObject({
+      disableAllHooks: true,
+    });
+    expect(queryFactory.mock.calls[1]?.[0].options.settings).toBeUndefined();
+
+    await internalSession.close();
+    await userSession.close();
   });
 
   test("turns Claude thinking off without retaining an effort level", async () => {
@@ -1477,6 +1642,26 @@ describe("ClaudeAgentSession features", () => {
 
     await expect(session.setThinkingOption?.("off")).rejects.toThrow(
       "Thinking option 'off' is not available for model 'claude-fable-5'",
+    );
+
+    await session.close();
+  });
+
+  test("rejects disabled thinking on Sonnet 5.5, which only runs with adaptive thinking", async () => {
+    const { queryFactory } = createQueryMock();
+    const client = new ClaudeAgentClient({
+      logger,
+      queryFactory,
+      resolveBinary: async () => "/test/claude/bin",
+    });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: "claude-sonnet-5-5",
+    });
+
+    await expect(session.setThinkingOption?.("off")).rejects.toThrow(
+      "Thinking option 'off' is not available for model 'claude-sonnet-5-5'",
     );
 
     await session.close();
@@ -3262,6 +3447,44 @@ describe("ClaudeAgentSession context window usage", () => {
     }
   });
 
+  test("reports the plan mode Claude enters on its own with EnterPlanMode", async () => {
+    // Claude Code announces a mode it switched to itself as a status message
+    // carrying the new permissionMode, right after the EnterPlanMode tool call.
+    const client = new ClaudeAgentClient({
+      logger,
+      queryFactory: createQueryFactoryForTurns([
+        [
+          { ...createInitMessage(), permissionMode: "acceptEdits" },
+          {
+            type: "system",
+            subtype: "status",
+            status: null,
+            permissionMode: "plan",
+            session_id: "session-1",
+          },
+          createSuccessResult(),
+        ],
+      ]),
+      resolveBinary: async () => "/test/claude/bin",
+    });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      modeId: "acceptEdits",
+    });
+
+    try {
+      const events = await collectStreamEvents(session, "enter plan mode");
+
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: "mode_changed", currentModeId: "plan" }),
+      );
+      expect(await session.getCurrentMode()).toBe("plan");
+    } finally {
+      await session.close();
+    }
+  });
+
   test("a compaction abandoned mid-turn does not suppress the next compaction marker", async () => {
     // The first turn starts compacting and then ends without ever reaching a
     // compact_boundary, so the marker it opened is never resolved.
@@ -3315,10 +3538,15 @@ describe("ClaudeAgentSession context window usage", () => {
   });
 
   test("a compaction abandoned in an autonomous turn does not suppress the next marker", async () => {
-    // Trailing output after the foreground result opens an autonomous turn, which starts
-    // compacting and is then ended by the next foreground turn, never reaching a boundary.
+    // Claude starts a turn of its own after the foreground result, which starts compacting and is
+    // then ended by the next foreground turn, never reaching a boundary.
     const session = await createSessionForTurns([
-      [createSuccessResult(), createMessageStartEvent(), createCompactingStatus()],
+      [
+        createSuccessResult(),
+        createInitMessage(),
+        createMessageStartEvent(),
+        createCompactingStatus(),
+      ],
       [createCompactingStatus(), createSuccessResult()],
     ]);
 
@@ -3528,10 +3756,10 @@ describe("ClaudeAgentSession context window usage", () => {
   });
 
   test("fails an autonomous turn that ends on an API error", async () => {
-    // A background task notification wakes Claude after the foreground result; that turn hits
-    // the same limit.
+    // A background task wakes Claude after the foreground result. The main session announces
+    // its new turn with system/init before the API error, just like a foreground turn.
     const session = await createSessionForTurns([
-      [createInitMessage(), createSuccessResult(), ...createApiErrorTurn()],
+      [createInitMessage(), createSuccessResult(), createInitMessage(), ...createApiErrorTurn()],
     ]);
 
     try {

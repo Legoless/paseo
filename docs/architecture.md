@@ -351,6 +351,10 @@ attempt: reusing it replays a failed prompt, and reusing it with edited content 
 `*_request_key_conflict`. Draft retries take a fresh key (`buildDraftCreationKey`) and
 archive the agent the failed prompt left behind.
 
+Agent registration commits creation. Rejecting the first prompt is a turn error on that
+agent; reporting creation failure leaves an orphaned agent and invites another Create.
+Receipt replay must not resend the prompt.
+
 `packages/client/src/creation/` owns capability selection and legacy orchestration.
 Callers always pass the initial prompt to agent creation. On an older host, the client
 adapts keyed creation to the legacy create/send sequence; it cannot continue that

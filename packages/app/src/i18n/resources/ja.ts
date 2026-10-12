@@ -27,9 +27,11 @@ export const ja = {
     total: "{{total}} 件の一致",
   },
   common: {
+    bottomSheetBackdrop: "ボトムシートの背景",
     back: "戻る",
     loading: "読み込み中...",
     actions: {
+      save: "保存",
       back: "戻る",
       cancel: "キャンセル",
       confirm: "確認",
@@ -394,6 +396,9 @@ export const ja = {
         completed: "完了",
       },
     },
+    turnFooter: {
+      workedFor: "作業時間 {{duration}}",
+    },
     compaction: {
       loading: "コンテキストを圧縮中...",
       auto: "コンテキストが自動的に圧縮されました",
@@ -452,7 +457,9 @@ export const ja = {
       recovery: {
         archivedTitle: "ワークスペースは閉じられています",
         restoreDescription:
-          "{{workspaceName}} は閉じられ、worktree が削除されました。ブランチ {{branch}} を復元して再度開きます。",
+          "{{workspaceName}} を復元してエージェントに戻ります。worktree ではブランチ {{branch}} を使用します。",
+        restoreWithoutBranchDescription:
+          "{{workspaceName}} を復元してエージェントに戻ります。保存されたベース、またはリポジトリのデフォルトブランチから新しいブランチを作成します。",
         unarchiveDescription: "{{workspaceName}} は閉じられています。再度開いてください。",
         restoreAction: "復元",
         unarchiveAction: "再度開く",
@@ -1032,6 +1039,47 @@ export const ja = {
         actions: {
           viewPullRequest: "表示",
           openOn: "{{brand}}で開く",
+          addToChat: "チャットに追加",
+          addAllToChat: "すべてチャットに追加",
+          addingToChat: "追加中...",
+        },
+        checksOverview: {
+          headline: {
+            actionRequired: "対応が必要なチェックがあります",
+            failure: "失敗したチェックがあります",
+            pending: "完了していないチェックがあります",
+            success: "すべてのチェックに合格しました",
+            none: "チェックなし",
+          },
+          count: {
+            actionRequired: "{{count}} 件要対応",
+            warning: "{{count}} 件警告",
+            failure: "{{count}} 件失敗",
+            pending: "{{count}} 件実行中",
+            manual: "{{count}} 件手動",
+            success: "{{count}} 件成功",
+            ignored: "{{count}} 件スキップ",
+          },
+          detailOne: "チェック: {{parts}}",
+          detailMany: "チェック: {{parts}}",
+          groupOne: {
+            actionRequired: "要対応のチェック {{count}} 件",
+            warning: "警告のチェック {{count}} 件",
+            failure: "失敗したチェック {{count}} 件",
+            pending: "実行中のチェック {{count}} 件",
+            manual: "手動のチェック {{count}} 件",
+            success: "成功したチェック {{count}} 件",
+            ignored: "スキップされたチェック {{count}} 件",
+          },
+          groupMany: {
+            actionRequired: "要対応のチェック {{count}} 件",
+            warning: "警告のチェック {{count}} 件",
+            failure: "失敗したチェック {{count}} 件",
+            pending: "実行中のチェック {{count}} 件",
+            manual: "手動のチェック {{count}} 件",
+            success: "成功したチェック {{count}} 件",
+            ignored: "スキップされたチェック {{count}} 件",
+          },
         },
         checksSummary: {
           passedLabel: "成功",
@@ -1045,17 +1093,21 @@ export const ja = {
           checks: "チェック",
           pipeline: "パイプライン",
           reviews: "レビュー",
+          activity: "アクティビティ",
         },
         empty: {
           noJobs: "ジョブなし",
           loadingPipeline: "パイプラインを読み込み中...",
           pipelineJobsLoadFailed: "パイプラインのジョブを読み込めませんでした",
           allowedToFail: "失敗を許可",
+          noActivity: "まだアクティビティはありません",
         },
         approvals: "{{given}} / {{required}} 承認",
         accessibility: {
           pullRequest: "プルリクエスト#{{number}}",
           pullRequest_mr: "マージリクエスト !{{number}}",
+          commentActions: "コメントの操作",
+          threadActions: "スレッドの操作",
           checkStatus: {
             passed: "成功",
             failed: "失敗",
@@ -1084,6 +1136,8 @@ export const ja = {
         },
         thread: {
           discussion: "ディスカッションスレッド",
+          resolved: "解決済み",
+          outdated: "古い",
         },
         errors: {
           statusLoadFailed: "プルリクエストのステータスを読み込めません",
@@ -1162,7 +1216,16 @@ export const ja = {
     },
   },
   sidebar: {
+    statusGroupAccessibility: "{{label}} グループ",
+    statusBucket: {
+      needsInput: "入力待ち",
+      failed: "失敗",
+      readyToReview: "レビュー待ち",
+      working: "実行中",
+      done: "完了",
+    },
     display: {
+      showBackground: "バックグラウンドを表示",
       trigger: "表示設定",
       heading: "表示",
       grouping: {
@@ -1222,6 +1285,9 @@ export const ja = {
       hosts: "ホスト",
       settings: "設定",
       closeSidebar: "サイドバーを閉じる",
+    },
+    footer: {
+      usage: "使用状況",
     },
     help: {
       trigger: "ヘルプとサポート",
@@ -1633,6 +1699,8 @@ export const ja = {
     noFiles: "ファイルまたはディレクトリが見つかりません",
     noCommands: "コマンドが見つかりません",
     failedToLoad: "読み込みに失敗しました",
+    chooseProjectForCommands: "コマンドを表示するにはプロジェクトを選択してください",
+    chooseModelForCommands: "コマンドを表示するにはモデルを選択してください",
   },
   loadOlderHistory: {
     failed: "古い履歴を読み込めませんでした",
@@ -1724,6 +1792,21 @@ export const ja = {
     },
   },
   pairing: {
+    hostPassword: {
+      title: "{{host}} のパスワード",
+      label: "ホストのパスワード",
+    },
+    hostConfirmation: {
+      title: "このホストに接続しますか？",
+      description:
+        "このホストはこのアプリ内でコードを実行し、接続中の他のホストにアクセスできるようになります。心当たりがある場合のみ接続してください。",
+      descriptionChanged:
+        "このリンクはこのホストへの接続方法を変更します。ホストはこのアプリ内でコードを実行し、接続中の他のホストにアクセスできるようになります。心当たりがある場合のみ接続してください。",
+      hostLabel: "ホスト",
+      fingerprintLabel: "鍵のフィンガープリント",
+      relayLabel: "リレー",
+      connect: "接続",
+    },
     connectionMethods: {
       title: "接続を追加",
       direct: {
@@ -1790,6 +1873,12 @@ export const ja = {
       helper: "リモートホストで動作する Paseo デーモンに接続します。",
       fields: {
         target: "SSH ホスト",
+        password: "デーモンのパスワード",
+        optional: "任意",
+      },
+      passwordVisibility: {
+        show: "パスワードを表示",
+        hide: "パスワードを非表示",
       },
       actions: {
         cancel: "キャンセル",
@@ -2032,6 +2121,8 @@ export const ja = {
     dismiss: "閉じる",
   },
   contextWindow: {
+    noData: "コンテキストデータがありません",
+    accessibilityNoData: "コンテキストウィンドウ：コンテキストデータがありません",
     title: "コンテキストウィンドウ",
     used: "{{percentage}}%使用",
     tokens: "{{used}} / {{max}}トークン",
@@ -2039,6 +2130,18 @@ export const ja = {
     accessibility: "コンテキストウィンドウ{{percentage}}%使用",
   },
   review: {
+    feedback: {
+      send: "フィードバックを送信 ({{count}})",
+      sending: "フィードバックを送信中 ({{count}})",
+      chooseAgent: "エージェントを選択",
+      sent: "{{recipient}} にフィードバックを送信しました",
+      "no-agents":
+        "フィードバックを送信するには、このワークスペースでエージェントタブを開いてください。",
+      disconnected: "フィードバックを送信するにはホストに接続してください。",
+      "no-context": "保存したコメントはこの差分と一致しなくなりました。",
+      failed: "フィードバックを送信できませんでした。もう一度お試しください。",
+      prompt: "このコードレビューに対応してください。",
+    },
     comment: {
       add: "レビューコメントを追加",
       edit: "レビューコメントを編集",
@@ -2097,8 +2200,11 @@ export const ja = {
     groupInfo: "{{title}}について",
     sections: {
       general: "一般",
+      chat: "チャット",
       appearance: "外観",
-      layout: en.settings.sections.layout,
+      sidebar: "サイドバー",
+      terminal: "ターミナル",
+      browser: "ブラウザ",
       editor: "エディター",
       shortcuts: "ショートカット",
       integrations: "連携",
@@ -2157,6 +2263,7 @@ export const ja = {
     },
     general: {
       title: "一般",
+      sending: "送信",
       browserData: {
         title: "ブラウザーデータ",
         siteData: "Cookie とサイトデータ",
@@ -2183,8 +2290,6 @@ export const ja = {
         },
       },
       serviceUrls: {
-        label: "サービスURL",
-        description: "実行中のスクリプトからURLを開く場所",
         options: {
           ask: "確認する",
           inApp: "Paseoで",
@@ -2203,7 +2308,6 @@ export const ja = {
       toolCallDetail: {
         label: "ツール呼び出しの表示",
         description: "タイムラインでのツール呼び出しの表示方法",
-        accessibilityLabel: "ツール呼び出しの表示を選択（{{value}}）",
         options: {
           overview: "要約",
           detailed: "すべての詳細",
@@ -2319,8 +2423,15 @@ export const ja = {
         description: "ターミナルペイン内のエージェントCLIにステータスグローを表示する",
       },
       sidebar: {
-        title: "サイドバー",
-        description: "サイドバー上部に表示する項目とその順序を選択します",
+        header: {
+          title: "ヘッダー",
+          description: "サイドバー上部に表示する項目とその順序を選択します",
+        },
+        footer: {
+          title: "フッター",
+          description:
+            "サイドバー下部に表示する行とその順序を選択します。プロジェクトを追加とアイコンの行は常に表示されます",
+        },
         moveUp: "上に移動",
         moveDown: "下に移動",
       },
@@ -2344,6 +2455,14 @@ export const ja = {
         codeSize: "コードサイズ",
         codeSizeHint: "コード、差分、ターミナル出力に使用されます",
         codeSizeAccessibility: "コードフォントサイズ",
+      },
+      layout: {
+        title: "レイアウト",
+        contentWidth: "コンテンツ幅",
+        contentWidthHint: "ワイド画面でのチャットと Markdown ファイルの最大幅",
+        contentWidthAccessibility: "コンテンツ幅 (ピクセル)",
+        reset: "リセット",
+        resetAccessibility: "コンテンツ幅をデフォルトに戻す",
       },
       syntax: {
         title: "構文ハイライト",
@@ -2457,6 +2576,10 @@ export const ja = {
       },
     },
     host: {
+      password: {
+        guidance:
+          "このホストを削除し、このデーモンが求めるパスワードを入力して追加し直してください。",
+      },
       appearance: {
         title: "外観",
         name: {

@@ -3,7 +3,11 @@ import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
 import { createTestLogger } from "../test-utils/test-logger.js";
 import type { AgentSnapshotPayload, WorkspaceDescriptorPayload } from "./messages.js";
 import { WorkspaceDirectory } from "./workspace-directory.js";
-import type { PersistedProjectRecord, PersistedWorkspaceRecord } from "./workspace-registry.js";
+import {
+  createPersistedWorkspaceRecord,
+  type PersistedProjectRecord,
+  type PersistedWorkspaceRecord,
+} from "./workspace-registry.js";
 import type { TerminalActivity } from "@getpaseo/protocol/terminal-activity";
 import type { ProviderSubagentWorkspaceActivity } from "./workspace-directory.js";
 
@@ -113,6 +117,7 @@ class WorkspaceStatus {
       workspaceDirectory: workspace.members[0].cwd,
       projectKind: "git",
       workspaceKind: workspace.members[0].kind,
+      background: workspace.background,
       name: workspace.displayName,
       archivingAt: null,
       status: "done",
@@ -661,6 +666,7 @@ describe("WorkspaceDirectory empty projects", () => {
         workspaceDirectory: workspace.members[0].cwd,
         projectKind: "non_git",
         workspaceKind: workspace.members[0].kind,
+        background: workspace.background,
         name: workspace.displayName,
         archivingAt: null,
         status: "done",
@@ -744,6 +750,51 @@ describe("WorkspaceDirectory empty projects", () => {
 
     expect(result.emptyProjects.map((p) => p.projectId)).toEqual(["empty"]);
   });
+
+  test("hides background workspaces and counts their project as empty unless includeBackground", async () => {
+    const directory = makeDirectory({
+      projects: [project({ projectId: "hidden-only" })],
+      workspaces: [
+        createPersistedWorkspaceRecord({
+          workspaceId: "ws-internal",
+          displayName: "helper",
+          members: [
+            {
+              projectId: "hidden-only",
+              cwd: "/workspace/hidden-only",
+              kind: "directory",
+              displayName: "helper",
+              branch: null,
+              worktreeRoot: null,
+              baseBranch: null,
+              isPaseoOwnedWorktree: false,
+              mainRepoRoot: null,
+            },
+          ],
+          createdAt: NOW,
+          updatedAt: NOW,
+          archivedAt: null,
+          background: true,
+        }),
+      ],
+    });
+
+    const hidden = await directory.listFetchEntries({
+      type: "fetch_workspaces_request",
+      requestId: "r1",
+      filter: { query: "helper" },
+    });
+    expect(hidden.entries).toEqual([]);
+    expect(hidden.emptyProjects.map((p) => p.projectId)).toEqual(["hidden-only"]);
+
+    const shown = await directory.listFetchEntries({
+      type: "fetch_workspaces_request",
+      requestId: "r2",
+      filter: { includeBackground: true },
+    });
+    expect(shown.entries.map((entry) => entry.id)).toEqual(["ws-internal"]);
+    expect(shown.emptyProjects).toEqual([]);
+  });
 });
 
 test("Git observation targets exclude archived records without hydrating app descriptors", async () => {
@@ -751,16 +802,27 @@ test("Git observation targets exclude archived records without hydrating app des
     id: string,
     projectId: string,
     archivedAt: string | null = null,
-  ): PersistedWorkspaceRecord => ({
-    workspaceId: id,
-    projectId,
-    cwd: `/workspace/${id}`,
-    kind: "local_checkout",
-    displayName: id,
-    createdAt: NOW,
-    updatedAt: NOW,
-    archivedAt,
-  });
+  ): PersistedWorkspaceRecord =>
+    createPersistedWorkspaceRecord({
+      workspaceId: id,
+      displayName: id,
+      members: [
+        {
+          projectId,
+          cwd: `/workspace/${id}`,
+          kind: "local_checkout",
+          displayName: id,
+          branch: null,
+          worktreeRoot: null,
+          baseBranch: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+      ],
+      createdAt: NOW,
+      updatedAt: NOW,
+      archivedAt,
+    });
   const project = (id: string, archivedAt: string | null = null): PersistedProjectRecord => ({
     projectId: id,
     rootPath: `/workspace/${id}`,
@@ -791,6 +853,17 @@ test("Git observation targets exclude archived records without hydrating app des
     isProviderVisibleToClient: () => true,
   });
   expect(await directory.listObservationTargets()).toEqual([
-    { id: "observed", workspaceDirectory: "/workspace/observed", workspaceKind: "local_checkout" },
+    {
+      id: "observed",
+      workspaceDirectory: "/workspace/observed",
+      workspaceKind: "local_checkout",
+      members: [
+        {
+          workspaceDirectory: "/workspace/observed",
+          workspaceKind: "local_checkout",
+          branch: null,
+        },
+      ],
+    },
   ]);
 });

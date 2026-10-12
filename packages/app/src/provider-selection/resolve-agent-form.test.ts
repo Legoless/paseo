@@ -16,7 +16,7 @@ import {
   type UserModifiedFields,
 } from "./resolve-agent-form";
 import { buildProviderDefinitions } from "@/utils/provider-definitions";
-import { buildDraftCommandConfig, resolveEffectiveComposerModelId } from "./provider-selection";
+import { buildDraftCommandTarget, resolveEffectiveComposerModelId } from "./provider-selection";
 import type { AgentProviderDefinition } from "@getpaseo/protocol/provider-manifest";
 import type {
   AgentModelDefinition,
@@ -163,13 +163,13 @@ describe("model aliases", () => {
       modeOptions: TEST_CODEX_DEFINITION.modes,
     };
     expect(
-      buildDraftCommandConfig({
+      buildDraftCommandTarget({
         selection,
         cwd: "/repo",
         effectiveModelId: resolveEffectiveComposerModelId(selection),
         effectiveThinkingOptionId: resolved.thinkingOptionId,
-      })?.model,
-    ).toBe("native-pinned-v9");
+      }),
+    ).toMatchObject({ status: "ready", config: { model: "native-pinned-v9" } });
     const explicitPick = resolveAgentForm(makeState(resolved), {
       type: "SET_MODEL_FROM_USER",
       modelId: "native-latest",

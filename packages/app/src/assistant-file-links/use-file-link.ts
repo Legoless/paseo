@@ -31,14 +31,21 @@ export interface AssistantFileLinkActions {
   canResolveFile(source: AssistantFileLinkSource): boolean;
 }
 
+interface AssistantFileLinkLookupKey {
+  query: string;
+  path: string;
+  lineStart: number | null;
+  lineEnd: number | null;
+}
+
 type AssistantFileLinkQueryKey = readonly [
   "assistantFileLink",
   string | null,
   string | null,
-  string,
+  AssistantFileLinkLookupKey | null,
 ];
 
-const DISABLED_QUERY_KEY = ["assistantFileLink", null, null, ""] as const;
+const DISABLED_QUERY_KEY = ["assistantFileLink", null, null, null] as const;
 
 interface AssistantFileLinkOpenInput {
   source: AssistantFileLinkSource;
@@ -67,7 +74,7 @@ export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult 
         ? assistantFileLinkQueryKey({
             serverId,
             workspaceRoot,
-            ambiguousQuery: resolution.ambiguousQuery,
+            resolution,
           })
         : DISABLED_QUERY_KEY,
     [resolution, serverId, workspaceRoot],
@@ -214,7 +221,7 @@ async function openAssistantFileLink(input: {
   const capturedQueryKey = assistantFileLinkQueryKey({
     serverId: capturedConfig.serverId,
     workspaceRoot: capturedConfig.workspaceRoot,
-    ambiguousQuery: capturedResolution.ambiguousQuery,
+    resolution: capturedResolution,
   });
 
   let target: InlinePathTarget;
@@ -278,13 +285,18 @@ function useStableSource(source: AssistantFileLinkSource): AssistantFileLinkSour
 function assistantFileLinkQueryKey(input: {
   serverId?: string;
   workspaceRoot?: string;
-  ambiguousQuery: string;
+  resolution: Extract<AssistantFileLinkResolution, { kind: "needsLookup" }>;
 }): AssistantFileLinkQueryKey {
   return [
     "assistantFileLink",
     input.serverId ?? null,
     input.workspaceRoot ?? null,
-    input.ambiguousQuery,
+    {
+      query: input.resolution.ambiguousQuery,
+      path: input.resolution.target.path,
+      lineStart: input.resolution.target.lineStart ?? null,
+      lineEnd: input.resolution.target.lineEnd ?? null,
+    },
   ];
 }
 

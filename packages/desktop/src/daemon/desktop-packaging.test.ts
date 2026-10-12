@@ -160,6 +160,35 @@ describe("desktop packaging", () => {
     expect(config).toContain("!node_modules/@getpaseo/server/dist/server/web-ui/**");
   });
 
+  it.each(["electron-builder.yml", "electron-builder.neo.yml"])(
+    "copies built-in plugin compiler inputs outside the archive in %s",
+    (filename) => {
+      const result = spawnSync(
+        process.execPath,
+        [
+          "-e",
+          'const fs = require("node:fs"); const yaml = require("js-yaml"); process.stdout.write(JSON.stringify(yaml.load(fs.readFileSync(process.argv[1], "utf8"))));',
+          join(packageRoot, filename),
+        ],
+        { cwd: packageRoot, encoding: "utf8" },
+      );
+      expect(result.status).toBe(0);
+      const config = z
+        .object({
+          files: z.array(z.string()),
+          extraResources: z.array(z.object({ from: z.string(), to: z.string() })),
+        })
+        .parse(JSON.parse(result.stdout));
+      expect(config.files).toContain(
+        "!node_modules/@getpaseo/server/dist/server/builtin-plugins/**",
+      );
+      expect(config.extraResources).toContainEqual({
+        from: "../server/dist/server/builtin-plugins",
+        to: "builtin-plugins",
+      });
+    },
+  );
+
   it("uses the server skill catalog without a duplicate desktop resource", () => {
     const config = readFileSync(join(packageRoot, "electron-builder.yml"), "utf8");
     const serverPackage = readFileSync(join(packageRoot, "..", "server", "package.json"), "utf8");

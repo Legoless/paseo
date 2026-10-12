@@ -284,6 +284,15 @@ describe("Claude catalog discovery", () => {
     expect(mock.close).toHaveBeenCalledTimes(2);
   });
 
+  it("preserves an explicitly configured Fable model omitted by native discovery", async () => {
+    const configDir = await configDirectory({
+      env: { ANTHROPIC_DEFAULT_FABLE_MODEL: "private-fable-model" },
+    });
+    const models = await getClaudeModelsWithSettings(createTestLogger(), configDir, [futureModel]);
+    expect(models.map((model) => model.id)).toEqual([futureModel.value, "private-fable-model"]);
+    expect(models[1]?.thinkingOptions).toBeUndefined();
+  });
+
   it("recognizes a configured canonical alias without adding a capability-less duplicate", async () => {
     const configDir = await configDirectory({ model: futureModel.resolvedModel });
     const models = await getClaudeModelsWithSettings(createTestLogger(), configDir, [futureModel]);

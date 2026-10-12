@@ -32,6 +32,7 @@ export function resolveCodexServiceTier(input: {
   serviceTiers: CodexServiceTier[];
 }): string | null {
   const selected = input.featureValues?.service_tier;
+  if (selected === "default") return "default";
   if (typeof selected === "string") {
     return input.serviceTiers.some((tier) => tier.id === selected) ? selected : null;
   }
@@ -60,7 +61,7 @@ export function buildCodexFeatures(input: {
       label: "Speed",
       tooltip: "Select inference speed",
       icon: "zap",
-      value: input.serviceTier ?? "",
+      value: input.serviceTier === "default" ? "" : (input.serviceTier ?? ""),
       options: [
         { id: "", label: "Default" },
         ...input.serviceTiers.map((tier) => ({
@@ -75,4 +76,11 @@ export function buildCodexFeatures(input: {
     features.push({ ...CODEX_PLAN_MODE_FEATURE, value: input.planModeEnabled });
   }
   return features;
+}
+
+export function readCodexServiceTier(values: Record<string, unknown> | undefined): string | null {
+  const tier = values?.service_tier;
+  if (typeof tier === "string") return tier;
+  // COMPAT(codexFastPreference): added in v0.10.0, remove after 2027-03-29 once saved Fast preferences have migrated.
+  return values?.fast_mode ? "fast" : null;
 }
