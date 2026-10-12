@@ -2,7 +2,7 @@ import { Fragment, useCallback, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Pressable, Text, View, type GestureResponderEvent } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { ExternalLink, Folder, Globe } from "lucide-react-native";
+import { ExternalLink, Folder } from "lucide-react-native";
 import {
   workspaceLabelKey,
   type WorkspaceLabelDefinition,
@@ -19,35 +19,26 @@ import { PullRequestStateIcon } from "@/git/pull-request-state-icon";
 import { CheckIndicator } from "./check-indicator";
 import type { CheckSummary, CheckSummaryState } from "./check-summary";
 import { selectMetaRowItems, type MetaRowItem } from "./meta-items";
-import { workspaceServiceLabelKey, type WorkspaceServiceSummary } from "./service-summary";
-
-export {
-  selectWorkspaceServiceSummary,
-  workspaceServiceLabelKey,
-  type WorkspaceServiceSummary,
-} from "./service-summary";
 
 /**
  * One size for every glyph on the line. The items are peers — host, change request, CI,
- * running service — so a glyph that differs in size reads as a different rank. The host badge
+ * labels — so a glyph that differs in size reads as a different rank. The host badge
  * owns the size because it is the one item that also appears off this line.
  */
 const META_ICON_SIZE = HOST_BADGE_ICON_SIZE;
 
 const ThemedExternalLink = withUnistyles(ExternalLink);
 const ThemedFolder = withUnistyles(Folder);
-const ThemedGlobe = withUnistyles(Globe);
 
 /** Stable identity so a row without labels doesn't re-select its items on every render. */
 const EMPTY_LABELS: readonly WorkspaceLabelDefinition[] = [];
 
 const foregroundMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const mutedMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-const dangerMapping = (theme: Theme) => ({ color: theme.colors.statusDanger });
 
 /**
  * The subtitle under a workspace title: which host it lives on, its change request, that
- * change request's CI, any running service, and the labels someone put on it. Everything the
+ * change request's CI, and the labels someone put on it. Everything the
  * row knows about a workspace that isn't its name.
  *
  * Items are peers separated by a dot rather than ranked by chrome. The host used to be a
@@ -63,13 +54,11 @@ export function WorkspaceMetaRow({
   projectName,
   hostBadge,
   prHint,
-  serviceSummary,
   labels = EMPTY_LABELS,
 }: {
   projectName: string | null;
   hostBadge: HostBadgeModel | null;
   prHint: PrHint | null;
-  serviceSummary: WorkspaceServiceSummary | null;
   labels?: readonly WorkspaceLabelDefinition[];
 }) {
   const { rowItems, checksDisplay } = useSidebarMetaPreferences();
@@ -77,7 +66,6 @@ export function WorkspaceMetaRow({
     projectName,
     hasHostBadge: hostBadge !== null,
     prHint,
-    serviceSummary,
     labels,
     visible: rowItems,
     checksDisplay,
@@ -119,10 +107,7 @@ function MetaItemNode({
   if (item.kind === "checks") {
     return <ChecksItem summary={item.summary} label={item.label} />;
   }
-  if (item.kind === "labels") {
-    return <LabelsItem labels={item.labels} leading={leading} />;
-  }
-  return <ServiceItem summary={item.summary} />;
+  return <LabelsItem labels={item.labels} leading={leading} />;
 }
 
 function IdentityItem({ name }: { name: string }) {
@@ -265,33 +250,6 @@ const CHECK_STATE_ACCESSIBLE_KEYS = {
   running: "workspace.git.pr.checksSummary.runningAccessible",
 } as const;
 
-/**
- * A running service, named. It is the one item on the line whose text is arbitrary — everything
- * else is a number, a short word, or a host label the user already picked — so it is also the
- * only one allowed to shrink, and it truncates rather than pushing the line past the row.
- *
- * A failed health check turns the whole item danger, glyph and name together. Colouring only the
- * glyph would leave the name reading as fine, and the name is the part you look at.
- */
-function ServiceItem({ summary }: { summary: WorkspaceServiceSummary }) {
-  const { t } = useTranslation();
-  const unhealthy = summary.health === "unhealthy";
-  return (
-    <View
-      style={styles.serviceItem}
-      accessibilityLabel={t(workspaceServiceLabelKey(summary), { name: summary.name })}
-      testID={unhealthy ? "workspace-service-unhealthy" : "workspace-service"}
-    >
-      <ThemedGlobe size={META_ICON_SIZE} uniProps={unhealthy ? dangerMapping : successMapping} />
-      <Text style={unhealthy ? styles.serviceNameUnhealthy : styles.serviceName} numberOfLines={1}>
-        {summary.name}
-      </Text>
-    </View>
-  );
-}
-
-const successMapping = (theme: Theme) => ({ color: theme.colors.statusSuccess });
-
 const PR_STATE_LABEL_KEYS = {
   merged: "workspace.git.pr.states.merged",
   closed: "workspace.git.pr.states.closed",
@@ -341,9 +299,6 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 0,
   },
   // Tighter than the line's own gap so a run of chips reads as one item — see `LabelsItem`.
-  // Shrinks at the same weight as the service name: both are arbitrary text somebody chose, so
-  // a crowded line takes from the two of them in proportion rather than emptying one of them.
-  // The host badge still gives up its space before either — see `flexShrink` in host-badge.tsx.
   labels: {
     flexDirection: "row",
     alignItems: "center",
@@ -353,26 +308,6 @@ const styles = StyleSheet.create((theme) => ({
   },
   labelsLeading: {
     marginLeft: -WORKSPACE_LABEL_CHIP_INSET,
-  },
-  // The one item that gives way when the line runs out of room — see `ServiceItem`.
-  serviceItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    minWidth: 0,
-    flexShrink: 1,
-  },
-  serviceName: {
-    color: theme.colors.statusSuccess,
-    fontSize: theme.fontSize.sm,
-    lineHeight: 16,
-    flexShrink: 1,
-  },
-  serviceNameUnhealthy: {
-    color: theme.colors.statusDanger,
-    fontSize: theme.fontSize.sm,
-    lineHeight: 16,
-    flexShrink: 1,
   },
   prText: {
     color: theme.colors.foregroundMuted,

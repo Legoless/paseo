@@ -1357,6 +1357,8 @@ export const ptBR = {
         serviceRunning: "Serviço {{name}} em execução",
         serviceUnhealthy: "Serviço {{name}} com falha",
         creating: "Criando...",
+        tabRunningOne: "1 aba em execução",
+        tabRunningMany: "{{count}} abas em execução",
         tabNeedsInputOne: "1 aba precisa de resposta",
         tabNeedsInputMany: "{{count}} abas precisam de resposta",
         tabFailedOne: "1 aba parou com um erro",

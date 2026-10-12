@@ -16,6 +16,7 @@ import {
 import {
   DEFAULT_SIDEBAR_ROW_ITEMS,
   isChecksHiddenByLegacyRowItem,
+  parseSidebarRowItems,
   type SidebarRowItems,
 } from "@/components/sidebar/display-preferences/row-items";
 import { isNative } from "@/constants/platform";
@@ -196,12 +197,9 @@ const SidebarRowItemsSchema = z
     project: z.boolean().catch(DEFAULT_SIDEBAR_ROW_ITEMS.project),
     host: z.boolean().catch(DEFAULT_SIDEBAR_ROW_ITEMS.host),
     changeRequest: z.boolean().catch(DEFAULT_SIDEBAR_ROW_ITEMS.changeRequest),
-    services: z.boolean().optional().catch(undefined),
     labels: z.boolean().catch(DEFAULT_SIDEBAR_ROW_ITEMS.labels),
     // COMPAT(sidebarRowItemsChecks): migrated in v0.3.0, remove after 2027-08-05.
     checks: z.boolean().optional().catch(undefined),
-    // COMPAT(sidebarRowItemsScripts): migrated in v0.3.0, remove after 2027-08-05.
-    scripts: z.boolean().optional().catch(undefined),
   })
   .catch(DEFAULT_SIDEBAR_ROW_ITEMS);
 
@@ -328,12 +326,6 @@ const StoredAppSettingsSchema = z
       uiBaseFontSize,
       contentFontSize: stored.contentFontSize ?? uiBaseFontSize,
       sidebarChecksDisplay,
-      sidebarRowItems: {
-        ...stored.sidebarRowItems,
-        services:
-          stored.sidebarRowItems.services ??
-          (stored.sidebarRowItems.scripts === false ? false : DEFAULT_SIDEBAR_ROW_ITEMS.services),
-      },
       toolCallDetailLevel,
       needsWrite,
     };
@@ -465,7 +457,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     uiFontSize: _uiFontSize,
     ...settings
   } = StoredAppSettingsSchema.parse(value);
-  return settings;
+  return { ...settings, sidebarRowItems: parseSidebarRowItems(settings.sidebarRowItems) };
 }
 
 function pickAppSettingsFromLegacy(legacy: StoredAppSettings): AppSettings {

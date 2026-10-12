@@ -1361,6 +1361,8 @@ export const fr = {
         serviceRunning: "Service {{name}} en cours d’exécution",
         serviceUnhealthy: "Service {{name}} en échec",
         creating: "Création…",
+        tabRunningOne: "1 onglet en cours d’exécution",
+        tabRunningMany: "{{count}} onglets en cours d’exécution",
         tabNeedsInputOne: "1 onglet attend une réponse",
         tabNeedsInputMany: "{{count}} onglets attendent une réponse",
         tabFailedOne: "1 onglet s’est arrêté sur une erreur",

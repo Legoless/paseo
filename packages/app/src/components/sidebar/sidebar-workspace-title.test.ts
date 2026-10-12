@@ -57,13 +57,10 @@ describe("resolveSidebarWorkspaceAccessibilityLabel", () => {
       leadingProjectName: "Search project",
       hostBadgeLabel: "Build host",
       pullRequestLabel: "Pull request 42",
-      serviceLabel: "Service web running",
       t: i18n.t,
     });
 
-    expect(label).toBe(
-      "Search project, fix/search, Build host, Pull request 42, Service web running, Working",
-    );
+    expect(label).toBe("Search project, fix/search, Build host, Pull request 42, Working");
   });
 
   it("omits the idle status from the workspace label", () => {

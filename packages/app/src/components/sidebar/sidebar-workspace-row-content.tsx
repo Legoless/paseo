@@ -17,10 +17,7 @@ import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
 import { getStatusDotColor } from "@/utils/status-dot-color";
 import { STATUS_INDICATOR_FILLED_DOT_SIZE } from "@/utils/status-indicator-geometry";
 import type { SidebarPaneStatusBucket, SidebarPaneStatusCounts } from "@/projects/workspace-groups";
-import {
-  WorkspaceMetaRow,
-  type WorkspaceServiceSummary,
-} from "@/components/sidebar/workspace-meta-row";
+import { WorkspaceMetaRow } from "@/components/sidebar/workspace-meta-row";
 import { WorkspaceHoverCard } from "@/components/workspace-hover-card";
 import type { HostBadgeModel } from "@/hosts/appearance";
 import type { SidebarWorkspaceEntry } from "@/hooks/use-sidebar-workspaces-list";
@@ -108,7 +105,6 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   hostBadge,
   leadingProjectName = null,
   leadingProjectIconDataUri = null,
-  serviceSummary = null,
   backdrop,
   isHovered,
   isLoading,
@@ -126,7 +122,6 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   /** Hoisted rows use their project icon as the leading visual because no project row contains them. */
   leadingProjectName?: string | null;
   leadingProjectIconDataUri?: string | null;
-  serviceSummary?: WorkspaceServiceSummary | null;
   /** The row's current background, so the project status badge can knock out of it. */
   backdrop: SidebarSurfaceBackdrop;
   isHovered: boolean;
@@ -212,7 +207,6 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
             projectName={leadingProjectName}
             hostBadge={hostBadge ?? null}
             prHint={workspace.prHint}
-            serviceSummary={serviceSummary}
             labels={labels}
           />
         </View>
@@ -437,6 +431,9 @@ export const sidebarWorkspaceRowStyles = StyleSheet.create((theme) => ({
   paneStatusDotAttention: {
     backgroundColor: getStatusDotColor({ theme, bucket: "attention" }) ?? undefined,
   },
+  paneStatusDotRunning: {
+    backgroundColor: getStatusDotColor({ theme, bucket: "running" }) ?? undefined,
+  },
   paneStatusCountText: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
@@ -482,6 +479,7 @@ const PANE_STATUS_COUNT_ORDER: readonly SidebarPaneStatusBucket[] = [
   "needs_input",
   "failed",
   "attention",
+  "running",
 ];
 
 // One and Many keys picked by the count, as the subagent pill does: i18next's own plural forms
@@ -499,17 +497,22 @@ const PANE_STATUS_COUNT_LABEL_KEYS = {
     one: "sidebar.workspace.status.tabReadyOne",
     many: "sidebar.workspace.status.tabReadyMany",
   },
+  running: {
+    one: "sidebar.workspace.status.tabRunningOne",
+    many: "sidebar.workspace.status.tabRunningMany",
+  },
 } as const satisfies Record<SidebarPaneStatusBucket, { one: string; many: string }>;
 
 function paneStatusDotStyle(bucket: SidebarPaneStatusBucket) {
   if (bucket === "needs_input") return sidebarWorkspaceRowStyles.paneStatusDotNeedsInput;
   if (bucket === "failed") return sidebarWorkspaceRowStyles.paneStatusDotFailed;
+  if (bucket === "running") return sidebarWorkspaceRowStyles.paneStatusDotRunning;
   return sidebarWorkspaceRowStyles.paneStatusDotAttention;
 }
 
 /**
- * How many of the workspace's open tabs are orange (needs input), red (failed) and green (finished,
- * not looked at yet): the same dots as the agent rows underneath, each with its count, sitting
+ * How many of the workspace's open tabs are orange (needs input), red (failed), green (finished,
+ * not looked at yet) and blue (running): the same dots as the agent rows, each with its count, sitting
  * just before the kebab. A tab behind its pane's front tab counts too, though it lights no pane.
  */
 export function SidebarWorkspacePaneStatusCounts({ counts }: { counts: SidebarPaneStatusCounts }) {

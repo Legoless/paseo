@@ -229,12 +229,7 @@ function BadgePreview({
       <Text style={styles.previewTitle} numberOfLines={1}>
         {t("settings.host.appearance.preview.workspaceName")}
       </Text>
-      <WorkspaceMetaRow
-        projectName={null}
-        hostBadge={hostBadge}
-        prHint={null}
-        serviceSummary={null}
-      />
+      <WorkspaceMetaRow projectName={null} hostBadge={hostBadge} prHint={null} />
     </View>
   );
 }

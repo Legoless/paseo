@@ -1340,6 +1340,8 @@ export const ko = {
         serviceRunning: "서비스 {{name}} 실행 중",
         serviceUnhealthy: "서비스 {{name}} 비정상",
         creating: "생성하는 중...",
+        tabRunningOne: "실행 중인 탭 1개",
+        tabRunningMany: "실행 중인 탭 {{count}}개",
         tabNeedsInputOne: "입력이 필요한 탭 1개",
         tabNeedsInputMany: "입력이 필요한 탭 {{count}}개",
         tabFailedOne: "오류로 중단된 탭 1개",

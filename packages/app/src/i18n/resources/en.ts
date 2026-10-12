@@ -1340,6 +1340,8 @@ export const en = {
         serviceRunning: "Service {{name}} running",
         serviceUnhealthy: "Service {{name}} unhealthy",
         creating: "Creating...",
+        tabRunningOne: "1 tab running",
+        tabRunningMany: "{{count}} tabs running",
         tabNeedsInputOne: "1 tab needs input",
         tabNeedsInputMany: "{{count}} tabs need input",
         tabFailedOne: "1 tab stopped with an error",

@@ -61,14 +61,14 @@ export interface SidebarWorkspaceSection {
    */
   uncategorized: SidebarWorkspaceUncategorizedRow;
   members: SidebarWorkspaceMemberRow[];
-  /** How many open tabs show each color that wants the user: orange, red and green. */
+  /** How many open tabs are asking, failed, ready or running. */
   paneStatusCounts: SidebarPaneStatusCounts;
 }
 
-/** The status colors the sidebar counts: needs input, failed, and a finish nobody has seen. */
+/** The active status colors counted beside each workspace. */
 export type SidebarPaneStatusBucket = Extract<
   SidebarStateBucket,
-  "needs_input" | "failed" | "attention"
+  "needs_input" | "failed" | "attention" | "running"
 >;
 
 export type SidebarPaneStatusCounts = Readonly<Record<SidebarPaneStatusBucket, number>>;
@@ -77,12 +77,18 @@ export const EMPTY_PANE_STATUS_COUNTS: SidebarPaneStatusCounts = {
   needs_input: 0,
   failed: 0,
   attention: 0,
+  running: 0,
 };
 
 function isPaneStatusBucket(
   bucket: SidebarStateBucket | undefined,
 ): bucket is SidebarPaneStatusBucket {
-  return bucket === "needs_input" || bucket === "failed" || bucket === "attention";
+  return (
+    bucket === "needs_input" ||
+    bucket === "failed" ||
+    bucket === "attention" ||
+    bucket === "running"
+  );
 }
 
 export interface SidebarWorkspaceGroupModel {
@@ -217,7 +223,7 @@ function buildWorkspaceSection(input: {
 }
 
 /**
- * The open tabs that want the user, by color: every agent row underneath the workspace plus every
+ * The open tabs with active status, by color: every agent row underneath the workspace plus every
  * terminal tab, wherever the tab sits. An unseen tab behind a pane's front tab lights no pane but
  * still counts. A terminal takes the bucket the daemon lists for it: only a known agent running in
  * it ever gets one, and the client has no terminal activity of its own for a workspace that is not
@@ -260,7 +266,7 @@ function isWorkspaceAgentRow(agent: Agent, workspaceId: string): boolean {
 }
 
 /**
- * The dock badge: every workspace row's counts added up, so the badge never shows a number the
+ * The dock badge: every workspace row's attention counts added up, so it never shows a number the
  * sidebar cannot account for. An agent with no tab on this client has no row and is not counted.
  */
 export function countAttentionTabs(input: {
@@ -414,6 +420,7 @@ function areSectionsEqual(left: SidebarWorkspaceSection, right: SidebarWorkspace
     left.paneStatusCounts.needs_input !== right.paneStatusCounts.needs_input ||
     left.paneStatusCounts.failed !== right.paneStatusCounts.failed ||
     left.paneStatusCounts.attention !== right.paneStatusCounts.attention ||
+    left.paneStatusCounts.running !== right.paneStatusCounts.running ||
     left.members.length !== right.members.length ||
     !areAgentBucketsEqual(left.uncategorized, right.uncategorized)
   ) {

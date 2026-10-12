@@ -1,6 +1,7 @@
 import { test, expect } from "../support/fixtures";
 import { createTempGitRepo } from "../support/helpers/workspace";
 import {
+  closeWorkspaceScriptsMenu,
   connectWorkspaceSetupClient,
   createWorkspaceThroughDaemon,
   openWorkspaceScriptsMenu,
@@ -10,9 +11,13 @@ import {
 } from "../support/helpers/workspace-setup";
 import { waitForWorkspaceTabsVisible } from "../support/helpers/workspace-tabs";
 import { getServerId } from "../support/helpers/server-id";
+import { openSidebarDisplayPage } from "../support/helpers/sidebar";
 import { buildHostWorkspaceRoute } from "../../src/utils/host-routes";
 
-test("scripts menu resizes when a service row grows after launch", async ({ page }) => {
+test("running services resize the Scripts menu without appearing in the sidebar", async ({
+  page,
+  e2eWorkerClient,
+}) => {
   const client = await connectWorkspaceSetupClient();
   const repo = await createTempGitRepo("script-menu-resize-", {
     paseoConfig: {
@@ -28,6 +33,7 @@ test("scripts menu resizes when a service row grows after launch", async ({ page
       },
     },
   });
+  let workspaceId: string | null = null;
 
   try {
     await seedProjectForWorkspaceSetup(client, repo.path);
@@ -39,6 +45,7 @@ test("scripts menu resizes when a service row grows after launch", async ({ page
       cwd: repo.path,
       worktreeSlug: `script-menu-resize-${Date.now()}`,
     });
+    workspaceId = workspace.id;
     await completed;
 
     await page.goto(buildHostWorkspaceRoute(getServerId(), workspace.id));
@@ -73,8 +80,28 @@ test("scripts menu resizes when a service row grows after launch", async ({ page
     expect(after.height).toBeGreaterThan(before.height);
     expect(after.scrollHeight).toBeLessThanOrEqual(after.clientHeight + 1);
     expect(after.childHeight).toBeGreaterThan(before.height);
+
+    await closeWorkspaceScriptsMenu(page);
+    const workspaceRow = page
+      .getByTestId(`sidebar-workspace-row-${getServerId()}:${workspace.id}`)
+      .filter({ visible: true });
+    await expect(workspaceRow).toBeVisible();
+    await expect(workspaceRow.getByText("web", { exact: true })).toHaveCount(0);
+    await expect(workspaceRow.getByTestId(/^workspace-service/)).toHaveCount(0);
+    await expect(workspaceRow).not.toHaveAccessibleName(/Service web (running|unhealthy)/);
+
+    await openSidebarDisplayPage(page, "sidebar-display-show");
+    await expect(page.getByTestId("sidebar-row-item-branch")).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Services", exact: true })).toHaveCount(0);
   } finally {
-    await client.close();
-    await repo.cleanup();
+    try {
+      if (workspaceId) {
+        const archived = await e2eWorkerClient.archiveWorkspace(workspaceId);
+        expect(archived.error).toBeNull();
+      }
+    } finally {
+      await client.close();
+      await repo.cleanup();
+    }
   }
 });

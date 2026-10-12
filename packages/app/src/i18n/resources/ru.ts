@@ -1350,6 +1350,8 @@ export const ru = {
         serviceRunning: "Сервис {{name}} запущен",
         serviceUnhealthy: "Сервис {{name}} работает некорректно",
         creating: "Создание...",
+        tabRunningOne: "1 вкладка работает",
+        tabRunningMany: "Работающие вкладки: {{count}}",
         tabNeedsInputOne: "1 вкладка ждёт ответа",
         tabNeedsInputMany: "Вкладки, ждущие ответа: {{count}}",
         tabFailedOne: "1 вкладка остановлена с ошибкой",

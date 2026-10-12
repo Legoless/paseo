@@ -112,6 +112,7 @@ function agent(input: {
   workspaceId: string;
   cwd: string;
   status?: Agent["status"];
+  backgroundWorkCount?: Agent["backgroundWorkCount"];
   title?: string | null;
   lastActivityAt?: Date;
   archivedAt?: Date | null;
@@ -126,6 +127,7 @@ function agent(input: {
     id: input.id,
     provider: "claude" as Agent["provider"],
     status: input.status ?? "idle",
+    backgroundWorkCount: input.backgroundWorkCount,
     turn: TURN_LIVENESS_IDLE,
     createdAt: new Date(0),
     updatedAt: new Date(1_000),
@@ -640,6 +642,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
     });
 
     expect(model.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts.attention).toBe(4);
+    expect(model.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts.running).toBe(1);
   });
 
   it("totals the dock badge from the workspace rows' counts, leaving out agents with no tab", () => {
@@ -672,12 +675,17 @@ describe("buildSidebarWorkspaceGroupModel", () => {
           finished("behind", "ws-1"),
           finished("tabless", "ws-1"),
           finished("front-2", "ws-2"),
+          agent({ id: "busy", workspaceId: "ws-1", cwd: "/repo", status: "running" }),
         ],
       }),
     ];
     const layoutsByWorkspace = {
       "srv:ws-1": splitLayout([
-        { id: "main", tabs: [agentTab("front"), agentTab("behind")], focusedTabId: "agent_front" },
+        {
+          id: "main",
+          tabs: [agentTab("front"), agentTab("behind"), agentTab("busy")],
+          focusedTabId: "agent_front",
+        },
       ]),
       "srv:ws-2": splitLayout([
         { id: "left", tabs: [agentTab("front-2")], focusedTabId: "agent_front-2" },
@@ -698,6 +706,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
 
     expect(badge).toBe(4);
     expect(badge).toBe(shown);
+    expect(sections.get("srv:ws-1")?.paneStatusCounts.running).toBe(1);
   });
 
   it("counts each open tab by its own color, agent or terminal", () => {
@@ -726,6 +735,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
                 "term-quota": "failed",
                 "term-behind": "needs_input",
                 "term-docked": "failed",
+                "term-running": "running",
               },
             },
           ],
@@ -735,6 +745,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
               workspaceId: "ws-1",
               cwd: "/repo/project-a/ws-1",
               pendingPermissions: [{ id: "perm-1" } as Agent["pendingPermissions"][number]],
+              status: "running",
             }),
             agent({
               id: "broken",
@@ -743,6 +754,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
               status: "error",
               requiresAttention: true,
               attentionReason: "error",
+              backgroundWorkCount: 1,
             }),
             agent({
               id: "done",
@@ -750,6 +762,12 @@ describe("buildSidebarWorkspaceGroupModel", () => {
               cwd: "/repo/project-a/ws-1",
               requiresAttention: true,
               attentionReason: "finished",
+            }),
+            agent({
+              id: "background",
+              workspaceId: "ws-1",
+              cwd: "/repo/project-a/ws-1",
+              backgroundWorkCount: 1,
             }),
           ],
         }),
@@ -768,6 +786,8 @@ describe("buildSidebarWorkspaceGroupModel", () => {
           front("a-broken", agentTab("broken")),
           front("a-done", agentTab("done")),
           front("side", terminalTab("term-docked")),
+          front("t-running", terminalTab("term-running")),
+          front("a-background", agentTab("background")),
         ]),
       },
     });
@@ -776,6 +796,53 @@ describe("buildSidebarWorkspaceGroupModel", () => {
       needs_input: 3,
       failed: 3,
       attention: 2,
+      running: 2,
+    });
+  });
+
+  it("counts a running agent once across panes and leaves out closed or tabless targets", () => {
+    const busy = agent({
+      id: "busy",
+      workspaceId: "ws-1",
+      cwd: "/repo/project-a/ws-1",
+      status: "running",
+    });
+    const model = buildSidebarWorkspaceGroupModel({
+      sessions: [
+        session({
+          workspaces: [TWO_PROJECT_WORKSPACE],
+          agents: [
+            busy,
+            { ...busy, id: "archived", archivedAt: new Date(2_000) },
+            { ...busy, id: "tabless" },
+            { ...busy, id: "other-workspace", workspaceId: "ws-2" },
+          ],
+        }),
+      ],
+      layoutsByWorkspace: {
+        "srv:ws-1": splitLayout([
+          { id: "main", tabs: agentTabs("busy"), focusedTabId: "agent_busy" },
+          {
+            id: "side",
+            tabs: [
+              tab({
+                tabId: "busy-again",
+                target: { kind: "agent", agentId: "busy" },
+                createdAt: 2,
+              }),
+              ...agentTabs("archived", "missing", "other-workspace"),
+            ],
+            focusedTabId: null,
+          },
+        ]),
+      },
+    });
+
+    expect(model.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts).toEqual({
+      needs_input: 0,
+      failed: 0,
+      attention: 0,
+      running: 1,
     });
   });
 
@@ -803,6 +870,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
       needs_input: 0,
       failed: 0,
       attention: 0,
+      running: 0,
     });
   });
 
@@ -828,6 +896,7 @@ describe("buildSidebarWorkspaceGroupModel", () => {
       needs_input: 0,
       failed: 0,
       attention: 0,
+      running: 0,
     });
   });
 
@@ -1033,26 +1102,31 @@ describe("preserveSidebarWorkspaceGroupModelIdentity", () => {
     ).toBe("Renamed");
   });
 
-  it("rebuilds a section when only its green count changes", () => {
-    const tabs = [
-      tab({
-        tabId: "terminal_term",
-        target: { kind: "terminal", terminalId: "term" },
-        createdAt: 1,
-      }),
-    ];
-    const build = (terminalStatusBuckets: WorkspaceDescriptor["terminalStatusBuckets"]) =>
-      buildSidebarWorkspaceGroupModel({
-        sessions: [session({ workspaces: [{ ...TWO_PROJECT_WORKSPACE, terminalStatusBuckets }] })],
-        layoutsByWorkspace: layoutsFor("ws-1", tabs),
-      });
-    const green = build({ term: "attention" });
-    expect(green.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts.attention).toBe(1);
+  it.each(["attention", "running"] as const)(
+    "rebuilds a section when only its %s count changes",
+    (bucket) => {
+      const tabs = [
+        tab({
+          tabId: "terminal_term",
+          target: { kind: "terminal", terminalId: "term" },
+          createdAt: 1,
+        }),
+      ];
+      const build = (terminalStatusBuckets: WorkspaceDescriptor["terminalStatusBuckets"]) =>
+        buildSidebarWorkspaceGroupModel({
+          sessions: [
+            session({ workspaces: [{ ...TWO_PROJECT_WORKSPACE, terminalStatusBuckets }] }),
+          ],
+          layoutsByWorkspace: layoutsFor("ws-1", tabs),
+        });
+      const active = build({ term: bucket });
+      expect(active.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts[bucket]).toBe(1);
 
-    const preserved = preserveSidebarWorkspaceGroupModelIdentity(green, build({}));
-    expect(preserved).not.toBe(green);
-    expect(preserved.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts.attention).toBe(0);
-  });
+      const preserved = preserveSidebarWorkspaceGroupModelIdentity(active, build({}));
+      expect(preserved).not.toBe(active);
+      expect(preserved.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts[bucket]).toBe(0);
+    },
+  );
 
   it("rebuilds a section when a draft's tab is renamed", () => {
     const build = (title?: string) =>
