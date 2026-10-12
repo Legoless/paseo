@@ -42,10 +42,6 @@ import { useToast } from "@/contexts/toast-context";
 import { Shortcut } from "@/components/ui/shortcut";
 import { resolveSidebarWorkspaceAccessibilityLabel } from "@/components/sidebar/sidebar-workspace-title";
 import {
-  workspaceServiceLabelKey,
-  type WorkspaceServiceSummary,
-} from "@/components/sidebar/workspace-meta-row";
-import {
   useWorkspaceLabelMenuPages,
   WORKSPACE_LABEL_PAGE_ID,
   type WorkspaceLabelTarget,
@@ -392,7 +388,6 @@ export function SidebarWorkspaceContextMenu({
   workspace,
   leadingProjectName,
   hostBadgeLabel,
-  serviceSummary,
   workspaceKey,
   onRename,
   onMarkAsRead,
@@ -417,7 +412,6 @@ export function SidebarWorkspaceContextMenu({
       workspace: SidebarWorkspaceEntry;
       leadingProjectName?: string | null;
       hostBadgeLabel?: string | null;
-      serviceSummary?: WorkspaceServiceSummary | null;
       highlightStyle: ComponentProps<typeof ContextMenuTrigger>["highlightStyle"];
     }
 >) {
@@ -438,9 +432,6 @@ export function SidebarWorkspaceContextMenu({
     leadingProjectName,
     hostBadgeLabel,
     pullRequestLabel,
-    serviceLabel: serviceSummary
-      ? t(workspaceServiceLabelKey(serviceSummary), { name: serviceSummary.name })
-      : null,
     t,
   });
   const workspaceTarget = useMemo<WorkspaceLabelTarget>(

@@ -3,12 +3,11 @@ import type { PrHint } from "@/git/pr-hint";
 import type { SidebarChecksDisplay } from "@/components/sidebar/display-preferences/checks-display";
 import type { SidebarRowItems } from "@/components/sidebar/display-preferences/row-items";
 import { selectCheckSummary, type CheckSummary } from "./check-summary";
-import type { WorkspaceServiceSummary } from "./service-summary";
 
 /**
  * What ends up on the line under a workspace title, in the order it is read: where the
- * workspace lives, what change it belongs to, whether that change is passing, what it is
- * running, and what someone filed it under. Identity first, then the work, then the work's
+ * workspace lives, what change it belongs to, whether that change is passing, and what someone
+ * filed it under. Identity first, then the work, then the work's
  * state, then the labels a person put on it.
  *
  * Branches are deliberately absent: the workspace row keeps only its notification, title, and
@@ -23,7 +22,6 @@ export type MetaRowItem =
   | { kind: "host" }
   | { kind: "changeRequest"; hint: PrHint }
   | { kind: "checks"; summary: CheckSummary; label: boolean }
-  | { kind: "services"; summary: WorkspaceServiceSummary }
   | { kind: "labels"; labels: readonly WorkspaceLabelDefinition[] };
 
 /**
@@ -40,13 +38,11 @@ export function selectMetaRowItems(input: {
   projectName: string | null;
   hasHostBadge: boolean;
   prHint: PrHint | null;
-  serviceSummary: WorkspaceServiceSummary | null;
   labels: readonly WorkspaceLabelDefinition[];
   visible: SidebarRowItems;
   checksDisplay: SidebarChecksDisplay;
 }): MetaRowItem[] {
-  const { projectName, hasHostBadge, prHint, serviceSummary, labels, visible, checksDisplay } =
-    input;
+  const { projectName, hasHostBadge, prHint, labels, visible, checksDisplay } = input;
   const items: MetaRowItem[] = [];
 
   if (projectName && visible.project) {
@@ -68,10 +64,6 @@ export function selectMetaRowItems(input: {
     if (summary) {
       items.push({ kind: "checks", summary, label: checksDisplay === "iconAndText" });
     }
-  }
-
-  if (serviceSummary && visible.services) {
-    items.push({ kind: "services", summary: serviceSummary });
   }
 
   if (labels.length > 0 && visible.labels) {

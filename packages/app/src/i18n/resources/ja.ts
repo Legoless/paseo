@@ -1346,6 +1346,8 @@ export const ja = {
         serviceRunning: "サービス {{name}} 実行中",
         serviceUnhealthy: "サービス {{name}} 異常",
         creating: "作成中...",
+        tabRunningOne: "実行中のタブ 1 件",
+        tabRunningMany: "実行中のタブ {{count}} 件",
         tabNeedsInputOne: "入力待ちのタブ 1 件",
         tabNeedsInputMany: "入力待ちのタブ {{count}} 件",
         tabFailedOne: "エラーで停止したタブ 1 件",

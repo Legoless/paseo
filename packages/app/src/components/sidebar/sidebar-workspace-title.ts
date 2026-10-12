@@ -19,7 +19,6 @@ export function resolveSidebarWorkspaceAccessibilityLabel(input: {
   leadingProjectName?: string | null;
   hostBadgeLabel?: string | null;
   pullRequestLabel?: string | null;
-  serviceLabel?: string | null;
   t: TFunction;
 }): string {
   return [
@@ -27,7 +26,6 @@ export function resolveSidebarWorkspaceAccessibilityLabel(input: {
     resolveSidebarWorkspacePrimaryLabel(input),
     input.hostBadgeLabel,
     input.pullRequestLabel,
-    input.serviceLabel,
     input.workspace.statusBucket === "done"
       ? null
       : getStatusBucketLabel(input.workspace.statusBucket, input.t),

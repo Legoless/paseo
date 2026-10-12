@@ -6,21 +6,31 @@ import {
 } from "./row-items";
 
 describe("parseSidebarRowItems", () => {
+  it.each([[true], [false]])("ignores the removed services item when stored as %s", (services) => {
+    expect(parseSidebarRowItems({ services, host: false })).toEqual({
+      branch: false,
+      project: false,
+      host: false,
+      changeRequest: true,
+      labels: true,
+    });
+  });
+
   it("shows operational metadata but hides identity badges by default", () => {
     expect(DEFAULT_SIDEBAR_ROW_ITEMS).toEqual({
       branch: false,
       project: false,
       host: true,
       changeRequest: true,
-      services: true,
       labels: true,
     });
   });
 
   it("applies stored overrides", () => {
-    expect(parseSidebarRowItems({ services: false })).toEqual({
+    expect(parseSidebarRowItems({ branch: true, labels: false })).toEqual({
       ...DEFAULT_SIDEBAR_ROW_ITEMS,
-      services: false,
+      branch: true,
+      labels: false,
     });
   });
 
@@ -34,7 +44,7 @@ describe("parseSidebarRowItems", () => {
 
   it("ignores unknown keys and non-boolean values", () => {
     expect(
-      parseSidebarRowItems({ checks: false, nonsense: false, services: null, host: false }),
+      parseSidebarRowItems({ checks: false, nonsense: false, branch: null, host: false }),
     ).toEqual({ ...DEFAULT_SIDEBAR_ROW_ITEMS, host: false });
   });
 
@@ -45,24 +55,23 @@ describe("parseSidebarRowItems", () => {
     },
   );
 
-  it("carries a switched-off scripts item over to services", () => {
-    // COMPAT(sidebarRowItemsScripts): the item narrowed from scripts to services in v0.3.0.
-    expect(parseSidebarRowItems({ scripts: false })).toEqual({
+  it.each([[true], [false]])("ignores the removed scripts item when stored as %s", (scripts) => {
+    expect(parseSidebarRowItems({ scripts, host: false })).toEqual({
       ...DEFAULT_SIDEBAR_ROW_ITEMS,
-      services: false,
+      host: false,
     });
   });
 
-  it("lets a stored services value win over the scripts item it replaced", () => {
+  it("ignores both removed item names when stored together", () => {
     expect(parseSidebarRowItems({ scripts: false, services: true })).toEqual(
       DEFAULT_SIDEBAR_ROW_ITEMS,
     );
   });
 
   it("does not hand back the shared default object", () => {
-    const parsed = parseSidebarRowItems({ services: false });
+    const parsed = parseSidebarRowItems({ host: false });
     expect(parsed).not.toBe(DEFAULT_SIDEBAR_ROW_ITEMS);
-    expect(DEFAULT_SIDEBAR_ROW_ITEMS.services).toBe(true);
+    expect(DEFAULT_SIDEBAR_ROW_ITEMS.host).toBe(true);
   });
 });
 

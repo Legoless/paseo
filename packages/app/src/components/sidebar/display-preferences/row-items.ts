@@ -12,14 +12,7 @@
  * that knows what an item is.
  */
 
-export const SIDEBAR_ROW_ITEMS = [
-  "branch",
-  "project",
-  "host",
-  "changeRequest",
-  "services",
-  "labels",
-] as const;
+export const SIDEBAR_ROW_ITEMS = ["branch", "project", "host", "changeRequest", "labels"] as const;
 
 export type SidebarRowItem = (typeof SIDEBAR_ROW_ITEMS)[number];
 
@@ -31,7 +24,6 @@ export const DEFAULT_SIDEBAR_ROW_ITEMS: SidebarRowItems = {
   project: false,
   host: true,
   changeRequest: true,
-  services: true,
   labels: true,
 };
 
@@ -58,11 +50,6 @@ export function parseSidebarRowItems(value: unknown): SidebarRowItems {
 
   const stored = value as Record<string, unknown>;
   const result = { ...DEFAULT_SIDEBAR_ROW_ITEMS };
-  // COMPAT(sidebarRowItemsScripts): the item was called "scripts" until v0.3.0, when it narrowed
-  // to services only. A stored `false` is someone who switched it off. Remove after 2027-08-05.
-  if (stored.scripts === false) {
-    result.services = false;
-  }
   for (const [key, entry] of Object.entries(stored)) {
     if (isSidebarRowItem(key) && typeof entry === "boolean") {
       result[key] = entry;

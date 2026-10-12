@@ -1320,6 +1320,8 @@ export const zhCN = {
         serviceRunning: "服务 {{name}} 运行中",
         serviceUnhealthy: "服务 {{name}} 异常",
         creating: "正在创建...",
+        tabRunningOne: "1 个标签页运行中",
+        tabRunningMany: "{{count}} 个标签页运行中",
         tabNeedsInputOne: "1 个标签页等待输入",
         tabNeedsInputMany: "{{count}} 个标签页等待输入",
         tabFailedOne: "1 个标签页因错误停止",

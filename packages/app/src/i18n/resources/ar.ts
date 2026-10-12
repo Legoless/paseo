@@ -1277,6 +1277,8 @@ export const ar = {
         serviceRunning: "الخدمة {{name}} قيد التشغيل",
         serviceUnhealthy: "الخدمة {{name}} غير سليمة",
         creating: "جارٍ الإنشاء...",
+        tabRunningOne: "علامة تبويب واحدة قيد التشغيل",
+        tabRunningMany: "علامات تبويب قيد التشغيل: {{count}}",
         tabNeedsInputOne: "علامة تبويب واحدة بانتظار إدخال",
         tabNeedsInputMany: "علامات تبويب بانتظار إدخال: {{count}}",
         tabFailedOne: "علامة تبويب واحدة توقفت بسبب خطأ",

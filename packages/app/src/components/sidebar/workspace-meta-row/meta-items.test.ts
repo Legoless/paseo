@@ -4,7 +4,6 @@ import type { PrHint } from "@/git/pr-hint";
 import { DEFAULT_SIDEBAR_CHECKS_DISPLAY } from "@/components/sidebar/display-preferences/checks-display";
 import { DEFAULT_SIDEBAR_ROW_ITEMS } from "@/components/sidebar/display-preferences/row-items";
 import { selectMetaRowItems } from "./meta-items";
-import type { WorkspaceServiceSummary } from "./service-summary";
 
 const PR_HINT: PrHint = {
   url: "https://github.com/acme/app/pull/7",
@@ -14,8 +13,6 @@ const PR_HINT: PrHint = {
   checksStatus: "success",
 };
 
-const SERVICE: WorkspaceServiceSummary = { name: "web", health: null };
-
 const LABELS: WorkspaceLabelDefinition[] = [{ name: "Urgent", color: "red" }];
 
 function select(overrides: Partial<Parameters<typeof selectMetaRowItems>[0]> = {}) {
@@ -23,7 +20,6 @@ function select(overrides: Partial<Parameters<typeof selectMetaRowItems>[0]> = {
     projectName: "Paseo",
     hasHostBadge: true,
     prHint: PR_HINT,
-    serviceSummary: SERVICE,
     labels: LABELS,
     visible: DEFAULT_SIDEBAR_ROW_ITEMS,
     checksDisplay: DEFAULT_SIDEBAR_CHECKS_DISPLAY,
@@ -41,13 +37,12 @@ describe("selectMetaRowItems", () => {
       "host",
       "changeRequest",
       "checks",
-      "services",
       "labels",
     ]);
   });
 
-  it("reads identity, then the change, then its state, then what is running, then labels", () => {
-    expect(kinds(select())).toEqual(["host", "changeRequest", "checks", "services", "labels"]);
+  it("reads identity, then the change, then its state, then labels", () => {
+    expect(kinds(select())).toEqual(["host", "changeRequest", "checks", "labels"]);
   });
 
   it("omits what the workspace does not have", () => {
@@ -57,7 +52,6 @@ describe("selectMetaRowItems", () => {
           projectName: null,
           hasHostBadge: false,
           prHint: null,
-          serviceSummary: null,
           labels: [],
         }),
       ),
@@ -70,7 +64,6 @@ describe("selectMetaRowItems", () => {
       "host",
       "changeRequest",
       "checks",
-      "services",
       "labels",
     ]);
   });
@@ -89,9 +82,8 @@ describe("selectMetaRowItems", () => {
   });
 
   it.each([
-    ["changeRequest", ["host", "checks", "services", "labels"]],
-    ["services", ["host", "changeRequest", "checks", "labels"]],
-    ["labels", ["host", "changeRequest", "checks", "services"]],
+    ["changeRequest", ["host", "checks", "labels"]],
+    ["labels", ["host", "changeRequest", "checks"]],
   ] as const)("drops %s and only %s when it is switched off", (item, expected) => {
     expect(kinds(select({ visible: { ...DEFAULT_SIDEBAR_ROW_ITEMS, [item]: false } }))).toEqual(
       expected,
@@ -99,19 +91,14 @@ describe("selectMetaRowItems", () => {
   });
 
   it("drops checks and only checks when they are hidden", () => {
-    expect(kinds(select({ checksDisplay: "none" }))).toEqual([
-      "host",
-      "changeRequest",
-      "services",
-      "labels",
-    ]);
+    expect(kinds(select({ checksDisplay: "none" }))).toEqual(["host", "changeRequest", "labels"]);
   });
 
   it("keeps checks when the change request is hidden", () => {
     // Each control answers for itself. A checks setting that drew nothing because a different
     // switch was off would be lying about its own state.
     const items = select({ visible: { ...DEFAULT_SIDEBAR_ROW_ITEMS, changeRequest: false } });
-    expect(kinds(items)).toEqual(["host", "checks", "services", "labels"]);
+    expect(kinds(items)).toEqual(["host", "checks", "labels"]);
   });
 
   it("draws nothing for checks when both are off", () => {
@@ -119,7 +106,7 @@ describe("selectMetaRowItems", () => {
       visible: { ...DEFAULT_SIDEBAR_ROW_ITEMS, changeRequest: false },
       checksDisplay: "none",
     });
-    expect(kinds(items)).toEqual(["host", "services", "labels"]);
+    expect(kinds(items)).toEqual(["host", "labels"]);
   });
 
   it("carries the resolved check summary rather than the raw hint", () => {
@@ -142,6 +129,6 @@ describe("selectMetaRowItems", () => {
 
   it("keeps a change request whose forge reports no checks", () => {
     const items = select({ prHint: { ...PR_HINT, checksStatus: undefined } });
-    expect(kinds(items)).toEqual(["host", "changeRequest", "services", "labels"]);
+    expect(kinds(items)).toEqual(["host", "changeRequest", "labels"]);
   });
 });

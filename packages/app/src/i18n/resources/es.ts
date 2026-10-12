@@ -1368,6 +1368,8 @@ export const es = {
         serviceRunning: "Servicio {{name}} en ejecución",
         serviceUnhealthy: "Servicio {{name}} con fallos",
         creating: "Creando...",
+        tabRunningOne: "1 pestaña en ejecución",
+        tabRunningMany: "{{count}} pestañas en ejecución",
         tabNeedsInputOne: "1 pestaña necesita una respuesta",
         tabNeedsInputMany: "{{count}} pestañas necesitan una respuesta",
         tabFailedOne: "1 pestaña se detuvo con un error",

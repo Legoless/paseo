@@ -58,7 +58,6 @@ import {
 import { useOpenKebabMenuVisibility } from "@/components/sidebar/use-open-kebab-menu-visibility";
 import { getSidebarRowBackdrop } from "@/components/sidebar/sidebar-row-backdrop";
 import { getStatusDotColor } from "@/utils/status-dot-color";
-import { selectWorkspaceServiceSummary } from "@/components/sidebar/workspace-meta-row";
 import {
   SidebarWorkspaceTrailingContent,
   useSidebarWorkspaceTrailing,
@@ -814,9 +813,6 @@ function StatusWorkspaceRowInnerContent({
     ...dragAttributes
   } = dragHandleProps?.attributes ?? {};
 
-  const isDesktop = !isTouchPlatform;
-  const serviceSummary = isDesktop ? selectWorkspaceServiceSummary(workspace.scripts) : null;
-
   const accessibilityState = useMemo(() => ({ selected }), [selected]);
   const didLongPressRef = dragInteraction?.didLongPressRef;
   const startDragPress = dragInteraction?.handlePressIn;
@@ -883,7 +879,6 @@ function StatusWorkspaceRowInnerContent({
               workspace={workspace}
               leadingProjectName={projectName}
               hostBadgeLabel={hostBadge?.label}
-              serviceSummary={serviceSummary}
               workspaceKey={workspace.workspaceKey}
               onCopyBranchName={onCopyBranchName}
               onRename={onRename}
@@ -912,7 +907,6 @@ function StatusWorkspaceRowInnerContent({
                 hostBadge={hostBadge}
                 leadingProjectName={projectName}
                 leadingProjectIconDataUri={projectIconDataUri}
-                serviceSummary={serviceSummary}
                 backdrop={backdrop}
                 isHovered={isHovered}
                 isLoading={isArchiving}

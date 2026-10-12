@@ -91,28 +91,41 @@ describe("loadAppSettingsFromStorage", () => {
     );
   });
 
-  it("keeps an explicit services choice over the legacy scripts fallback", async () => {
-    const deps = makeDeps({
-      storage: createInMemoryKeyValueStorage({
-        [APP_SETTINGS_KEY]: JSON.stringify({
-          contentFontSize: 16,
-          sidebarRowItems: { scripts: false, services: true },
+  it.each([[true], [false]])(
+    "ignores stored services %s and legacy scripts while round-tripping other row items",
+    async (services) => {
+      const deps = makeDeps({
+        storage: createInMemoryKeyValueStorage({
+          [APP_SETTINGS_KEY]: JSON.stringify({
+            contentFontSize: 16,
+            sidebarRowItems: { scripts: false, services, host: false },
+          }),
         }),
-      }),
-    });
+      });
 
-    expect((await loadAppSettingsFromStorage(deps)).sidebarRowItems.services).toBe(true);
+      expect((await loadAppSettingsFromStorage(deps)).sidebarRowItems).toEqual({
+        ...DEFAULT_SIDEBAR_ROW_ITEMS,
+        host: false,
+      });
 
-    await saveAppSettings({
-      queryClient: new QueryClient(),
-      updates: {
-        sidebarRowItems: { ...DEFAULT_SIDEBAR_ROW_ITEMS, services: true },
-      },
-      deps,
-    });
+      const sidebarRowItems = {
+        ...DEFAULT_SIDEBAR_ROW_ITEMS,
+        branch: true,
+        host: false,
+        labels: false,
+      };
 
-    expect((await loadAppSettingsFromStorage(deps)).sidebarRowItems.services).toBe(true);
-  });
+      await saveAppSettings({
+        queryClient: new QueryClient(),
+        updates: {
+          sidebarRowItems,
+        },
+        deps,
+      });
+
+      expect((await loadAppSettingsFromStorage(deps)).sidebarRowItems).toEqual(sidebarRowItems);
+    },
+  );
 
   it("keeps an interrupt the user picked after the migration ran", async () => {
     const deps = makeDeps({

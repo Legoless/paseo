@@ -33,7 +33,6 @@ import {
 } from "@/components/sidebar/sidebar-workspace-row-content";
 import { useOpenKebabMenuVisibility } from "@/components/sidebar/use-open-kebab-menu-visibility";
 import { getSidebarRowBackdrop } from "@/components/sidebar/sidebar-row-backdrop";
-import { selectWorkspaceServiceSummary } from "@/components/sidebar/workspace-meta-row";
 import {
   SidebarWorkspaceTrailingContent,
   useSidebarWorkspaceTrailing,
@@ -263,8 +262,6 @@ function WorkspaceRowBody({
   return (
     <SidebarWorkspaceRowFrame workspace={workspace} isDragging={isDragging}>
       {({ isHovered, contextMenuOpen, onContextMenuOpenChange, hoverHandlers }) => {
-        const isDesktop = !isTouchPlatform;
-        const serviceSummary = isDesktop ? selectWorkspaceServiceSummary(workspace.scripts) : null;
         const workspaceRowStyle = getWorkspaceRowStyle({
           isDragging,
           isPressed,
@@ -287,7 +284,6 @@ function WorkspaceRowBody({
               onContextMenuOpenChange={onContextMenuOpenChange}
               workspace={workspace}
               hostBadgeLabel={hostBadge?.label}
-              serviceSummary={serviceSummary}
               workspaceKey={workspace.workspaceKey}
               onCopyPath={onCopyPath}
               onCopyBranchName={onCopyBranchName}
@@ -315,7 +311,6 @@ function WorkspaceRowBody({
               <SidebarWorkspaceRowContent
                 workspace={workspace}
                 hostBadge={hostBadge}
-                serviceSummary={serviceSummary}
                 backdrop={backdrop}
                 isHovered={isHovered}
                 isLoading={isArchiving || isCreating}
