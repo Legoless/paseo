@@ -26,6 +26,7 @@ export interface WorkspaceTabPresentation {
   subtitle: string;
   tooltip: string;
   modified: boolean;
+  showCloseButton: boolean;
   titleState: "ready" | "loading";
   icon: React.ComponentType<PanelIconProps>;
   statusBucket: SidebarStateBucket | null;
@@ -93,6 +94,7 @@ function WorkspaceTabPresentationResolverInner({
       subtitle: descriptor.subtitle,
       tooltip: tab.title ?? descriptor.tooltip,
       modified: attributes.modified,
+      showCloseButton: registration.showCloseButton,
       // A named tab is never pending: the shimmer belongs to a title still being derived, and this
       // one is already known.
       titleState: tab.title ? "ready" : descriptor.titleState,
@@ -110,6 +112,7 @@ function WorkspaceTabPresentationResolverInner({
       tab.kind,
       tab.title,
       attributes.modified,
+      registration.showCloseButton,
     ],
   );
 

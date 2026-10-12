@@ -35843,6 +35843,34 @@ WARNING: This link could potentially be dangerous`)
           }
           return false;
         }
+        function resolveMacTerminalEditingShortcut(args) {
+          if (args.ctrlKey || args.shiftKey) {
+            return null;
+          }
+          if (args.metaKey && !args.altKey) {
+            switch (args.key) {
+              case "ArrowLeft":
+                return "";
+              case "ArrowRight":
+                return "";
+              case "Backspace":
+                return "";
+              default:
+                return null;
+            }
+          }
+          if (args.altKey && !args.metaKey) {
+            switch (args.key) {
+              case "ArrowLeft":
+                return "\x1Bb";
+              case "ArrowRight":
+                return "\x1Bf";
+              default:
+                return null;
+            }
+          }
+          return null;
+        }
         function mergeTerminalModifiers(args) {
           const { pendingModifiers, ctrlKey, shiftKey, altKey, metaKey } = args;
           return {
@@ -35913,6 +35941,9 @@ WARNING: This link could potentially be dangerous`)
           let previousStyle = DEFAULT_STYLE;
           for (let index = 0; index < length; index += 1) {
             const cell = row[index] ?? { char: " " };
+            if (cell.char === "") {
+              continue;
+            }
             const nextStyle = getTerminalStyle(cell);
             if (!terminalStylesEqual(previousStyle, nextStyle)) {
               output.push(styleToAnsi(nextStyle));
@@ -36700,6 +36731,9 @@ WARNING: This link could potentially be dangerous`)
                 }
                 return true;
               }
+              if (this.maybeSendMacEditingShortcut(terminal, event)) {
+                return false;
+              }
               const normalizedKey = normalizeDomTerminalKey(event.key);
               if (!normalizedKey || isTerminalModifierDomKey(event.key)) {
                 return true;
@@ -36729,11 +36763,7 @@ WARNING: This link could potentially be dangerous`)
                 key: normalizeTerminalTransportKey(normalizedKey),
                 ...modifiers,
               });
-              if (
-                this.pendingModifiers.ctrl ||
-                this.pendingModifiers.shift ||
-                this.pendingModifiers.alt
-              ) {
+              if (hasPendingTerminalModifiers(this.pendingModifiers)) {
                 this.callbacks.onPendingModifiersConsumed?.();
               }
               event.preventDefault();
@@ -36782,6 +36812,20 @@ WARNING: This link could potentially be dangerous`)
           getInputModeState() {
             return this.inputModeTracker.getState();
           }
+          maybeSendMacEditingShortcut(terminal, event) {
+            if (!this.options.isMac || hasPendingTerminalModifiers(this.pendingModifiers)) {
+              return false;
+            }
+            const editingShortcutData = resolveMacTerminalEditingShortcut(event);
+            if (editingShortcutData === null) {
+              return false;
+            }
+            terminal.input(editingShortcutData, true);
+            terminal.scrollToBottom();
+            event.preventDefault();
+            event.stopPropagation();
+            return true;
+          }
           mount(input) {
             this.unmount();
             input.host.innerHTML = "";
@@ -36789,6 +36833,10 @@ WARNING: This link could potentially be dangerous`)
             this.lastSize = null;
             this.inputModeTracker.reset();
             this.emitInputModeChange();
+            const openExternalLink = (event, uri) => {
+              event.preventDefault();
+              void this.callbacks.onOpenExternalUrl?.(uri);
+            };
             const terminal = new Vn2({
               allowProposedApi: true,
               convertEol: false,
@@ -36796,6 +36844,8 @@ WARNING: This link could potentially be dangerous`)
               cursorStyle: "bar",
               fontFamily: resolveTerminalFontFamily(input.fontFamily),
               fontSize: resolveTerminalFontSize(input.fontSize),
+              // OSC 8 hyperlinks; without a handler xterm prompts and calls window.open().
+              linkHandler: { activate: openExternalLink },
               lineHeight: 1,
               macOptionIsMeta: true,
               minimumContrastRatio: 1,
@@ -36812,12 +36862,7 @@ WARNING: This link could potentially be dangerous`)
             let imageAddon = null;
             terminal.loadAddon(fitAddon);
             terminal.loadAddon(unicode11Addon);
-            terminal.loadAddon(
-              new L3((event, uri) => {
-                event.preventDefault();
-                void this.callbacks.onOpenExternalUrl?.(uri);
-              }),
-            );
+            terminal.loadAddon(new L3(openExternalLink));
             const localFileLinkProvider = terminal.registerLinkProvider(
               createTerminalLocalFileLinkProvider(terminal, {
                 resolveLink: async (source) => {

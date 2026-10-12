@@ -29,6 +29,7 @@ type SupervisorLifecycleMessage =
   | {
       type: "paseo:ready";
       listen: string;
+      serverId: string;
     }
   | {
       type: "paseo:restart";
@@ -339,7 +340,11 @@ async function main() {
     if (!listen) {
       throw new Error("Daemon did not expose a listen target after startup");
     }
-    sendSupervisorLifecycleMessage({ type: "paseo:ready", listen });
+    sendSupervisorLifecycleMessage({
+      type: "paseo:ready",
+      listen,
+      serverId: daemon.getServerId(),
+    });
   } catch (err) {
     logger.fatal({ err }, "Daemon failed to start listening");
     throw err;

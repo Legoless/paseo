@@ -8,7 +8,7 @@ import {
   resolveNonPlanningModeId,
 } from "./policy";
 import { findModelByReference } from "@/provider-selection/model-catalog";
-import { buildDraftCommandConfig } from "@/provider-selection/provider-selection";
+import { buildDraftCommandTarget } from "@/provider-selection/provider-selection";
 
 it("filters only native model mode exclusions, including when selected by alias", () => {
   const modes = [
@@ -45,7 +45,7 @@ it("filters only native model mode exclusions, including when selected by alias"
     resolveAgentModeForModel({ modeId: savedModeId, modes, defaultModeId: "auto", model }),
   ).toBe("default");
   expect(
-    buildDraftCommandConfig({
+    buildDraftCommandTarget({
       selection: {
         provider: model.provider,
         modelId: model.id,
@@ -58,7 +58,10 @@ it("filters only native model mode exclusions, including when selected by alias"
       effectiveModelId: model.id,
       effectiveThinkingOptionId: "",
     }),
-  ).toEqual({ provider: model.provider, cwd: "/repo", model: model.id, modeId: "future-mode" });
+  ).toEqual({
+    status: "ready",
+    config: { provider: model.provider, cwd: "/repo", model: model.id, modeId: "future-mode" },
+  });
   const supportedModel = { ...model, metadata: { unsupportedModeIds: [] } };
   const restoredModeId = resolveAgentModeForModel({
     modeId: savedModeId,
@@ -68,7 +71,7 @@ it("filters only native model mode exclusions, including when selected by alias"
   });
   expect(restoredModeId).toBe("auto");
   expect(
-    buildDraftCommandConfig({
+    buildDraftCommandTarget({
       selection: {
         provider: model.provider,
         modelId: model.id,
@@ -80,8 +83,8 @@ it("filters only native model mode exclusions, including when selected by alias"
       cwd: "/repo",
       effectiveModelId: model.id,
       effectiveThinkingOptionId: "",
-    })?.modeId,
-  ).toBe("auto");
+    }),
+  ).toMatchObject({ status: "ready", config: { modeId: "auto" } });
 });
 
 describe("getAgentFeatureSelectOptions", () => {

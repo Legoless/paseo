@@ -1,16 +1,13 @@
 import {
   useCallback,
-  useEffect,
   useMemo,
-  useRef,
   useState,
   type PropsWithChildren,
   type ReactElement,
   type ReactNode,
 } from "react";
-import { Dimensions, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { FadeIn, FadeOut } from "react-native-reanimated";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
   Check,
@@ -28,16 +25,12 @@ import type { Theme } from "@/styles/theme";
 import { DiffStat } from "@/components/diff-stat";
 import { Pressable } from "react-native";
 import type { GestureResponderEvent } from "react-native";
-import { Portal } from "@gorhom/portal";
-import { useBottomSheetModalInternal } from "@gorhom/bottom-sheet";
 import type { PrHint } from "@/git/use-pr-status-query";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { copyToClipboard } from "@/utils/copy-to-clipboard";
 import { PrBadge } from "@/components/sidebar/pr-badge";
-import { useHoverSafeZone } from "@/hooks/use-hover-safe-zone";
 import { useIsCompactFormFactor } from "@/constants/layout";
-import { FloatingSurface } from "@/components/ui/floating";
-import { isWeb } from "@/constants/platform";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { useHosts } from "@/runtime/host-runtime";
 import {
   COUNTED_CHECK_PRESENTATIONS,
@@ -59,52 +52,6 @@ import {
   type WorkspaceLabelDefinition,
 } from "@getpaseo/protocol/workspace-labels";
 
-interface Rect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-function measureElement(element: View): Promise<Rect> {
-  return new Promise((resolve) => {
-    element.measureInWindow((x, y, width, height) => {
-      resolve({ x, y, width, height });
-    });
-  });
-}
-
-function computeHoverCardPosition({
-  triggerRect,
-  contentSize,
-  displayArea,
-  offset,
-}: {
-  triggerRect: Rect;
-  contentSize: { width: number; height: number };
-  displayArea: Rect;
-  offset: number;
-}): { x: number; y: number } {
-  let x = triggerRect.x + triggerRect.width + offset;
-  let y = triggerRect.y;
-
-  // If it overflows right, try left
-  if (x + contentSize.width > displayArea.width - 8) {
-    x = triggerRect.x - contentSize.width - offset;
-  }
-
-  // Constrain to screen
-  const padding = 8;
-  x = Math.max(padding, Math.min(displayArea.width - contentSize.width - padding, x));
-  y = Math.max(
-    displayArea.y + padding,
-    Math.min(displayArea.y + displayArea.height - contentSize.height - padding, y),
-  );
-
-  return { x, y };
-}
-
-const HOVER_GRACE_MS = 100;
 const HOVER_CARD_WIDTH = 260;
 
 interface WorkspaceHoverCardProps {
@@ -151,9 +98,9 @@ export function WorkspaceHoverCard({
     [workspace.name, workspace.projectCount, workspace.workspaceKey],
   );
   return (
-    <HoverCard details={details} isDragging={isDragging} disabled={disabled}>
+    <DetailsHoverCard details={details} isDragging={isDragging} disabled={disabled}>
       {children}
-    </HoverCard>
+    </DetailsHoverCard>
   );
 }
 
@@ -196,13 +143,13 @@ export function AgentHoverCard({
     ],
   );
   return (
-    <HoverCard details={details} disabled={disabled}>
+    <DetailsHoverCard details={details} disabled={disabled}>
       {children}
-    </HoverCard>
+    </DetailsHoverCard>
   );
 }
 
-function HoverCard({
+function DetailsHoverCard({
   details,
   isDragging = false,
   disabled = false,
@@ -213,179 +160,24 @@ function HoverCard({
   disabled?: boolean;
 }>): ReactNode {
   const isCompact = useIsCompactFormFactor();
-
-  if (!isWeb || isCompact) {
-    return children;
-  }
-
+  if (isCompact) return children;
   return (
-    <HoverCardDesktop details={details} isDragging={isDragging} disabled={disabled}>
-      {children}
-    </HoverCardDesktop>
-  );
-}
-
-function HoverCardDesktop({
-  details,
-  isDragging,
-  disabled,
-  children,
-}: PropsWithChildren<{
-  details: HoverCardDetails;
-  isDragging: boolean;
-  disabled: boolean;
-}>): ReactElement {
-  const triggerRef = useRef<View>(null);
-  const contentRef = useRef<View>(null);
-  const [open, setOpen] = useState(false);
-  const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const clearGraceTimer = useCallback(() => {
-    if (graceTimerRef.current) {
-      clearTimeout(graceTimerRef.current);
-      graceTimerRef.current = null;
-    }
-  }, []);
-
-  const scheduleClose = useCallback(() => {
-    if (graceTimerRef.current) return;
-    graceTimerRef.current = setTimeout(() => {
-      graceTimerRef.current = null;
-      setOpen(false);
-    }, HOVER_GRACE_MS);
-  }, []);
-
-  const handleTriggerEnter = useCallback(() => {
-    clearGraceTimer();
-    if (!isDragging && !disabled) {
-      setOpen(true);
-    }
-  }, [clearGraceTimer, disabled, isDragging]);
-
-  const handleTriggerLeave = useCallback(() => {
-    scheduleClose();
-  }, [scheduleClose]);
-
-  useHoverSafeZone({
-    enabled: open,
-    triggerRef,
-    contentRef,
-    onEnterSafeZone: clearGraceTimer,
-    onLeaveSafeZone: scheduleClose,
-  });
-
-  useEffect(() => {
-    if (isDragging || disabled) {
-      clearGraceTimer();
-      setOpen(false);
-    }
-  }, [clearGraceTimer, disabled, isDragging]);
-
-  useEffect(() => {
-    return () => {
-      clearGraceTimer();
-    };
-  }, [clearGraceTimer]);
-
-  return (
-    <View
-      ref={triggerRef}
-      collapsable={false}
-      onPointerEnter={handleTriggerEnter}
-      onPointerLeave={handleTriggerLeave}
-    >
-      {children}
-      {open ? (
-        <HoverCardContent details={details} triggerRef={triggerRef} contentRef={contentRef} />
-      ) : null}
-    </View>
-  );
-}
-
-function HoverCardContent({
-  details,
-  triggerRef,
-  contentRef,
-}: {
-  details: HoverCardDetails;
-  triggerRef: React.RefObject<View | null>;
-  contentRef: React.RefObject<View | null>;
-}): ReactElement | null {
-  const bottomSheetInternal = useBottomSheetModalInternal(true);
-  const [triggerRect, setTriggerRect] = useState<Rect | null>(null);
-  const [contentSize, setContentSize] = useState<{ width: number; height: number } | null>(null);
-  const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
-
-  // Measure trigger — same pattern as tooltip.tsx
-  useEffect(() => {
-    if (!triggerRef.current) return;
-
-    let cancelled = false;
-    measureElement(triggerRef.current).then((rect) => {
-      if (cancelled) return;
-      setTriggerRect(rect);
-      return;
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [triggerRef]);
-
-  // Compute position when both measurements are available
-  useEffect(() => {
-    if (!triggerRect || !contentSize) return;
-    const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
-    const displayArea = { x: 0, y: 0, width: screenWidth, height: screenHeight };
-    const result = computeHoverCardPosition({
-      triggerRect,
-      contentSize,
-      displayArea,
-      offset: 4,
-    });
-    setPosition(result);
-  }, [triggerRect, contentSize]);
-
-  const handleLayout = useCallback(
-    (event: { nativeEvent: { layout: { width: number; height: number } } }) => {
-      const { width, height } = event.nativeEvent.layout;
-      setContentSize({ width, height });
-    },
-    [],
-  );
-
-  const frameStyle = useMemo(
-    () => ({
-      position: "absolute" as const,
-      top: position?.y ?? -9999,
-      left: position?.x ?? -9999,
-    }),
-    [position?.x, position?.y],
-  );
-
-  return (
-    <Portal hostName={bottomSheetInternal?.hostName}>
-      <View pointerEvents="box-none" style={styles.portalOverlay}>
-        <FloatingSurface
-          ref={contentRef}
-          entering={FadeIn.duration(80)}
-          exiting={FadeOut.duration(80)}
-          collapsable={false}
-          onLayout={handleLayout}
-          accessibilityRole="menu"
-          accessibilityLabel={details.title}
-          testID={details.kind === "workspace" ? "workspace-hover-card" : "agent-hover-card"}
-          style={styles.card}
-          frameStyle={frameStyle}
-        >
-          {details.kind === "workspace" ? (
-            <WorkspaceHoverCardBody details={details} />
-          ) : (
-            <AgentHoverCardBody details={details} />
-          )}
-        </FloatingSurface>
-      </View>
-    </Portal>
+    <HoverCard disabled={isDragging || disabled}>
+      <HoverCardTrigger>{children}</HoverCardTrigger>
+      <HoverCardContent
+        placement="right"
+        role="menu"
+        accessibilityLabel={details.title}
+        testID={details.kind === "workspace" ? "workspace-hover-card" : "agent-hover-card"}
+        style={styles.card}
+      >
+        {details.kind === "workspace" ? (
+          <WorkspaceHoverCardBody details={details} />
+        ) : (
+          <AgentHoverCardBody details={details} />
+        )}
+      </HoverCardContent>
+    </HoverCard>
   );
 }
 
@@ -709,14 +501,6 @@ function checksSummaryPressableStyle({ hovered = false }: { pressed: boolean; ho
 }
 
 const styles = StyleSheet.create((theme) => ({
-  portalOverlay: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    zIndex: 1000,
-  },
   card: {
     backgroundColor: theme.colors.surface1,
     borderWidth: 1,
@@ -729,7 +513,6 @@ const styles = StyleSheet.create((theme) => ({
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 8,
-    zIndex: 1000,
   },
   cardHeader: {
     flexDirection: "row",

@@ -68,7 +68,8 @@ import type { Theme } from "@/styles/theme";
 import { RenderProfile } from "@/utils/render-profiler";
 import { TrailingActionScrim } from "@/components/ui/trailing-action-scrim";
 import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
-import { useCompactTimeAgo } from "@/hooks/use-compact-time-ago";
+import { useCompactTimeAgo } from "@/hooks/use-time-ago";
+import { formatCompactTimeAgoAsProse } from "@/utils/time";
 import { buildWorkspaceKeyboardHandlerId } from "@/keyboard/handler-id";
 import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
 import {
@@ -105,7 +106,7 @@ const TAB_ICON_WIDTH = 14;
 const TAB_CONTENT_GAP = 4;
 const TAB_DROP_INDICATOR_WIDTH = 4;
 const TAB_MODIFIED_DOT_SIZE = 8;
-const TAB_MIN_WIDTH = 96;
+const TAB_MIN_WIDTH = 64;
 const TAB_MAX_WIDTH = 160;
 const TAB_CLOSE_BUTTON_RESERVED_WIDTH = 0;
 const TAB_LABEL_LAYOUT_ALLOWANCE = 4;
@@ -148,12 +149,6 @@ function formatAgentTooltipTitle(singleLineTitle: string): string {
   return `${singleLineTitle.slice(0, AGENT_TOOLTIP_TITLE_MAX_LENGTH - 1).trimEnd()}…`;
 }
 
-function formatAgentTooltipActivity(compactActivity: string): string {
-  if (compactActivity === "now") return "just now";
-  if (/^\d/.test(compactActivity)) return `${compactActivity} ago`;
-  return compactActivity;
-}
-
 function AgentTabTooltipBody({
   serverId,
   agentId,
@@ -169,7 +164,7 @@ function AgentTabTooltipBody({
     return state.agentLastActivity.get(agentId) ?? agent?.lastActivityAt ?? null;
   });
   const compactActivity = useCompactTimeAgo(lastActivityAt);
-  const activity = formatAgentTooltipActivity(compactActivity);
+  const activity = formatCompactTimeAgoAsProse(compactActivity);
 
   return (
     <View style={styles.tooltipAgentContent}>
@@ -479,9 +474,10 @@ function sameWidths(left: number[], right: number[]): boolean {
   return left.length === right.length && left.every((width, index) => width === right[index]);
 }
 
-interface WorkspaceDesktopTabsRowProps {
+export interface WorkspaceDesktopTabsRowProps {
   paneId?: string;
   isFocused?: boolean;
+  ownsKeyboardShortcuts?: boolean;
   tabs: WorkspaceDesktopTabRowItem[];
   normalizedServerId: string;
   normalizedWorkspaceId: string;
@@ -832,9 +828,8 @@ function TabChip({
               {...(dragHandleProps?.listeners as object | undefined)}
               testID={`workspace-tab-${testIdentity}`}
               triggerRef={dragHandleProps?.setActivatorNodeRef as unknown as undefined}
-              enabledOnMobile={false}
               style={tabChipStyle}
-              onPressIn={handleNavigateTab}
+              onPressIn={isWeb ? handleNavigateTab : undefined}
               onPress={handleNavigateTab}
               accessibilityRole="button"
               accessibilityLabel={accessibilityLabel}
@@ -993,6 +988,7 @@ export function WorkspaceDesktopTabsRow(props: WorkspaceDesktopTabsRowProps) {
 function ResolvedWorkspaceDesktopTabsRow({
   paneId,
   isFocused = false,
+  ownsKeyboardShortcuts = isFocused,
   tabs,
   expectedTabCount,
   normalizedServerId,
@@ -1211,14 +1207,14 @@ function ResolvedWorkspaceDesktopTabsRow({
 
   const handleNewTabKeyboardAction = useCallback(
     (action: KeyboardActionDefinition): boolean => {
-      if (!isFocused) return false;
+      if (!ownsKeyboardShortcuts) return false;
       if (action.id === "workspace.tab.menu.open") {
         createNewTab();
         return true;
       }
       return false;
     },
-    [createNewTab, isFocused],
+    [createNewTab, ownsKeyboardShortcuts],
   );
 
   useKeyboardActionHandler({
@@ -1229,7 +1225,7 @@ function ResolvedWorkspaceDesktopTabsRow({
       paneId,
     }),
     actions: ["workspace.tab.menu.open"],
-    enabled: isFocused,
+    enabled: ownsKeyboardShortcuts,
     priority: 200,
     handle: handleNewTabKeyboardAction,
   });
@@ -1241,7 +1237,8 @@ function ResolvedWorkspaceDesktopTabsRow({
       dragHandleProps,
       isActive,
     }: DraggableRenderItemInfo<ResolvedWorkspaceDesktopTabRowItem>) => {
-      const shouldShowCloseButton = layout.closeButtonPolicy === "all";
+      const shouldShowCloseButton =
+        layout.closeButtonPolicy === "all" && item.presentation.showCloseButton;
       const layoutItem = layout.items[index] ?? null;
       const resolvedTabWidth = layoutItem?.width ?? 150;
       const showLabel = layoutItem?.showLabel ?? true;

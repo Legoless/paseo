@@ -18,6 +18,7 @@ import {
   type ActiveWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
 import { StyleSheet } from "react-native-unistyles";
+import { density, densityFontSize } from "@/styles/density";
 import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
 import { getSidebarRowBackdrop } from "@/components/sidebar/sidebar-row-backdrop";
 import { type GestureType } from "react-native-gesture-handler";
@@ -72,11 +73,7 @@ import {
   type SidebarWorkspacePlacement,
 } from "@/hooks/use-sidebar-workspaces-list";
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
-import {
-  hasActiveSidebarLabelFilter,
-  useSidebarViewStore,
-  type SidebarGroupMode,
-} from "@/stores/sidebar-view-store";
+import { type SidebarGroupMode } from "@/stores/sidebar-view-store";
 import { useShowShortcutBadges } from "@/hooks/use-show-shortcut-badges";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { ProjectStatusIndicator } from "@/components/sidebar/project-leading-visual";
@@ -1603,9 +1600,6 @@ export function SidebarWorkspaceList({
   const onToggleWorkspacePin = useSidebarWorkspacePinController();
   const getPinnedWorkspaceOrder = useSidebarOrderStore((state) => state.getPinnedWorkspaceOrder);
   const setPinnedWorkspaceOrder = useSidebarOrderStore((state) => state.setPinnedWorkspaceOrder);
-  const hasActiveLabelFilter = useSidebarViewStore((state) =>
-    hasActiveSidebarLabelFilter(state.labelFilter),
-  );
   const handlePinnedWorkspaceReorder = useCallback(
     (reorderedWorkspaces: SidebarWorkspacePlacement[]) => {
       const reorderedWorkspaceKeys = reorderedWorkspaces.map((workspace) => workspace.workspaceKey);
@@ -1639,11 +1633,10 @@ export function SidebarWorkspaceList({
   // this whole subtree, which unmounted the header — and the header is where the display menu's
   // trigger lives, so filtering the last row away closed the menu you were filtering from.
   //
-  // Only the label filter can get here. The project filter resolves against the projects it can
-  // see and falls back to "all projects" when nothing matches, so it either keeps at least one
-  // workspace or is not applied at all — it can narrow this list but never empty it.
+  // Keep the header mounted when a local filter hides every workspace, so its display menu
+  // can reveal them again.
   const hasVisibleRows = topLevelWorkspaces.length > 0 || pinnedGroups.pinnedChats.length > 0;
-  const sidebarFilterEmpty = hasActiveLabelFilter && hasProjectsBeforeFilter && !hasVisibleRows;
+  const sidebarFilterEmpty = hasProjectsBeforeFilter && !hasVisibleRows;
 
   // The workspace grouping keeps its three-level sections; every other grouping mode is a flat
   // list of grouped rows, so a new mode lands in the grouped branch rather than silently in this
@@ -2264,7 +2257,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   uncategorizedName: {
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.base,
+    fontSize: densityFontSize(theme, "base"),
     fontWeight: "400",
     minWidth: 0,
     flex: 1,
@@ -2279,7 +2272,7 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 1,
   },
   workspaceRow: {
-    minHeight: 36,
+    minHeight: density.rowHeight,
     marginBottom: theme.spacing[0.5],
     paddingVertical: theme.spacing[2],
     paddingLeft: theme.spacing[2],

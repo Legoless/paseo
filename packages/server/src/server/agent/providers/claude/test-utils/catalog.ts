@@ -13,6 +13,7 @@ const fixtures = [
   { id: "claude-opus-4-7[1m]", fast: true, off: true, context: 1_000_000 },
   { id: "claude-opus-4-6", fast: true, off: true, context: 200_000 },
   { id: "claude-opus-4-6[1m]", fast: true, off: true, context: 1_000_000 },
+  { id: "claude-sonnet-5-5", fast: false, off: false, context: 1_000_000 },
   { id: "claude-sonnet-5", fast: false, off: true, context: 200_000 },
   { id: "claude-sonnet-5[1m]", fast: false, off: true, context: 1_000_000 },
   { id: "claude-sonnet-4-6", fast: false, off: true, context: 200_000 },

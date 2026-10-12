@@ -320,6 +320,7 @@ export function ExplorerSidebarTabRail({
     serverId: normalizedServerId,
     purpose: "supporting",
     host: "explorer",
+    surface: "panel",
   });
   const singletonConfigurationItems = useMemo(
     () => groups.flatMap((group) => group.items).filter((item) => item.toggleTarget !== null),

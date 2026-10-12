@@ -1,9 +1,9 @@
-import { useCallback, useMemo, type ReactElement } from "react";
+import { useCallback, type ReactElement } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Unlink, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { getProviderIcon } from "@/components/provider-icons";
+import { useProviderIcon } from "@/components/provider-icons";
 import { ComposerTrackActions, ComposerTrackPill, ComposerTrackRow } from "@/composer/tracks";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -17,6 +17,7 @@ import { collectAllTabs, useWorkspaceLayoutStore } from "@/stores/workspace-layo
 import type { Theme } from "@/styles/theme";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import { useShallow } from "zustand/shallow";
+import { getPanelManifest } from "@/panels/panel-manifest";
 import type { SubagentRow } from "./select";
 import type { ArchiveFinishedStatus } from "./use-archive-finished";
 import {
@@ -50,17 +51,19 @@ const IDLE_ARCHIVE_FINISHED_STATUS: ArchiveFinishedStatus = { kind: "idle" };
 /** Leading and action glyphs share one size so rows keep a single icon column. */
 const ROW_ICON_SIZE = 14;
 
-function buildRowPresentation(
+function useRowPresentation(
   row: SubagentRow,
   serverId: string,
   tabTitle: string | null,
 ): WorkspaceTabPresentation {
+  const icon = useProviderIcon(row.provider, serverId);
   const data = buildSubagentRowPresentationData(row, tabTitle);
   return {
     ...data,
     tooltip: data.label,
     modified: false,
-    icon: getProviderIcon(row.provider, serverId),
+    showCloseButton: getPanelManifest(data.kind).showCloseButton,
+    icon,
   };
 }
 
@@ -215,10 +218,7 @@ function SubagentsTrackRow({
 }: SubagentsTrackRowProps): ReactElement {
   const { t } = useTranslation();
   const isCompact = useIsCompactFormFactor();
-  const presentation = useMemo(
-    () => buildRowPresentation(row, serverId, tabTitle),
-    [row, serverId, tabTitle],
-  );
+  const presentation = useRowPresentation(row, serverId, tabTitle);
   const displayLabel =
     presentation.titleState === "loading" ? t("common.states.loading") : presentation.label;
   const handlePress = useCallback(() => {

@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 
+import { resolveRepositoryDefaultBranch } from "../../../utils/checkout-git.js";
 import { createRealpathAwarePathMatcher } from "../../../utils/path.js";
 import { runGitCommand } from "../../../utils/run-git-command.js";
 import {
@@ -7,6 +9,7 @@ import {
   isPaseoOwnedWorktreeCwd,
   mapWorkspaceCwdToWorktree,
   rollbackCreatedPaseoWorktree,
+  type WorktreeSource,
 } from "../../../utils/worktree.js";
 import { WorktreeRequestError, toWorktreeRequestError } from "../../worktree-errors.js";
 import {
@@ -93,14 +96,6 @@ export function createWorkspaceRecoveryService(deps: {
           message: `The project directory ${member.cwd} no longer exists and cannot be recreated.`,
         };
       }
-      if (!member.branch) {
-        return {
-          kind: "unavailable",
-          workspaceId,
-          reason: "worktree_branch_missing",
-          message: "The archived worktree has no branch recorded, so it cannot be restored.",
-        };
-      }
       const project = await deps.getProject(member.projectId);
       if (!project) {
         return {
@@ -110,6 +105,8 @@ export function createWorkspaceRecoveryService(deps: {
           message: "The project for this archived worktree no longer exists.",
         };
       }
+      // COMPAT(worktreeRestoreMissingMainRepoRoot): records created before v0.1.110
+      // lack placement ownership; remove the project-root fallback after 2027-01-17.
       const sourceRepoRoot = member.mainRepoRoot ?? project.rootPath;
       if (!(await deps.isDirectory(sourceRepoRoot))) {
         return {
@@ -162,13 +159,13 @@ export function createWorkspaceRecoveryService(deps: {
     workspace: PersistedWorkspaceMember,
     sourceRepoRoot: string,
   ): Promise<void> {
-    const branch = workspace.branch;
-    if (!branch) {
-      throw new WorktreeRequestError({
-        code: "unknown",
-        message: `Worktree ${workspace.cwd} has no branch to restore`,
-      });
-    }
+    const source: WorktreeSource = workspace.branch
+      ? { kind: "restore", branchName: workspace.branch, baseRef: workspace.baseBranch }
+      : {
+          kind: "restore-from-base",
+          branchName: `restored/${randomUUID().slice(0, 8)}`,
+          baseRef: await resolveRecoveryBase(sourceRepoRoot, workspace.baseBranch),
+        };
 
     try {
       await runGitCommand(["worktree", "prune"], { cwd: sourceRepoRoot, timeout: 30_000 });
@@ -194,7 +191,7 @@ export function createWorkspaceRecoveryService(deps: {
       const result = await createWorktree({
         cwd: sourceRepoRoot,
         worktreeSlug: basename(previousWorktreePath),
-        source: { kind: "restore", branchName: branch, baseRef: workspace.baseBranch },
+        source,
         runSetup: false,
         paseoHome: deps.paseoHome,
         worktreesRoot: deps.worktreesRoot,
@@ -237,4 +234,24 @@ export function createWorkspaceRecoveryService(deps: {
   }
 
   return { inspect, restore };
+}
+
+async function resolveRecoveryBase(repoRoot: string, recordedBase: string | null): Promise<string> {
+  if (recordedBase) {
+    try {
+      await runGitCommand(["rev-parse", "--verify", `${recordedBase}^{commit}`], { cwd: repoRoot });
+      return recordedBase;
+    } catch {
+      // The saved base was removed; use the repository default for continued work.
+    }
+  }
+  const defaultBranch = await resolveRepositoryDefaultBranch(repoRoot);
+  if (!defaultBranch) {
+    throw new WorktreeRequestError({
+      code: "unknown",
+      message:
+        "The saved base is unavailable and the repository has no default branch to restore from.",
+    });
+  }
+  return defaultBranch;
 }

@@ -228,18 +228,6 @@ export const ANTIGRAVITY_MODES: AgentProviderModeDefinition[] = [
 
 export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
   {
-    id: "antigravity",
-    label: "Antigravity",
-    description: "Google's autonomous coding assistant with Gemini 3.8 and Claude models",
-    defaultModeId: "accept-edits",
-    modes: ANTIGRAVITY_MODES,
-    voice: {
-      enabled: true,
-      defaultModeId: "accept-edits",
-      defaultModel: "gemini-3.8-flash-high",
-    },
-  },
-  {
     id: "claude",
     label: "Claude",
     description: "Anthropic's multi-tool assistant with MCP support, streaming, and deep reasoning",

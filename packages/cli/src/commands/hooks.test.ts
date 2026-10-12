@@ -17,6 +17,15 @@ function inputFrom(value: string) {
   };
 }
 
+function claudeNotification(notificationType: string) {
+  return JSON.stringify({
+    session_id: "session-1",
+    hook_event_name: "Notification",
+    message: "Claude is waiting for your input",
+    notification_type: notificationType,
+  });
+}
+
 function ttyInput() {
   return {
     isTTY: true,
@@ -181,10 +190,10 @@ describe("runHooksCommand", () => {
     const send = await runHook(
       claudeProvider.id,
       "Notification",
-      inputFrom(JSON.stringify({ notification_type: notificationType })),
+      inputFrom(claudeNotification(notificationType)),
     );
 
-    expectPostedState(send, "needs-input");
+    expectPostedState(send, "needs-input", "session-1");
   });
 
   it.each(["idle_prompt", "auth_success", "elicitation_response", "agent_completed"])(
@@ -193,7 +202,7 @@ describe("runHooksCommand", () => {
       const send = await runHook(
         claudeProvider.id,
         "Notification",
-        inputFrom(JSON.stringify({ notification_type: notificationType })),
+        inputFrom(claudeNotification(notificationType)),
       );
 
       expect(send.calls).toEqual([]);

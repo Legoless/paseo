@@ -10,7 +10,7 @@ import { useToast } from "@/contexts/toast-context";
 import { AgentStreamView } from "@/agent-stream/view";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { getProviderIcon } from "@/components/provider-icons";
+import { useProviderIcon } from "@/components/provider-icons";
 import {
   resolveComposerTrackControlClearance,
   resolveComposerTrackTailClearance,
@@ -222,7 +222,7 @@ function useProviderSubagentDescriptor(
       subagentType && subagentType !== label ? `${subagentType} · ${providerLabel}` : providerLabel,
     tooltip: label,
     titleState: descriptor ? "ready" : "loading",
-    icon: getProviderIcon(provider, context.serverId),
+    icon: useProviderIcon(provider, context.serverId),
     statusBucket: descriptor
       ? deriveSidebarStateBucket({
           status: providerSubagentLifecycleStatus(descriptor.status),

@@ -725,6 +725,7 @@ describe("WorkspaceReconciliationService", () => {
     expect(workspaces.get("w1")).toEqual({
       workspaceId: "w1",
       displayName: "orphan",
+      background: false,
       title: null,
       pinnedAt: null,
       createdAt: timestamp,
