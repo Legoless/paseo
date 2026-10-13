@@ -65,6 +65,7 @@ import {
 import type { RegisteredProviderDefinition } from "./provider-registry.js";
 import { runProviderTurn } from "./providers/provider-runner.js";
 import { StaleProviderSessionError } from "./stale-provider-session-error.js";
+import type { ProviderSubagentStatus } from "./provider-subagents/store.js";
 
 interface Deferred<Value> {
   promise: Promise<Value>;
@@ -1100,6 +1101,7 @@ class PluginAgentSession implements AgentSession {
   private readonly subagentIdsBySession = new Map<string, string | null>();
   private readonly childUnsubscribes = new Map<string, () => void>();
   private readonly childSnapshots = new Map<string, Map<string, ProviderTimelineItem>>();
+  private readonly childStatuses = new Map<string, ProviderSubagentStatus>();
   private unsubscribe: (() => void) | null = null;
   private currentTurnId: string | null = null;
   private closed = false;
@@ -1256,6 +1258,7 @@ class PluginAgentSession implements AgentSession {
     this.unsubscribe = null;
     for (const unsubscribe of this.childUnsubscribes.values()) unsubscribe();
     this.childUnsubscribes.clear();
+    this.childStatuses.clear();
     this.subagentIdsBySession.clear();
     this.listeners.clear();
     this.onClose();
@@ -1321,6 +1324,7 @@ class PluginAgentSession implements AgentSession {
     }
     const childId = child.providerId;
     this.subagentIdsBySession.set(child.id, childId);
+    this.childStatuses.set(childId, "running");
     this.publish({
       type: "provider_subagent",
       provider: this.provider,
@@ -1534,22 +1538,29 @@ class PluginAgentSession implements AgentSession {
       }
       return;
     }
-    if (event.type === "session.turn" && event.state !== "started") {
+    if (event.type === "session.turn") {
+      const status = event.state === "started" ? "running" : event.state;
+      this.childStatuses.set(childId, status);
       this.publish({
         type: "provider_subagent",
         provider: this.provider,
-        event: { type: "upsert", id: childId, status: event.state },
+        event: { type: "upsert", id: childId, status },
       });
       return;
     }
     if (event.type === "session.runtime_failed" || event.type === "session.closed") {
+      const closedCleanly = event.type === "session.closed" && !event.error;
+      if (closedCleanly && this.childStatuses.get(childId) !== "running") return;
+      const failed = event.type === "session.runtime_failed" || event.error;
+      const status = failed ? "failed" : "completed";
+      this.childStatuses.set(childId, status);
       this.publish({
         type: "provider_subagent",
         provider: this.provider,
         event: {
           type: "upsert",
           id: childId,
-          status: event.type === "session.runtime_failed" || event.error ? "failed" : "completed",
+          status,
         },
       });
     }
