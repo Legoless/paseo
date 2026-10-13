@@ -19,6 +19,7 @@ export class TerminalActivityTracker {
   // env and posts its own running/idle; its Stop must not finish the outer turn.
   // Kept across needs_input so the owner resumes after an approval.
   private ownerSessionId: string | null = null;
+  private hookNeedsInput = false;
 
   private readonly changeListeners = new Set<
     (snapshot: TerminalActivitySnapshot, previous: TerminalActivitySnapshot) => void
@@ -32,6 +33,9 @@ export class TerminalActivityTracker {
     const owner = this.ownerSessionId;
     if (sessionId && owner && sessionId !== owner && this.resolvedState === "working") {
       return;
+    }
+    if (sessionId) {
+      this.hookNeedsInput = state === "attention" && attentionReason !== "quota";
     }
     if (sessionId && state === "working") {
       // Starting a turn makes the reporter the owner, replacing one kept across a
@@ -71,6 +75,10 @@ export class TerminalActivityTracker {
     return this.ownerSessionId;
   }
 
+  hasHookNeedsInput(): boolean {
+    return this.hookNeedsInput;
+  }
+
   clearAttention(): boolean {
     if (!this.attentionReason) {
       return false;
@@ -90,6 +98,8 @@ export class TerminalActivityTracker {
     state: TerminalActivityState | null,
     attentionReason: TerminalActivityAttentionReason | null,
   ): void {
+    const needsInput = state === "idle" && attentionReason === "needs_input";
+    if (!needsInput) this.hookNeedsInput = false;
     if (state === null || attentionReason === "finished" || attentionReason === "quota") {
       this.ownerSessionId = null;
     }

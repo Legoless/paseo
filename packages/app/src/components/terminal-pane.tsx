@@ -363,6 +363,23 @@ export function TerminalPane({
     setResizeRequestToken((current) => current + 1);
   }, []);
   useEffect(() => {
+    if (
+      isTerminalPresented &&
+      isAppActivelyVisible &&
+      rendererReadyStreamKey === terminalStreamKey
+    ) {
+      // Every visible pane needs a repaint after returning, including panes that
+      // do not own keyboard focus or the daemon's terminal size.
+      requestTerminalReflow();
+    }
+  }, [
+    isTerminalPresented,
+    isAppActivelyVisible,
+    rendererReadyStreamKey,
+    terminalStreamKey,
+    requestTerminalReflow,
+  ]);
+  useEffect(() => {
     if (!isMobile || !isWorkspaceFocused || mobileView === "agent") {
       return;
     }

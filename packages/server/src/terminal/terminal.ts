@@ -33,6 +33,15 @@ let nodePtySpawnHelperChecked = false;
 const TERMINAL_TITLE_DEBOUNCE_MS = 150;
 const TERMINAL_EXIT_OUTPUT_LINE_LIMIT = 12;
 const TERMINAL_EXIT_OUTPUT_CHAR_LIMIT = 16000;
+interface PendingTerminalInput {
+  data: string;
+  mouseReport: boolean;
+}
+
+const TERMINAL_MOUSE_REPORT_ESCAPE = String.fromCharCode(0x1b);
+const TERMINAL_MOUSE_REPORT = new RegExp(
+  `^(?:${TERMINAL_MOUSE_REPORT_ESCAPE}\\[<\\d+;\\d+;\\d+[Mm]|${TERMINAL_MOUSE_REPORT_ESCAPE}\\[M[\\x20-\\xff]{3})+(?![\\s\\S])`,
+);
 const TERMINAL_OSC_COLOR_QUERY_RESPONSES = new Map<number, string>([
   [10, "rgb:e6e6/e6e6/e6e6"],
   [11, "rgb:0b0b/0b0b/0b0b"],
@@ -1144,7 +1153,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   let titleMode = resolveInitialTitleMode(presetTitle);
   let pendingTitle: string | undefined;
   let titleDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-  let pendingInput = "";
+  let pendingInput: PendingTerminalInput[] = [];
   let inputFlushImmediate: ReturnType<typeof setImmediate> | null = null;
   let stateRevision = 0;
   const inputModeTracker = new TerminalInputModeTracker();
@@ -1164,6 +1173,8 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     setActivity: (state, attentionReason) => activityTracker.set(state, attentionReason),
     clearActivity: () => activityTracker.clear(),
     getActivity: () => activityTracker.getSnapshot(),
+    getActivityOwnerSessionId: () => activityTracker.getOwnerSessionId(),
+    hasHookNeedsInput: () => activityTracker.hasHookNeedsInput(),
     readLastLines: (limit) => extractLastOutputLines(terminal, limit),
     readCursorLine: () => extractCursorLine(terminal),
   });
@@ -1440,7 +1451,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     disposed = true;
     activityScanner.dispose();
     activityTracker.clear();
-    pendingInput = "";
+    pendingInput = [];
     recentOutputChunks.length = 0;
     recentOutputLength = 0;
     inputModeTracker.reset();
@@ -1588,8 +1599,14 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
       clearImmediate(inputFlushImmediate);
       inputFlushImmediate = null;
     }
-    const data = pendingInput;
-    pendingInput = "";
+    const mouseTrackingEnabled = inputModeTracker.isMouseTrackingEnabled();
+    // A report can queue before cleanup, then flush after the shell has resumed.
+    // Keep input-message boundaries so filtering never removes bytes from pasted text.
+    const data = pendingInput
+      .filter((input) => !input.mouseReport || mouseTrackingEnabled)
+      .map((input) => input.data)
+      .join("");
+    pendingInput = [];
     if (!data || killed || disposed) {
       return;
     }
@@ -1611,13 +1628,19 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
 
     switch (msg.type) {
       case "input": {
+        const mouseReport = TERMINAL_MOUSE_REPORT.test(msg.data);
+        // Browser/guest mouse events can arrive after the PTY has disabled tracking.
+        // Only complete standalone reports qualify; mixed text and paste remain intact.
+        if (mouseReport && !inputModeTracker.isMouseTrackingEnabled()) {
+          break;
+        }
         if (isTerminalActivityInterruptInput(msg.data)) {
           activityTracker.interrupt();
           activityScanner.handleInterrupt();
         } else {
           activityScanner.feedInput(msg.data);
         }
-        pendingInput += msg.data;
+        pendingInput.push({ data: msg.data, mouseReport });
         scheduleInputFlush();
         break;
       }

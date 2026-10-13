@@ -71,6 +71,68 @@ describe("TerminalActivityTracker — set", () => {
   });
 });
 
+describe("TerminalActivityTracker — hook input provenance", () => {
+  it("distinguishes screen-detected input from a hook wait on the same owned session", () => {
+    const tracker = new TerminalActivityTracker();
+    tracker.set("working", undefined, "root");
+    tracker.set("attention");
+
+    expect(tracker.getOwnerSessionId()).toBe("root");
+    expect(tracker.hasHookNeedsInput()).toBe(false);
+
+    const before = tracker.getSnapshot();
+    const changes: TerminalActivitySnapshot[] = [];
+    tracker.onChange((snapshot) => changes.push(snapshot));
+    tracker.set("attention", undefined, "root");
+
+    expect(tracker.hasHookNeedsInput()).toBe(true);
+    expect(tracker.getSnapshot()).toEqual(before);
+    expect(changes).toEqual([]);
+
+    tracker.set("attention");
+    expect(tracker.hasHookNeedsInput()).toBe(true);
+  });
+
+  it("does not give a rejected foreign session hook input authority", () => {
+    const tracker = new TerminalActivityTracker();
+    tracker.set("working", undefined, "root");
+    tracker.set("attention", undefined, "child");
+
+    expect(tracker.hasHookNeedsInput()).toBe(false);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it.each(["focus", "running", "idle", "quota", "clear"])(
+    "clears hook input authority on %s",
+    (action) => {
+      const tracker = new TerminalActivityTracker();
+      tracker.set("working", undefined, "root");
+      tracker.set("attention", undefined, "root");
+      expect(tracker.hasHookNeedsInput()).toBe(true);
+
+      switch (action) {
+        case "focus":
+          tracker.clearAttention();
+          break;
+        case "running":
+          tracker.set("working");
+          break;
+        case "idle":
+          tracker.set("idle");
+          break;
+        case "quota":
+          tracker.set("attention", "quota", "root");
+          break;
+        case "clear":
+          tracker.clear();
+          break;
+      }
+
+      expect(tracker.hasHookNeedsInput()).toBe(false);
+    },
+  );
+});
+
 describe("TerminalActivityTracker — clearAttention", () => {
   it("moves attention back to idle", () => {
     const tracker = new TerminalActivityTracker();

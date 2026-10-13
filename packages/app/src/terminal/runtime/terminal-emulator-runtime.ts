@@ -649,18 +649,20 @@ export class TerminalEmulatorRuntime {
       const nextRows = currentTerminal.rows;
       const nextCols = currentTerminal.cols;
       const previous = this.lastSize;
-      if (
-        !forceRefresh &&
-        !forceClaim &&
-        previous &&
-        previous.rows === nextRows &&
-        previous.cols === nextCols
-      ) {
-        return;
+      const sameSize = previous?.rows === nextRows && previous.cols === nextCols;
+      if (sameSize && !forceClaim) {
+        if (forceRefresh) {
+          this.refreshVisibleRows();
+        }
+        // Presentation can need a repaint without changing the PTY geometry.
+        if (!forceRefresh || !shouldClaim) {
+          return;
+        }
+      } else {
+        this.refreshVisibleRows();
       }
 
       this.lastSize = { rows: nextRows, cols: nextCols };
-      this.refreshVisibleRows();
       this.callbacks.onResize?.(
         createTerminalResizeEvent({
           rows: nextRows,
@@ -689,7 +691,9 @@ export class TerminalEmulatorRuntime {
       terminal,
     });
     const resizeObserver = new ResizeObserver(() => {
-      fitAndEmitResize({ shouldClaim: false });
+      // Revealing a retained pane or changing its pixel bounds can require a
+      // repaint even when the terminal still has the same rows and columns.
+      fitAndEmitResize({ forceRefresh: true, shouldClaim: false });
     });
     resizeObserver.observe(input.root);
     resizeObserver.observe(input.host);

@@ -61,7 +61,13 @@ type BridgeInboundMessage =
   | { type: "paste"; streamKey: string; text: string }
   | { type: "clear"; streamKey: string }
   | { type: "focus"; streamKey: string; forceRefocus?: boolean }
-  | { type: "resize"; streamKey: string; forceClaim: boolean; shouldClaim?: boolean }
+  | {
+      type: "resize";
+      streamKey: string;
+      forceClaim: boolean;
+      shouldClaim?: boolean;
+      forceRefresh?: boolean;
+    }
   | { type: "setTheme"; streamKey: string; theme: ITheme }
   | { type: "setScrollback"; streamKey: string; lines: number }
   | { type: "setFont"; streamKey: string; fontFamily?: string; fontSize?: number }
@@ -245,6 +251,7 @@ export function IsolatedTerminalEmulator({
   const rendererReadyStreamKeyRef = useRef<string | null>(null);
   const focusOnReadyAfterReloadRef = useRef(false);
   const needsHostRepaintRef = useRef(true);
+  const hostRepaintTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const mountConfigRef = useRef({
     streamKey,
     initialSnapshot,
@@ -298,40 +305,59 @@ export function IsolatedTerminalEmulator({
     onSwipeRight,
   };
 
-  const sendToWebView = useCallback((message: BridgeInboundMessage) => {
-    // An evicted guest has no webview; drop output instead of buffering it (the fresh
-    // subscription on remount re-delivers the snapshot).
-    if (isEvictedRef.current) {
-      return;
-    }
-    const webview = webviewRef.current;
-    if (!bridgeReadyRef.current || !webview) {
-      pendingMessagesRef.current.push(message);
-      return;
-    }
-    webview.send(TERMINAL_GUEST_MESSAGE_CHANNEL, JSON.stringify(message));
-    // A recreated webview's surface is not re-presented by the embedder until the host
-    // composites the region again (verified: content sits painted-but-invisible for minutes
-    // with a live guest). The first content message after a mount is when the guest actually
-    // has something on its surface, so invalidate the host container once, right after it.
-    if (
-      needsHostRepaintRef.current &&
-      (message.type === "restoreOutput" ||
-        message.type === "renderSnapshot" ||
-        message.type === "writeOutput")
-    ) {
-      needsHostRepaintRef.current = false;
-      const host = hostRef.current;
-      if (host) {
-        setTimeout(() => {
-          host.style.filter = "brightness(0.999)";
+  const cancelHostRepaint = useCallback(() => {
+    for (const timer of hostRepaintTimersRef.current) clearTimeout(timer);
+    hostRepaintTimersRef.current = [];
+    const host = hostRef.current;
+    if (host) host.style.filter = "";
+  }, []);
+
+  const requestHostRepaint = useCallback(() => {
+    if (hostRepaintTimersRef.current.length > 0) return;
+    const host = hostRef.current;
+    if (!host) return;
+    hostRepaintTimersRef.current.push(
+      setTimeout(() => {
+        host.style.filter = "brightness(0.999)";
+        hostRepaintTimersRef.current.push(
           setTimeout(() => {
             host.style.filter = "";
-          }, 100);
-        }, 100);
-      }
-    }
+            hostRepaintTimersRef.current = [];
+          }, 100),
+        );
+      }, 100),
+    );
   }, []);
+
+  const sendToWebView = useCallback(
+    (message: BridgeInboundMessage) => {
+      // An evicted guest has no webview; drop output instead of buffering it (the fresh
+      // subscription on remount re-delivers the snapshot).
+      if (isEvictedRef.current) {
+        return;
+      }
+      const webview = webviewRef.current;
+      if (!bridgeReadyRef.current || !webview) {
+        pendingMessagesRef.current.push(message);
+        return;
+      }
+      webview.send(TERMINAL_GUEST_MESSAGE_CHANNEL, JSON.stringify(message));
+      // A recreated or revealed guest can paint without its surface being presented.
+      // Invalidate the host after first content and explicit presentation refits.
+      if (
+        needsHostRepaintRef.current &&
+        (message.type === "restoreOutput" ||
+          message.type === "renderSnapshot" ||
+          message.type === "writeOutput")
+      ) {
+        needsHostRepaintRef.current = false;
+        requestHostRepaint();
+      } else if (message.type === "resize" && message.forceRefresh) {
+        requestHostRepaint();
+      }
+    },
+    [requestHostRepaint],
+  );
 
   const flushPendingMessages = useCallback(() => {
     const webview = webviewRef.current;
@@ -340,9 +366,9 @@ export function IsolatedTerminalEmulator({
     }
     const pending = pendingMessagesRef.current.splice(0);
     for (const message of pending) {
-      webview.send(TERMINAL_GUEST_MESSAGE_CHANNEL, JSON.stringify(message));
+      sendToWebView(message);
     }
-  }, []);
+  }, [sendToWebView]);
 
   useImperativeHandle(
     ref,
@@ -678,6 +704,7 @@ export function IsolatedTerminalEmulator({
     dispatchLifecycle({ type: "mount", now: Date.now() });
 
     return () => {
+      cancelHostRepaint();
       webview.removeEventListener("ipc-message", stableIpcMessageListener);
       webview.removeEventListener("render-process-gone", handleRenderProcessGone);
       webview.removeEventListener("destroyed", handleDestroyed);
@@ -691,7 +718,7 @@ export function IsolatedTerminalEmulator({
       rendererReadyStreamKeyRef.current = null;
       isolatedTerminalGuestBudget.release(guestKey);
     };
-  }, [lifecycle.epoch, stableIpcMessageListener, isEvicted]);
+  }, [lifecycle.epoch, stableIpcMessageListener, isEvicted, cancelHostRepaint]);
 
   // The guest is a native compositor surface: a confirm dialog or menu in
   // overlay-root paints above it and still loses the click. Same rule as
@@ -810,7 +837,13 @@ export function IsolatedTerminalEmulator({
 
   useEffect(() => {
     if (resizeRequestToken <= 0) return;
-    sendToWebView({ type: "resize", streamKey, forceClaim: false, shouldClaim: false });
+    sendToWebView({
+      type: "resize",
+      streamKey,
+      forceClaim: false,
+      shouldClaim: false,
+      forceRefresh: true,
+    });
   }, [resizeRequestToken, sendToWebView, streamKey]);
 
   useEffect(() => {

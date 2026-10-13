@@ -327,7 +327,8 @@ describe("terminal emulator runtime in a real browser", () => {
     await waitFor({ predicate: () => mounted.sizes.length > 0 });
     await settleMountRefits();
 
-    expect(mounted.sizes.length).toBeGreaterThan(1);
+    const reportedGrids = mounted.sizes.map((size) => `${size.rows}:${size.cols}`);
+    expect(new Set(reportedGrids).size).toBe(reportedGrids.length);
     expect(mounted.sizes.filter((size) => size.shouldClaim)).toEqual([]);
 
     const settledSize = latestSize(mounted.sizes);
@@ -454,6 +455,8 @@ describe("terminal emulator runtime in a real browser", () => {
     const mounted = createTerminalHost({ width: 720, height: 360 });
 
     await waitFor({ predicate: () => mounted.sizes.length > 0 });
+    await settleMountRefits();
+    mounted.sizes.length = 0;
 
     const terminal = getBrowserTerminal();
     const refreshCalls: Array<[number, number]> = [];
@@ -467,6 +470,7 @@ describe("terminal emulator runtime in a real browser", () => {
 
     await waitFor({ predicate: () => refreshCalls.length > 0 });
     expect(refreshCalls.at(-1)).toEqual([0, terminal.rows - 1]);
+    expect(mounted.sizes).toEqual([]);
   });
 
   it("intercepts Shift+Enter only after enhanced terminal input mode is active", async () => {

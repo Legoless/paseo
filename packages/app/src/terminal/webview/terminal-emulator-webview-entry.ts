@@ -42,7 +42,13 @@ type InboundMessage =
   | { type: "clearFind"; streamKey: string }
   | { type: "findWidgetSize"; streamKey: string; size: { width: number; height: number } }
   | { type: "focus"; streamKey: string; forceRefocus?: boolean }
-  | { type: "resize"; streamKey: string; forceClaim: boolean; shouldClaim?: boolean }
+  | {
+      type: "resize";
+      streamKey: string;
+      forceClaim: boolean;
+      shouldClaim?: boolean;
+      forceRefresh?: boolean;
+    }
   | { type: "setTheme"; streamKey: string; theme: ITheme }
   | { type: "setScrollback"; streamKey: string; lines: number }
   | { type: "setFont"; streamKey: string; fontFamily?: string; fontSize?: number }
@@ -290,6 +296,7 @@ class TerminalWebViewBridge {
         this.runtime?.resize({
           shouldClaim: message.shouldClaim ?? true,
           forceClaim: message.forceClaim,
+          forceRefresh: message.forceRefresh,
         });
         break;
     }
