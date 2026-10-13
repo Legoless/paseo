@@ -30,6 +30,8 @@ const catalogRows = readFixture("catalog-controls");
 const replacements = new Map();
 const counts = new Map();
 const receipts = new Set();
+let childLiveEvents = [];
+let childLiveDelivered = false;
 const lines = createInterface({ input: process.stdin });
 lines.on("line", receive);
 function receive(line) {
@@ -133,38 +135,8 @@ function controlResponse(frame) {
 }
 function parityResponse(frame) {
   if (workflowResponse(frame)) return true;
-  if (frame.method === "view/page") {
-    let result;
-    if (process.env.MUSE_TEST_GAP || process.env.MUSE_TEST_SILENT) {
-      result = {
-        events: replace(
-          rows
-            .filter(
-              (row) =>
-                row.dir === "in" &&
-                row.msg.method &&
-                row.msg.params?.viewCursor &&
-                !row.msg.id &&
-                row.msg.method !== "item/delta",
-            )
-            .map((row) => ({ method: row.msg.method, params: row.msg.params })),
-        ),
-        nextCursor: null,
-      };
-    } else {
-      result = replace(
-        responseFor(
-          readFixture(
-            frame.params.sessionId === "fixture-child" ? "phase3-child-read" : "phase3-controls",
-          ),
-          "view/page",
-        ),
-      );
-      for (const event of result.events) event.params.sessionId = frame.params.sessionId;
-    }
-    respond(frame, result);
-    return true;
-  }
+  if (childSubscriptionResponse(frame)) return true;
+  if (pageResponse(frame)) return true;
   if (frame.method === "session/read") {
     const result = responseFor(readFixture("phase3-child-read"), "session/read");
     result.session.sessionId = frame.params.sessionId;
@@ -222,6 +194,76 @@ function parityResponse(frame) {
   }
   if (skillResponse(frame)) return true;
   return false;
+}
+function pageResponse(frame) {
+  if (frame.method !== "view/page") return false;
+  let result;
+  if (process.env.MUSE_TEST_GAP || process.env.MUSE_TEST_SILENT) {
+    result = {
+      events: replace(
+        rows
+          .filter(
+            (row) =>
+              row.dir === "in" &&
+              row.msg.method &&
+              row.msg.params?.viewCursor &&
+              !row.msg.id &&
+              row.msg.method !== "item/delta",
+          )
+          .map((row) => ({ method: row.msg.method, params: row.msg.params })),
+      ),
+      nextCursor: null,
+    };
+  } else {
+    result = replace(
+      responseFor(
+        readFixture(
+          frame.params.sessionId === "fixture-child" ? "phase3-child-read" : "phase3-controls",
+        ),
+        "view/page",
+      ),
+    );
+    for (const event of result.events) event.params.sessionId = frame.params.sessionId;
+  }
+  prepareLiveChildPage(frame, result);
+  respond(frame, result);
+  return true;
+}
+function childSubscriptionResponse(frame) {
+  if (frame.method !== "view/subscribe") return false;
+  respond(frame, { viewCursor: frame.params.after });
+  setTimeout(() => {
+    childLiveDelivered = true;
+    if (process.env.MUSE_TEST_CHILD_GAP) {
+      send({
+        jsonrpc: "2.0",
+        method: "view/gap",
+        params: {
+          sessionId: frame.params.sessionId,
+          after: "fixture-child-gap-after",
+          next: childLiveEvents[1].params.viewCursor,
+        },
+      });
+      return;
+    }
+    for (const event of childLiveEvents) send({ jsonrpc: "2.0", ...event });
+  }, 10);
+  return true;
+}
+function prepareLiveChildPage(frame, result) {
+  if (
+    frame.params.sessionId !== "fixture-child" ||
+    !process.env.MUSE_TEST_CHILD_LIVE ||
+    childLiveDelivered
+  )
+    return;
+  const started = result.events.find((event) => event.method === "turn/started");
+  const completed = result.events.find((event) => event.method === "turn/completed");
+  completed.params.terminal = process.env.MUSE_TEST_CHILD_TERMINAL || "completed";
+  if (process.env.MUSE_TEST_CHILD_ERROR)
+    completed.params.error = { kind: "childFailure", message: "Child turn failed" };
+  result.events = result.events.filter((event) => event.method !== "turn/completed");
+  childLiveEvents = [started, completed, started, completed];
 }
 function skillResponse(frame) {
   if (frame.method === "skill/list") {

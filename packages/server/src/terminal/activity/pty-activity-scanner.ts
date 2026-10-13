@@ -33,6 +33,7 @@ export const KNOWN_AGENT_NAMES = [
   "gemini",
   "amp",
   "kimi",
+  "muse",
 ] as const;
 
 export type KnownAgentName = (typeof KNOWN_AGENT_NAMES)[number];
@@ -123,6 +124,7 @@ const IDLE_PROMPT_PATTERNS = {
   // turn runs the cursor leaves the box, which keeps this from lighting mid-turn. The
   // border is required: approval options start with "> " too ("│ >" vs "> Allow once").
   kimi: [/^│\s*>(?:\s|$)/],
+  muse: [/^❯(?:\s+.*)?$/],
 } satisfies Record<KnownAgentName, readonly RegExp[]>;
 
 export function isIdlePromptLine(line: string, agent: KnownAgentName): boolean {
@@ -231,6 +233,70 @@ export function isKimiBusyScreen(lines: string[]): boolean {
   return tail.some((line) => KIMI_RUNNING_TASKS.test(line) && KIMI_STATUS_BAR_SEGMENT.test(line));
 }
 
+// Muse leaves its composer on the cursor line throughout the turn. Its animated
+// diamond status is the last non-empty row above the ruled composer; a completed
+// response also starts with a diamond, so require an elapsed time for a filled
+// diamond. Narrow panes wrap the row or truncate its interrupt hint.
+const MUSE_RUNNING_STATUS =
+  /^[◇◈◆]\s+(?:Thinking|Working|Double checking|Finishing up)\s+\(\d+[hms](?:\s*\d+[hms])*(?:\s*[·•]\s*(.*?))?\)?$/i;
+const MUSE_STARTING_STATUS = /^[◇◈]\s+(?:Thinking|Working)$/i;
+const MUSE_COMPOSER_RULE = /^[─━═]{2,}/;
+const MUSE_PROFILE_FOOTER =
+  /\s[·•]\s(?:Read only|Ask me|Auto-review|Unrestricted|Launch overrides)$/i;
+
+function museComposerStart(lines: string[]): number {
+  for (let index = lines.length - 1; index > 0; index -= 1) {
+    if (/^❯(?:\s|$)/.test(lines[index]) && MUSE_COMPOSER_RULE.test(lines[index - 1])) {
+      return index - 1;
+    }
+  }
+  return -1;
+}
+
+export function isMuseNeedsInputScreen(lines: string[]): boolean {
+  const stripped = lines.map((line) => stripAnsi(line).trim());
+  const composer = museComposerStart(stripped);
+  const dialog = (composer >= 0 ? stripped.slice(0, composer) : stripped).slice(-15);
+  const text = dialog.join(" ");
+  return (
+    dialog.some((line) =>
+      /^(?:Structured user input needed|Review answers before submit|Approval request(?:\s[·•]|$)|Change approval defaults in \/permissions)/i.test(
+        line,
+      ),
+    ) ||
+    (/Would you like to (?:run the following command|allow this (?:network access|file access|tool action))\?/i.test(
+      text,
+    ) &&
+      /\bAllow (?:once|this stage once|for this session)\b|\bYes, proceed\b|\bAbort\b/i.test(
+        text,
+      )) ||
+    /\bEnter to (?:select|toggle)\b.*\bTab for an optional note\b.*\bEsc to interrupt\b/i.test(
+      text,
+    ) ||
+    (/\bEnter to select\b.*\bEsc to interrupt\b/i.test(text) &&
+      /\bQuestion\b|\bAllow once\b|\bAllow for this session\b|\bAlways allow\b/i.test(text)) ||
+    (composer < 0 && isNeedsInputScreen(dialog))
+  );
+}
+
+export function isMuseBusyScreen(lines: string[]): boolean {
+  const stripped = lines.map((line) => stripAnsi(line).trim());
+  const composer = museComposerStart(stripped);
+  if (composer < 0 || isMuseNeedsInputScreen(lines)) return false;
+  const statusLines = stripped
+    .slice(0, composer)
+    .filter((line) => line.length > 0)
+    .slice(-3);
+  return statusLines.some((_, index) => {
+    const status = statusLines.slice(index).join(" ");
+    if (MUSE_STARTING_STATUS.test(status)) return true;
+    const running = MUSE_RUNNING_STATUS.exec(status);
+    if (!running) return false;
+    const hint = running[1]?.replace(/[.…]+$/, "").trim();
+    return hint === undefined || "esc to interrupt".startsWith(hint);
+  });
+}
+
 // Agents that keep their idle-looking composer up while work still runs.
 function isAgentBusyScreen(lines: string[], agent: KnownAgentName): boolean {
   if (agent === "antigravity") return isAntigravityBusyScreen(lines);
@@ -238,6 +304,7 @@ function isAgentBusyScreen(lines: string[], agent: KnownAgentName): boolean {
   if (agent === "claude") return isClaudeBusyScreen(lines);
   if (agent === "grok") return isGrokBusyScreen(lines);
   if (agent === "kimi") return isKimiBusyScreen(lines);
+  if (agent === "muse") return isMuseBusyScreen(lines);
   return false;
 }
 
@@ -247,6 +314,9 @@ export function isIdleAgentScreen(
   agent: KnownAgentName,
 ): boolean {
   if (isAgentBusyScreen(lines, agent)) {
+    return false;
+  }
+  if (agent === "muse" && isMuseNeedsInputScreen(lines)) {
     return false;
   }
   if (agent !== "cursor") {
@@ -279,6 +349,7 @@ const AGENT_EXECUTABLES: readonly AgentExecutable[] = [
   { agent: "gemini", names: ["gemini"] },
   { agent: "amp", names: ["amp"] },
   { agent: "kimi", names: ["kimi", "kimi-code"] },
+  { agent: "muse", names: ["muse"] },
 ];
 
 const AGENT_DISPLAY_TITLES: readonly { agent: KnownAgentName; pattern: RegExp }[] = [
@@ -288,6 +359,7 @@ const AGENT_DISPLAY_TITLES: readonly { agent: KnownAgentName; pattern: RegExp }[
   { agent: "antigravity", pattern: /^(?:google\s+)?antigravity(?:\s|$)/i },
   { agent: "opencode", pattern: /^opencode(?:\s|$)/i },
   { agent: "cursor", pattern: /^cursor agent(?:\s|$)/i },
+  { agent: "muse", pattern: /^muse code(?:\s|$)/i },
 ];
 
 function executableBasename(token: string): string {
@@ -360,7 +432,7 @@ function commandStartsTurn(command: string): boolean {
   if (tokens.some((token) => LAUNCH_TURN_FLAGS.test(token))) {
     return true;
   }
-  return agent === "codex" && tokens.includes("exec");
+  return (agent === "codex" || agent === "muse") && tokens.includes("exec");
 }
 
 export function detectAgentFromCommand(command: string | undefined): KnownAgentName | null {
@@ -372,6 +444,8 @@ export function detectAgentFromCommand(command: string | undefined): KnownAgentN
   }
 
   const executable = extractCommandExecutable(normalized);
+  // Muse's installer launcher execs a release-named native binary.
+  if (/^muse-bin-\d+\.\d+\.\d+(?:-[a-z\d.]+)?$/i.test(executable)) return "muse";
   for (const entry of AGENT_EXECUTABLES) {
     if (entry.names.includes(executable)) {
       return entry.agent;
@@ -415,11 +489,23 @@ export function detectAgentFromOutput(chunk: string): KnownAgentName | null {
   // The welcome banner is not reprinted on resume/restore; the status bar's context
   // meter ("context: 29% (290k/1M)") is the stable marker on those screens.
   if (/\bcontext:\s*\d{1,3}%\s*\(\d[\d.,]*[km]?\/\d+[km]\)/i.test(stripped)) return "kimi";
+  if (/^\s*muse code\s+v?\d+\.\d+/im.test(stripped)) return "muse";
+  // A restored Muse screen can have scrolled its banner away. Its voice composer
+  // together with the profile footer identifies it; the cwd-only title does not.
+  const lines = stripped.split(/\r?\n/);
+  if (
+    /^\s*[─━═]{2,}.*\bVoice input\b/im.test(stripped) &&
+    museComposerStart(lines.map((line) => line.trim())) >= 0 &&
+    lines.some((line) => MUSE_PROFILE_FOOTER.test(line.trim()))
+  ) {
+    return "muse";
+  }
 
   return null;
 }
 
 const BRAILLE_SPINNER_REGEX = /[\u2800-\u28FF]/;
+const MUSE_DIAMOND_REGEX = /[◇◈◆]/;
 // Claude Code titles the tab "◐ …"/"◑ …" only while a turn runs, and "✳ …" when idle or a
 // dialog waits. Its spinner is not braille and it repaints too often for a stillness check,
 // so this title is the one output signal that a turn resumed after a needs-input stop, such
@@ -525,6 +611,7 @@ export class PtyActivityScanner {
         !detected &&
         (!this.lookedAtScreen ||
           BRAILLE_SPINNER_REGEX.test(chunk) ||
+          MUSE_DIAMOND_REGEX.test(chunk) ||
           chunk.includes("◎") ||
           chunk.includes("⸬"))
       ) {
@@ -558,26 +645,26 @@ export class PtyActivityScanner {
       this.setWorking();
     }
 
-    this.promoteWorkingGrokScreen();
+    this.promoteWorkingAgentScreen();
     this.scheduleStillnessCheck();
   }
 
-  // Finished attention ignores a later spinner frame, and that frame keeps
-  // repainting, so the stillness check would not get a quiet gap in which
-  // to look. Any later Grok output can be the next frame of an open
-  // Thinking header; that screen clears the green. Quota stays red.
-  private promoteWorkingGrokScreen(): void {
+  // A continuously animating live status leaves no quiet gap for the stillness
+  // check. Grok and Muse can also resume after an approval without Enter, or
+  // start work on their own after a finished turn. Quota stays red.
+  private promoteWorkingAgentScreen(): void {
     if (
-      this.initialLaunch ||
+      (this.initialLaunch && this.activeAgent !== "muse") ||
       this.isInsideInterruptWindow() ||
-      this.activeAgent !== "grok" ||
+      (this.activeAgent !== "grok" && this.activeAgent !== "muse") ||
       this.currentActivity === "working" ||
       this.options.getActivity().attentionReason === "quota"
     ) {
       return;
     }
     const lines = this.options.readLastLines(15);
-    if (isGrokBusyScreen(lines) && !isSpendLimitScreen(lines)) {
+    if (isAgentBusyScreen(lines, this.activeAgent) && !isSpendLimitScreen(lines)) {
+      this.initialLaunch = false;
       this.setWorking();
     }
   }
@@ -678,7 +765,7 @@ export class PtyActivityScanner {
       return;
     }
 
-    if (isNeedsInputScreen(lines)) {
+    if (this.activeAgent === "muse" ? isMuseNeedsInputScreen(lines) : isNeedsInputScreen(lines)) {
       this.currentActivity = "attention";
       this.unresolvedWorkingStillness = 0;
       this.options.setActivity("attention");

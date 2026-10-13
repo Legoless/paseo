@@ -518,6 +518,85 @@ describe("PluginAgentClientRegistry", () => {
     }
   });
 
+  test("restores a native child to running when another turn starts after any terminal state", async () => {
+    const harness = createProviderHarness();
+    const registry = new PluginAgentClientRegistry(createTestLogger());
+    registry.replace([harness.registration]);
+    const session = await registry.clients()[harness.registration.id]!.createSession({
+      provider: harness.registration.id,
+      cwd: "/workspace",
+    });
+    try {
+      const events: AgentStreamEvent[] = [];
+      session.subscribe((event) => events.push(event));
+      let turn = 0;
+      for (const state of [
+        "started",
+        "completed",
+        "started",
+        "canceled",
+        "started",
+        "failed",
+        "started",
+      ] as const) {
+        if (state === "started") turn += 1;
+        harness.emit({
+          type: "session.turn",
+          sessionId: "child-1",
+          turnId: `child-turn-${turn}`,
+          state,
+        });
+      }
+      expect(events).toEqual(
+        ["running", "completed", "running", "canceled", "running", "failed", "running"].map(
+          (status) => ({
+            type: "provider_subagent",
+            provider: harness.registration.id,
+            event: { type: "upsert", id: "child-1", status },
+          }),
+        ),
+      );
+    } finally {
+      await session.close();
+      registry.replace([]);
+    }
+  });
+
+  for (const state of ["started", "completed", "canceled", "failed"] as const) {
+    test(`settles a ${state} native child correctly on clean closure`, async () => {
+      const harness = createProviderHarness();
+      const registry = new PluginAgentClientRegistry(createTestLogger());
+      registry.replace([harness.registration]);
+      const session = await registry.clients()[harness.registration.id]!.createSession({
+        provider: harness.registration.id,
+        cwd: "/workspace",
+      });
+      try {
+        const events: AgentStreamEvent[] = [];
+        session.subscribe((event) => events.push(event));
+        harness.emit({
+          type: "session.turn",
+          sessionId: "child-1",
+          turnId: "child-turn-2",
+          state,
+        });
+        harness.emit({ type: "session.closed", sessionId: "child-1" });
+        let statuses: string[] = [state];
+        if (state === "started") statuses = ["running", "completed"];
+        expect(events).toEqual(
+          statuses.map((status) => ({
+            type: "provider_subagent",
+            provider: harness.registration.id,
+            event: { type: "upsert", id: "child-1", status },
+          })),
+        );
+      } finally {
+        await session.close();
+        registry.replace([]);
+      }
+    });
+  }
+
   test("gates persistence operations on negotiated provider capabilities", async () => {
     const harness = createProviderHarness({ capabilities: ["session.persistence"] });
     const registry = new PluginAgentClientRegistry(createTestLogger());

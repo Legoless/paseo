@@ -10,6 +10,8 @@ import {
   isIdleAgentScreen,
   isIdlePromptLine,
   isKimiBusyScreen,
+  isMuseBusyScreen,
+  isMuseNeedsInputScreen,
   isNeedsInputScreen,
   isSpendLimitScreen,
   KNOWN_AGENT_NAMES,
@@ -59,6 +61,16 @@ describe("detectAgentFromCommand", () => {
     expect(detectAgentFromCommand("kimi-code")).toBe("kimi");
   });
 
+  it("detects Muse's launcher and release-named native binary", () => {
+    expect(detectAgentFromCommand("muse")).toBe("muse");
+    expect(detectAgentFromCommand("muse exec 'inspect this repository'")).toBe("muse");
+    expect(detectAgentFromCommand("/Users/test/.local/bin/muse --resume latest")).toBe("muse");
+    expect(detectAgentFromCommand("env MUSE_HOME=/tmp/muse muse")).toBe("muse");
+    expect(detectAgentFromCommand("/tmp/muse/muse-bin-1.4.6-R6000.1")).toBe("muse");
+    expect(detectAgentFromCommand("cat muse-notes.md")).toBeNull();
+    expect(detectAgentFromCommand("muse-bin-notes")).toBeNull();
+  });
+
   it("returns null for non-agent commands", () => {
     expect(detectAgentFromCommand("zsh")).toBeNull();
     expect(detectAgentFromCommand("bash")).toBeNull();
@@ -79,12 +91,15 @@ describe("detectAgentFromTitle", () => {
     expect(detectAgentFromTitle("OpenAI Codex")).toBe("codex");
     expect(detectAgentFromTitle("Google Antigravity")).toBe("antigravity");
     expect(detectAgentFromTitle("Cursor Agent")).toBe("cursor");
+    expect(detectAgentFromTitle("Muse Code 1.4.6")).toBe("muse");
   });
 
   it("ignores shell working-directory titles", () => {
     expect(detectAgentFromTitle("~/src/claude-code")).toBeNull();
     expect(detectAgentFromTitle("~/Projects/cursor")).toBeNull();
     expect(detectAgentFromTitle("/tmp/opencode")).toBeNull();
+    expect(detectAgentFromTitle("~/Projects/muse")).toBeNull();
+    expect(detectAgentFromTitle("⠋ muse-project")).toBeNull();
   });
 });
 
@@ -99,6 +114,7 @@ describe("detectAgentFromOutput", () => {
     expect(detectAgentFromOutput("OpenCode v1.18.31")).toBe("opencode");
     expect(detectAgentFromOutput("  Cursor Agent\r\n  v2026.09.18-9a7762b")).toBe("cursor");
     expect(detectAgentFromOutput("▐█▛█▛█▌  Welcome to Kimi Code!")).toBe("kimi");
+    expect(detectAgentFromOutput("\x1b[1mMuse Code 1.4.6\x1b[0m")).toBe("muse");
     expect(
       detectAgentFromOutput(
         "Ask When Needed  K3 thinking: max  ~/proj  main  context: 29% (290k/1M)",
@@ -1610,4 +1626,301 @@ describe("PtyActivityScanner — full lifecycle", () => {
       expect(tracker.getSnapshot().attentionReason).toBe("quota");
     },
   );
+});
+
+describe("Muse Code terminal activity", () => {
+  const composer = (draft = "") => [
+    "── Voice input (⌥ + v to start) ─────────────────────────",
+    `❯ ${draft}`,
+    "────────────────────────────────────────────────────────",
+    "echo · /private/tmp/muse-project · Auto-review",
+  ];
+
+  function terminal(initialLines: string[] = [], cursorLine = "❯ ") {
+    const tracker = new TerminalActivityTracker();
+    let lines = initialLines;
+    let cursor = cursorLine;
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: (limit) => lines.slice(-limit),
+      readCursorLine: () => cursor,
+      stillnessMs: 500,
+    });
+    return {
+      tracker,
+      scanner,
+      paint(next: string[], nextCursor = "❯ ", output = next.join("\n")) {
+        lines = next;
+        cursor = nextCursor;
+        scanner.feedOutput(output);
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("recognizes a restored working screen after the startup banner scrolled away", () => {
+    const screen = ["◇ Thinking (1s · esc to interrupt)", "", ...composer()];
+    expect(detectAgentFromOutput(screen.join("\n"))).toBe("muse");
+    const { tracker, scanner, paint } = terminal(screen);
+    paint(screen);
+    expect(scanner.getActiveAgent()).toBe("muse");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("rechecks a restored screen when a later Muse diamond frame arrives", () => {
+    const { tracker, scanner, paint } = terminal();
+    scanner.feedOutput("partial repaint");
+    expect(scanner.getActiveAgent()).toBeNull();
+    paint(["◇ Thinking (2s · esc to interrupt)", "", ...composer()], "❯ ", "◈");
+    expect(scanner.getActiveAgent()).toBe("muse");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("recognizes a restored idle screen before the next prompt is submitted", () => {
+    const screen = composer();
+    expect(detectAgentFromOutput(screen.join("\n"))).toBe("muse");
+    const { tracker, scanner, paint } = terminal(screen);
+    paint(screen);
+    vi.advanceTimersByTime(500);
+    expect(scanner.getActiveAgent()).toBe("muse");
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+    scanner.feedInput("\r");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it.each(["Read only", "Ask me", "Auto-review", "Unrestricted", "Launch overrides"])(
+    "recognizes a restored composer with the %s profile",
+    (profile) => {
+      const screen = [...composer().slice(0, -1), `echo · /private/tmp/project · ${profile}`];
+      expect(detectAgentFromOutput(screen.join("\n"))).toBe("muse");
+    },
+  );
+
+  it("requires Muse's composer and profile footer instead of recognizing quoted prose", () => {
+    expect(detectAgentFromOutput("The transcript says Muse Code 1.4.6.")).toBeNull();
+    expect(detectAgentFromOutput("◇ Thinking (1s · esc to interrupt)")).toBeNull();
+    expect(detectAgentFromOutput(composer().slice(0, -1).join("\n"))).toBeNull();
+    expect(detectAgentFromOutput("echo · /tmp/project · Auto-review")).toBeNull();
+    expect(isMuseBusyScreen(["◇ Thinking (1s · esc to interrupt)", "plain shell"])).toBe(false);
+  });
+
+  it.each(["◇ Thinking", "◈ Working", "◆ Double checking", "◇ Finishing up"])(
+    "keeps a persistent composer working for %s",
+    (status) => {
+      const screen = [`${status} (12s · esc to interrupt)`, "", ...composer("next task")];
+      expect(isMuseBusyScreen(screen)).toBe(true);
+      expect(isIdleAgentScreen(screen, "❯ next task", "muse")).toBe(false);
+      const { tracker, scanner, paint } = terminal();
+      scanner.handleInitialCommand("muse");
+      paint(screen, "❯ next task");
+      vi.advanceTimersByTime(2500);
+      expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    },
+  );
+
+  it("recognizes Muse's unadorned initial Thinking frame", () => {
+    expect(isMuseBusyScreen(["◇ Thinking", "", ...composer()])).toBe(true);
+  });
+
+  it.each([
+    { status: ["◆ Thinking (12s · esc to inter"] },
+    { status: ["◇ Working (2s)"] },
+    { status: ["◈ Double checking (3s ·", "esc to interrupt)"] },
+    { status: ["◇ Finishing up", "(1m2s · esc to interrupt)"] },
+  ])("keeps Muse working when its narrow-pane status reads $status", ({ status }) => {
+    const screen = [...status, "", ...composer()];
+    expect(isMuseBusyScreen(screen)).toBe(true);
+    const { tracker, scanner, paint } = terminal();
+    scanner.handleInitialCommand("muse");
+    scanner.feedInput("\r");
+    paint(screen);
+    vi.advanceTimersByTime(2500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it.each(["Thinking", "Working", "Double checking", "Finishing up"])(
+    "finishes a reply whose entire text is %s",
+    (response) => {
+      const screen = [`◆ ${response}`, "", ...composer()];
+      expect(isMuseBusyScreen(screen)).toBe(false);
+      expect(isIdleAgentScreen(screen, "❯ ", "muse")).toBe(true);
+      const { tracker, scanner, paint } = terminal();
+      scanner.handleInitialCommand("muse");
+      scanner.feedInput("\r");
+      paint(screen);
+      vi.advanceTimersByTime(500);
+      expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+    },
+  );
+
+  it("treats a draft as idle and ignores status and approval text inside a finished response", () => {
+    const screen = [
+      "◆ The old transcript had ◇ Thinking (12s · esc to interrupt).",
+      "Allow the command to run? Confirm the change before continuing.",
+      "The panel said Approval request · keys active in a moment.",
+      "Done.",
+      "",
+      ...composer("approve and run this?"),
+    ];
+    expect(isMuseBusyScreen(screen)).toBe(false);
+    expect(isMuseNeedsInputScreen(screen)).toBe(false);
+    expect(isIdleAgentScreen(screen, "❯ approve and run this?", "muse")).toBe(true);
+    const { tracker, scanner, paint } = terminal();
+    scanner.handleInitialCommand("muse");
+    scanner.feedInput("\r");
+    paint(screen, "❯ approve and run this?");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("tracks launch, prompt, approval, resumed work, completion, focus and exit", () => {
+    const { tracker, scanner, paint } = terminal();
+    scanner.handleCommandStarted();
+    scanner.handleTitleChange("muse");
+    paint(["Muse Code 1.4.6", "", ...composer()]);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+
+    scanner.feedInput("inspect the repository");
+    scanner.feedInput("\r");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    paint(
+      [
+        "Would you like to run the following command?",
+        "git status",
+        "Approval request · keys active in a moment",
+        "❯ Allow once",
+        "  Allow for this session",
+        "  Abort",
+        "Enter to select · ↑/↓ to move · Esc to interrupt",
+      ],
+      "❯ Allow once",
+    );
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+
+    // Muse's menu can resume without sending a standalone Enter to the scanner.
+    scanner.feedInput("1");
+    paint(["◇ Working (2s · esc to interrupt)", "", ...composer()]);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    paint(["◆ Done.", "", ...composer()]);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+
+    expect(tracker.clearAttention()).toBe(true);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: null });
+    scanner.handleCommandFinished();
+    expect(scanner.getActiveAgent()).toBeNull();
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+  });
+
+  it("prefers user questions over a stale composer and running status", () => {
+    const screen = [
+      "◇ Working (2s · esc to interrupt)",
+      "Structured user input needed",
+      "Question 1: Which option?",
+      "❯ First option",
+      "  Second option",
+      "Enter to select · ↑/↓ to move · Tab for an optional note · Esc to interrupt",
+      ...composer(),
+    ];
+    expect(isMuseNeedsInputScreen(screen)).toBe(true);
+    expect(isMuseBusyScreen(screen)).toBe(false);
+    expect(isIdleAgentScreen(screen, "❯ ", "muse")).toBe(false);
+    const { tracker, scanner, paint } = terminal();
+    scanner.handleInitialCommand("muse");
+    scanner.feedInput("\r");
+    paint(screen);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+  });
+
+  it("recognizes staged approvals and multi-select questions", () => {
+    const approval = [
+      "Would you like to run the following command?",
+      "npm install",
+      "❯ Allow this stage once",
+      "  Abort the entire command",
+    ];
+    expect(isMuseNeedsInputScreen(approval)).toBe(true);
+    expect(isIdleAgentScreen(approval, "❯ Allow this stage once", "muse")).toBe(false);
+    const question = [
+      "❯ First option",
+      "  Second option",
+      "  Submit",
+      "Enter to toggle · Submit row to continue · ↑/↓ to move ·",
+      "←/→ to switch question · Tab for an optional note · Esc to interrupt",
+    ];
+    expect(isMuseNeedsInputScreen(question)).toBe(true);
+    expect(isIdleAgentScreen(question, "❯ First option", "muse")).toBe(false);
+  });
+
+  it("keeps quota red at the composer, clears it on focus and starts the next turn", () => {
+    const { tracker, scanner, paint } = terminal();
+    scanner.handleInitialCommand("muse");
+    scanner.feedInput("\r");
+    paint(["Usage limit reached", "", ...composer()]);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "quota" });
+
+    paint(["Usage limit reached", "", ...composer()]);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "quota" });
+    expect(tracker.clearAttention()).toBe(true);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: null });
+
+    scanner.feedInput("\r");
+    paint(["◇ Working (0s · esc to interrupt)", "", ...composer()]);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("starts Muse exec working before output and clears it when the command exits", () => {
+    const { tracker, scanner } = terminal();
+    scanner.handleInitialCommand("muse exec --model echo 'hello'");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    scanner.handleCommandFinished();
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+  });
+
+  it("preserves Muse activity through its basename and spinning cwd titles", () => {
+    const { tracker, scanner, paint } = terminal();
+    scanner.handleInitialCommand("muse");
+    scanner.handleTitleChange("muse-project");
+    scanner.feedInput("\r");
+    scanner.handleTitleChange("⠋ muse-project");
+    expect(scanner.getActiveAgent()).toBe("muse");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    scanner.handleTitleChange("muse-project");
+    paint(["◆ Done.", "", ...composer()]);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("ignores interrupt residue and does not turn the returned composer green", () => {
+    const { tracker, scanner, paint } = terminal();
+    scanner.handleInitialCommand("muse");
+    scanner.feedInput("\r");
+    paint(["◇ Working (1s · esc to interrupt)", "", ...composer()]);
+    tracker.interrupt();
+    scanner.handleInterrupt();
+    paint(["◇ Working (1s · esc to interrupt)", "", ...composer()]);
+    // Esc restores the submitted prompt as a composer draft, without a turn-end row.
+    paint(composer("Harmless fixture prompt."), "❯ Harmless fixture prompt.");
+    scanner.feedOutput("\x1b]0;⠋ muse-project\x07");
+    vi.advanceTimersByTime(1500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+
+    scanner.feedInput("\r");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
 });

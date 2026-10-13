@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { UsageSourceRegistry } from "../../../packages/server/src/server/plugins/usage-sources/index.js";
 import { Usage as MuseUsage } from "../server/usage.js";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import os from "node:os";
 import path from "node:path";
@@ -1173,7 +1173,26 @@ for (const variant of ["tool", "dedicated", "workflow"]) {
           e.item.type === "assistant_message",
       ),
     ).toMatchObject({ item: { text: "SUBAGENT_PHASE0_OK" } });
-    await h.wait((e) => e.type === "session.turn" && e.state === "completed");
+    await h.wait(
+      (e) =>
+        e.type === "session.turn" && e.sessionId === "paseo-session" && e.state === "completed",
+    );
+    expect(
+      h.events.filter((e) => e.type === "session.turn" && e.sessionId === "fixture-child"),
+    ).toEqual([
+      {
+        type: "session.turn",
+        sessionId: "fixture-child",
+        turnId: expect.any(String),
+        state: "started",
+      },
+      {
+        type: "session.turn",
+        sessionId: "fixture-child",
+        turnId: expect.any(String),
+        state: "completed",
+      },
+    ]);
     expect(
       h.events.filter((e) => e.type === "session.opened" && e.sessionId === "fixture-child"),
     ).toHaveLength(1);
@@ -1182,6 +1201,14 @@ for (const variant of ["tool", "dedicated", "workflow"]) {
         .filter((f) => f.method === "session/read")
         .map((f) => f.params.sessionId),
     ).toEqual(["fixture-child"]);
+    expect(
+      (await h.recorded()).filter((f) => f.method === "view/subscribe").map((f) => f.params),
+    ).toEqual([
+      {
+        sessionId: "fixture-child",
+        after: "v:01a0ee47-7e29-7103-97c7-cdde44e26fe8:6",
+      },
+    ]);
     expect(
       h.events.filter(
         (e) =>
@@ -1192,6 +1219,86 @@ for (const variant of ["tool", "dedicated", "workflow"]) {
     ).toHaveLength(1);
   });
 }
+for (const [terminal, error, state] of [
+  ["completed", false, "completed"],
+  ["cancelled", false, "canceled"],
+  ["failed", false, "failed"],
+  ["completed", true, "failed"],
+] as const) {
+  test(`native child ${terminal}${error ? " with error" : ""} settles its glow once despite repeated live events`, async () => {
+    const h = await harness("subagent", {
+      MUSE_TEST_CHILD: "tool",
+      MUSE_TEST_CHILD_LIVE: "1",
+      MUSE_TEST_CHILD_TERMINAL: terminal,
+      ...(error ? { MUSE_TEST_CHILD_ERROR: "1" } : {}),
+    });
+    await h.open();
+    await h.prompt();
+    const completion = await h.wait(
+      (e) => e.type === "session.turn" && e.sessionId === "fixture-child" && e.state === state,
+    );
+    if (state === "failed")
+      expect(completion).toMatchObject({
+        error: error
+          ? { code: "childFailure", message: "Child turn failed" }
+          : { message: "Muse turn failed" },
+      });
+    await h.wait(
+      (e) =>
+        e.type === "session.turn" && e.sessionId === "paseo-session" && e.state === "completed",
+    );
+    expect(
+      h.events
+        .filter((e) => e.type === "session.turn" && e.sessionId === "fixture-child")
+        .map((e) => (e.type === "session.turn" ? e.state : undefined)),
+    ).toEqual(["started", state]);
+    expect(
+      h.events
+        .filter((e) => e.type === "session.turn" && e.sessionId === "paseo-session")
+        .map((e) => (e.type === "session.turn" ? e.state : undefined)),
+    ).toEqual(["started", "completed"]);
+    expect(
+      (await h.recorded()).filter((f) => f.method === "view/subscribe").map((f) => f.params),
+    ).toEqual([
+      {
+        sessionId: "fixture-child",
+        after: "v:01a0ee47-7e29-7103-97c7-cdde44e26fe8:5",
+      },
+    ]);
+  });
+}
+test("child gap backfill settles a missing completion after its parent is idle", async () => {
+  const h = await harness("subagent", {
+    MUSE_TEST_CHILD: "tool",
+    MUSE_TEST_CHILD_LIVE: "1",
+    MUSE_TEST_CHILD_GAP: "1",
+  });
+  await h.open();
+  await h.prompt();
+  const parent = await h.wait(
+    (e) => e.type === "session.turn" && e.sessionId === "paseo-session" && e.state === "completed",
+  );
+  const child = await h.wait(
+    (e) => e.type === "session.turn" && e.sessionId === "fixture-child" && e.state === "completed",
+  );
+  expect(h.events.indexOf(parent)).toBeLessThan(h.events.indexOf(child));
+  expect(await h.recorded()).toContainEqual(
+    expect.objectContaining({
+      method: "view/page",
+      params: {
+        sessionId: "fixture-child",
+        cursor: "fixture-child-gap-after",
+        limit: 1000,
+        direction: "forward",
+      },
+    }),
+  );
+  expect(
+    h.events
+      .filter((e) => e.type === "session.turn" && e.sessionId === "fixture-child")
+      .map((e) => (e.type === "session.turn" ? e.state : undefined)),
+  ).toEqual(["started", "completed"]);
+});
 test("gap backfill repairs a missing completion without duplicating item revisions", async () => {
   const h = await harness("text-reasoning", { MUSE_TEST_GAP: "1" });
   await h.open();
@@ -1623,26 +1730,32 @@ test("status accepts initialization slower than the account deadline without iso
 }, 10000);
 
 for (const extension of ["cmd", "bat"]) {
-  test.runIf(process.platform === "win32")(
-    `launches the discovered Muse .${extension} for status, catalog and sessions`,
-    async () => {
-      const h = await harness("catalog-controls");
-      const shim = path.join(h.root, `muse launcher.${extension}`);
-      await writeFile(shim, `@echo off\r\n"${process.execPath}" "${h.launch.args[0]}" %*\r\n`);
-      h.launch.command = shim;
-      h.launch.args = [];
-      expect(await h.provider.status!({ launch: h.launch })).toEqual({ available: true });
-      await h.send({ type: "catalog", requestId: "shim-catalog" });
-      expect(await h.wait((event) => event.type === "catalog")).toMatchObject({
-        requestId: "shim-catalog",
-      });
-      await h.open();
-      expect(await h.wait((event) => event.type === "session.opened")).toMatchObject({
-        sessionId: "paseo-session",
-      });
-    },
-    20000,
-  );
+  test(`launches the discovered Muse .${extension} for status, catalog and sessions`, async () => {
+    const h = await harness("catalog-controls");
+    const shim = path.join(h.root, `muse launcher.${extension}`);
+    let contents;
+    if (process.platform === "win32")
+      contents = `@echo off\r\n"${process.execPath}" "${h.launch.args[0]}" %*\r\n`;
+    else {
+      const command = [process.execPath, h.launch.args[0]!]
+        .map((argument) => `'${argument.replaceAll("'", "'\\''")}'`)
+        .join(" ");
+      contents = `#!/usr/bin/env sh\nexec ${command} "$@"\n`;
+    }
+    await writeFile(shim, contents);
+    await chmod(shim, 0o755);
+    h.launch.command = shim;
+    h.launch.args = [];
+    expect(await h.provider.status!({ launch: h.launch })).toEqual({ available: true });
+    await h.send({ type: "catalog", requestId: "shim-catalog" });
+    expect(await h.wait((event) => event.type === "catalog")).toMatchObject({
+      requestId: "shim-catalog",
+    });
+    await h.open();
+    expect(await h.wait((event) => event.type === "session.opened")).toMatchObject({
+      sessionId: "paseo-session",
+    });
+  }, 20000);
 }
 
 test("force-stops a Muse host that ignores stdin EOF", async () => {
