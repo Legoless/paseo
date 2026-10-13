@@ -151,6 +151,10 @@ export class TerminalInputModeTracker {
     return terminalInputModeSupportsModifiedEnter(this.getState());
   }
 
+  isMouseTrackingEnabled(): boolean {
+    return this.mouseProtocol !== 0;
+  }
+
   getPreamble(): string {
     const parts: string[] = [];
     if (this.kittyKeyboardFlags > 0) {

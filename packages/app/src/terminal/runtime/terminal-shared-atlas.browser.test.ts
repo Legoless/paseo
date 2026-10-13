@@ -1,5 +1,9 @@
 import { afterEach, expect, it } from "vitest";
-import { encodeTerminalOutput, TerminalEmulatorRuntime } from "./terminal-emulator-runtime";
+import {
+  encodeTerminalOutput,
+  TerminalEmulatorRuntime,
+  type TerminalResizeEvent,
+} from "./terminal-emulator-runtime";
 
 // Real @xterm/addon-webgl, no mock: embedded terminals in one window share one WebGL glyph
 // atlas, so one terminal clearing it blanks the unchanged text of every other terminal.
@@ -7,11 +11,14 @@ import { encodeTerminalOutput, TerminalEmulatorRuntime } from "./terminal-emulat
 interface WebglRendererInternals {
   _charAtlas?: object;
   _canvas: HTMLCanvasElement;
+  _gl: WebGL2RenderingContext;
   renderRows: (start: number, end: number) => void;
 }
 
 interface TerminalInternals {
   rows: number;
+  cols: number;
+  onRender: (listener: () => void) => { dispose: () => void };
   buffer: { active: { getLine: (y: number) => { translateToString: (trim: boolean) => string } } };
   clearTextureAtlas: () => void;
   _core: {
@@ -47,7 +54,11 @@ async function waitFor(predicate: () => boolean): Promise<void> {
   }
 }
 
-function mount(left: number, resetTextureAtlasOnFirstSnapshot?: boolean): TerminalEmulatorRuntime {
+function mount(
+  left: number,
+  resetTextureAtlasOnFirstSnapshot?: boolean,
+  onResize?: (size: TerminalResizeEvent) => void,
+): TerminalEmulatorRuntime {
   const root = document.createElement("div");
   Object.assign(root.style, {
     position: "fixed",
@@ -61,6 +72,7 @@ function mount(left: number, resetTextureAtlasOnFirstSnapshot?: boolean): Termin
   root.appendChild(host);
   document.body.appendChild(root);
   const runtime = new TerminalEmulatorRuntime();
+  runtime.setCallbacks({ callbacks: { onResize } });
   runtime.mount({
     root,
     host,
@@ -86,11 +98,15 @@ function rendererOf(runtime: TerminalEmulatorRuntime): WebglRendererInternals | 
 function litPixels(runtime: TerminalEmulatorRuntime): number {
   const renderer = rendererOf(runtime)!;
   renderer.renderRows(0, terminalOf(runtime).rows - 1);
+  return canvasLitPixels(renderer._canvas);
+}
+
+function canvasLitPixels(canvas: HTMLCanvasElement): number {
   const copy = document.createElement("canvas");
-  copy.width = renderer._canvas.width;
-  copy.height = renderer._canvas.height;
+  copy.width = canvas.width;
+  copy.height = canvas.height;
   const context = copy.getContext("2d")!;
-  context.drawImage(renderer._canvas, 0, 0);
+  context.drawImage(canvas, 0, 0);
   const pixels = context.getImageData(0, 0, copy.width, copy.height).data;
   let lit = 0;
   for (let index = 0; index < pixels.length; index += 4) {
@@ -144,4 +160,50 @@ it("resets the atlas once for a terminal that owns its renderer", async () => {
   await frames(3);
 
   expect(clears).toBe(1);
+});
+
+it("repaints unchanged terminal geometry after a passive layout change without focusing it", async () => {
+  const sizes: TerminalResizeEvent[] = [];
+  const first = mount(0, undefined, (size) => sizes.push(size));
+  const sibling = mount(440);
+  await waitFor(() => Boolean(rendererOf(first)?._charAtlas && rendererOf(sibling)?._charAtlas));
+  await new Promise((resolve) => setTimeout(resolve, 2_600));
+
+  const root = mounted.find((entry) => entry.runtime === first)!.root;
+  const siblingRoot = mounted.find((entry) => entry.runtime === sibling)!.root;
+  const siblingInput = siblingRoot.querySelector<HTMLTextAreaElement>("textarea")!;
+  siblingInput.focus();
+  const terminal = terminalOf(first);
+  const renderer = rendererOf(first)!;
+  const painted: number[] = [];
+  // WebGL does not preserve its framebuffer after presentation. Observe pixels
+  // inside onRender, without requesting the repaint that the test must prove.
+  const listener = terminal.onRender(() => painted.push(canvasLitPixels(renderer._canvas)));
+  first.restoreOutput({
+    data: encodeTerminalOutput(
+      "\x1b[?25l" + Array.from({ length: 10 }, (_, index) => coloredRow(index + 1)).join(""),
+    ),
+  });
+  await waitFor(() => painted.some((pixels) => pixels > 1_000));
+  await frames(3);
+  const baselinePixels = Math.max(...painted);
+  const baselineSize = { rows: terminal.rows, cols: terminal.cols };
+  sizes.length = 0;
+  painted.length = 0;
+
+  // Simulate a canvas whose pixels are lost while its terminal buffer is intact.
+  // A one-pixel pane resize leaves the cell grid unchanged, so it must still
+  // request a local repaint instead of waiting for a focus redraw.
+  renderer._gl.clearColor(0, 0, 0, 1);
+  renderer._gl.clear(renderer._gl.COLOR_BUFFER_BIT);
+  expect(canvasLitPixels(renderer._canvas)).toBe(0);
+  root.style.width = "419px";
+
+  await waitFor(() => painted.some((pixels) => pixels > baselinePixels * 0.9));
+
+  expect({ rows: terminal.rows, cols: terminal.cols }).toEqual(baselineSize);
+  expect(terminal.buffer.active.getLine(0).translateToString(true)).toContain("line 1");
+  expect(document.activeElement).toBe(siblingInput);
+  expect(sizes).toEqual([]);
+  listener.dispose();
 });

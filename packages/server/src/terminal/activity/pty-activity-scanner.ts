@@ -16,6 +16,8 @@ export interface PtyActivityScannerOptions {
   ) => void;
   clearActivity: () => void;
   getActivity: () => ObservedTerminalActivity;
+  getActivityOwnerSessionId?: () => string | null;
+  hasHookNeedsInput?: () => boolean;
   readLastLines: (limit: number) => string[];
   readCursorLine: () => string;
   stillnessMs?: number;
@@ -297,6 +299,59 @@ export function isMuseBusyScreen(lines: string[]): boolean {
   });
 }
 
+// OpenCode's textarea stays visible while busy and has no prompt marker. Its
+// left border, agent/model row, and footer identify the composer. The shadow
+// row disappears with transparent themes, so the last left-border row is the
+// other boundary. Only the footer below it carries live interrupt status;
+// elapsed assistant headers and "view subagents" belong to the transcript.
+const OPENCODE_COMPOSER_BORDER = /^[┃│]/;
+const OPENCODE_COMPOSER_SHADOW = /^╹▀*$/;
+const OPENCODE_INTERRUPT_HINT = /(?:^|\s)esc\s+(?:again\s+to\s+)?interrupt(?:\s|$)/i;
+const OPENCODE_FOOTER_SPINNER = /^(?:[■⬝·⬥◆⬩⬪\u2800-\u28ff]+|\[⋯\])(?:\s|$)/;
+const OPENCODE_COMMAND_HINT = /\S+\s+commands(?:\s|$)/i;
+
+function openCodeComposerFooter(lines: string[]): string[] | null {
+  const stripped = lines.map((line) => stripAnsi(line).trim());
+  const shadow = stripped.findLastIndex((line) => OPENCODE_COMPOSER_SHADOW.test(line));
+  const end =
+    shadow >= 0
+      ? shadow
+      : stripped.findLastIndex((line) => OPENCODE_COMPOSER_BORDER.test(line)) + 1;
+  if (end <= 0) return null;
+  const body: string[] = [];
+  for (let index = end - 1; index >= 0; index -= 1) {
+    if (!OPENCODE_COMPOSER_BORDER.test(stripped[index])) break;
+    body.unshift(stripped[index].slice(1).trim());
+  }
+  if (body.length < 2 || !/\S\s+[·•]\s+\S/.test(body.slice(-4).join(" "))) return null;
+  const footer = stripped.slice(shadow >= 0 ? end + 1 : end).filter(Boolean);
+  const text = footer.join(" ");
+  if (!OPENCODE_INTERRUPT_HINT.test(text) && !OPENCODE_COMMAND_HINT.test(text)) return null;
+  return footer;
+}
+
+export function isOpenCodeBusyScreen(lines: string[]): boolean {
+  if (isOpenCodeNeedsInputScreen(lines)) return false;
+  const footer = openCodeComposerFooter(lines);
+  return (
+    footer !== null &&
+    OPENCODE_FOOTER_SPINNER.test(footer[0] ?? "") &&
+    OPENCODE_INTERRUPT_HINT.test(footer.join(" "))
+  );
+}
+
+export function isOpenCodeNeedsInputScreen(lines: string[]): boolean {
+  const stripped = lines.slice(-15).map((line) => stripAnsi(line).trim());
+  const composerFooter = openCodeComposerFooter(lines);
+  const footer = (composerFooter ?? stripped).filter(Boolean).slice(-4).join(" ");
+  const permission =
+    /\bPermission required\b|\bReject permission\b/i.test(stripped.join(" ")) &&
+    /\benter\s+confirm\b/i.test(footer);
+  const question = /\benter\s+(?:submit|toggle|confirm)\b.*\besc\s+dismiss\b/i.test(footer);
+  if (permission || question) return true;
+  return composerFooter === null && isNeedsInputScreen(lines);
+}
+
 // Agents that keep their idle-looking composer up while work still runs.
 function isAgentBusyScreen(lines: string[], agent: KnownAgentName): boolean {
   if (agent === "antigravity") return isAntigravityBusyScreen(lines);
@@ -305,7 +360,14 @@ function isAgentBusyScreen(lines: string[], agent: KnownAgentName): boolean {
   if (agent === "grok") return isGrokBusyScreen(lines);
   if (agent === "kimi") return isKimiBusyScreen(lines);
   if (agent === "muse") return isMuseBusyScreen(lines);
+  if (agent === "opencode") return isOpenCodeBusyScreen(lines);
   return false;
+}
+
+function isAgentNeedsInputScreen(lines: string[], agent: KnownAgentName): boolean {
+  if (agent === "muse") return isMuseNeedsInputScreen(lines);
+  if (agent === "opencode") return isOpenCodeNeedsInputScreen(lines);
+  return isNeedsInputScreen(lines);
 }
 
 export function isIdleAgentScreen(
@@ -318,6 +380,10 @@ export function isIdleAgentScreen(
   }
   if (agent === "muse" && isMuseNeedsInputScreen(lines)) {
     return false;
+  }
+  if (agent === "opencode") {
+    if (isOpenCodeNeedsInputScreen(lines)) return false;
+    return openCodeComposerFooter(lines) !== null || isIdlePromptLine(cursorLine, agent);
   }
   if (agent !== "cursor") {
     return isIdlePromptLine(cursorLine, agent);
@@ -484,6 +550,7 @@ export function detectAgentFromOutput(chunk: string): KnownAgentName | null {
     return "antigravity";
   }
   if (/\bopencode\s+v\d/i.test(stripped)) return "opencode";
+  if (openCodeComposerFooter(stripped.split(/\r?\n/)) !== null) return "opencode";
   if (/\bcursor agent\s+v\d{4}\./i.test(stripped.replace(/\r?\n/g, " "))) return "cursor";
   if (/\bwelcome to kimi code\b/i.test(stripped)) return "kimi";
   // The welcome banner is not reprinted on resume/restore; the status bar's context
@@ -611,6 +678,7 @@ export class PtyActivityScanner {
         !detected &&
         (!this.lookedAtScreen ||
           BRAILLE_SPINNER_REGEX.test(chunk) ||
+          /[■⬝⬥⬩⬪]/.test(chunk) ||
           MUSE_DIAMOND_REGEX.test(chunk) ||
           chunk.includes("◎") ||
           chunk.includes("⸬"))
@@ -639,6 +707,7 @@ export class PtyActivityScanner {
         (this.currentActivity !== "working" ||
           this.options.getActivity().attentionReason === "needs_input")) ||
         (this.currentActivity !== "working" &&
+          this.activeAgent !== "opencode" &&
           BRAILLE_SPINNER_REGEX.test(chunk) &&
           !this.options.getActivity().attentionReason))
     ) {
@@ -650,14 +719,17 @@ export class PtyActivityScanner {
   }
 
   // A continuously animating live status leaves no quiet gap for the stillness
-  // check. Grok and Muse can also resume after an approval without Enter, or
+  // check. Grok, Muse, and OpenCode can resume after an approval without Enter, or
   // start work on their own after a finished turn. Quota stays red.
   private promoteWorkingAgentScreen(): void {
     if (
-      (this.initialLaunch && this.activeAgent !== "muse") ||
+      (this.initialLaunch && this.activeAgent !== "muse" && this.activeAgent !== "opencode") ||
       this.isInsideInterruptWindow() ||
-      (this.activeAgent !== "grok" && this.activeAgent !== "muse") ||
-      this.currentActivity === "working" ||
+      (this.activeAgent !== "grok" &&
+        this.activeAgent !== "muse" &&
+        this.activeAgent !== "opencode") ||
+      (this.currentActivity === "working" && this.options.getActivity().state === "working") ||
+      this.hasOpenCodeHookNeedsInput() ||
       this.options.getActivity().attentionReason === "quota"
     ) {
       return;
@@ -714,6 +786,25 @@ export class PtyActivityScanner {
     this.lastOutputAt = 0;
   }
 
+  private hasOpenCodeHookWork(lines: string[]): boolean {
+    return (
+      this.activeAgent === "opencode" &&
+      this.options.getActivity().state === "working" &&
+      Boolean(this.options.getActivityOwnerSessionId?.()) &&
+      !isOpenCodeNeedsInputScreen(lines)
+    );
+  }
+
+  private hasOpenCodeHookNeedsInput(): boolean {
+    // Ownership also survives questions seen only by the scanner. A child
+    // hook's wait is what can outrank the parent's live interrupt footer.
+    return (
+      this.activeAgent === "opencode" &&
+      this.options.getActivity().attentionReason === "needs_input" &&
+      Boolean(this.options.hasHookNeedsInput?.())
+    );
+  }
+
   private onStillness(): void {
     if (!this.activeAgent) return;
 
@@ -726,8 +817,13 @@ export class PtyActivityScanner {
     }
 
     const lines = this.options.readLastLines(15);
+    const openCodeHookNeedsInput = this.hasOpenCodeHookNeedsInput();
 
-    if (isAgentBusyScreen(lines, this.activeAgent) && !isSpendLimitScreen(lines)) {
+    if (
+      !openCodeHookNeedsInput &&
+      isAgentBusyScreen(lines, this.activeAgent) &&
+      !isSpendLimitScreen(lines)
+    ) {
       this.unresolvedWorkingStillness = 0;
       if (this.currentActivity !== "working") {
         // The welcome screen never looks busy. Work we can see is a turn, including
@@ -744,6 +840,14 @@ export class PtyActivityScanner {
       this.currentActivity = "attention";
       this.unresolvedWorkingStillness = 0;
       this.options.setActivity("attention", "quota");
+      return;
+    }
+
+    // OpenCode's parent composer goes idle while background sessions keep
+    // running. Its plugin aggregates their status under the root session id;
+    // that owned hook state ends only when the plugin reports a terminal state.
+    if (openCodeHookNeedsInput || this.hasOpenCodeHookWork(lines)) {
+      this.unresolvedWorkingStillness = 0;
       return;
     }
 
@@ -765,7 +869,7 @@ export class PtyActivityScanner {
       return;
     }
 
-    if (this.activeAgent === "muse" ? isMuseNeedsInputScreen(lines) : isNeedsInputScreen(lines)) {
+    if (isAgentNeedsInputScreen(lines, this.activeAgent)) {
       this.currentActivity = "attention";
       this.unresolvedWorkingStillness = 0;
       this.options.setActivity("attention");

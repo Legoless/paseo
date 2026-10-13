@@ -20,6 +20,8 @@ function _paseo_osc7() {
 
 function _paseo_precmd() {
   local command_status=$?
+  # An agent can exit without disabling mouse reports, which would enter the next shell prompt.
+  printf '\e[?9;1000;1002;1003;1005;1006;1015;1016l'
   # Before D: the command-finished save then records where the command left the shell.
   _paseo_osc7
   if [[ "$_PASEO_ZSH_COMMAND_ACTIVE" == "1" ]]; then

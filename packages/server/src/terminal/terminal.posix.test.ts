@@ -1,6 +1,6 @@
 // POSIX-only: node-pty + POSIX shell assertions
 /* eslint-disable max-nested-callbacks */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { isPlatform } from "../test-utils/platform.js";
 import {
   buildTerminalEnvironment,
@@ -114,6 +114,7 @@ const sessions: TerminalSession[] = [];
 const temporaryDirs: string[] = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   for (const session of sessions) {
     await session.killAndWait();
   }
@@ -739,6 +740,79 @@ describe.skipIf(isPlatform("win32"))("terminal POSIX-only", () => {
 
       unsubscribeCommandFinished();
     });
+
+    it.each([
+      { ending: "normal exit", input: "done\r", exitCode: 7 },
+      { ending: "interrupt", input: "\x03", exitCode: 130 },
+    ])(
+      "clears agent mouse tracking before the zsh prompt after $ending",
+      async ({ input, exitCode }) => {
+        const homeDir = mkdtempSync(join(tmpdir(), "terminal-zsh-mouse-exit-home-"));
+        temporaryDirs.push(homeDir);
+        writeFileSync(join(homeDir, ".zshenv"), "");
+        writeFileSync(join(homeDir, ".zshrc"), "PS1='$ '\n");
+        const scriptPath = join(homeDir, "mouse-agent.cjs");
+        const mouseTracking = "\x1b[?1003h\x1b[?1006h";
+        const mouseReset = "\x1b[?9;1000;1002;1003;1005;1006;1015;1016l";
+        writeFileSync(
+          scriptPath,
+          `process.stdin.resume();
+process.stdin.on("data", () => process.exit(7));
+process.stdout.write(${JSON.stringify(`${mouseTracking}mouse-agent-ready\r\n`)});
+`,
+        );
+
+        const session = trackSession(
+          await createTerminal({
+            workspaceId: "ws-test",
+            cwd: homeDir,
+            shell: "/bin/zsh",
+            env: { HOME: homeDir, ZDOTDIR: homeDir },
+          }),
+        );
+        let output = "";
+        const unsubscribeOutput = session.subscribe((message) => {
+          if (message.type === "output") output += message.data;
+        });
+        const commandCompletions: Array<number | null> = [];
+        const unsubscribeCommandFinished = session.onCommandFinished((info) => {
+          commandCompletions.push(info.exitCode);
+        });
+
+        await waitForLines(session, ["$"]);
+        output = "";
+        session.send({
+          type: "input",
+          data: `${JSON.stringify(process.execPath)} ${JSON.stringify(scriptPath)}\r`,
+        });
+        await waitForState(session, () => output.includes("mouse-agent-ready"));
+        expect(session.getReplayPreamble()).toContain(mouseTracking);
+        expect(commandCompletions).toEqual([]);
+
+        session.send({ type: "input", data: input });
+        const commandFinished = `\x1b]633;D;${exitCode}\x07`;
+        const promptStarted = "\x1b]633;A\x07";
+        await waitForState(
+          session,
+          () => output.includes(`${commandFinished}`) && output.includes(promptStarted),
+        );
+
+        const mouseTrackingIndex = output.indexOf(mouseTracking);
+        const mouseResetIndex = output.indexOf(mouseReset, mouseTrackingIndex);
+        const commandFinishedIndex = output.indexOf(commandFinished);
+        const promptStartedIndex = output.indexOf(promptStarted, commandFinishedIndex);
+        expect(mouseResetIndex).toBeGreaterThan(mouseTrackingIndex);
+        expect(commandFinishedIndex).toBeGreaterThan(mouseResetIndex);
+        expect(promptStartedIndex).toBeGreaterThan(commandFinishedIndex);
+        expect(commandCompletions).toEqual([exitCode]);
+        for (const mode of [9, 1000, 1002, 1003, 1005, 1006, 1015, 1016]) {
+          expect(session.getReplayPreamble()).not.toContain(`\x1b[?${mode}h`);
+        }
+
+        unsubscribeOutput();
+        unsubscribeCommandFinished();
+      },
+    );
   });
 
   describe("colors", () => {
@@ -984,6 +1058,107 @@ describe.skipIf(isPlatform("win32"))("terminal POSIX-only", () => {
       await new Promise((resolve) => setTimeout(resolve, 200));
 
       expect(messages.length).toBe(0);
+    });
+  });
+
+  describe("mouse reports", () => {
+    async function createInputCapture(
+      input: {
+        mouseTracking?: boolean;
+        disableMarkerPath?: string;
+      } = {},
+    ): Promise<TerminalSession> {
+      const session = trackSession(
+        await createTerminal({
+          workspaceId: "ws-test",
+          cwd: realpathSync(tmpdir()),
+          cols: 500,
+          command: process.execPath,
+          args: [
+            "-e",
+            `
+  process.stdin.setRawMode(true);
+  let captured = "";
+  process.stdin.on("data", (chunk) => {
+    captured += chunk.toString("latin1");
+    if (captured.includes("\\r")) {
+      process.stdout.write("\\r\\nCAPTURE:" + JSON.stringify(captured) + "\\r\\n");
+    }
+  });
+  process.stdout.write(${JSON.stringify(input.mouseTracking ? "\x1b[?1003h\x1b[?1006h" : "")} + "READY\\r\\n");
+  ${
+    input.disableMarkerPath
+      ? `const fs = require("node:fs");
+  const timer = setInterval(() => {
+    if (!fs.existsSync(${JSON.stringify(input.disableMarkerPath)})) return;
+    clearInterval(timer);
+    process.stdout.write("\\x1b[?1003l\\x1b[?1006lDISABLED\\r\\n");
+  }, 10);`
+      : ""
+  }
+  `,
+          ],
+        }),
+      );
+      await waitForState(session, (state) => getLines(state).includes("READY"));
+      return session;
+    }
+
+    async function expectCapturedInput(session: TerminalSession, expected: string): Promise<void> {
+      const state = await waitForState(session, (current) =>
+        getLines(current).some((line) => line.startsWith("CAPTURE:")),
+      );
+      const line = getLines(state).find((candidate) => candidate.startsWith("CAPTURE:"))!;
+      expect(JSON.parse(line.slice("CAPTURE:".length))).toBe(expected);
+    }
+
+    it("drops late standalone mouse reports while preserving typed and pasted input", async () => {
+      const session = await createInputCapture();
+      const sgr = "\x1b[<51;31;36M";
+      const x10 = "\x1b[M#AB";
+      const text = `typed ${sgr} text`;
+      const paste = `\x1b[200~${sgr}${x10}\x1b[201~`;
+
+      session.send({ type: "input", data: sgr });
+      session.send({ type: "input", data: "\x1b[<0;10;20m" });
+      session.send({ type: "input", data: x10 });
+      session.send({ type: "input", data: `${sgr}${x10}${sgr}` });
+      session.send({ type: "input", data: text });
+      session.send({ type: "input", data: paste });
+      session.send({ type: "input", data: `${sgr}\n` });
+      session.send({ type: "input", data: `${sgr}\r` });
+
+      await expectCapturedInput(session, `${text}${paste}${sgr}\n${sgr}\r`);
+    });
+
+    it("passes mouse reports to the foreground program while tracking is enabled", async () => {
+      const session = await createInputCapture({ mouseTracking: true });
+      const sgr = "\x1b[<51;31;36M\x1b[<0;10;20m";
+      const x10 = "\x1b[M#AB";
+
+      session.send({ type: "input", data: sgr });
+      session.send({ type: "input", data: x10 });
+      session.send({ type: "input", data: "\r" });
+
+      await expectCapturedInput(session, `${sgr}${x10}\r`);
+    });
+
+    it("drops queued mouse reports when tracking turns off before the input flush", async () => {
+      const directory = mkdtempSync(join(tmpdir(), "terminal-mouse-flush-"));
+      temporaryDirs.push(directory);
+      const disableMarkerPath = join(directory, "disable");
+      const session = await createInputCapture({ mouseTracking: true, disableMarkerPath });
+
+      vi.useFakeTimers({ toFake: ["setImmediate", "clearImmediate"] });
+      session.send({ type: "input", data: "\x1b[<35;48;37M" });
+      session.send({ type: "input", data: "typed\r" });
+      writeFileSync(disableMarkerPath, "");
+      await waitForState(session, (state) => getLines(state).includes("DISABLED"));
+
+      await vi.runOnlyPendingTimersAsync();
+      vi.useRealTimers();
+
+      await expectCapturedInput(session, "typed\r");
     });
   });
 

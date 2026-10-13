@@ -553,7 +553,7 @@ export default function TerminalEmulator({
     if (resizeRequestToken <= 0) {
       return;
     }
-    runtimeRef.current?.resize({ forceClaim: false, shouldClaim: false });
+    runtimeRef.current?.resize({ forceRefresh: true, forceClaim: false, shouldClaim: false });
   }, [resizeRequestToken]);
 
   const showTerminalContextMenu = useCallback(() => {

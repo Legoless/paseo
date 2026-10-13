@@ -12,6 +12,8 @@ import {
   isKimiBusyScreen,
   isMuseBusyScreen,
   isMuseNeedsInputScreen,
+  isOpenCodeBusyScreen,
+  isOpenCodeNeedsInputScreen,
   isNeedsInputScreen,
   isSpendLimitScreen,
   KNOWN_AGENT_NAMES,
@@ -1626,6 +1628,385 @@ describe("PtyActivityScanner — full lifecycle", () => {
       expect(tracker.getSnapshot().attentionReason).toBe("quota");
     },
   );
+});
+
+describe("OpenCode terminal activity", () => {
+  const composer = (draft = "") => [
+    "┃",
+    `┃   ${draft}`,
+    "┃",
+    "┃   Sisyphus - Ultraworker · DeepSeek V4.1 Flash OpenRouter · max",
+    "╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+  ];
+  const idleFooter = [" /tmp/project   177.9K (17%) · $0.22   ctrl+p commands"];
+  const busyFooter = [" ⬝⬝■⬝⬝⬝⬝⬝ esc interrupt 177.9K (17%) · $0.22 ctrl+p commands"];
+
+  function terminal(initialLines: string[] = []) {
+    const tracker = new TerminalActivityTracker();
+    let lines = initialLines;
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      getActivityOwnerSessionId: () => tracker.getOwnerSessionId(),
+      hasHookNeedsInput: () => tracker.hasHookNeedsInput(),
+      readLastLines: (limit) => lines.slice(-limit),
+      readCursorLine: () => "┃",
+      stillnessMs: 500,
+    });
+    return {
+      tracker,
+      scanner,
+      paint(next: string[], output = next.join("\n")) {
+        lines = next;
+        scanner.feedOutput(output);
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps the screenshot's blank composer working while the interrupt footer is visible", () => {
+    const screen = [
+      "Confirmed DEFEAT dialog. Clicking RESTART and verifying the level resets:",
+      "▪ Sisyphus - Ultraworker · DeepSeek V4.1 Flash",
+      ...composer(),
+      ...busyFooter,
+    ];
+    expect(isOpenCodeBusyScreen(screen)).toBe(true);
+    expect(isIdleAgentScreen(screen, "┃", "opencode")).toBe(false);
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    paint(screen);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    vi.advanceTimersByTime(2000);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it.each(
+    [
+      [" [⋯] esc interrupt"],
+      [" ■⬝⬝⬝⬝⬝⬝⬝ esc again to interrupt"],
+      [" ⬝⬝■⬝⬝⬝⬝⬝", "esc again to", "interrupt 177.9K (17%)", "ctrl+p commands"],
+      [" ⬝⬝■⬝⬝⬝⬝⬝ rate limited [retrying in 2s attempt #1] esc interrupt"],
+    ].map((footer) => ({ footer })),
+  )("recognizes wrapped, retry, and animation-disabled busy footers $footer", ({ footer }) => {
+    const screen = [
+      "┃",
+      "┃   queued follow-up",
+      "┃",
+      "┃   Sisyphus -",
+      "┃   Ultraworker · DeepSeek V4.1 Flash",
+      "┃   OpenRouter · max",
+      "╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+      ...footer,
+    ];
+    expect(isOpenCodeBusyScreen(screen)).toBe(true);
+    expect(isIdleAgentScreen(screen, "┃ queued follow-up", "opencode")).toBe(false);
+  });
+
+  it("recognizes a restored OpenCode screen without a banner", () => {
+    const screen = [...composer(), ...busyFooter];
+    expect(detectAgentFromOutput(screen.join("\n"))).toBe("opencode");
+    const { scanner, tracker, paint } = terminal(screen);
+    paint(screen, "177.9K");
+    expect(scanner.getActiveAgent()).toBe("opencode");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("rechecks a restored OpenCode screen after a partial repaint", () => {
+    const { scanner, tracker, paint } = terminal();
+    scanner.feedOutput("partial repaint");
+    expect(scanner.getActiveAgent()).toBeNull();
+    paint([...composer(), ...busyFooter], "⬝⬝■⬝⬝⬝⬝⬝");
+    expect(scanner.getActiveAgent()).toBe("opencode");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("keeps a restored idle composer clear and recognizes a draft as the next turn's prompt", () => {
+    const screen = [...composer("next task"), ...idleFooter];
+    const { scanner, tracker, paint } = terminal(screen);
+    paint(screen);
+    vi.advanceTimersByTime(500);
+    expect(scanner.getActiveAgent()).toBe("opencode");
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+    scanner.feedInput("\r");
+    paint([...composer(), ...busyFooter]);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    paint(screen);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("finishes at a narrow idle composer and ignores transcript status and approval prose", () => {
+    const screen = [
+      "✓ Explore Task - Find reusable sprite-matching prior art",
+      "  ↳ 35 toolcalls · 0ms",
+      "ctrl+x down view subagents",
+      "Four investigations are running in parallel:",
+      "I'll synthesize them into a scoped plan when they report back.",
+      "Press esc interrupt to stop. Allow the command to continue?",
+      "▪ Sisyphus - Ultraworker · DeepSeek V4.1 Flash · 2m 12s",
+      ...composer("please approve this and confirm? ⠋ esc interrupt"),
+      " /Users/legoless/Projects/legoless/   173.0K (17%) · ctrl+p",
+      " Belle/.worktrees/docs-diablo2-game-   commands",
+      " state-research",
+    ];
+    expect(isOpenCodeBusyScreen(screen)).toBe(false);
+    expect(isOpenCodeNeedsInputScreen(screen)).toBe(false);
+    expect(isIdleAgentScreen(screen, "┃ draft", "opencode")).toBe(true);
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    scanner.feedInput("\r");
+    paint(screen);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+    tracker.clearAttention();
+    paint(screen, "⠋");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: null });
+  });
+
+  it("supports a transparent composer without its shadow row", () => {
+    const screen = [
+      ...composer("Permission required: enter confirm, esc dismiss").slice(0, -1),
+      "",
+      ...idleFooter,
+    ];
+    expect(detectAgentFromOutput(screen.join("\n"))).toBe("opencode");
+    expect(isIdleAgentScreen(screen, "┃", "opencode")).toBe(true);
+    expect(isOpenCodeNeedsInputScreen(screen)).toBe(false);
+    expect(isOpenCodeBusyScreen([...composer().slice(0, -1), "", ...busyFooter])).toBe(true);
+  });
+
+  it("does not identify OpenCode from transcript snippets without the complete composer", () => {
+    expect(
+      detectAgentFromOutput("Sisyphus - Ultraworker · DeepSeek V4.1 Flash · 2m 12s"),
+    ).toBeNull();
+    expect(detectAgentFromOutput("ctrl+x down view subagents")).toBeNull();
+    expect(detectAgentFromOutput("177.9K (17%) · $0.22 ctrl+p commands")).toBeNull();
+    expect(isOpenCodeBusyScreen(["⬝⬝■⬝⬝⬝⬝⬝ esc interrupt", "plain shell"])).toBe(false);
+    expect(
+      isOpenCodeBusyScreen([...composer(), ...idleFooter, "The footer used esc interrupt."]),
+    ).toBe(false);
+  });
+
+  it("returns immediately to blue when the busy footer follows premature hook completion", () => {
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    scanner.feedInput("\r");
+    paint([...composer(), ...busyFooter]);
+    tracker.set("idle", undefined, "root");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+    paint([...composer(), ...busyFooter], "⬝■⬝⬝⬝⬝⬝⬝");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it.each(
+    [
+      [
+        "Permission required",
+        "Run git status",
+        "Allow once   Allow always   Reject",
+        "⇆ select   enter confirm",
+      ],
+      [
+        "Which implementation?",
+        "1. Small patch",
+        "2. Full rewrite",
+        "↑↓ select   enter submit   esc dismiss",
+      ],
+      [
+        "Select all targets",
+        "1. Desktop",
+        "2. Mobile",
+        "⇆ tab   ↑↓ select   enter toggle   esc dismiss",
+      ],
+      ["Confirm", "Desktop: Small patch", "⇆ tab   enter submit   esc dismiss"],
+      ["Reject permission", "Tell OpenCode why", "enter confirm   esc cancel"],
+    ].map((dialog) => ({ dialog })),
+  )(
+    "shows orange for the current OpenCode dialog $dialog and resumes without Enter",
+    ({ dialog }) => {
+      expect(isOpenCodeNeedsInputScreen(dialog)).toBe(true);
+      expect(isIdleAgentScreen(dialog, "", "opencode")).toBe(false);
+      const { scanner, tracker, paint } = terminal();
+      scanner.handleInitialCommand("opencode");
+      scanner.feedInput("\r");
+      paint(dialog);
+      vi.advanceTimersByTime(500);
+      expect(tracker.getSnapshot()).toMatchObject({
+        state: "idle",
+        attentionReason: "needs_input",
+      });
+      scanner.feedInput("1");
+      paint([...composer(), ...busyFooter]);
+      expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    },
+  );
+
+  it("holds background hook work at the parent's idle composer until the aggregate finishes", () => {
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    scanner.feedInput("\r");
+    tracker.set("working", undefined, "root");
+    paint([
+      "Four investigations are running in parallel:",
+      "▪ Sisyphus - Ultraworker · DeepSeek V4.1 Flash · 2m 12s",
+      ...composer(),
+      ...idleFooter,
+    ]);
+    vi.advanceTimersByTime(2500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    tracker.set("idle", undefined, "root");
+    paint([...composer(), ...idleFooter]);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("holds hook work through an unresolved screen and lets hook approval remain orange", () => {
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    tracker.set("working", undefined, "root");
+    paint(["incomplete screen"]);
+    vi.advanceTimersByTime(2500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    tracker.set("attention", undefined, "root");
+    paint([...composer(), ...idleFooter]);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+  });
+
+  it("keeps owned hook approval orange after a visible dialog returns to the parent's composer", () => {
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    tracker.set("working", undefined, "root");
+    paint([
+      "Permission required",
+      "Allow once   Allow always   Reject",
+      "⇆ select   enter confirm",
+    ]);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+    tracker.set("attention", undefined, "root");
+    paint([...composer(), ...idleFooter]);
+    vi.advanceTimersByTime(1500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+
+    tracker.set("working", undefined, "root");
+    paint([...composer(), ...idleFooter]);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    tracker.set("idle", undefined, "root");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("keeps a waiting background child's hook orange while the parent footer remains busy", () => {
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    tracker.set("working", undefined, "root");
+    paint([...composer(), ...busyFooter]);
+    tracker.set("attention", undefined, "root");
+    paint([...composer(), ...busyFooter], "⬝■⬝⬝⬝⬝⬝⬝");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+    vi.advanceTimersByTime(1500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+
+    tracker.set("working", undefined, "root");
+    paint([...composer(), ...busyFooter]);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("resumes a scanned question under an owned root without requiring a new running hook", () => {
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    tracker.set("working", undefined, "root");
+    paint(["Which implementation?", "1. Small patch", "↑↓ select   enter submit   esc dismiss"]);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+    expect(tracker.getOwnerSessionId()).toBe("root");
+    scanner.feedInput("1");
+    paint([...composer(), ...busyFooter]);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("gives a quota banner priority over owned child approval and a busy parent", () => {
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    tracker.set("working", undefined, "root");
+    tracker.set("attention", undefined, "root");
+    paint(["Quota exhausted", ...composer(), ...busyFooter]);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "quota" });
+  });
+
+  it("prefers a visible permission dialog over owned background hook work", () => {
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    tracker.set("working", undefined, "root");
+    paint([
+      "Permission required",
+      "Allow once   Allow always   Reject",
+      "⇆ select   enter confirm",
+    ]);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+  });
+
+  it("prefers a dialog footer over a stale composer and interrupt footer", () => {
+    const screen = [
+      ...composer(),
+      ...busyFooter,
+      "Permission required",
+      "Allow once   Allow always   Reject",
+      "⇆ select   enter confirm",
+    ];
+    expect(isOpenCodeNeedsInputScreen(screen)).toBe(true);
+    expect(isOpenCodeBusyScreen(screen)).toBe(false);
+    expect(isIdleAgentScreen(screen, "┃", "opencode")).toBe(false);
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    tracker.set("working", undefined, "root");
+    paint(screen);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+  });
+
+  it("keeps a quota failure red ahead of busy footer or hook idle", () => {
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    tracker.set("working", undefined, "root");
+    paint(["Quota exhausted", ...composer(), ...busyFooter]);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "quota" });
+    tracker.set("idle", undefined, "root");
+    paint(["Quota exhausted", ...composer(), ...idleFooter]);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "quota" });
+  });
+
+  it("clears interrupted hook work without finished attention at the restored draft", () => {
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    tracker.set("working", undefined, "root");
+    paint([...composer(), ...busyFooter]);
+    tracker.interrupt();
+    scanner.handleInterrupt();
+    paint([...composer(), ...busyFooter]);
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+    paint([...composer("original task"), ...idleFooter]);
+    vi.advanceTimersByTime(1500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+    scanner.feedInput("\r");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    scanner.handleCommandFinished();
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+  });
 });
 
 describe("Muse Code terminal activity", () => {

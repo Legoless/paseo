@@ -164,4 +164,22 @@ describe("TerminalInputModeTracker", () => {
 
     expect(tracker.getPreamble()).toBe("");
   });
+
+  it("reports mouse tracking independently of its encoding", () => {
+    const tracker = new TerminalInputModeTracker();
+
+    expect(tracker.isMouseTrackingEnabled()).toBe(false);
+    tracker.feed("\x1b[?1006h");
+    expect(tracker.isMouseTrackingEnabled()).toBe(false);
+    tracker.feed("\x1b[?1003h");
+    expect(tracker.isMouseTrackingEnabled()).toBe(true);
+    tracker.feed("\x1b[?1006l");
+    expect(tracker.isMouseTrackingEnabled()).toBe(true);
+    tracker.feed("\x1b[?1003l");
+    expect(tracker.isMouseTrackingEnabled()).toBe(false);
+    tracker.feed("\x1b[?9h");
+    expect(tracker.isMouseTrackingEnabled()).toBe(true);
+    tracker.reset();
+    expect(tracker.isMouseTrackingEnabled()).toBe(false);
+  });
 });
