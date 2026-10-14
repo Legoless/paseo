@@ -1,4 +1,5 @@
-import { readFileSync, appendFileSync } from "node:fs";
+import { existsSync, readFileSync, appendFileSync } from "node:fs";
+import path from "node:path";
 import { createInterface } from "node:readline";
 
 const args = process.argv.slice(2);
@@ -65,6 +66,17 @@ lines.on("line", (line) => {
   const input = JSON.parse(line);
   record({ input });
   const text = input.message.content;
+  if (text.includes("TOOL_GATE")) {
+    const toolFrames = fixture("tools-default").slice(1);
+    interrupted = fixture("sigint-mid-tool").at(-1);
+    for (const frame of toolFrames.slice(0, 3)) emit(frame);
+    const timer = setInterval(() => {
+      if (!existsSync(path.join(process.cwd(), "release-tool"))) return;
+      clearInterval(timer);
+      emit(toolFrames[3]);
+    }, 10);
+    return;
+  }
   let name = "text-turn";
   if (text.includes("Attached image: ")) name = "image-file-external";
   if (text.includes("TOOLS")) name = "tools-default";
