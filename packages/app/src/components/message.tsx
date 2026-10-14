@@ -44,6 +44,7 @@ import {
   Scissors,
   MicVocal,
   FileSymlink,
+  X,
 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
@@ -174,6 +175,7 @@ const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const ThemedNotificationInfo = withUnistyles(Info);
 const ThemedNotificationWarning = withUnistyles(TriangleAlertIcon);
 const ThemedNotificationError = withUnistyles(XCircle);
+const ThemedNotificationDismiss = withUnistyles(X);
 
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const foregroundMutedColorMapping = (theme: Theme) => ({
@@ -2081,6 +2083,7 @@ interface NotificationProps {
   level: "info" | "warning" | "error";
   message: string;
   disableOuterSpacing?: boolean;
+  onDismiss?: (message: string) => void;
 }
 
 const notificationStylesheet = StyleSheet.create((theme) => ({
@@ -2122,14 +2125,26 @@ const notificationStylesheet = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.base,
     lineHeight: 20,
   },
+  dismissButton: {
+    flexShrink: 0,
+    width: 20,
+    height: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 }));
 
 export const Notification = memo(function Notification({
   level,
   message,
   disableOuterSpacing,
+  onDismiss,
 }: NotificationProps) {
+  const { t } = useTranslation();
   const resolvedDisableOuterSpacing = useDisableOuterSpacing(disableOuterSpacing);
+  const handleDismiss = useCallback(() => {
+    onDismiss?.(message);
+  }, [message, onDismiss]);
 
   const typeConfig = {
     info: {
@@ -2172,6 +2187,23 @@ export const Notification = memo(function Notification({
               {message}
             </Text>
           </View>
+          {onDismiss ? (
+            <Pressable
+              onPress={handleDismiss}
+              hitSlop={8}
+              style={notificationStylesheet.dismissButton}
+              accessibilityLabel={t("common.actions.dismiss")}
+              accessibilityRole="button"
+              testID="notification-dismiss"
+            >
+              {({ hovered }) => (
+                <ThemedNotificationDismiss
+                  size={14}
+                  uniProps={hovered ? foregroundColorMapping : foregroundMutedColorMapping}
+                />
+              )}
+            </Pressable>
+          ) : null}
         </View>
       </View>
     </View>

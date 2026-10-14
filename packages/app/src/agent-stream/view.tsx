@@ -51,6 +51,7 @@ import type {
   AgentPermissionResponse,
 } from "@getpaseo/protocol/agent-types";
 import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
+import { useNotificationDismissalStore } from "@/stores/notification-dismissal-store";
 import { useSessionStore } from "@/stores/session-store";
 import { resolveAgentImageFallbackRoot } from "@/utils/assistant-image-source";
 import { useRevealedText } from "@/hooks/use-revealed-text";
@@ -559,6 +560,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const effectiveStreamHead = useRetainedValue(streamHead, isActive);
     const effectiveTurnPresentation = useRetainedValue(turnPresentation, isActive);
     const isTurnActive = effectiveTurnPresentation.isActive;
+    const dismissedNotifications = useNotificationDismissalStore(
+      (state) => state.dismissedMessages,
+    );
+    const dismissNotification = useNotificationDismissalStore((state) => state.dismiss);
     const presentStream = useMemo(() => createStreamPresentation(), []);
     const presentation = useMemo(
       () =>
@@ -568,6 +573,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           transform: transformTimelineItem,
           level: toolCallDetailLevel,
           isTurnActive,
+          dismissedNotifications,
         }),
       [
         presentStream,
@@ -576,6 +582,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         transformTimelineItem,
         toolCallDetailLevel,
         isTurnActive,
+        dismissedNotifications,
       ],
     );
     const {
@@ -958,7 +965,13 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             return renderToolCallItem(layoutItem, item);
 
           case "notification":
-            return <Notification level={item.level} message={item.message} />;
+            return (
+              <Notification
+                level={item.level}
+                message={item.message}
+                onDismiss={item.sourceType === "notification" ? dismissNotification : undefined}
+              />
+            );
 
           case "todo_list":
             return <TodoListCard items={item.items} activity={item.activity} />;
@@ -983,6 +996,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       },
       [
         agentId,
+        dismissNotification,
         renderUserMessageItem,
         renderAssistantMessageItem,
         renderThoughtItem,
