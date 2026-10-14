@@ -95,14 +95,18 @@ async function harness(env: Record<string, string> = {}) {
       },
     });
   }
-  async function message(content: ProviderContent[], sessionId = "s") {
+  async function message(
+    content: ProviderContent[],
+    sessionId = "s",
+    delivery: "auto" | "steer" = "auto",
+  ) {
     const clientMessageId = `prompt-${events.length}`;
     await connection.send({
       type: "session.prompt",
       sessionId,
       prompt: {
         clientMessageId,
-        delivery: "auto",
+        delivery,
         input: { type: "message", content },
       },
     });
@@ -115,12 +119,19 @@ async function harness(env: Record<string, string> = {}) {
   function prompt(text: string) {
     return message([{ type: "text", text }]);
   }
+  function steer(text: string, sessionId = "s") {
+    return message([{ type: "text", text }], sessionId, "steer");
+  }
   async function completed(clientMessageId: string) {
     const result = events.find(
       (event) =>
         event.type === "session.prompt_result" && event.clientMessageId === clientMessageId,
     );
-    if (!result || result.type !== "session.prompt_result" || result.result.type !== "turn")
+    if (
+      !result ||
+      result.type !== "session.prompt_result" ||
+      (result.result.type !== "turn" && result.result.type !== "steer")
+    )
       throw new Error("Prompt was not admitted");
     const turnId = result.result.turnId;
     return wait(
@@ -149,6 +160,7 @@ async function harness(env: Record<string, string> = {}) {
     request,
     open,
     prompt,
+    steer,
     message,
     completed,
     records,
@@ -161,6 +173,7 @@ it("streams complete text snapshots, prefixes the system prompt only once and pr
   expect(h.connection.capabilities).toEqual([
     "prompt.message",
     "prompt.image",
+    "prompt.steer",
     "session.configure",
     "session.persistence",
   ]);
@@ -541,9 +554,18 @@ it.each(["auth", "exit", "stderr"])(
   },
 );
 
-it("rejects mid-turn steering and reports a busy message without queueing a second native turn", async () => {
+it("rejects mid-turn auto prompts with TURN_ACTIVE and idle steers with TURN_INACTIVE", async () => {
   const h = await harness();
   await h.open();
+  const idleSteer = await h.steer("IDLE_STEER");
+  expect(
+    h.events.find(
+      (event) => event.type === "session.prompt_result" && event.clientMessageId === idleSteer,
+    ),
+  ).toMatchObject({
+    type: "session.prompt_result",
+    result: { type: "failed", error: { code: "TURN_INACTIVE" } },
+  });
   await h.prompt("HANG");
   const second = await h.prompt("SECOND");
   expect(
@@ -554,17 +576,107 @@ it("rejects mid-turn steering and reports a busy message without queueing a seco
     type: "session.prompt_result",
     result: { type: "failed", error: { code: "TURN_ACTIVE" } },
   });
-  await expect(
-    h.connection.send({
-      type: "session.prompt",
-      sessionId: "s",
-      prompt: {
-        clientMessageId: "steer",
-        delivery: "steer",
-        input: { type: "message", content: [{ type: "text", text: "x" }] },
-      },
-    }),
-  ).rejects.toThrow(/prompt.steer/);
+});
+
+it("steers a running text turn immediately by interrupting and resuming the conversation in the same turn", async () => {
+  const h = await harness();
+  await h.open();
+  const first = await h.prompt("HANG");
+  await h.wait(
+    (event) => event.type === "timeline.item" && event.item.type === "assistant_message",
+  );
+  const firstResult = h.events.find(
+    (event) => event.type === "session.prompt_result" && event.clientMessageId === first,
+  );
+  if (
+    !firstResult ||
+    firstResult.type !== "session.prompt_result" ||
+    firstResult.result.type !== "turn"
+  )
+    throw new Error("Expected initial turn result");
+  const steered = await h.steer("HELLO");
+  expect(
+    h.events.find(
+      (event) => event.type === "session.prompt_result" && event.clientMessageId === steered,
+    ),
+  ).toMatchObject({
+    type: "session.prompt_result",
+    result: { type: "steer", turnId: firstResult.result.turnId },
+  });
+  expect(await h.completed(first)).toMatchObject({
+    type: "session.turn",
+    turnId: firstResult.result.turnId,
+    state: "completed",
+  });
+  expect(
+    h.events.filter((event) => event.type === "session.turn" && event.state === "canceled"),
+  ).toEqual([]);
+  const records = await h.records();
+  const launches = records.filter((entry) => entry.args?.includes("--input-format"));
+  expect(launches).toHaveLength(2);
+  expect(launches[1].args.slice(-2)).toEqual([
+    "--conversation",
+    "e5cf1e2d-c715-4328-8e67-4a85c8dc3cda",
+  ]);
+  expect(
+    records.filter((entry) => entry.input).map((entry) => entry.input.message.content),
+  ).toEqual(["SYSTEM PREFIX\n\nHANG", "HELLO"]);
+});
+
+it("waits for an active tool call to finish before interrupting and delivering a steered prompt", async () => {
+  const h = await harness();
+  await h.open();
+  const first = await h.prompt("TOOL_GATE");
+  await h.wait(
+    (event) =>
+      event.type === "timeline.item" &&
+      event.item.type === "tool_call" &&
+      event.item.status === "running",
+  );
+  const firstResult = h.events.find(
+    (event) => event.type === "session.prompt_result" && event.clientMessageId === first,
+  );
+  if (
+    !firstResult ||
+    firstResult.type !== "session.prompt_result" ||
+    firstResult.result.type !== "turn"
+  )
+    throw new Error("Expected initial turn result");
+  const steered = await h.steer("HELLO");
+  expect(
+    h.events.find(
+      (event) => event.type === "session.prompt_result" && event.clientMessageId === steered,
+    ),
+  ).toMatchObject({
+    type: "session.prompt_result",
+    result: { type: "steer", turnId: firstResult.result.turnId },
+  });
+  // While the tool is still ACTIVE, the first process must not be interrupted or respawned.
+  expect(
+    (await h.records()).filter((entry) => entry.args?.includes("--input-format")),
+  ).toHaveLength(1);
+  expect((await h.records()).filter((entry) => entry.signal)).toEqual([]);
+
+  await writeFile(path.join(h.cwd, "release-tool"), "ok");
+  expect(await h.completed(first)).toMatchObject({
+    type: "session.turn",
+    turnId: firstResult.result.turnId,
+    state: "completed",
+  });
+  expect(
+    h.events.filter(
+      (event) =>
+        event.type === "timeline.item" &&
+        event.item.type === "tool_call" &&
+        event.item.status === "completed",
+    ),
+  ).toHaveLength(1);
+  const launches = (await h.records()).filter((entry) => entry.args?.includes("--input-format"));
+  expect(launches).toHaveLength(2);
+  expect(launches[1].args.slice(-2)).toEqual([
+    "--conversation",
+    "e5cf1e2d-c715-4328-8e67-4a85c8dc3cda",
+  ]);
 });
 
 describe("discovery", () => {

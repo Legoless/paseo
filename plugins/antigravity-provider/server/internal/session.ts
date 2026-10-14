@@ -20,12 +20,20 @@ import { AntigravityError, diagnostic, type Frame, type Step } from "./wire.js";
 const persistenceSchema = z
   .object({ version: z.literal(1), data: z.object({ conversationId: z.string().min(1) }).strict() })
   .strict();
+interface SteeredPrompt {
+  clientMessageId: string;
+  text: string;
+  nativeText: string;
+}
 interface Turn {
   id: string;
-  text: Map<number, string>;
-  usageSteps: Set<number>;
+  leg: number;
+  text: Map<string, string>;
+  usageSteps: Set<string>;
   tools: Map<string, Extract<ProviderTimelineItem, { type: "tool_call" }>>;
   usage: Required<Pick<ProviderUsage, "inputTokens" | "outputTokens" | "cachedInputTokens">>;
+  pendingSteers: SteeredPrompt[];
+  switching: boolean;
 }
 type State =
   | { type: "dormant" }
@@ -79,6 +87,35 @@ export class Session {
   }
 
   async prompt(prompt: ProviderPrompt): Promise<void> {
+    if (prompt.delivery === "steer") {
+      if (this.state.type !== "running")
+        throw new AntigravityError("Antigravity has no active turn to steer", "TURN_INACTIVE");
+      const { text, nativeText } = await this.promptFiles.encode(prompt);
+      if (this.state.type !== "running")
+        throw new AntigravityError("Antigravity has no active turn to steer", "TURN_INACTIVE");
+      const { turn } = this.state;
+      turn.pendingSteers.push({
+        clientMessageId: prompt.clientMessageId,
+        text,
+        nativeText,
+      });
+      this.emit({
+        type: "session.prompt_result",
+        sessionId: this.options.id,
+        clientMessageId: prompt.clientMessageId,
+        result: { type: "steer", turnId: turn.id },
+      });
+      this.item({
+        type: "user_message",
+        id: prompt.clientMessageId,
+        clientMessageId: prompt.clientMessageId,
+        text,
+      });
+      if (!turn.switching && !this.hasRunningTools(turn)) {
+        void this.flushSteer(turn);
+      }
+      return;
+    }
     if (this.state.type === "running")
       throw new AntigravityError(
         "Antigravity already has an active turn; wait for it to finish",
@@ -90,10 +127,13 @@ export class Session {
     const driver = this.state.driver;
     const turn: Turn = {
       id: randomUUID(),
+      leg: 0,
       text: new Map(),
       usageSteps: new Set(),
       tools: new Map(),
       usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
+      pendingSteers: [],
+      switching: false,
     };
     this.state = { type: "running", driver, turn };
     this.emit({
@@ -123,7 +163,7 @@ export class Session {
       this.firstMessage = false;
     } catch (error) {
       if (!(error instanceof Error)) throw error;
-      this.failTurn(new AntigravityError(error.message));
+      this.failTurn(new AntigravityError(error.message), driver);
       await driver.stop("interrupt");
     }
   }
@@ -148,6 +188,7 @@ export class Session {
   async interrupt(): Promise<void> {
     if (this.state.type !== "running") return;
     const { driver, turn } = this.state;
+    turn.pendingSteers.length = 0;
     this.state = { type: "stopping", driver };
     await driver.stop("interrupt");
     this.finishTools(turn, "canceled");
@@ -169,6 +210,7 @@ export class Session {
       await this.promptFiles.close();
     }
     if (state.type === "running") {
+      state.turn.pendingSteers.length = 0;
       this.finishTools(state.turn, "canceled");
       this.emit({
         type: "session.turn",
@@ -206,15 +248,27 @@ export class Session {
       this.state = { type: "dormant" };
     }
     if (this.state.type !== "dormant") return;
+    try {
+      const driver = await this.spawnReadyDriver((next) => {
+        this.state = { type: "starting", driver: next };
+      });
+      this.state = { type: "idle", driver };
+    } catch (error) {
+      this.state = { type: "dormant" };
+      throw error;
+    }
+  }
+
+  private async spawnReadyDriver(onSpawn: (driver: Driver) => void): Promise<Driver> {
     this.reportedDenials.clear();
-    const driver = startDriver({
+    const driver: Driver = startDriver({
       launch: this.options.launch,
       config: this.config,
       conversationId: this.conversationId,
-      onFrame: (frame) => this.accept(frame),
-      onExit: (error) => this.failTurn(error),
+      onFrame: (frame) => this.accept(frame, driver),
+      onExit: (error) => this.failTurn(error, driver),
     });
-    this.state = { type: "starting", driver };
+    onSpawn(driver);
     try {
       const init = await driver.ready;
       if (this.conversationId !== null && init.conversation_id !== this.conversationId)
@@ -223,22 +277,83 @@ export class Session {
           "INVALID_RESUME",
         );
       this.conversationId = init.conversation_id;
-      this.state = { type: "idle", driver };
       if (this.config.persist)
         this.emit({
           type: "session.persistence",
           sessionId: this.options.id,
           persistence: this.persistence(),
         });
+      return driver;
     } catch (error) {
-      this.state = { type: "dormant" };
       await driver.stop("interrupt");
       throw error;
     }
   }
 
-  private accept(frame: Frame): void {
-    if (this.state.type !== "running") return;
+  private canSteerTurn(turn: Turn): boolean {
+    return (
+      this.state.type === "running" &&
+      this.state.turn === turn &&
+      turn.pendingSteers.length > 0 &&
+      !this.hasRunningTools(turn)
+    );
+  }
+
+  private isRunningTurn(turn: Turn): boolean {
+    return this.state.type === "running" && this.state.turn === turn;
+  }
+
+  private withSystemPrompt(nativeText: string): string {
+    return this.firstMessage && this.config.systemPrompt
+      ? `${this.config.systemPrompt}\n\n${nativeText}`
+      : nativeText;
+  }
+
+  private async flushSteer(turn: Turn): Promise<void> {
+    if (turn.switching || !this.canSteerTurn(turn)) return;
+    turn.switching = true;
+    try {
+      while (this.canSteerTurn(turn) && this.state.type === "running") {
+        await this.state.driver.stop("interrupt");
+        if (!this.isRunningTurn(turn)) return;
+        const driver = await this.spawnReadyDriver((next) => {
+          if (this.isRunningTurn(turn)) this.state = { type: "running", driver: next, turn };
+        });
+        if (!this.isRunningTurn(turn)) {
+          await driver.stop("interrupt");
+          return;
+        }
+        const nativeText = turn.pendingSteers
+          .splice(0)
+          .map((entry) => entry.nativeText)
+          .join("\n\n");
+        turn.leg += 1;
+        turn.switching = false;
+        await driver.prompt(this.withSystemPrompt(nativeText));
+        this.firstMessage = false;
+        if (this.canSteerTurn(turn)) turn.switching = true;
+      }
+    } catch (error) {
+      if (!this.isRunningTurn(turn) || this.state.type !== "running") return;
+      turn.switching = false;
+      this.failTurn(toAntigravityError(error), this.state.driver);
+    }
+  }
+
+  private hasRunningTools(turn: Turn): boolean {
+    for (const item of turn.tools.values()) {
+      if (item.status === "running") return true;
+    }
+    return false;
+  }
+
+  private accept(frame: Frame, sourceDriver: Driver): void {
+    if (
+      this.state.type !== "running" ||
+      this.state.driver !== sourceDriver ||
+      this.state.turn.switching
+    )
+      return;
     const { turn, driver } = this.state;
     if (frame.event === "step_update") {
       this.acceptStep(frame.step_update, turn);
@@ -272,6 +387,10 @@ export class Session {
       });
     } else {
       this.finishTools(turn, "completed");
+      if (turn.pendingSteers.length > 0) {
+        void this.flushSteer(turn);
+        return;
+      }
       this.state = { type: "idle", driver };
       this.emit({
         type: "session.turn",
@@ -283,14 +402,18 @@ export class Session {
   }
 
   private acceptStep(step: Step, turn: Turn): void {
-    const id = `${turn.id}:${step.step_index}`;
+    const stepKey = `${turn.leg}:${step.step_index}`;
+    const id =
+      turn.leg === 0
+        ? `${turn.id}:${step.step_index}`
+        : `${turn.id}:${turn.leg}:${step.step_index}`;
     if (step.step_type === "agent_response") {
-      const previous = turn.text.get(step.step_index) || "";
+      const previous = turn.text.get(stepKey) || "";
       const text = previous + step.text_delta;
-      turn.text.set(step.step_index, text);
+      turn.text.set(stepKey, text);
       if (step.text_delta) this.item({ type: "assistant_message", id, messageId: id, text });
-      if (step.state === "DONE" && step.usage && !turn.usageSteps.has(step.step_index)) {
-        turn.usageSteps.add(step.step_index);
+      if (step.state === "DONE" && step.usage && !turn.usageSteps.has(stepKey)) {
+        turn.usageSteps.add(stepKey);
         turn.usage.inputTokens += step.usage.input_tokens;
         turn.usage.outputTokens += step.usage.output_tokens;
         turn.usage.cachedInputTokens += step.usage.cache_read_tokens;
@@ -305,14 +428,19 @@ export class Session {
       const item = toolItem(step, id);
       turn.tools.set(id, item);
       this.item(item);
+      if (turn.pendingSteers.length > 0 && !turn.switching && !this.hasRunningTools(turn)) {
+        void this.flushSteer(turn);
+      }
     }
   }
 
-  private failTurn(error: AntigravityError): void {
+  private failTurn(error: AntigravityError, sourceDriver?: Driver): void {
     const state = this.state;
     if (state.type !== "running" && state.type !== "idle") return;
+    if (sourceDriver && state.driver !== sourceDriver) return;
     this.retire(state.driver);
     if (state.type === "running") {
+      state.turn.pendingSteers.length = 0;
       this.finishTools(state.turn, "failed");
       this.emit({
         type: "session.turn",
@@ -339,10 +467,14 @@ export class Session {
   }
 
   private finishTools(turn: Turn, status: "completed" | "failed" | "canceled"): void {
-    for (const item of turn.tools.values()) {
+    for (const [id, item] of turn.tools.entries()) {
       if (item.status !== "running") continue;
-      if (status === "failed") this.item({ ...item, status, error: "Antigravity turn failed" });
-      else this.item({ ...item, status, error: null });
+      const updated =
+        status === "failed"
+          ? { ...item, status, error: "Antigravity turn failed" }
+          : { ...item, status, error: null };
+      turn.tools.set(id, updated);
+      this.item(updated);
     }
   }
 
@@ -394,4 +526,9 @@ function denialNoticeTitle(
 ): string {
   if (actions.length > 1) return `${actions.length} actions denied`;
   return actions[0].action === "command" ? "Shell command denied" : "Action denied";
+}
+
+function toAntigravityError(error: unknown): AntigravityError {
+  if (error instanceof AntigravityError) return error;
+  return new AntigravityError(error instanceof Error ? error.message : String(error));
 }

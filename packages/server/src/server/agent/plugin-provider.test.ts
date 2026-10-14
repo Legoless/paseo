@@ -621,6 +621,32 @@ describe("PluginAgentClientRegistry", () => {
     await registry.shutdown();
   });
 
+  test("returns unavailable from steerActiveTurn when prompt.steer is not negotiated", async () => {
+    const harness = createProviderHarness({
+      capabilities: ["prompt.message"],
+      completeTurn: false,
+    });
+    const registry = new PluginAgentClientRegistry(createTestLogger());
+    registry.replace([harness.registration]);
+    try {
+      const client = registry.clients()[harness.registration.id]!;
+      const session = await client.createSession({
+        provider: harness.registration.id,
+        cwd: "/workspace",
+      });
+      const started = await session.startTurn("hello", { clientMessageId: "turn-message" });
+      await expect(
+        session.steerActiveTurn!("steer prompt", {
+          clientMessageId: "steer-message",
+          expectedTurnId: started.turnId,
+        }),
+      ).resolves.toEqual({ status: "unavailable" });
+      expect(harness.inputs.filter((input) => input.type === "session.prompt")).toHaveLength(1);
+    } finally {
+      await registry.shutdown();
+    }
+  });
+
   test("terminalizes an active turn exactly once when its plugin provider is removed", async () => {
     const harness = createProviderHarness({ completeTurn: false });
     const registry = new PluginAgentClientRegistry(createTestLogger());
