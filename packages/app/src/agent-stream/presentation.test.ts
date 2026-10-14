@@ -609,4 +609,57 @@ describe("timeline presentation", () => {
     ]);
     expect(projectTimelineItems([source], () => [])).toEqual([]);
   });
+
+  it("omits dismissed notifications from history and live head while preserving error notifications", () => {
+    const presentWithDismissals = createStreamPresentation();
+    const warningNotice: StreamItem = {
+      kind: "notification",
+      sourceType: "notification",
+      id: "notice-1",
+      timestamp: new Date("2026-01-01T00:00:00.000Z"),
+      level: "warning",
+      message: "Antigravity is running with full access",
+    };
+    const errorNotice: StreamItem = {
+      kind: "notification",
+      sourceType: "error",
+      id: "error-1",
+      timestamp: new Date("2026-01-01T00:00:01.000Z"),
+      level: "error",
+      message: "Antigravity is running with full access",
+    };
+    const headNotice: StreamItem = {
+      kind: "notification",
+      sourceType: "notification",
+      id: "notice-2",
+      timestamp: new Date("2026-01-01T00:00:02.000Z"),
+      level: "info",
+      message: "This chat uses OpenCode v2.",
+    };
+    const tail = [warningNotice, errorNotice];
+    const head = [headNotice];
+
+    const initial = presentWithDismissals({
+      ...presentationOptions,
+      tail,
+      head,
+      transform: undefined,
+      dismissedNotifications: [],
+    });
+    expect(initial.tail).toEqual([warningNotice, errorNotice]);
+    expect(initial.head).toEqual([headNotice]);
+
+    const afterDismiss = presentWithDismissals({
+      ...presentationOptions,
+      tail,
+      head,
+      transform: undefined,
+      dismissedNotifications: [
+        "Antigravity is running with full access",
+        "This chat uses OpenCode v2.",
+      ],
+    });
+    expect(afterDismiss.tail).toEqual([errorNotice]);
+    expect(afterDismiss.head).toEqual([]);
+  });
 });

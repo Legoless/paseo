@@ -18,6 +18,7 @@ interface PresentationInput {
   transform: TimelineItemTransform | undefined;
   level: ToolCallDetailLevel;
   isTurnActive: boolean;
+  dismissedNotifications?: readonly string[];
 }
 
 function retainItems(previous: StreamItem[], next: StreamItem[]): StreamItem[] {
@@ -74,6 +75,8 @@ export function createStreamPresentation() {
   let liveSources = new Map<string, AssistantMessageItem>();
   let historySource: StreamItem[] | undefined;
   let historyTransform: TimelineItemTransform | undefined;
+  let historyDismissedNotifications: readonly string[] | undefined;
+  let dismissedSet: ReadonlySet<string> | null = null;
   let historyRows: StreamItem[] = [];
   let displayTail: StreamItem[] = [];
   let displayHistory: StreamItem[] | undefined;
@@ -82,13 +85,26 @@ export function createStreamPresentation() {
   let preparedLevel: ToolCallDetailLevel | undefined;
   let preparedHistory: PreparedToolCallHistory | null = null;
 
+  function isDismissedNotification(item: StreamItem): boolean {
+    return (
+      item.kind === "notification" &&
+      item.sourceType === "notification" &&
+      Boolean(dismissedSet?.has(item.message))
+    );
+  }
+
   /**
    * One display row per Markdown block. Messages with reference definitions stay
    * together because every link needs the same document-wide definitions.
    */
   function nativeBlocks(item: StreamItem): StreamItem[] {
+    if (isDismissedNotification(item)) return [];
     if (item.kind === "user_message") return [presentUserMessage(item)];
     if (item.kind !== "assistant_message") return [item];
+    return presentAssistantMessage(item);
+  }
+
+  function presentAssistantMessage(item: AssistantMessageItem): AssistantMessageItem[] {
     const cached = blocksBySource.get(item);
     if (cached) return cached;
     const previousSource = liveSources.get(item.id);
@@ -140,8 +156,18 @@ export function createStreamPresentation() {
   }
 
   return (input: PresentationInput) => {
+    if (historyDismissedNotifications !== input.dismissedNotifications) {
+      dismissedSet =
+        input.dismissedNotifications && input.dismissedNotifications.length > 0
+          ? new Set(input.dismissedNotifications)
+          : null;
+    }
     // Retained history is not reprojected or regrouped on each live text update.
-    if (historySource !== input.tail || historyTransform !== input.transform) {
+    if (
+      historySource !== input.tail ||
+      historyTransform !== input.transform ||
+      historyDismissedNotifications !== input.dismissedNotifications
+    ) {
       // One rendering path: history splits the same way the live head does, and
       // `blocksBySource` keeps both the live block identities and the split cost
       // from being paid again when only the tail's array identity changed.
@@ -150,6 +176,7 @@ export function createStreamPresentation() {
       );
       historySource = input.tail;
       historyTransform = input.transform;
+      historyDismissedNotifications = input.dismissedNotifications;
     }
     const head: StreamItem[] = [];
     const promoted: StreamItem[] = [];
