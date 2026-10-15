@@ -111,8 +111,9 @@ export function isNeedsInputScreen(lines: string[]): boolean {
 
 const IDLE_PROMPT_PATTERNS = {
   claude: [/^❯$/],
-  // Codex keeps its composer (`› ` + placeholder or draft) on the cursor line; `› 1.` is a menu row.
-  codex: [/^(?:codex\s*)?›(?:\s+(?!\d+\.\s)\S.*)?$/i],
+  // Codex keeps its composer (`› ` or `» ` + placeholder or draft) on the cursor line.
+  // Numbered menu rows such as `› 1.` are not composers.
+  codex: [/^(?:codex\s*)?[›»](?:\s+(?!\d+\.\s)\S.*)?$/i],
   // Grok 4.7's composer is `❯`. `>` and `grok>` are the older prompt.
   grok: [/^(?:grok\s*)?[>❯]$/i],
   antigravity: [/^>$/],
@@ -154,7 +155,7 @@ const CODEX_RUNNING_STATUS = /\(\d+[hms] [^)]*esc to interrupt\)(?:\s*·.*)?$|^�
 
 export function isCodexBusyScreen(lines: string[]): boolean {
   const stripped = lines.map((line) => stripAnsi(line).trim());
-  const composer = stripped.findLastIndex((line) => line.startsWith("›"));
+  const composer = stripped.findLastIndex((line) => /^[›»](?:\s|$)/.test(line));
   const status = stripped.slice(0, Math.max(composer, 0)).findLast((line) => line.length > 0);
   return status !== undefined && CODEX_RUNNING_STATUS.test(status);
 }
@@ -660,6 +661,15 @@ export class PtyActivityScanner {
       this.initialLaunch = false;
       this.setWorking();
     }
+  }
+
+  handleHookActivityChange(): void {
+    if (!this.activeAgent || this.options.getActivity().state !== "working") {
+      return;
+    }
+    this.initialLaunch = false;
+    // Hooks can arrive after the final PTY repaint, when no stillness check remains armed.
+    this.scheduleStillnessCheck();
   }
 
   handleInterrupt(): void {

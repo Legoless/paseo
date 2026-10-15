@@ -1779,6 +1779,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     sessionId?: string,
   ): void {
     activityTracker.set(state, attentionReason, sessionId);
+    activityScanner.handleHookActivityChange();
     // The pane's agent is the hook session the tracker accepted as the turn owner. A nested
     // `claude -p` reporting from inside it is rejected there, so it never becomes the target.
     if (sessionId && activityTracker.getOwnerSessionId() === sessionId) {
