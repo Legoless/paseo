@@ -121,6 +121,53 @@ describe("combined model selector data", () => {
     });
   });
 
+  it("shows the grouped model label for a saved hidden native variant", () => {
+    const providers = buildSelectableProviderSelectorProviders([
+      snapshotEntry({
+        provider: "antigravity",
+        label: "Antigravity",
+        models: [
+          {
+            provider: "antigravity",
+            id: "gemini-3.8-flash-high",
+            aliases: ["gemini-3.8-flash-low"],
+            label: "Gemini 3.8 Flash",
+          },
+          {
+            provider: "antigravity",
+            id: "gemini-3.8-flash-low",
+            label: "Gemini 3.8 Flash",
+            isSelectable: false,
+          },
+        ],
+      }),
+    ]);
+
+    expect(providers[0].modelSelection).toEqual({
+      kind: "models",
+      rows: [
+        {
+          favoriteKey: "antigravity:gemini-3.8-flash-high",
+          provider: "antigravity",
+          providerLabel: "Antigravity",
+          modelId: "gemini-3.8-flash-high",
+          aliases: ["gemini-3.8-flash-low"],
+          modelLabel: "Gemini 3.8 Flash",
+          description: "gemini-3.8-flash-high",
+          isDefault: undefined,
+        },
+      ],
+    });
+    expect(
+      resolveSelectedModelLabel({
+        providers,
+        selectedProvider: "antigravity",
+        selectedModel: "gemini-3.8-flash-low",
+        isLoading: false,
+      }),
+    ).toBe("Gemini 3.8 Flash");
+  });
+
   it("synthesizes a default model row for ready enabled providers without explicit models", () => {
     expect(
       buildSelectableProviderSelectorProviders([
@@ -386,6 +433,14 @@ describe("combined model selector data", () => {
         isLoading: false,
       }),
     ).toBe("Error");
+    expect(
+      resolveSelectedModelLabel({
+        providers,
+        selectedProvider: "opencode",
+        selectedModel: "gemini-4-argon-high",
+        isLoading: false,
+      }),
+    ).toBe("gemini-4-argon-high");
   });
 
   it("returns observable submission readiness reasons", () => {

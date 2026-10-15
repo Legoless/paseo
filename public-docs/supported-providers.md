@@ -26,6 +26,9 @@ Work out of the box once the underlying CLI is installed and authenticated.
 Install the Antigravity CLI (`agy`) on your daemon host, then run `agy` once to sign in. Pick
 **Antigravity** in Paseo. The provider ships with Paseo; no separate plugin install is required.
 
+Choose the model and reasoning effort separately. Each model offers the effort levels available
+in your installed CLI.
+
 **Full access** is the only permission mode. Antigravity cannot ask for permission when another
 app drives it, so Paseo starts `agy` with `--dangerously-skip-permissions`. Every tool call,
 including shell commands, runs without asking. Each session starts with a warning explaining

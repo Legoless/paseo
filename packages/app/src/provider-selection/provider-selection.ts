@@ -21,6 +21,7 @@ export interface ProviderSelectionModelRow {
   provider: string;
   providerLabel: string;
   modelId: string;
+  aliases?: string[];
   modelLabel: string;
   description?: string;
   isDefault?: boolean;
@@ -65,6 +66,7 @@ function buildModelRows(
     provider,
     providerLabel,
     modelId: model.id,
+    ...(model.aliases?.length ? { aliases: [...model.aliases] } : {}),
     modelLabel: model.label,
     description: model.description ?? model.id,
     isDefault: model.isDefault,
@@ -181,6 +183,16 @@ export function getAllProviderModelRows(
   return providers.flatMap(getProviderModelRows);
 }
 
+function findModelRowByReference(
+  rows: ProviderSelectionModelRow[],
+  modelId: string,
+): ProviderSelectionModelRow | undefined {
+  return (
+    rows.find((row) => row.modelId === modelId) ??
+    rows.find((row) => row.aliases?.includes(modelId))
+  );
+}
+
 export function resolveSelectedModelLabel(input: {
   providers: ProviderSelectorProvider[];
   selectedProvider: string;
@@ -194,24 +206,25 @@ export function resolveSelectedModelLabel(input: {
       : i18n.t("providerSelection.selectModel");
   }
 
+  const selectedModel = input.selectedModel.trim();
   const provider = input.providers.find((entry) => entry.id === selectedProvider);
   if (!provider) {
+    if (selectedModel) return selectedModel;
     return input.isLoading
       ? i18n.t("providerSelection.loading")
       : i18n.t("providerSelection.selectModel");
   }
   if (provider.modelSelection.kind === "loading") {
-    return i18n.t("providerSelection.loading");
+    return selectedModel || i18n.t("providerSelection.loading");
   }
   if (provider.modelSelection.kind === "error") {
-    return i18n.t("providerSelection.error");
+    return selectedModel || i18n.t("providerSelection.error");
   }
   if (provider.modelSelection.kind !== "models") {
-    return i18n.t("providerSelection.selectModel");
+    return selectedModel || i18n.t("providerSelection.selectModel");
   }
 
-  const model = provider.modelSelection.rows.find((entry) => entry.modelId === input.selectedModel);
-  const selectedModel = input.selectedModel.trim();
+  const model = findModelRowByReference(provider.modelSelection.rows, selectedModel);
   if (!model && selectedModel) {
     return selectedModel;
   }

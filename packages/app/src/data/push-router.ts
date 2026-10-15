@@ -191,7 +191,7 @@ export async function applyProvidersSnapshotUpdate(input: {
   const previous = input.queryClient.getQueryData<{ snapshotHash?: string }>(queryKey);
   let announcement: typeof snapshot | undefined = snapshot;
   void input.queryClient.cancelQueries({ queryKey, exact: true });
-  await input.queryClient.fetchQuery({
+  const next = await input.queryClient.fetchQuery({
     queryKey,
     staleTime: 0,
     structuralSharing: false,
@@ -207,8 +207,16 @@ export async function applyProvidersSnapshotUpdate(input: {
       });
     },
   });
-  void input.queryClient.invalidateQueries({ queryKey: providerFeaturesQueryRoot(input.serverId) });
-  if (!snapshot.snapshotHash || previous?.snapshotHash !== snapshot.snapshotHash) {
+  const nextHash = next.snapshotHash ?? snapshot.snapshotHash;
+  if (!nextHash || previous?.snapshotHash !== nextHash) {
+    void input.queryClient.invalidateQueries({
+      queryKey: providerFeaturesQueryRoot(input.serverId),
+      predicate: (query) =>
+        !cwd ||
+        normalizeProvidersSnapshotCwd(
+          typeof query.queryKey[3] === "string" ? query.queryKey[3] : null,
+        ) === cwd,
+    });
     void input.queryClient.invalidateQueries({
       queryKey: agentCommandsQueryRoot(input.serverId),
       exact: false,

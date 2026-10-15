@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,7 +46,7 @@ async function harness(env: Record<string, string> = {}) {
   const launch: ProviderLaunch = {
     command: process.execPath,
     args: [fake, "--launch-prefix"],
-    env: { AGY_TEST_LOG: log, ...env },
+    env: { HOME: cwd, AGY_TEST_LOG: log, ...env },
   };
   const connection = await provider.connect({
     versions: [1],
@@ -78,7 +78,11 @@ async function harness(env: Record<string, string> = {}) {
             event.type === "catalog"),
       );
   }
-  async function open(restored?: ProviderPersistence, sessionId = "s") {
+  async function open(
+    restored?: ProviderPersistence,
+    sessionId = "s",
+    selection: { model?: string; thinkingOption?: string } = {},
+  ) {
     await request({
       type: "session.open",
       requestId: `open-${events.length}`,
@@ -92,6 +96,7 @@ async function harness(env: Record<string, string> = {}) {
         mcpServers: {},
         persist: true,
         systemPrompt: "SYSTEM PREFIX",
+        ...selection,
       },
     });
   }
@@ -151,6 +156,13 @@ async function harness(env: Record<string, string> = {}) {
       throw new Error("Missing persistence");
     return opened.persistence;
   }
+  function config(sessionId = "s") {
+    const event = events.findLast(
+      (candidate) => candidate.type === "session.config" && candidate.sessionId === sessionId,
+    );
+    if (!event || event.type !== "session.config") throw new Error("Missing session config");
+    return event.config;
+  }
   return {
     connection,
     events,
@@ -165,6 +177,7 @@ async function harness(env: Record<string, string> = {}) {
     completed,
     records,
     persistence,
+    config,
   };
 }
 
@@ -521,6 +534,223 @@ it("defers model and mode changes until the next prompt, then respawns with vali
   );
 });
 
+it("changes effort separately, then clears it to the selected model's native default", async () => {
+  const h = await harness();
+  await h.open(undefined, "s", { model: "gemini-3.8-flash-high" });
+  expect(h.config()).toMatchObject({
+    model: "gemini-3.8-flash-high",
+    thinkingOption: "high",
+    thinkingOptions: [
+      { id: "high", label: "High", metadata: { modelId: "gemini-3.8-flash-high" } },
+      { id: "medium", label: "Medium", metadata: { modelId: "gemini-3.8-flash-medium" } },
+      { id: "low", label: "Low", metadata: { modelId: "gemini-3.8-flash-low" } },
+    ],
+  });
+  await h.request({
+    type: "session.configure",
+    requestId: "low-effort",
+    sessionId: "s",
+    changes: { thinkingOption: "low" },
+  });
+  expect(h.config()).toMatchObject({
+    model: "gemini-3.8-flash-high",
+    thinkingOption: "low",
+  });
+  expect(
+    (await h.records()).filter((entry) => entry.args?.includes("--input-format")),
+  ).toHaveLength(1);
+  await h.completed(await h.prompt("HELLO"));
+  await h.request({
+    type: "session.configure",
+    requestId: "default-effort",
+    sessionId: "s",
+    changes: { thinkingOption: null },
+  });
+  expect(h.config()).toMatchObject({
+    model: "gemini-3.8-flash-high",
+    thinkingOption: "high",
+  });
+  expect(
+    (await h.records()).filter((entry) => entry.args?.includes("--input-format")),
+  ).toHaveLength(2);
+  await h.completed(await h.prompt("HELLO AGAIN"));
+  const launches = (await h.records()).filter((entry) => entry.args?.includes("--input-format"));
+  expect(launches.map((entry) => entry.args[entry.args.indexOf("--model") + 1])).toEqual([
+    "gemini-3.8-flash-high",
+    "gemini-3.8-flash-low",
+    "gemini-3.8-flash-high",
+  ]);
+  for (const launch of launches) expect(launch.args).not.toContain("--effort");
+  expect(launches[1].args.slice(-2)).toEqual([
+    "--conversation",
+    "e5cf1e2d-c715-4328-8e67-4a85c8dc3cda",
+  ]);
+});
+
+it("validates effort against the selected model without changing a valid selection", async () => {
+  const h = await harness();
+  await h.open(undefined, "s", { model: "gemini-3.1-pro-high", thinkingOption: "low" });
+  await h.request({
+    type: "session.configure",
+    requestId: "unsupported-effort",
+    sessionId: "s",
+    changes: { thinkingOption: "medium" },
+  });
+  expect(h.events).toContainEqual(
+    expect.objectContaining({
+      type: "request.failed",
+      requestId: "unsupported-effort",
+      error: expect.objectContaining({ code: "INVALID_THINKING_OPTION" }),
+    }),
+  );
+  expect(h.config()).toMatchObject({
+    model: "gemini-3.1-pro-high",
+    thinkingOption: "low",
+    thinkingOptions: [
+      { id: "high", label: "High", metadata: { modelId: "gemini-3.1-pro-high" } },
+      { id: "low", label: "Low", metadata: { modelId: "gemini-3.1-pro-low" } },
+    ],
+  });
+  await h.completed(await h.prompt("HELLO"));
+  const launches = (await h.records()).filter((entry) => entry.args?.includes("--input-format"));
+  expect(launches).toHaveLength(1);
+  expect(launches[0].args.slice(-2)).toEqual(["--model", "gemini-3.1-pro-low"]);
+  expect(launches[0].args).not.toContain("--effort");
+});
+
+it.each([
+  { effort: "medium", nextEffort: "high", nativeModel: "gemini-3.1-pro-high" },
+  { effort: "low", nextEffort: "low", nativeModel: "gemini-3.1-pro-low" },
+])(
+  "uses $nextEffort effort when switching from Flash $effort to Pro without selecting effort",
+  async ({ effort, nextEffort, nativeModel }) => {
+    const h = await harness();
+    await h.open(undefined, "s", { model: "gemini-3.8-flash-high", thinkingOption: effort });
+    await h.request({
+      type: "session.configure",
+      requestId: "switch-model",
+      sessionId: "s",
+      changes: { model: "gemini-3.1-pro-high" },
+    });
+    expect(h.config()).toMatchObject({
+      model: "gemini-3.1-pro-high",
+      thinkingOption: nextEffort,
+    });
+    expect(h.events.filter((event) => event.type === "request.failed")).toEqual([]);
+    await h.completed(await h.prompt("HELLO"));
+    const launches = (await h.records()).filter((entry) => entry.args?.includes("--input-format"));
+    expect(launches).toHaveLength(2);
+    expect(launches[1].args.slice(-4)).toEqual([
+      "--model",
+      nativeModel,
+      "--conversation",
+      "e5cf1e2d-c715-4328-8e67-4a85c8dc3cda",
+    ]);
+  },
+);
+
+it("adopts the native default model and effort without restarting the initial driver", async () => {
+  const h = await harness({ AGY_TEST_INIT_MODEL: "gemini-3.8-flash-low" });
+  await h.open();
+  expect(h.config()).toMatchObject({
+    model: "gemini-3.8-flash-low",
+    thinkingOption: "low",
+  });
+  await h.completed(await h.prompt("HELLO"));
+  const initialLaunches = (await h.records()).filter((entry) =>
+    entry.args?.includes("--input-format"),
+  );
+  expect(initialLaunches).toHaveLength(1);
+  expect(initialLaunches[0].args).not.toContain("--model");
+  await h.request({
+    type: "session.configure",
+    requestId: "default-medium-effort",
+    sessionId: "s",
+    changes: { thinkingOption: "medium" },
+  });
+  expect(h.config()).toMatchObject({
+    model: "gemini-3.8-flash-low",
+    thinkingOption: "medium",
+  });
+  await h.completed(await h.prompt("HELLO AGAIN"));
+  const launches = (await h.records()).filter((entry) => entry.args?.includes("--input-format"));
+  expect(launches).toHaveLength(2);
+  expect(launches[1].args.slice(-4)).toEqual([
+    "--model",
+    "gemini-3.8-flash-medium",
+    "--conversation",
+    "e5cf1e2d-c715-4328-8e67-4a85c8dc3cda",
+  ]);
+});
+
+it("preserves a separate effort selection when resuming a persisted conversation", async () => {
+  const first = await harness();
+  await first.open(undefined, "s", {
+    model: "gemini-3.8-flash-high",
+    thinkingOption: "medium",
+  });
+  await first.completed(await first.prompt("HELLO"));
+  const persistence = first.persistence();
+  const { model, thinkingOption } = first.config();
+  await first.connection.close();
+  const resumed = await harness();
+  await resumed.open(persistence, "s", { model, thinkingOption });
+  expect(resumed.config()).toMatchObject({
+    model: "gemini-3.8-flash-high",
+    thinkingOption: "medium",
+  });
+  await resumed.completed(await resumed.prompt("RESUME"));
+  const launches = (await resumed.records()).filter((entry) =>
+    entry.args?.includes("--input-format"),
+  );
+  expect(launches).toHaveLength(1);
+  expect(launches[0].args.slice(-4)).toEqual([
+    "--model",
+    "gemini-3.8-flash-medium",
+    "--conversation",
+    "e5cf1e2d-c715-4328-8e67-4a85c8dc3cda",
+  ]);
+  expect(launches[0].args).not.toContain("--effort");
+});
+
+it("preserves a legacy native variant and derives its effort on resume", async () => {
+  const h = await harness();
+  await h.open(
+    { version: 1, data: { conversationId: "e5cf1e2d-c715-4328-8e67-4a85c8dc3cda" } },
+    "s",
+    { model: "gemini-3.8-flash-low" },
+  );
+  expect(h.config()).toMatchObject({
+    model: "gemini-3.8-flash-low",
+    thinkingOption: "low",
+  });
+  await h.completed(await h.prompt("RESUME"));
+  await h.request({
+    type: "session.configure",
+    requestId: "legacy-high-effort",
+    sessionId: "s",
+    changes: { thinkingOption: "high" },
+  });
+  await h.completed(await h.prompt("HELLO"));
+  await h.request({
+    type: "session.configure",
+    requestId: "legacy-default-effort",
+    sessionId: "s",
+    changes: { thinkingOption: null },
+  });
+  expect(h.config()).toMatchObject({
+    model: "gemini-3.8-flash-low",
+    thinkingOption: "low",
+  });
+  await h.completed(await h.prompt("HELLO AGAIN"));
+  const launches = (await h.records()).filter((entry) => entry.args?.includes("--input-format"));
+  expect(launches.map((entry) => entry.args[entry.args.indexOf("--model") + 1])).toEqual([
+    "gemini-3.8-flash-low",
+    "gemini-3.8-flash-high",
+    "gemini-3.8-flash-low",
+  ]);
+});
+
 it("resumes after connection close without replay or another system prefix", async () => {
   const first = await harness();
   await first.open();
@@ -703,22 +933,86 @@ describe("discovery", () => {
     expect(await provider.status?.({ launch: h.launch })).toEqual({ available: true });
   });
 
-  it("parses tab-separated catalog and exposes only full access without thinking options", async () => {
+  it("groups effort variants under one selectable model with model-specific thinking options", async () => {
     const h = await harness();
     await h.request({ type: "catalog", requestId: "catalog" });
     const event = h.events[0];
     expect(event).toMatchObject({
       type: "catalog",
       catalog: {
-        models: expect.arrayContaining([
-          { id: "gemini-3.8-flash-low", label: "Gemini 3.8 Flash (Low)" },
-        ]),
         thinkingOptions: [],
         defaultMode: "full-access",
       },
     });
     if (event.type !== "catalog") throw new Error("Missing catalog");
     expect(event.catalog.models).toHaveLength(11);
+    expect(
+      event.catalog.models
+        .filter((model) => model.isSelectable !== false)
+        .map((model) => ({
+          id: model.id,
+          label: model.label,
+          aliases: model.aliases,
+        })),
+    ).toEqual([
+      {
+        id: "gemini-3.8-flash-high",
+        label: "Gemini 3.8 Flash",
+        aliases: ["gemini-3.8-flash-medium", "gemini-3.8-flash-low"],
+      },
+      {
+        id: "gemini-3.7-flash-high",
+        label: "Gemini 3.7 Flash",
+        aliases: ["gemini-3.7-flash-medium", "gemini-3.7-flash-low"],
+      },
+      {
+        id: "gemini-3.6-flash-high",
+        label: "Gemini 3.6 Flash",
+        aliases: ["gemini-3.6-flash-medium", "gemini-3.6-flash-low"],
+      },
+      {
+        id: "gemini-3.1-pro-high",
+        label: "Gemini 3.1 Pro",
+        aliases: ["gemini-3.1-pro-low"],
+      },
+    ]);
+    for (const version of ["3.8", "3.7", "3.6"]) {
+      const baseId = `gemini-${version}-flash`;
+      const thinkingOptions = ["high", "medium", "low"].map((effort) => ({
+        id: effort,
+        label: effort[0].toUpperCase() + effort.slice(1),
+        metadata: { modelId: `${baseId}-${effort}` },
+      }));
+      expect(event.catalog.models.filter((model) => model.id.startsWith(baseId))).toEqual([
+        {
+          id: `${baseId}-high`,
+          label: `Gemini ${version} Flash`,
+          aliases: [`${baseId}-medium`, `${baseId}-low`],
+          defaultThinkingOptionId: "high",
+          thinkingOptions,
+        },
+        {
+          id: `${baseId}-medium`,
+          label: `Gemini ${version} Flash`,
+          isSelectable: false,
+          defaultThinkingOptionId: "medium",
+          thinkingOptions,
+        },
+        {
+          id: `${baseId}-low`,
+          label: `Gemini ${version} Flash`,
+          isSelectable: false,
+          defaultThinkingOptionId: "low",
+          thinkingOptions,
+        },
+      ]);
+    }
+    expect(
+      event.catalog.models.find((model) => model.id === "gemini-3.1-pro-high")?.thinkingOptions,
+    ).toEqual([
+      { id: "high", label: "High", metadata: { modelId: "gemini-3.1-pro-high" } },
+      { id: "low", label: "Low", metadata: { modelId: "gemini-3.1-pro-low" } },
+    ]);
     expect(event.catalog.modes).toEqual([
       {
         id: "full-access",
@@ -729,6 +1023,31 @@ describe("discovery", () => {
         description:
           "Antigravity cannot ask for permission when another app drives it. Paseo starts it with --dangerously-skip-permissions.",
       },
+    ]);
+  });
+
+  it("leaves models without adjustable effort unchanged", async () => {
+    const h = await harness({
+      AGY_TEST_MODELS: [
+        "claude-sonnet-4-6\tClaude Sonnet 4.6",
+        "gpt-oss-120b-medium\tGPT-OSS 120B (Medium)",
+      ].join("\n"),
+    });
+    await h.request({ type: "catalog", requestId: "fixed-models" });
+    expect(h.events[0]).toMatchObject({
+      type: "catalog",
+      catalog: {
+        models: [
+          { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+          { id: "gpt-oss-120b-medium", label: "GPT-OSS 120B (Medium)" },
+        ],
+        thinkingOptions: [],
+      },
+    });
+    if (h.events[0].type !== "catalog") throw new Error("Missing catalog");
+    expect(h.events[0].catalog.models).toEqual([
+      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+      { id: "gpt-oss-120b-medium", label: "GPT-OSS 120B (Medium)" },
     ]);
   });
   it("reports missing, old, unauthenticated and available launches", async () => {
@@ -779,6 +1098,190 @@ describe("discovery", () => {
         launch: { ...h.launch, env: { ...h.launch.env, HOME: "different" } },
       }),
     ).not.toBe(key);
+  });
+
+  it("coalesces concurrent status checks and reuses the probed catalog on initial catalog fetch", async () => {
+    const h = await harness();
+    const results = await Promise.all([
+      provider.status?.({ launch: h.launch }),
+      provider.status?.({ launch: h.launch }),
+      provider.status?.({ launch: h.launch }),
+    ]);
+    expect(results).toEqual([{ available: true }, { available: true }, { available: true }]);
+    await h.request({ type: "catalog", requestId: "initial-catalog" });
+    const recordsAfterInitial = await h.records();
+    expect(recordsAfterInitial.filter((entry) => entry.args?.includes("--version"))).toHaveLength(
+      1,
+    );
+    expect(recordsAfterInitial.filter((entry) => entry.args?.includes("models"))).toHaveLength(1);
+    await h.request({ type: "catalog", requestId: "refresh-catalog" });
+    const recordsAfterRefresh = await h.records();
+    expect(recordsAfterRefresh.filter((entry) => entry.args?.includes("models"))).toHaveLength(2);
+  });
+
+  it("opens and closes non-persistent draft sessions without spawning a driver", async () => {
+    const h = await harness();
+    await h.request({
+      type: "session.open",
+      requestId: "draft-open",
+      sessionId: "draft",
+      history: "skip",
+      config: {
+        cwd: h.cwd,
+        env: {},
+        settings: {},
+        mcpServers: {},
+        persist: false,
+      },
+    });
+    await h.request({
+      type: "session.close",
+      requestId: "draft-close",
+      sessionId: "draft",
+    });
+    const records = await h.records();
+    expect(records.filter((entry) => entry.args?.includes("--input-format"))).toHaveLength(0);
+  });
+
+  it("normalizes legacy mode, thinking option, and retired model when resuming a persisted session", async () => {
+    const h = await harness();
+    await h.request({
+      type: "session.open",
+      requestId: "legacy-resume",
+      sessionId: "legacy",
+      persistence: {
+        version: 1,
+        data: { conversationId: "e5cf1e2d-c715-4328-8e67-4a85c8dc3cda" },
+      },
+      history: "replay",
+      config: {
+        cwd: h.cwd,
+        env: {},
+        settings: {},
+        mcpServers: {},
+        persist: true,
+        mode: "bypass",
+        model: "retired-gemini-model",
+        thinkingOption: "high",
+      },
+    });
+    expect(
+      h.events.find((event) => event.type === "session.config" && event.sessionId === "legacy"),
+    ).toMatchObject({
+      type: "session.config",
+      config: {
+        mode: "full-access",
+        model: undefined,
+      },
+    });
+  });
+
+  it("replays transcript.jsonl history when resuming a persisted session", async () => {
+    const h = await harness();
+    const conversationId = "e5cf1e2d-c715-4328-8e67-4a85c8dc3cda";
+    const logsDir = path.join(
+      h.cwd,
+      ".gemini",
+      "antigravity-cli",
+      "brain",
+      conversationId,
+      ".system_generated",
+      "logs",
+    );
+    await mkdir(logsDir, { recursive: true });
+    await writeFile(
+      path.join(logsDir, "transcript.jsonl"),
+      [
+        JSON.stringify({
+          step_index: 0,
+          source: "USER_EXPLICIT",
+          type: "USER_INPUT",
+          status: "DONE",
+          created_at: "2026-10-14T12:00:00Z",
+          content:
+            "<USER_REQUEST>\nSYSTEM PREFIX\n\nCheck telemetry\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\ntime\n</ADDITIONAL_METADATA>",
+        }),
+        JSON.stringify({
+          step_index: 1,
+          source: "MODEL",
+          type: "PLANNER_RESPONSE",
+          status: "DONE",
+          created_at: "2026-10-14T12:00:01Z",
+          thinking: "Checking sensor streams",
+          tool_calls: [
+            {
+              name: "run_command",
+              args: { CommandLine: JSON.stringify("echo ok") },
+            },
+          ],
+        }),
+        JSON.stringify({
+          step_index: 2,
+          source: "MODEL",
+          type: "GENERIC",
+          status: "DONE",
+          created_at: "2026-10-14T12:00:02Z",
+          content: "ok\n",
+        }),
+        JSON.stringify({
+          step_index: 3,
+          source: "MODEL",
+          type: "PLANNER_RESPONSE",
+          status: "DONE",
+          created_at: "2026-10-14T12:00:03Z",
+          content: "Telemetry looks healthy.",
+        }),
+      ].join("\n"),
+    );
+
+    await h.request({
+      type: "session.open",
+      requestId: "replay-resume",
+      sessionId: "replayed",
+      persistence: {
+        version: 1,
+        data: { conversationId },
+      },
+      history: "replay",
+      config: {
+        cwd: h.cwd,
+        env: { HOME: h.cwd },
+        settings: {},
+        mcpServers: {},
+        persist: true,
+        systemPrompt: "SYSTEM PREFIX",
+      },
+    });
+
+    const timelineItems = h.events
+      .filter((event) => event.type === "timeline.item" && event.sessionId === "replayed")
+      .map((event) => (event.type === "timeline.item" ? event.item : null));
+    expect(timelineItems).toEqual([
+      expect.objectContaining({
+        type: "user_message",
+        text: "Check telemetry",
+      }),
+      expect.objectContaining({
+        type: "reasoning",
+        text: "Checking sensor streams",
+      }),
+      expect.objectContaining({
+        type: "tool_call",
+        name: "run_command",
+        status: "completed",
+        detail: expect.objectContaining({
+          type: "shell",
+          command: "echo ok",
+          output: "ok\n",
+        }),
+      }),
+      expect.objectContaining({
+        type: "assistant_message",
+        text: "Telemetry looks healthy.",
+      }),
+    ]);
+    const records = await h.records();
+    expect(records.filter((entry) => entry.args?.includes("--input-format"))).toHaveLength(0);
   });
 });
 
@@ -886,18 +1389,25 @@ describe("image prompts", () => {
   });
 });
 
-it.runIf(process.platform === "win32")(
-  "launches an Antigravity command shim for probes and conversation startup",
-  async () => {
-    const h = await harness();
-    const shim = path.join(h.cwd, "agy launcher.cmd");
-    await writeFile(shim, `@echo off\r\n"${process.execPath}" "${fake}" %*\r\n`);
-    h.launch.command = shim;
-    h.launch.args = ["--launch-prefix"];
-    expect(await provider.status!({ launch: h.launch })).toEqual({ available: true });
-    await h.open();
-    expect(await h.wait((event) => event.type === "session.opened")).toMatchObject({
-      sessionId: "s",
-    });
-  },
-);
+it("launches an Antigravity command shim for probes and conversation startup", async () => {
+  const h = await harness();
+  const isWindows = process.platform === "win32";
+  const shim = path.join(h.cwd, `agy launcher.${isWindows ? "cmd" : "sh"}`);
+  const command = [process.execPath, fake]
+    .map((argument) => `'${argument.replaceAll("'", "'\\''")}'`)
+    .join(" ");
+  await writeFile(
+    shim,
+    isWindows
+      ? `@echo off\r\n"${process.execPath}" "${fake}" %*\r\n`
+      : `#!/usr/bin/env bash\nexec ${command} "$@"\n`,
+    { mode: 0o755 },
+  );
+  h.launch.command = shim;
+  h.launch.args = ["--launch-prefix"];
+  expect(await provider.status!({ launch: h.launch })).toEqual({ available: true });
+  await h.open();
+  expect(await h.wait((event) => event.type === "session.opened")).toMatchObject({
+    sessionId: "s",
+  });
+});

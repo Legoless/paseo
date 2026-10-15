@@ -1262,4 +1262,33 @@ describe("plugin provider launch and status", () => {
       }
     },
   );
+
+  test("decodes legacy pre-plugin Antigravity persistence handles on resume", async () => {
+    const harness = createProviderHarness();
+    const registry = new PluginAgentClientRegistry(createTestLogger());
+    registry.replace([{ ...harness.registration, id: "antigravity" }]);
+    try {
+      const client = registry.clients().antigravity!;
+      const resumed = await client.resumeSession(
+        {
+          provider: "antigravity",
+          sessionId: "8fdaabff-6cea-4b47-85ac-105a00f73da8",
+          nativeHandle: "8fdaabff-6cea-4b47-85ac-105a00f73da8",
+        },
+        { cwd: "/workspace" },
+      );
+      expect(harness.inputs).toContainEqual(
+        expect.objectContaining({
+          type: "session.open",
+          persistence: {
+            version: 1,
+            data: { conversationId: "8fdaabff-6cea-4b47-85ac-105a00f73da8" },
+          },
+        }),
+      );
+      await resumed.close();
+    } finally {
+      await registry.shutdown();
+    }
+  });
 });

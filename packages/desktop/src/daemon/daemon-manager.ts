@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { app, ipcMain, powerMonitor } from "electron";
 import log from "electron-log/main";
@@ -135,10 +135,15 @@ function logFilePath(): string {
 }
 
 export function isDesktopManagedDaemonRunningSync(): boolean {
-  if (!ownedLaunch) return false;
+  const home = ownedLaunch?.home ?? getPaseoHome();
   try {
-    const lock = JSON.parse(readFileSync(path.join(ownedLaunch.home, "paseo.pid"), "utf8"));
-    return isSameDaemonInstance(lock, ownedLaunch.instance) && isProcessRunning(lock.pid);
+    const lock = JSON.parse(readFileSync(path.join(home, "paseo.pid"), "utf8"));
+    if (ownedLaunch) {
+      return isSameDaemonInstance(lock, ownedLaunch.instance) && isProcessRunning(lock.pid);
+    }
+    return Boolean(
+      lock?.desktopManaged === true && typeof lock.pid === "number" && isProcessRunning(lock.pid),
+    );
   } catch {
     return false;
   }
@@ -147,7 +152,7 @@ export function isDesktopManagedDaemonRunningSync(): boolean {
 export async function stopDesktopDaemonViaCli(
   reason: DesktopDaemonStopReason = DEFAULT_DESKTOP_DAEMON_STOP_REASON,
 ): Promise<void> {
-  await stopDesktopDaemon(reason);
+  await stopDesktopDaemon(reason, undefined, { allowDesktopManaged: true });
 }
 
 function isProcessRunning(pid: number): boolean {
@@ -266,11 +271,28 @@ function normalizeVersion(version: string | null): string | null {
   return trimmed.replace(/^v/i, "");
 }
 
-function shouldRestartForVersion(current: DesktopDaemonStatus): boolean {
-  if (!current.ownedByDesktop) return false;
+function isDaemonBuildNewerThanRunningInstance(current: DesktopDaemonStatus): boolean {
+  if (!app.isPackaged || !current.startedAt) return false;
+  const startedAtMs = Date.parse(current.startedAt);
+  if (!Number.isFinite(startedAtMs)) return false;
+  try {
+    const { entryPath } = resolveDaemonRunnerEntrypoint();
+    return statSync(entryPath).mtimeMs > startedAtMs;
+  } catch {
+    return false;
+  }
+}
+
+function shouldRestartForVersion(current: DesktopDaemonStatus, settings: DesktopSettings): boolean {
+  const canManageInstance =
+    current.ownedByDesktop || (current.desktopManaged && !settings.daemon.keepRunningAfterQuit);
+  if (!canManageInstance) return false;
   const appVersion = normalizeVersion(resolveDesktopAppVersion());
   const daemonVersion = normalizeVersion(current.version);
-  return Boolean(appVersion && daemonVersion && appVersion !== daemonVersion);
+  if (appVersion && daemonVersion && appVersion !== daemonVersion) {
+    return true;
+  }
+  return isDaemonBuildNewerThanRunningInstance(current);
 }
 
 function assertBuiltInDaemonManagementEnabled(settings: DesktopSettings): void {
@@ -280,7 +302,8 @@ function assertBuiltInDaemonManagementEnabled(settings: DesktopSettings): void {
 }
 
 async function startDaemon(): Promise<DesktopDaemonStatus> {
-  assertBuiltInDaemonManagementEnabled(await getDesktopSettingsStore().get());
+  const settings = await getDesktopSettingsStore().get();
+  assertBuiltInDaemonManagementEnabled(settings);
 
   const current = await resolveDesktopDaemonStatus();
   logDesktopDaemonLifecycle("initial status check before start", {
@@ -292,12 +315,12 @@ async function startDaemon(): Promise<DesktopDaemonStatus> {
     desktopManaged: current.desktopManaged,
   });
   if (current.status === "running" || current.status === "starting") {
-    if (shouldRestartForVersion(current)) {
+    if (shouldRestartForVersion(current, settings)) {
       logDesktopDaemonLifecycle("daemon version mismatch, restarting", {
         appVersion: normalizeVersion(resolveDesktopAppVersion()),
         daemonVersion: normalizeVersion(current.version),
       });
-      await stopDesktopDaemon("version_mismatch");
+      await stopDesktopDaemon("version_mismatch", undefined, { allowDesktopManaged: true });
     } else {
       return current;
     }
@@ -351,14 +374,16 @@ async function startDaemon(): Promise<DesktopDaemonStatus> {
 export async function stopDesktopDaemon(
   reason: DesktopDaemonStopReason = DEFAULT_DESKTOP_DAEMON_STOP_REASON,
   confirmedInstance?: { pid: number; startedAt: string },
+  options?: { allowDesktopManaged?: boolean },
 ): Promise<DesktopDaemonStatus> {
   const home = getPaseoHome();
   const instance = await readDaemonInstance(home);
   const owned = Boolean(
     instance &&
-    ownedLaunch &&
-    ownedLaunch.home === home &&
-    isSameDaemonInstance(instance, ownedLaunch.instance),
+    ((ownedLaunch &&
+      ownedLaunch.home === home &&
+      isSameDaemonInstance(instance, ownedLaunch.instance)) ||
+      (options?.allowDesktopManaged && instance.desktopManaged === true)),
   );
   const explicit =
     reason === "manual_ipc" &&
