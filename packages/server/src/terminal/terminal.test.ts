@@ -1654,6 +1654,35 @@ describe("terminal restore", () => {
 });
 
 describe("terminal pty activity scanning", () => {
+  it("settles a late Codex working hook without another PTY repaint", async () => {
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: [
+          "-e",
+          'process.stdout.write("OpenAI Codex\\r\\n» Ask Codex to do anything"); process.stdin.setRawMode(true); process.stdin.resume();',
+        ],
+      }),
+    );
+
+    await waitForState(session, (state) =>
+      getLines(state).join("\n").includes("» Ask Codex to do anything"),
+    );
+    // Let the launch repaint's stillness check finish before the hook arrives.
+    await delay(1500);
+    session.setActivity("working", undefined, "codex-session");
+    expect(deriveTerminalActivityStatusBucket(session.getActivity())).toBe("running");
+
+    await vi.waitFor(
+      () =>
+        expect(session.getActivity()).toMatchObject({ state: "idle", attentionReason: "finished" }),
+      { timeout: 4000 },
+    );
+    expect(deriveTerminalActivityStatusBucket(session.getActivity())).toBe("attention");
+  });
+
   it("tracks activity without launching a real provider", async () => {
     const session = trackSession(
       await createTerminal({

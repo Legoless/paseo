@@ -894,6 +894,38 @@ describe("PtyActivityScanner — full lifecycle", () => {
     expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
   });
 
+  it("keeps Codex's double-chevron composer working until its turn finishes", () => {
+    const tracker = new TerminalActivityTracker();
+    let screenLines = [
+      "• Working (12s • esc to interrupt)",
+      "» Ask Codex to do anything",
+      "  GPT-6-Astra ultra · Context 91% left",
+    ];
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screenLines,
+      readCursorLine: () => "» Ask Codex to do anything",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("codex");
+    scanner.feedInput("\r");
+    scanner.feedOutput("• Working (12s • esc to interrupt)");
+    vi.advanceTimersByTime(2500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    screenLines = [
+      "Worked for 1m 12s • 14:21",
+      "» Ask Codex to do anything",
+      "  GPT-6-Astra ultra · Context 91% left",
+    ];
+    scanner.feedOutput("Worked for 1m 12s • 14:21");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
   it("keeps a Codex turn working while its status line shows above the composer", () => {
     const tracker = new TerminalActivityTracker();
     const scanner = new PtyActivityScanner({
@@ -1041,6 +1073,56 @@ describe("PtyActivityScanner — full lifecycle", () => {
 
     expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
   });
+
+  it("settles the first working hook without a local Enter or another PTY repaint", () => {
+    const tracker = new TerminalActivityTracker();
+    const composer = "» Ask Codex to do anything";
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => ["Worked for 1m 12s • 14:21", composer],
+      readCursorLine: () => composer,
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("codex");
+    tracker.set("working", undefined, "hook-session");
+    scanner.handleHookActivityChange();
+    vi.advanceTimersByTime(500);
+
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it.each(["›", "»"])(
+    "settles a late working hook at Codex's %s composer without more PTY output",
+    (prompt) => {
+      const tracker = new TerminalActivityTracker();
+      const composer = `${prompt} Ask Codex to do anything`;
+      const scanner = new PtyActivityScanner({
+        setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+        clearActivity: () => tracker.clear(),
+        getActivity: () => tracker.getSnapshot(),
+        readLastLines: () => ["Worked for 1m 12s • 14:21", composer],
+        readCursorLine: () => composer,
+        stillnessMs: 500,
+      });
+
+      scanner.handleInitialCommand("codex");
+      scanner.feedInput("\r");
+      scanner.feedOutput("Worked for 1m 12s • 14:21");
+      vi.advanceTimersByTime(500);
+      expect(tracker.clearAttention()).toBe(true);
+
+      // A tool hook can arrive after the final repaint with no subsequent terminal output.
+      tracker.set("working", undefined, "late-subagent-session");
+      scanner.handleHookActivityChange();
+      expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+      vi.advanceTimersByTime(500);
+
+      expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+    },
+  );
 
   it("clears hook-reported working that never reaches a prompt", () => {
     const tracker = new TerminalActivityTracker();
