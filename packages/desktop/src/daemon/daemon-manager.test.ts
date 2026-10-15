@@ -1,10 +1,15 @@
+import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_DESKTOP_SETTINGS } from "../settings/desktop-settings";
-import { createDaemonCommandHandlers } from "./daemon-manager";
+import {
+  createDaemonCommandHandlers,
+  isDesktopManagedDaemonRunningSync,
+  stopDesktopDaemonViaCli,
+} from "./daemon-manager";
 
 const mocks = vi.hoisted(() => ({
   paseoHome: "",
@@ -174,5 +179,36 @@ describe("daemon-manager commands", () => {
     expect(await handler({ listen: "remote:6799" })).toBeNull();
     writeFileSync(lockPath, JSON.stringify({ ...lock, desktopManaged: false }));
     expect(await handler({ listen: "localhost:6799" })).toBeNull();
+  });
+
+  it("detects and stops a running desktopManaged daemon on quit across GUI sessions", async () => {
+    mkdirSync(mocks.paseoHome);
+    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
+    try {
+      const lockPath = path.join(mocks.paseoHome, "paseo.pid");
+      const lock = {
+        pid: child.pid!,
+        startedAt: new Date().toISOString(),
+        hostname: hostname(),
+        uid: process.getuid?.() ?? 0,
+        listen: "127.0.0.1:6799",
+        desktopManaged: true,
+      };
+      writeFileSync(lockPath, JSON.stringify(lock));
+      expect(isDesktopManagedDaemonRunningSync()).toBe(true);
+
+      mocks.runExternalCliJsonCommand.mockImplementation(async (args: string[]) => {
+        if (args[1] === "stop") {
+          child.kill("SIGKILL");
+          return { stopped: true };
+        }
+        return { localDaemon: "stopped" };
+      });
+
+      await stopDesktopDaemonViaCli("quit");
+      expect(isDesktopManagedDaemonRunningSync()).toBe(false);
+    } finally {
+      child.kill("SIGKILL");
+    }
   });
 });

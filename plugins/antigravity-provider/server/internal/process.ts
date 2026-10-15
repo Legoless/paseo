@@ -15,6 +15,7 @@ import {
 interface DriverOptions {
   launch: ProviderLaunch;
   config: ProviderSessionConfig;
+  model?: string;
   conversationId: string | null;
   onFrame(frame: Frame): void;
   onExit(error: AntigravityError): void;
@@ -28,7 +29,7 @@ export interface Driver {
 }
 
 export function selection(config: ProviderSessionConfig): string {
-  return JSON.stringify([config.model, config.mode]);
+  return JSON.stringify([config.model, config.mode, config.thinkingOption]);
 }
 
 function driverArgs(options: DriverOptions): string[] {
@@ -44,7 +45,7 @@ function driverArgs(options: DriverOptions): string[] {
     "--disable-slash-commands",
     "--dangerously-skip-permissions",
   ];
-  if (config.model) args.push("--model", config.model);
+  if (options.model) args.push("--model", options.model);
   if (conversationId) args.push("--conversation", conversationId);
   return args;
 }
@@ -52,7 +53,7 @@ function driverArgs(options: DriverOptions): string[] {
 export function startDriver(options: DriverOptions): Driver {
   const child = spawnProcess(options.launch.command, driverArgs(options), {
     cwd: options.config.cwd,
-    env: { ...options.launch.env, ...options.config.env },
+    env: { AGY_CLI_DISABLE_AUTO_UPDATE: "1", ...options.launch.env, ...options.config.env },
     detached: process.platform !== "win32",
     stdio: "pipe",
   });
@@ -185,7 +186,7 @@ interface ProbeOptions {
 export function probe(options: ProbeOptions): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawnProcess(options.launch.command, [...options.launch.args, ...options.args], {
-      env: options.launch.env,
+      env: { AGY_CLI_DISABLE_AUTO_UPDATE: "1", ...options.launch.env },
       cwd: options.cwd,
       stdio: "pipe",
       detached: process.platform !== "win32",
@@ -198,7 +199,7 @@ export function probe(options: ProbeOptions): Promise<string> {
         reject(new AntigravityError("Antigravity discovery timed out", "PROBE_TIMEOUT"));
         return undefined;
       }, reject);
-    }, 10_000);
+    }, 30_000);
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
     });

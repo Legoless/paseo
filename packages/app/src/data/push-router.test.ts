@@ -679,4 +679,82 @@ describe("server data push router", () => {
     expect(queryClient.getQueryState(terminalKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(otherProviderKey)?.isInvalidated).toBe(false);
   });
+
+  it("invalidates providerFeatures only when snapshotHash changes and only for matching cwd", async () => {
+    const queryClient = new QueryClient();
+    const fake = createFakeClient();
+    const serverId = "server-1";
+    const entries = [
+      { provider: "antigravity" as const, status: "ready" as const, enabled: true, models: [] },
+    ];
+    const compactSnapshot = {
+      entries,
+      thinkingSets: [],
+    };
+    const repoAFeaturesKey = [
+      "providerFeatures",
+      serverId,
+      "antigravity",
+      "/repo-a",
+      null,
+      null,
+      null,
+      {},
+    ] as const;
+    const repoBFeaturesKey = [
+      "providerFeatures",
+      serverId,
+      "antigravity",
+      "/repo-b",
+      null,
+      null,
+      null,
+      {},
+    ] as const;
+    queryClient.setQueryData(repoAFeaturesKey, []);
+    queryClient.setQueryData(repoBFeaturesKey, []);
+    const unmount = mountServerDataPushRouter({ client: fake.client, queryClient, serverId });
+
+    fake.emit({
+      type: "providers_snapshot_update",
+      payload: {
+        cwd: "/repo-a",
+        snapshotHash: "hash-1",
+        compactSnapshot,
+        entries,
+        generatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+
+    await expect.poll(() => queryClient.getQueryState(repoAFeaturesKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(repoBFeaturesKey)?.isInvalidated).toBe(false);
+
+    queryClient.setQueryData(repoAFeaturesKey, []);
+    expect(queryClient.getQueryState(repoAFeaturesKey)?.isInvalidated).toBe(false);
+
+    fake.emit({
+      type: "providers_snapshot_update",
+      payload: {
+        cwd: "/repo-a",
+        snapshotHash: "hash-1",
+        compactSnapshot,
+        entries,
+        generatedAt: "2026-01-01T00:00:01.000Z",
+      },
+    });
+
+    await expect
+      .poll(
+        () =>
+          (
+            queryClient.getQueryData(providersSnapshotQueryKey(serverId, "/repo-a")) as {
+              generatedAt?: string;
+            }
+          )?.generatedAt,
+      )
+      .toBe("2026-01-01T00:00:01.000Z");
+    expect(queryClient.getQueryState(repoAFeaturesKey)?.isInvalidated).toBe(false);
+
+    unmount();
+  });
 });

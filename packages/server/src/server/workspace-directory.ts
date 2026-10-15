@@ -415,8 +415,8 @@ export class WorkspaceDirectory {
   // Apply working terminal contributions to descriptor statuses and seed the
   // activity timestamp entries used by `resolveStatusEnteredAt`.
   // A terminal contributes only to the workspace it carries; same-cwd siblings
-  // are untouched. A terminal waiting on the user is also listed by id with its
-  // bucket, so the client can tell which of its panes glows which color.
+  // are untouched. Each active terminal is also listed by id with its bucket,
+  // so the client can count and color its terminal tabs.
   private applyTerminalContributions(
     terminalContributions: Array<{
       terminalId: string;
@@ -442,12 +442,10 @@ export class WorkspaceDirectory {
       ) {
         existing.status = bucket;
       }
-      if (bucket !== "running") {
-        existing.terminalStatusBuckets = {
-          ...existing.terminalStatusBuckets,
-          [terminalId]: bucket,
-        };
-      }
+      existing.terminalStatusBuckets = {
+        ...existing.terminalStatusBuckets,
+        [terminalId]: bucket,
+      };
       const entries = activityEntriesByWorkspaceId.get(workspaceId) ?? [];
       entries.push({ bucket, changedAtIso: new Date(activity.changedAt).toISOString() });
       activityEntriesByWorkspaceId.set(workspaceId, entries);

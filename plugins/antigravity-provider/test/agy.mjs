@@ -24,7 +24,9 @@ if (args.includes("models")) {
     process.stderr.write(fixture("models-unauthenticated", "stderr").join("\n"));
     process.exit(1);
   }
-  process.stdout.write(fixture("models-api-key").join("\n") + "\n");
+  process.stdout.write(
+    (process.env.AGY_TEST_MODELS || fixture("models-api-key").join("\n")) + "\n",
+  );
   process.exit(0);
 }
 if (process.env.AGY_TEST_STARTUP === "auth") {
@@ -57,6 +59,7 @@ function emit(frame) {
   process.stdout.write(JSON.stringify(converted) + "\n");
 }
 const init = fixture("text-turn")[0];
+if (process.env.AGY_TEST_INIT_MODEL) init.init.model = process.env.AGY_TEST_INIT_MODEL;
 if (args.includes("--model")) init.init.model = args[args.indexOf("--model") + 1];
 emit(init);
 let interrupted = null;

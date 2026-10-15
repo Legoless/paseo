@@ -9,7 +9,7 @@ import {
   type ProviderLaunch,
   type ProviderRegistration,
 } from "@getpaseo/plugin/server/provider";
-import { getCatalog, getStatus } from "./internal/catalog.js";
+import { getCatalog, getStatus, launchCacheKey } from "./internal/catalog.js";
 import { Session } from "./internal/session.js";
 import { AntigravityError } from "./internal/wire.js";
 
@@ -38,10 +38,7 @@ export function createAntigravityProvider(): ProviderRegistration {
     },
     async getCatalogCacheKey({ launch }) {
       if (!launch) return undefined;
-      const env = Object.entries(launch.env).sort(([left], [right]) => left.localeCompare(right));
-      return createHash("sha256")
-        .update(JSON.stringify([launch.command, launch.args, env]))
-        .digest("hex");
+      return createHash("sha256").update(launchCacheKey(launch)).digest("hex");
     },
     async connect(request) {
       if (!request.versions.includes(1))
@@ -60,9 +57,10 @@ function createConnection(
 ): ProviderConnection {
   const sessions = new Map<string, Session>();
   const listeners = new Set<(event: ProviderEvent) => void>();
+  const queues = new Map<string, Promise<void>>();
   let discovered: ProviderCatalog | null = null;
+  let discovering: Promise<ProviderCatalog> | null = null;
   let closed = false;
-  let pending = Promise.resolve();
 
   function emit(event: ProviderEvent): void {
     if (closed) return;
@@ -73,6 +71,21 @@ function createConnection(
       throw new AntigravityError("Antigravity catalog has not been discovered");
     return discovered;
   }
+  async function ensureCatalog(cwd?: string): Promise<ProviderCatalog> {
+    if (discovered !== null) return discovered;
+    discovering ??= getCatalog(launch, cwd).then(
+      (next) => {
+        discovered = next;
+        discovering = null;
+        return next;
+      },
+      (error) => {
+        discovering = null;
+        throw error;
+      },
+    );
+    return discovering;
+  }
   function session(id: string): Session {
     const found = sessions.get(id);
     if (!found) throw new AntigravityError(`Unknown Antigravity session: ${id}`);
@@ -81,7 +94,7 @@ function createConnection(
   async function dispatch(input: ProviderInput): Promise<void> {
     switch (input.type) {
       case "catalog":
-        discovered = await getCatalog(launch, input.cwd);
+        discovered = await getCatalog(launch, input.cwd, { refresh: discovered !== null });
         emit({
           type: "catalog",
           requestId: input.requestId,
@@ -91,11 +104,12 @@ function createConnection(
       case "session.open": {
         if (sessions.has(input.sessionId))
           throw new AntigravityError(`Session already exists: ${input.sessionId}`);
-        if (discovered === null) discovered = await getCatalog(launch, input.config.cwd);
+        await ensureCatalog(input.config.cwd);
         const opened = new Session({
           id: input.sessionId,
           config: input.config,
           persistence: input.persistence,
+          history: input.history,
           catalog,
           launch,
           emit,
@@ -149,12 +163,18 @@ function createConnection(
     async send(input) {
       if (closed) throw new AntigravityError("Antigravity connection is closed");
       requireProviderCapabilities(negotiated, input);
-      pending = pending
+      const lane = "sessionId" in input ? `session:${input.sessionId}` : `op:${input.type}`;
+      const previous = queues.get(lane) ?? Promise.resolve();
+      const next = previous
         .then(async () => {
           if (!closed) await dispatch(input);
           return undefined;
         })
-        .catch((error) => failed(input, error));
+        .catch((error) => failed(input, error))
+        .finally(() => {
+          if (queues.get(lane) === next) queues.delete(lane);
+        });
+      queues.set(lane, next);
     },
     onEvent(listener) {
       listeners.add(listener);
@@ -163,7 +183,8 @@ function createConnection(
     async close() {
       if (closed) return;
       closed = true;
-      await pending;
+      await Promise.all(queues.values());
+      queues.clear();
       await Promise.all([...sessions.values()].map((opened) => opened.close()));
       sessions.clear();
       listeners.clear();

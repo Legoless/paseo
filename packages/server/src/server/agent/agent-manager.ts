@@ -1276,7 +1276,9 @@ export class AgentManager {
       return await client.listFeatures(normalizedConfig);
     }
 
-    const session = await client.createSession(normalizedConfig);
+    const session = await client.createSession(normalizedConfig, undefined, {
+      persistSession: false,
+    });
     try {
       return session.features ?? [];
     } finally {

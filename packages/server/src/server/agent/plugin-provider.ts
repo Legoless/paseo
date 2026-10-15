@@ -1752,6 +1752,13 @@ function decodePersistence(handle: AgentPersistenceHandle): ProviderPersistence 
   if (fromMetadata !== undefined) {
     return ProviderPersistenceSchema.parse(fromMetadata);
   }
+  // COMPAT(antigravity-legacy-persistence): added in v0.11.2, remove after 2026-12-31
+  if (handle.provider === "antigravity" && !handle.sessionId.startsWith("plugin:")) {
+    const conversationId = (handle.nativeHandle ?? handle.sessionId).trim();
+    if (conversationId.length > 0) {
+      return { version: 1, data: { conversationId } };
+    }
+  }
   return decodePersistenceId(handle.sessionId);
 }
 

@@ -1268,6 +1268,7 @@ function retainedCatalogEntry(input: {
     status: retained ? "ready" : input.coldStatus,
     defaultModeId: retained ? retained.defaultModeId : input.fallbackDefaultModeId,
     enabled: true,
+    ...(retained ? { fetchedAt: new Date().toISOString() } : {}),
     ...(input.error === undefined ? {} : { error: input.error }),
   };
 }

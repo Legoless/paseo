@@ -12,9 +12,10 @@ import type {
   ProviderUsage,
 } from "@getpaseo/plugin/server/provider";
 import { startDriver, selection, type Driver } from "./process.js";
-import { validateSelection } from "./catalog.js";
+import { nativeModel, validateSelection } from "./catalog.js";
 import { PromptFiles } from "./prompt.js";
 import { toolItem } from "./timeline.js";
+import { readTranscriptItems } from "./transcript.js";
 import { AntigravityError, diagnostic, type Frame, type Step } from "./wire.js";
 
 const persistenceSchema = z
@@ -48,6 +49,7 @@ interface SessionOptions {
   launch: ProviderLaunch;
   catalog(): ProviderCatalog;
   persistence?: ProviderPersistence;
+  history?: "replay" | "skip";
   emit(event: ProviderEvent): void;
 }
 
@@ -60,16 +62,20 @@ export class Session {
   private readonly reportedDenials = new Map<string, number>();
 
   constructor(private readonly options: SessionOptions) {
-    this.config = { ...options.config, mode: options.config.mode ?? "full-access" };
+    const catalog = options.catalog();
+    const initialConfig = { ...options.config, mode: options.config.mode ?? "full-access" };
+    this.config = options.persistence
+      ? normalizeResumedConfig(initialConfig, catalog)
+      : initialConfig;
     this.conversationId = options.persistence
       ? persistenceSchema.parse(options.persistence).data.conversationId
       : null;
     this.firstMessage = this.conversationId === null;
-    validateSelection(this.config, options.catalog());
+    validateSelection(this.config, catalog);
   }
 
   async open(requestId: string, capabilities: readonly string[]): Promise<void> {
-    await this.ensureDriver();
+    if (this.config.persist && this.conversationId === null) await this.ensureDriver();
     this.emit({
       type: "session.opened",
       requestId,
@@ -80,6 +86,20 @@ export class Session {
       cwd: this.config.cwd,
       title: this.config.title,
     });
+    if (
+      this.options.persistence &&
+      this.conversationId !== null &&
+      this.options.history !== "skip"
+    ) {
+      const history = await readTranscriptItems(
+        this.conversationId,
+        this.config,
+        this.options.launch,
+      );
+      for (const entry of history) {
+        this.item(entry.item, entry.timestamp);
+      }
+    }
     this.publishFullAccessNotice();
     this.publishConfig();
     this.emit({ type: "session.commands", sessionId: this.options.id, commands: [] });
@@ -169,6 +189,7 @@ export class Session {
   }
 
   configure(changes: ProviderConfigChanges): void {
+    const catalog = this.options.catalog();
     const config = {
       ...this.config,
       model: changes.model === null ? undefined : (changes.model ?? this.config.model),
@@ -178,9 +199,16 @@ export class Session {
           ? undefined
           : (changes.thinkingOption ?? this.config.thinkingOption),
     };
+    if (changes.model !== undefined && changes.thinkingOption === undefined) {
+      const model = catalog.models.find((entry) => entry.id === config.model);
+      const supportsEffort = model?.thinkingOptions?.some(
+        (option) => option.id === config.thinkingOption,
+      );
+      if (!supportsEffort) config.thinkingOption = undefined;
+    }
     if (changes.settings && Object.keys(changes.settings).length > 0)
       throw new AntigravityError("Antigravity has no configurable settings");
-    validateSelection(config, this.options.catalog());
+    validateSelection(config, catalog);
     this.config = config;
     this.publishConfig();
   }
@@ -264,6 +292,7 @@ export class Session {
     const driver: Driver = startDriver({
       launch: this.options.launch,
       config: this.config,
+      model: nativeModel(this.config, this.options.catalog()),
       conversationId: this.conversationId,
       onFrame: (frame) => this.accept(frame, driver),
       onExit: (error) => this.failTurn(error, driver),
@@ -277,6 +306,12 @@ export class Session {
           "INVALID_RESUME",
         );
       this.conversationId = init.conversation_id;
+      const native = this.options.catalog().models.find((model) => model.id === init.init.model);
+      if (!this.config.model && native) {
+        this.config = { ...this.config, model: native.id };
+        driver.selection = selection(this.config);
+        this.publishConfig();
+      }
       if (this.config.persist)
         this.emit({
           type: "session.persistence",
@@ -484,21 +519,29 @@ export class Session {
   }
 
   private publishConfig(): void {
+    const catalog = this.options.catalog();
+    const model = catalog.models.find((entry) => entry.id === this.config.model);
     this.emit({
       type: "session.config",
       sessionId: this.options.id,
       config: {
         model: this.config.model,
         mode: this.config.mode || "full-access",
-        models: this.options.catalog().models,
-        modes: this.options.catalog().modes,
-        thinkingOptions: [],
+        thinkingOption: this.config.thinkingOption ?? model?.defaultThinkingOptionId,
+        models: catalog.models,
+        modes: catalog.modes,
+        thinkingOptions: model?.thinkingOptions ?? [],
         settings: [],
       },
     });
   }
-  private item(item: ProviderTimelineItem): void {
-    this.emit({ type: "timeline.item", sessionId: this.options.id, item });
+  private item(item: ProviderTimelineItem, timestamp?: string): void {
+    this.emit({
+      type: "timeline.item",
+      sessionId: this.options.id,
+      item,
+      ...(timestamp ? { timestamp } : {}),
+    });
   }
   private emit(event: ProviderEvent): void {
     this.options.emit(event);
@@ -531,4 +574,30 @@ function denialNoticeTitle(
 function toAntigravityError(error: unknown): AntigravityError {
   if (error instanceof AntigravityError) return error;
   return new AntigravityError(error instanceof Error ? error.message : String(error));
+}
+
+function normalizeResumedConfig(
+  config: ProviderSessionConfig,
+  catalog: ProviderCatalog,
+): ProviderSessionConfig {
+  const model =
+    config.model && catalog.models.some((entry) => entry.id === config.model)
+      ? config.model
+      : undefined;
+  const mode =
+    config.mode && catalog.modes.some((entry) => entry.id === config.mode)
+      ? config.mode
+      : (catalog.defaultMode ?? "full-access");
+  const selected = catalog.models.find((entry) => entry.id === model);
+  const thinkingOption = selected?.thinkingOptions?.some(
+    (option) => option.id === config.thinkingOption,
+  )
+    ? config.thinkingOption
+    : undefined;
+  return {
+    ...config,
+    model,
+    mode,
+    thinkingOption,
+  };
 }

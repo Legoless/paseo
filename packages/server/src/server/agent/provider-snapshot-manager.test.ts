@@ -3527,10 +3527,22 @@ test("result identity covers content, metadata and status while unchanged refres
     const metadata = read();
     expect(metadata.contentHash).not.toBe(content.contentHash);
     available = false;
+    await vi.waitFor(() =>
+      expect(Date.now()).toBeGreaterThan(Date.parse(metadata.entry.fetchedAt!)),
+    );
     await refresh();
-    const unavailable = read();
-    expect(unavailable.entry.status).toBe("unavailable");
-    expect(unavailable.contentHash).not.toBe(metadata.contentHash);
+    const retained = read();
+    expect(retained.entry.status).toBe("ready");
+    expect(retained.entry.models).toEqual([model]);
+    expect(retained.contentHash).toBe(metadata.contentHash);
+    expect(Date.parse(retained.entry.fetchedAt!)).toBeGreaterThan(
+      Date.parse(metadata.entry.fetchedAt!),
+    );
+    manager.applyMutableProviderConfig({ codex: { enabled: false } });
+    const disabled = read();
+    expect(disabled.entry.status).toBe("unavailable");
+    expect(disabled.entry.enabled).toBe(false);
+    expect(disabled.contentHash).not.toBe(retained.contentHash);
   } finally {
     await manager.shutdown();
     manager.destroy();
@@ -4086,6 +4098,51 @@ test("model overrides preserve negotiated plugin capabilities and connection shu
     expect(client.capabilities.supportsSessionPersistence).toBe(true);
     await manager.shutdown();
     expect(closed).toBe(1);
+  } finally {
+    await manager.shutdown();
+    manager.destroy();
+  }
+});
+
+test("retainedCatalogEntry advances fetchedAt on failed refresh so stale catalogs do not loop", async () => {
+  let fail = false;
+  let calls = 0;
+  const manager = new ProviderSnapshotManager({
+    logger: createTestLogger(),
+    providerOverrides: PUBLICATION_PROVIDERS,
+    extraClients: {
+      codex: createExtraClient("codex", {
+        isAvailable: async () => {
+          calls += 1;
+          return !fail;
+        },
+        fetchCatalog: async () => ({
+          models: [{ provider: "codex", id: "gpt-5", label: "GPT-5" }],
+          modes: [],
+        }),
+      }),
+    },
+  });
+  try {
+    await manager.warmUpSnapshotForCwd({ cwd: "/tmp/retain-freshness" });
+    const first = manager
+      .getSnapshot("/tmp/retain-freshness")
+      .records.find(({ entry }) => entry.provider === "codex")!.entry;
+    expect(first.status).toBe("ready");
+    await vi.waitFor(() => expect(Date.now()).toBeGreaterThan(Date.parse(first.fetchedAt!)));
+
+    fail = true;
+    await manager.refreshSnapshotForCwd({ cwd: "/tmp/retain-freshness", providers: ["codex"] });
+    const retained = manager
+      .getSnapshot("/tmp/retain-freshness")
+      .records.find(({ entry }) => entry.provider === "codex")!.entry;
+    expect(retained.status).toBe("ready");
+    expect(retained.models).toEqual(first.models);
+    expect(Date.parse(retained.fetchedAt!)).toBeGreaterThan(Date.parse(first.fetchedAt!));
+
+    const callsAfterFailedRefresh = calls;
+    await manager.warmUpSnapshotForCwd({ cwd: "/tmp/retain-freshness" });
+    expect(calls).toBe(callsAfterFailedRefresh);
   } finally {
     await manager.shutdown();
     manager.destroy();

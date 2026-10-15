@@ -208,13 +208,15 @@ class WorkspaceStatus {
     return Object.fromEntries(entries.entries.map((entry) => [entry.id, entry.status]));
   }
 
-  hasWorkingTerminal(changedAt: number): void {
+  hasWorkingTerminal(changedAt: number): string {
+    const terminalId = `terminal-${this.terminals.length + 1}`;
     this.terminals.push({
-      terminalId: `terminal-${this.terminals.length + 1}`,
+      terminalId,
       cwd: this.workspace.members[0].cwd,
       workspaceId: this.workspace.workspaceId,
       activity: { state: "working", changedAt },
     });
+    return terminalId;
   }
 
   // A working terminal owned by a specific same-cwd workspace. Ownership follows
@@ -561,11 +563,11 @@ describe("WorkspaceDirectory", () => {
     await expect(workspace.workspaceStatus()).resolves.toBe("attention");
   });
 
-  test("lists each terminal waiting on the user by its bucket, and no busy or quiet one", async () => {
+  test("lists each active terminal by its bucket, and no quiet one", async () => {
     const workspace = new WorkspaceStatus();
     const changedAt = new Date(NOW).getTime();
 
-    workspace.hasWorkingTerminal(changedAt);
+    const working = workspace.hasWorkingTerminal(changedAt);
     const finished = workspace.hasFinishedTerminal(changedAt);
     workspace.hasIdleTerminal(changedAt);
     const asking = workspace.hasTerminalWaiting("needs_input", changedAt);
@@ -574,16 +576,17 @@ describe("WorkspaceDirectory", () => {
 
     const descriptor = await workspace.workspaceDescriptor();
     expect(descriptor.terminalStatusBuckets).toEqual({
+      [working]: "running",
       [finished]: "attention",
       [asking]: "needs_input",
       [outOfQuota]: "failed",
     });
   });
 
-  test("sends an empty terminal bucket map when no terminal waits on the user", async () => {
+  test("sends an empty terminal bucket map when no terminal has active status", async () => {
     const workspace = new WorkspaceStatus();
 
-    workspace.hasWorkingTerminal(new Date(NOW).getTime());
+    workspace.hasIdleTerminal(new Date(NOW).getTime());
 
     await expect(workspace.workspaceDescriptor()).resolves.toMatchObject({
       terminalStatusBuckets: {},
