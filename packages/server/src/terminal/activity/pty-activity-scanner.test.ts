@@ -210,6 +210,34 @@ describe("isNeedsInputScreen", () => {
     ).toBe(false);
   });
 
+  it("ignores a Grok draft under the always-approve footer", () => {
+    const screen = [
+      "Can you commit and push everything codex did?",
+      "I did not re-run the test suites.",
+      "Worked for 4m4s",
+      "╭────────────────────╮",
+      "❯ So lets continue one the",
+      "Grok 4.7 (xhigh) · always-approve",
+      "Enter:send  Shift+Tab: mode",
+    ];
+    expect(isNeedsInputScreen(screen)).toBe(false);
+    expect(isIdleAgentScreen(screen, "❯ So lets continue one the", "grok")).toBe(false);
+  });
+
+  it("keeps a Grok approval card above the composer", () => {
+    expect(
+      isNeedsInputScreen([
+        "Do you want to proceed?",
+        "❯ Allow once",
+        "  Always allow this command",
+        "  Reject",
+        "╭────────────────────╮",
+        "❯ So lets continue one the",
+        "Grok 4.7 (xhigh) · always-approve",
+      ]),
+    ).toBe(true);
+  });
+
   it("ignores approval words typed into Claude's composer", () => {
     const rule = "─".repeat(60);
     expect(
@@ -1510,6 +1538,51 @@ describe("PtyActivityScanner — full lifecycle", () => {
 
     screenLines = finished;
     scanner.feedOutput("❯");
+    vi.advanceTimersByTime(500);
+
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "finished",
+    });
+  });
+
+  it("stays finished while a Grok draft contains continue under always-approve", () => {
+    const tracker = new TerminalActivityTracker();
+    let screenLines = [
+      "Worked for 4m4s",
+      "╭────────────────────╮",
+      "❯",
+      "Grok 4.7 (xhigh) · always-approve",
+    ];
+    let cursorLine = "❯";
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screenLines,
+      readCursorLine: () => cursorLine,
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("grok");
+    scanner.feedInput("\r");
+    scanner.feedOutput("reply");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "finished",
+    });
+
+    screenLines = [
+      "Can you commit and push everything codex did?",
+      "I did not re-run the test suites.",
+      "Worked for 4m4s",
+      "╭────────────────────╮",
+      "❯ So lets continue one the",
+      "Grok 4.7 (xhigh) · always-approve",
+    ];
+    cursorLine = "❯ So lets continue one the";
+    scanner.feedOutput("e");
     vi.advanceTimersByTime(500);
 
     expect(tracker.getSnapshot()).toMatchObject({

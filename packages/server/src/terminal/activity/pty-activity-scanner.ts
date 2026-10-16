@@ -56,11 +56,20 @@ export function isSpendLimitScreen(lines: string[]): boolean {
 const HORIZONTAL_RULE = /^[─━═]{3,}/;
 
 // Claude's input box is a `❯ text` composer directly under a rule, with its status line
-// below. None of it is a prompt from the agent: words typed into the composer
-// ("confirm", "allow") and footer `?`s (git counts, tips) must not read as one.
+// below. Grok's is the same composer directly under a textless `╭─╮` cap, and the
+// model footer (`Grok 4.7 · always-approve`) sits under the draft. None of it is a
+// prompt from the agent: words typed into the composer ("confirm", "continue") and
+// the mode name in the footer must not read as one. A card titled `╭─ Approve ─╮`
+// is not a cap, so a real approval above the composer still counts.
+const GROK_COMPOSER_CAP = /^╭[─━═╮]*$/;
+
 function dropComposerBlock(lines: string[]): string[] {
   for (let index = lines.length - 1; index > 0; index -= 1) {
-    if (/^[>❯]/.test(lines[index].trim()) && HORIZONTAL_RULE.test(lines[index - 1].trim())) {
+    const previous = lines[index - 1].trim();
+    if (
+      /^[>❯]/.test(lines[index].trim()) &&
+      (HORIZONTAL_RULE.test(previous) || GROK_COMPOSER_CAP.test(previous))
+    ) {
       return lines.slice(0, index - 1);
     }
   }
