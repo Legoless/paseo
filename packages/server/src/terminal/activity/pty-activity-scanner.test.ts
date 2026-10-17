@@ -2999,6 +2999,31 @@ describe("Antigravity, Gemini, and Cursor terminal activity", () => {
     expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
   });
 
+  it("keeps Antigravity working while a subagent is still running", () => {
+    const running = [
+      "The main analysis is complete; awaiting the engine revision.",
+      ">",
+      "  ● Agent(self: McLaren Engine Revision Engineer)  Run installed checks · 28m5s",
+      "? for shortcuts                         Gemini 4 Argon · high · 1 subagent(s)",
+    ];
+    expect(isAntigravityBusyScreen(running)).toBe(true);
+    expect(isAntigravityBusyScreen([">", "Gemini 4 Argon · high · 1 task(s)"])).toBe(true);
+    expect(isIdleAgentScreen(running, ">", "antigravity")).toBe(false);
+    expect(isAntigravityBusyScreen(["The main analysis is complete.", ">", "0 subagent(s)"])).toBe(
+      false,
+    );
+
+    const { tracker, scanner, paint } = terminal("antigravity");
+    scanner.feedInput("\r");
+    paint(["The main analysis is complete.", ">"], ">");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+
+    paint(running, ">");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
   it("keeps Gemini working on its elapsed status and finishes at the placeholder", () => {
     const placeholder = "│ >   Type your message or @path/to/file";
     expect(isIdlePromptLine(placeholder, "gemini")).toBe(true);

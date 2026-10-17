@@ -245,14 +245,14 @@ export function isIdlePromptLine(line: string, agent: KnownAgentName): boolean {
 }
 
 const ANTIGRAVITY_RUNNING_STATUS = /\[\d{1,2}:\d{2}:\d{2}\].*\brunning$/i;
-const ANTIGRAVITY_OPEN_TASKS = /\b[1-9]\d*\s+task\(s\)\b/i;
+const ANTIGRAVITY_OPEN_WORK = /\b[1-9]\d*\s+(?:task|subagent)\(s\)(?=\s|$)/i;
 
 // The agy composer stays on `>` while a command is still running. That prompt is only
-// idle once the status line and the open-task count are gone.
+// idle once the status line and the open-task/subagent count are gone.
 export function isAntigravityBusyScreen(lines: string[]): boolean {
   const tail = lines.slice(-20).map((line) => stripAnsi(line).trim());
   return tail.some(
-    (line) => ANTIGRAVITY_RUNNING_STATUS.test(line) || ANTIGRAVITY_OPEN_TASKS.test(line),
+    (line) => ANTIGRAVITY_RUNNING_STATUS.test(line) || ANTIGRAVITY_OPEN_WORK.test(line),
   );
 }
 
