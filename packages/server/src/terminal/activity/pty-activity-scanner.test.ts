@@ -6,6 +6,8 @@ import {
   isAntigravityBusyScreen,
   isClaudeBusyScreen,
   isCodexBusyScreen,
+  isCursorNeedsInputScreen,
+  isGeminiBusyScreen,
   isGrokBusyScreen,
   isIdleAgentScreen,
   isIdlePromptLine,
@@ -221,7 +223,26 @@ describe("isNeedsInputScreen", () => {
       "Enter:send  Shift+Tab: mode",
     ];
     expect(isNeedsInputScreen(screen)).toBe(false);
-    expect(isIdleAgentScreen(screen, "❯ So lets continue one the", "grok")).toBe(false);
+    expect(isIdleAgentScreen(screen, "❯ So lets continue one the", "grok")).toBe(true);
+  });
+
+  it("ignores Grok's startup tip and always-approve footer", () => {
+    const screen = [
+      "Grok Build 1.0.60",
+      "",
+      "New worktree",
+      "Resume session",
+      "Changelog",
+      "Quit",
+      "",
+      "Tip: Run /compact [context] when chat gets long.",
+      "",
+      "> ",
+      "╰────────────────────── Grok 4.7 (xhigh) · always-approve ─╯",
+      "[stable]",
+    ];
+    expect(isNeedsInputScreen(screen)).toBe(false);
+    expect(isIdleAgentScreen(screen, ">", "grok")).toBe(true);
   });
 
   it("keeps a Grok approval card above the composer", () => {
@@ -1884,6 +1905,15 @@ describe("OpenCode terminal activity", () => {
     expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
   });
 
+  it("rechecks a restored OpenCode screen after an animation-disabled repaint", () => {
+    const { scanner, tracker, paint } = terminal();
+    scanner.feedOutput("partial repaint");
+    expect(scanner.getActiveAgent()).toBeNull();
+    paint([...composer(), " [⋯] esc interrupt 177.9K (17%) · $0.22 ctrl+p commands"], "[⋯]");
+    expect(scanner.getActiveAgent()).toBe("opencode");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
   it("keeps a restored idle composer clear and recognizes a draft as the next turn's prompt", () => {
     const screen = [...composer("next task"), ...idleFooter];
     const { scanner, tracker, paint } = terminal(screen);
@@ -1968,6 +1998,12 @@ describe("OpenCode terminal activity", () => {
         "Permission required",
         "Run git status",
         "Allow once   Allow always   Reject",
+        "⇆ select   enter confirm",
+      ],
+      [
+        "△ Always allow",
+        "This will allow edit until OpenCode is restarted.",
+        "Confirm   Cancel",
         "⇆ select   enter confirm",
       ],
       [
@@ -2130,6 +2166,45 @@ describe("OpenCode terminal activity", () => {
     paint(screen);
     vi.advanceTimersByTime(500);
     expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+  });
+
+  it("prefers Always allow over a stale composer and interrupt footer", () => {
+    const screen = [
+      ...composer(),
+      ...busyFooter,
+      "△ Always allow",
+      "This will allow edit until OpenCode is restarted.",
+      "Confirm   Cancel",
+      "⇆ select   enter confirm",
+    ];
+    expect(isOpenCodeNeedsInputScreen(screen)).toBe(true);
+    expect(isOpenCodeBusyScreen(screen)).toBe(false);
+    expect(isIdleAgentScreen(screen, "┃", "opencode")).toBe(false);
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    tracker.set("working", undefined, "root");
+    paint(screen);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+  });
+
+  it("ignores quota wording in an OpenCode draft and keeps a real banner red", () => {
+    const draft = "Explain insufficient quota errors";
+    const screen = [...composer(draft), ...idleFooter];
+    expect(isSpendLimitScreen(screen, "opencode")).toBe(false);
+    const quotaScreen = ["Quota exhausted", ...composer("next task"), ...idleFooter];
+    expect(isSpendLimitScreen(quotaScreen, "opencode")).toBe(true);
+
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    scanner.feedInput("\r");
+    paint(screen);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+
+    paint(quotaScreen);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "quota" });
   });
 
   it("keeps a quota failure red ahead of busy footer or hook idle", () => {
@@ -2401,6 +2476,25 @@ describe("Muse Code terminal activity", () => {
     expect(isIdleAgentScreen(question, "❯ First option", "muse")).toBe(false);
   });
 
+  it("ignores quota wording in a Muse draft and keeps a real banner red", () => {
+    const draft = "Explain insufficient quota errors";
+    const screen = ["◆ Done.", "", ...composer(draft)];
+    expect(isSpendLimitScreen(screen, "muse")).toBe(false);
+    const quotaScreen = ["Usage limit reached", "", ...composer("next task")];
+    expect(isSpendLimitScreen(quotaScreen, "muse")).toBe(true);
+
+    const { tracker, scanner, paint } = terminal();
+    scanner.handleInitialCommand("muse");
+    scanner.feedInput("\r");
+    paint(screen, `❯ ${draft}`);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+
+    paint(quotaScreen, "❯ next task");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "quota" });
+  });
+
   it("keeps quota red at the composer, clears it on focus and starts the next turn", () => {
     const { tracker, scanner, paint } = terminal();
     scanner.handleInitialCommand("muse");
@@ -2458,5 +2552,644 @@ describe("Muse Code terminal activity", () => {
 
     scanner.feedInput("\r");
     expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+});
+
+describe("Claude and Codex composer activity", () => {
+  type ComposerAgent = "claude" | "codex";
+
+  const claudeRule = "─".repeat(40);
+
+  function composer(agent: ComposerAgent, draft: string): string[] {
+    if (agent === "claude") {
+      return [claudeRule, `❯ ${draft}`, claudeRule];
+    }
+    return [`› ${draft}`];
+  }
+
+  function composerCursor(agent: ComposerAgent, draft: string): string {
+    return agent === "claude" ? `❯ ${draft}` : `› ${draft}`;
+  }
+
+  function finishedScreen(agent: ComposerAgent, draft: string): string[] {
+    return [agent === "claude" ? "✻ Worked for 2s" : "Worked for 2s", ...composer(agent, draft)];
+  }
+
+  function terminal(agent: ComposerAgent) {
+    const tracker = new TerminalActivityTracker();
+    let lines: string[] = [];
+    let cursorLine = "";
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: (limit) => lines.slice(-limit),
+      readCursorLine: () => cursorLine,
+      stillnessMs: 500,
+    });
+    scanner.handleInitialCommand(agent);
+    return {
+      tracker,
+      scanner,
+      paint(next: string[], cursor: string, output = next.join("\n")) {
+        lines = next;
+        cursorLine = cursor;
+        scanner.feedOutput(output);
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("ignores a source error containing quota wording without weakening real notices", () => {
+    expect(isSpendLimitScreen(['throw new Error("quota exceeded")'])).toBe(false);
+    expect(isSpendLimitScreen(["Quota exceeded"])).toBe(true);
+    expect(isSpendLimitScreen(["API rate limit reached"])).toBe(true);
+  });
+
+  it.each<ComposerAgent>(["claude", "codex"])(
+    "excludes %s composer drafts from quota and approval checks but preserves real notices",
+    (agent) => {
+      const draft = composerCursor(agent, "quota exceeded; please confirm and continue?");
+      expect(isSpendLimitScreen(finishedScreen(agent, "quota exceeded"), agent)).toBe(false);
+      expect(isNeedsInputScreen(finishedScreen(agent, "please confirm and continue?"), agent)).toBe(
+        false,
+      );
+
+      expect(
+        isSpendLimitScreen(
+          ["You've hit your monthly spend limit · resets 3pm", ...composer(agent, "next task")],
+          agent,
+        ),
+      ).toBe(true);
+
+      const selection = agent === "claude" ? "❯ Continue" : "› 1. Yes, proceed (y)";
+      const dialog = ["Do you want to proceed?", selection, ...composer(agent, "next task")];
+      expect(isNeedsInputScreen(dialog, agent)).toBe(true);
+      expect(isIdleAgentScreen(dialog, composerCursor(agent, "next task"), agent)).toBe(false);
+      expect(isIdlePromptLine(draft, agent)).toBe(true);
+    },
+  );
+
+  it("accepts a Claude draft composer without admitting an unnumbered approval option", () => {
+    const screen = finishedScreen("claude", "next task");
+    expect(isIdlePromptLine("❯ next task", "claude")).toBe(true);
+    expect(isIdleAgentScreen(screen, "❯ next task", "claude")).toBe(true);
+
+    const approval = ["Do you want to proceed?", "❯ Continue", "  No"];
+    expect(isNeedsInputScreen(approval, "claude")).toBe(true);
+    expect(isIdleAgentScreen(approval, "❯ Continue", "claude")).toBe(false);
+  });
+
+  it.each(["›", "»"])(
+    "recognizes Codex's %s numbered approval without accepting a numbered draft",
+    (prompt) => {
+      const selection = `${prompt} 1. Yes, proceed (y)`;
+      const dialog = ["Would you like to proceed?", selection, "  2. No"];
+      expect(isNeedsInputScreen(dialog, "codex")).toBe(true);
+      expect(isIdleAgentScreen(dialog, selection, "codex")).toBe(false);
+      expect(isIdlePromptLine(`${prompt} 1. Fix the parser`, "codex")).toBe(false);
+    },
+  );
+
+  it("keeps Codex working on a truncated dynamic header nearest its composer", () => {
+    const busy = ["• Planning the fix (1m 02s", "› Ask Codex to do anything"];
+    expect(isCodexBusyScreen(busy)).toBe(true);
+    expect(isIdleAgentScreen(busy, "› Ask Codex to do anything", "codex")).toBe(false);
+    expect(
+      isCodexBusyScreen([
+        "• Planning the fix (1m 02s",
+        "Worked for 1m 03s",
+        "› Ask Codex to do anything",
+      ]),
+    ).toBe(false);
+  });
+
+  it.each<ComposerAgent>(["claude", "codex"])(
+    "finishes at a %s draft containing quota wording and keeps a real banner red",
+    (agent) => {
+      const { tracker, scanner, paint } = terminal(agent);
+      scanner.feedInput("\r");
+      paint(finishedScreen(agent, "quota exceeded"), composerCursor(agent, "quota exceeded"));
+      vi.advanceTimersByTime(500);
+      expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+
+      paint(
+        ["You've hit your monthly spend limit · resets 3pm", ...composer(agent, "next task")],
+        composerCursor(agent, "next task"),
+        "quota notice",
+      );
+      vi.advanceTimersByTime(500);
+      expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "quota" });
+    },
+  );
+
+  it("finishes Claude at a draft and gives a later unnumbered dialog priority", () => {
+    const { tracker, scanner, paint } = terminal("claude");
+    scanner.feedInput("\r");
+    paint(finishedScreen("claude", "next task"), "❯ next task");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+
+    paint(["Do you want to proceed?", "❯ Continue", "  No"], "❯ Continue");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+  });
+
+  it("resumes Codex after a y approval and finishes after continuous busy repaints", () => {
+    const { tracker, scanner, paint } = terminal("codex");
+    const composerLine = "› Ask Codex to do anything";
+    scanner.feedInput("\r");
+    paint(
+      ["Would you like to proceed?", "› 1. Yes, proceed (y)", "  2. No"],
+      "› 1. Yes, proceed (y)",
+    );
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+
+    scanner.feedInput("y");
+    paint(["Worked for 2s", composerLine], composerLine, "⠋");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+
+    paint(["• Planning the fix (1m 02s", composerLine], composerLine, "02s");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    vi.advanceTimersByTime(400);
+    paint(["• Planning the fix (1m 03s", composerLine], composerLine, "03s");
+    vi.advanceTimersByTime(400);
+    paint(["• Planning the fix (1m 04s", composerLine], composerLine, "04s");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    vi.advanceTimersByTime(400);
+
+    paint(["Worked for 1m 05s", composerLine], composerLine);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it.each<ComposerAgent>(["claude", "codex"])(
+    "clears dismissed %s needs-input at the returned composer without finished attention",
+    (agent) => {
+      const { tracker, scanner, paint } = terminal(agent);
+      const selection = agent === "claude" ? "❯ Continue" : "› 1. Yes, proceed (y)";
+      const dialog = ["Do you want to proceed?", selection, "  No"];
+      scanner.feedInput("\r");
+      paint(dialog, selection);
+      vi.advanceTimersByTime(500);
+      expect(tracker.getSnapshot()).toMatchObject({
+        state: "idle",
+        attentionReason: "needs_input",
+      });
+
+      tracker.interrupt();
+      scanner.handleInterrupt();
+      paint([...dialog, ...finishedScreen(agent, "next task")], composerCursor(agent, "next task"));
+      vi.advanceTimersByTime(500);
+      expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: null });
+    },
+  );
+});
+
+describe("Grok and Kimi composer activity", () => {
+  type GrokKimiAgent = "grok" | "kimi";
+
+  function grokComposer(draft: string): string[] {
+    return ["╭────────────────────╮", `❯ ${draft}`.trimEnd(), "Grok 4.7 (xhigh) · always-approve"];
+  }
+
+  function grokFinishedScreen(draft: string): string[] {
+    return ["Worked for 4m4s", ...grokComposer(draft)];
+  }
+
+  function kimiComposer(draft: string): string[] {
+    return ["╭──────╮", `│ > ${draft}`.trimEnd(), "╰──────╯"];
+  }
+
+  function kimiStatus(badge = ""): string {
+    return `Ask When Needed  K3 thinking: max${badge}  ~/proj  main  context: 29% (290k/1M)`;
+  }
+
+  function kimiScreen(draft: string, badge = ""): string[] {
+    return [...kimiComposer(draft), kimiStatus(badge)];
+  }
+
+  function screenWithDraft(agent: GrokKimiAgent, draft: string): string[] {
+    return agent === "grok" ? grokFinishedScreen(draft) : kimiScreen(draft);
+  }
+
+  function draftCursor(agent: GrokKimiAgent, draft: string): string {
+    return agent === "grok" ? `❯ ${draft}` : `│ > ${draft}`;
+  }
+
+  function terminal(agent?: GrokKimiAgent) {
+    const tracker = new TerminalActivityTracker();
+    let lines: string[] = [];
+    let cursorLine = "";
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: (limit) => lines.slice(-limit),
+      readCursorLine: () => cursorLine,
+      stillnessMs: 500,
+    });
+    if (agent) scanner.handleInitialCommand(agent);
+    return {
+      tracker,
+      scanner,
+      paint(next: string[], cursor: string, output = next.join("\n")) {
+        lines = next;
+        cursorLine = cursor;
+        scanner.feedOutput(output);
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("strips Grok's uncapped startup draft without hiding a real approval", () => {
+    const startup = [
+      "Grok Build 1.0.60",
+      "Tip: Run /compact [context] when chat gets long.",
+      "> please confirm?",
+      "╰────────────────────── Grok 4.7 (xhigh) · always-approve ─╯",
+      "[stable]",
+    ];
+    expect(isNeedsInputScreen(startup, "grok")).toBe(false);
+
+    const approval = ["Do you want to proceed?", "❯ Allow once", "  Reject", ...grokComposer("")];
+    expect(isNeedsInputScreen(approval, "grok")).toBe(true);
+    expect(isIdleAgentScreen(approval, "❯", "grok")).toBe(false);
+
+    const { tracker, scanner, paint } = terminal("grok");
+    paint(startup, "> please confirm?");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+
+    scanner.feedInput("\r");
+    paint(approval, "❯");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+  });
+
+  it("finishes Grok's first type-ahead paint after busy and approval checks", () => {
+    const draft = "So lets continue one the";
+    const finished = grokFinishedScreen(draft);
+    expect(isGrokBusyScreen(finished)).toBe(false);
+    expect(isNeedsInputScreen(finished, "grok")).toBe(false);
+    expect(isIdleAgentScreen(finished, `❯ ${draft}`, "grok")).toBe(true);
+
+    const busy = ["Worked for 4m4s", "⸬ Run tests  1m04s", ...grokComposer(draft)];
+    expect(isGrokBusyScreen(busy)).toBe(true);
+    expect(isIdleAgentScreen(busy, `❯ ${draft}`, "grok")).toBe(false);
+
+    const { tracker, scanner, paint } = terminal("grok");
+    scanner.feedInput("\r");
+    paint(finished, `❯ ${draft}`);
+    vi.advanceTimersByTime(1500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("reads Kimi running badges only on status rows below the composer", () => {
+    const draft = "explain K3 thinking: max [1 task running]";
+    const draftScreen = kimiScreen(draft);
+    expect(isKimiBusyScreen(draftScreen)).toBe(false);
+    expect(isIdleAgentScreen(draftScreen, `│ > ${draft}`, "kimi")).toBe(true);
+
+    const quoted = [kimiStatus(" [1 task running]"), ...kimiScreen("")];
+    expect(isKimiBusyScreen(quoted)).toBe(false);
+    expect(isKimiBusyScreen(kimiScreen("", " [1 task running]"))).toBe(true);
+
+    const { tracker, scanner, paint } = terminal("kimi");
+    scanner.feedInput("\r");
+    paint(draftScreen, `│ > ${draft}`);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+
+    paint(kimiScreen("", " [1 task running]"), "│ >", "1 task running");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    paint(kimiScreen(""), "│ >");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it.each<GrokKimiAgent>(["grok", "kimi"])(
+    "ignores quota wording in a %s draft and keeps a real banner red",
+    (agent) => {
+      const draft = "why am I out of quota?";
+      const screen = screenWithDraft(agent, draft);
+      const cursor = draftCursor(agent, draft);
+      expect(isSpendLimitScreen(screen, agent)).toBe(false);
+
+      const banner =
+        agent === "grok" ? "You've hit your monthly spend limit" : "Model rate limit reached";
+      const quotaScreen = [banner, ...screenWithDraft(agent, "next task")];
+      expect(isSpendLimitScreen(quotaScreen, agent)).toBe(true);
+
+      const { tracker, scanner, paint } = terminal(agent);
+      scanner.feedInput("\r");
+      paint(screen, cursor);
+      vi.advanceTimersByTime(500);
+      expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+
+      paint(quotaScreen, draftCursor(agent, "next task"), "quota notice");
+      vi.advanceTimersByTime(500);
+      expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "quota" });
+    },
+  );
+
+  it.each<GrokKimiAgent>(["grok", "kimi"])(
+    "rechecks a restored %s screen after an earlier command finishes",
+    (agent) => {
+      const restored =
+        agent === "grok"
+          ? ["Worked for 4m4s", "⸬ Run tests  1m04s", ...grokComposer("")]
+          : kimiScreen("", " [1 task running]");
+      const { tracker, scanner, paint } = terminal();
+      paint(["ordinary shell output"], "");
+      expect(scanner.getActiveAgent()).toBeNull();
+      scanner.handleCommandFinished();
+
+      paint(restored, agent === "grok" ? "❯" : "│ >", agent === "grok" ? "1m05s" : "29%");
+      expect(scanner.getActiveAgent()).toBe(agent);
+      vi.advanceTimersByTime(500);
+      expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    },
+  );
+});
+
+describe("Antigravity, Gemini, and Cursor terminal activity", () => {
+  type RemainingAgent = "antigravity" | "gemini" | "cursor";
+
+  function terminal(agent: RemainingAgent) {
+    const tracker = new TerminalActivityTracker();
+    let lines: string[] = [];
+    let cursorLine = "";
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: (limit) => lines.slice(-limit),
+      readCursorLine: () => cursorLine,
+      stillnessMs: 500,
+    });
+    const command = { antigravity: "agy", cursor: "cursor-agent", gemini: "gemini" }[agent];
+    scanner.handleInitialCommand(command);
+    return {
+      tracker,
+      scanner,
+      paint(next: string[], cursor: string, output = next.join("\n")) {
+        lines = next;
+        cursorLine = cursor;
+        scanner.feedOutput(output);
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("sanitizes Antigravity's bare draft without hiding selections or quota notices", () => {
+    const draft = "please confirm and run the tests";
+    const screen = ["Antigravity ready.", `> ${draft}`];
+    expect(isNeedsInputScreen(screen, "antigravity")).toBe(false);
+    expect(isSpendLimitScreen(["> explain insufficient quota errors"], "antigravity")).toBe(false);
+    expect(isSpendLimitScreen(["You are out of quota. Stop.", ...screen], "antigravity")).toBe(
+      true,
+    );
+    expect(isIdleAgentScreen(screen, `> ${draft}`, "antigravity")).toBe(false);
+    expect(isIdleAgentScreen(["Done.", ">"], ">", "antigravity")).toBe(true);
+
+    const trust = [
+      "Accessing workspace:",
+      "/Users/test/project",
+      "Do you trust the contents of this project?",
+      "Antigravity CLI requires permission to read, edit, and execute files here.",
+      "> Yes, I trust this folder",
+      "  No, exit",
+      "  ↑/↓ Navigate · enter Confirm",
+    ];
+    expect(isNeedsInputScreen(trust, "antigravity")).toBe(true);
+
+    const { tracker, scanner, paint } = terminal("antigravity");
+    paint(screen, `> ${draft}`);
+    vi.advanceTimersByTime(1500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+
+    scanner.feedInput("\r");
+    paint(trust, "> Yes, I trust this folder");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+  });
+
+  it("keeps Gemini working on its elapsed status and finishes at the placeholder", () => {
+    const placeholder = "│ >   Type your message or @path/to/file";
+    expect(isIdlePromptLine(placeholder, "gemini")).toBe(true);
+    expect(isIdlePromptLine("> Type your message or @path/to/file", "gemini")).toBe(true);
+    expect(isIdlePromptLine("│   > Type your message or @path/to/file │", "gemini")).toBe(true);
+    expect(isIdlePromptLine("│ > explain something", "gemini")).toBe(false);
+
+    const busy = ["⠇ Addressing User's Inquiry (esc to cancel, 15s)", placeholder];
+    expect(isGeminiBusyScreen(busy)).toBe(true);
+    expect(isIdleAgentScreen(busy, placeholder, "gemini")).toBe(false);
+    const finished = ["✓ Done.", placeholder];
+    expect(isGeminiBusyScreen(finished)).toBe(false);
+    expect(isIdleAgentScreen(finished, placeholder, "gemini")).toBe(true);
+
+    const { tracker, scanner, paint } = terminal("gemini");
+    scanner.feedInput("\r");
+    paint(busy, placeholder, "15s");
+    vi.advanceTimersByTime(2500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    paint(finished, placeholder);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("recognizes Gemini's daily quota notice without matching source text", () => {
+    const notice = "✕ [API Error: You have exhausted your daily quota on this model.]";
+    expect(isSpendLimitScreen([notice], "gemini")).toBe(true);
+    expect(isSpendLimitScreen(['throw new Error("exhausted your daily quota")'])).toBe(false);
+
+    const placeholder = "│ >   Type your message or @path/to/file";
+    const { tracker, scanner, paint } = terminal("gemini");
+    scanner.feedInput("\r");
+    paint([notice, placeholder], placeholder);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "quota" });
+  });
+
+  it("finishes Cursor at follow-up placeholders without admitting drafts or busy rows", () => {
+    const placeholders = ["→ Add a follow-up", "→ Add a follow-up — /plan to review and build"];
+    for (const placeholder of placeholders) {
+      expect(isIdleAgentScreen(["OK", `  ${placeholder}`], "", "cursor")).toBe(true);
+    }
+    expect(isIdleAgentScreen(["OK", "  → Add a follow-up now"], "", "cursor")).toBe(false);
+    expect(isIdleAgentScreen(["  → Add a follow-up", "ctrl+c to stop"], "", "cursor")).toBe(false);
+
+    const { tracker, scanner, paint } = terminal("cursor");
+    for (const placeholder of placeholders) {
+      scanner.feedInput("\r");
+      paint(["OK", `  ${placeholder}`], "");
+      vi.advanceTimersByTime(500);
+      expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+      tracker.clearAttention();
+    }
+  });
+
+  it("keeps Cursor pending decisions orange instead of clearing them", () => {
+    const decision = [
+      "Ready to proceed?",
+      "→ 1. Proceed (enter)",
+      "  2. Mark as fixed (f)",
+      "→ Waiting for decision (y/n/p)...",
+    ];
+    expect(isCursorNeedsInputScreen(decision)).toBe(true);
+    expect(isIdleAgentScreen(decision, "", "cursor")).toBe(false);
+    expect(
+      isIdleAgentScreen(
+        ["  → Plan, search, build anything", "Allow Cursor to run this command? [y/N]"],
+        "",
+        "cursor",
+      ),
+    ).toBe(false);
+
+    const { tracker, scanner, paint } = terminal("cursor");
+    scanner.feedInput("\r");
+    paint(decision, "");
+    vi.advanceTimersByTime(1500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+  });
+});
+
+describe("stale dialog and Cursor footer regressions", () => {
+  type DialogAgent = "claude" | "codex" | "grok";
+  type RegressionAgent = DialogAgent | "cursor";
+
+  const commands: Record<RegressionAgent, string> = {
+    claude: "claude",
+    codex: "codex",
+    grok: "grok",
+    cursor: "cursor-agent",
+  };
+
+  function liveDialog(agent: DialogAgent): string[] {
+    if (agent === "codex") {
+      return ["Do you want to proceed?", "› 1. Yes, proceed (y)", "  2. No"];
+    }
+    if (agent === "grok") {
+      return ["Do you want to proceed?", "❯ Allow once", "  Reject"];
+    }
+    return ["Do you want to proceed?", "❯ Continue", "  No"];
+  }
+
+  function finishedScreen(agent: DialogAgent): string[] {
+    if (agent === "claude") {
+      return ["✻ Worked for 2s", "─".repeat(40), "❯", "─".repeat(40)];
+    }
+    if (agent === "codex") {
+      return ["Worked for 4m4s", "› Ask Codex to do anything"];
+    }
+    return ["Worked for 4m4s", "╭────────────────────╮", "❯", "Grok 4.7 (xhigh) · always-approve"];
+  }
+
+  function idleCursor(agent: DialogAgent): string {
+    return agent === "codex" ? "› Ask Codex to do anything" : "❯";
+  }
+
+  function terminal(agent: RegressionAgent) {
+    const tracker = new TerminalActivityTracker();
+    let lines: string[] = [];
+    let cursorLine = "";
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: (limit) => lines.slice(-limit),
+      readCursorLine: () => cursorLine,
+      stillnessMs: 500,
+    });
+    scanner.handleInitialCommand(commands[agent]);
+    return {
+      tracker,
+      scanner,
+      paint(next: string[], cursor: string, output = next.join("\n")) {
+        lines = next;
+        cursorLine = cursor;
+        scanner.feedOutput(output);
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each<DialogAgent>(["claude", "codex", "grok"])(
+    "finishes %s without re-raising a dialog closed by the turn-end marker",
+    (agent) => {
+      const dialog = liveDialog(agent);
+      const selection = dialog[1];
+      const resolved = [...dialog, ...finishedScreen(agent)];
+      const cursor = idleCursor(agent);
+      expect(isNeedsInputScreen(dialog, agent)).toBe(true);
+      expect(isIdleAgentScreen(dialog, selection, agent)).toBe(false);
+      expect(isNeedsInputScreen(resolved, agent)).toBe(false);
+      expect(isIdleAgentScreen(resolved, cursor, agent)).toBe(true);
+
+      const { tracker, scanner, paint } = terminal(agent);
+      scanner.feedInput("\r");
+      paint(dialog, selection);
+      vi.advanceTimersByTime(500);
+      expect(tracker.getSnapshot()).toMatchObject({
+        state: "idle",
+        attentionReason: "needs_input",
+      });
+
+      scanner.feedInput("\r");
+      paint(resolved, cursor);
+      vi.advanceTimersByTime(500);
+      expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+    },
+  );
+
+  it("ignores Cursor prose above the composer but rejects a live busy footer", () => {
+    const placeholder = "→ Plan, search, build anything";
+    const prose = ["The server is running; ctrl+c to stop it.", placeholder];
+    const busy = [placeholder, "ctrl+c to stop"];
+    expect(isIdleAgentScreen(prose, "", "cursor")).toBe(true);
+    expect(isIdleAgentScreen(busy, "", "cursor")).toBe(false);
+
+    const { tracker, scanner, paint } = terminal("cursor");
+    scanner.feedInput("\r");
+    paint(busy, "");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    paint(prose, "");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
   });
 });

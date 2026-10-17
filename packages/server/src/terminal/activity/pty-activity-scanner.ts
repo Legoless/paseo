@@ -45,23 +45,60 @@ const TYPOGRAPHIC_APOSTROPHE = /[\u2018\u2019\u201a\u201b\u2032\u02bc]/g;
 // Phrases the CLIs print when the account itself cannot continue. Kept specific
 // so a source file that merely mentions "spend limit" does not light the pane.
 const SPEND_LIMIT_NOTICE =
-  /you(?:'ve| have) hit your (?:(?:monthly|weekly|daily|session) )?(?:spend |usage )?limit\b|spend limit (?:has been )?reached|usage limit (?:has been )?reached|\bout of (?:credits|quota|extra usage)\b|\b(?:quota|rate limit) (?:exceeded|exhausted|reached)\b|\binsufficient quota\b|\bcredit balance is too low\b|\bexhausted your (?:capacity|quota|credits)\b|\bsubscription limit\b/;
+  /you(?:'ve| have) hit your (?:(?:monthly|weekly|daily|session) )?(?:spend |usage )?limit\b|spend limit (?:has been )?reached|usage limit (?:has been )?reached|\bout of (?:credits|quota|extra usage)\b|\b(?:quota|rate limit) (?:exceeded|exhausted|reached)\b|\binsufficient quota\b|\bcredit balance is too low\b|\bexhausted your (?:(?:daily|weekly|monthly|session) )?(?:capacity|quota|credits)\b|\bsubscription limit\b/;
+const SOURCE_ERROR_EXPRESSION = /\bthrow\s+new\s+[\w$]*error\s*\(/i;
 
-export function isSpendLimitScreen(lines: string[]): boolean {
+export function isSpendLimitScreen(lines: string[], agent?: KnownAgentName): boolean {
   if (lines.length === 0) return false;
-  const tail = stripAnsi(lines.join("\n")).toLowerCase().replace(TYPOGRAPHIC_APOSTROPHE, "'");
-  return SPEND_LIMIT_NOTICE.test(tail);
+  return screenWithoutEditableComposer(lines.map(stripAnsi), agent).some((line) => {
+    const normalized = line.toLowerCase().replace(TYPOGRAPHIC_APOSTROPHE, "'");
+    return !SOURCE_ERROR_EXPRESSION.test(normalized) && SPEND_LIMIT_NOTICE.test(normalized);
+  });
 }
 
 const HORIZONTAL_RULE = /^[─━═]{3,}/;
+const CLAUDE_COMPOSER = /^❯(?:\s+.*)?$/;
+const CODEX_COMPOSER = /^(?:codex\s*)?[›»](?:\s+(?!\d+\.\s)\S.*)?$/i;
+const ANTIGRAVITY_COMPOSER = /^>(?:\s|$)/;
+const GEMINI_COMPOSER_PLACEHOLDER =
+  /^(?:│\s*)?>\s+Type\s+your\s+message\s+or\s+@path\/to\/file(?:\s*│)?$/;
 
 // Claude's input box is a `❯ text` composer directly under a rule, with its status line
 // below. Grok's is the same composer directly under a textless `╭─╮` cap, and the
 // model footer (`Grok 4.7 · always-approve`) sits under the draft. None of it is a
 // prompt from the agent: words typed into the composer ("confirm", "continue") and
-// the mode name in the footer must not read as one. A card titled `╭─ Approve ─╮`
-// is not a cap, so a real approval above the composer still counts.
+// the mode name in the footer must not read as one, including on the startup screen
+// where the composer has no cap. A card titled `╭─ Approve ─╮` is not a cap, so a
+// real approval above the composer still counts.
 const GROK_COMPOSER_CAP = /^╭[─━═╮]*$/;
+const GROK_COMPOSER_PROMPT = /^[>❯](?:\s|$)/;
+const GROK_MODEL_FOOTER = /\bGrok\s+\d+\.\d+\b.*\balways-approve\b/i;
+const KIMI_COMPOSER_PROMPT = /^│\s*>(?:\s|$)/;
+const KIMI_COMPOSER_TOP = /^╭[─━═]+╮$/;
+const KIMI_COMPOSER_BOTTOM = /^╰[─━═]+╯$/;
+
+interface KimiComposerBounds {
+  top: number;
+  bottom: number;
+}
+
+function grokBoxedComposerStart(lines: string[]): number {
+  for (let index = lines.length - 1; index > 0; index -= 1) {
+    if (
+      GROK_COMPOSER_PROMPT.test(lines[index].trim()) &&
+      GROK_COMPOSER_CAP.test(lines[index - 1].trim())
+    ) {
+      return index - 1;
+    }
+  }
+  return -1;
+}
+
+function grokUncappedComposerStart(lines: string[]): number {
+  const footer = lines.findLastIndex((line) => GROK_MODEL_FOOTER.test(line.trim()));
+  if (footer <= 0 || !GROK_COMPOSER_PROMPT.test(lines[footer - 1].trim())) return -1;
+  return footer - 1;
+}
 
 function dropComposerBlock(lines: string[]): string[] {
   for (let index = lines.length - 1; index > 0; index -= 1) {
@@ -73,13 +110,79 @@ function dropComposerBlock(lines: string[]): string[] {
       return lines.slice(0, index - 1);
     }
   }
-  return lines;
+  const uncappedGrokComposer = grokUncappedComposerStart(lines);
+  return uncappedGrokComposer >= 0 ? lines.slice(0, uncappedGrokComposer) : lines;
 }
 
-export function isNeedsInputScreen(lines: string[]): boolean {
+function dropCodexComposer(lines: string[]): string[] {
+  const composer = lines.findLastIndex((line) => CODEX_COMPOSER.test(line.trim()));
+  if (composer < 0) return lines;
+  return [...lines.slice(0, composer), ...lines.slice(composer + 1)];
+}
+
+function dropAntigravityComposer(lines: string[]): string[] {
+  const composer = lines.findLastIndex((line) => ANTIGRAVITY_COMPOSER.test(line.trim()));
+  if (composer < 0) return lines;
+  const remaining = [...lines.slice(0, composer), ...lines.slice(composer + 1)];
+  return hasSelectionContext(remaining) ? lines : remaining;
+}
+
+function findKimiComposer(lines: string[]): KimiComposerBounds | null {
+  const bottom = lines.findLastIndex((line) => KIMI_COMPOSER_BOTTOM.test(line.trim()));
+  if (bottom < 0) return null;
+  const top = lines.slice(0, bottom).findLastIndex((line) => KIMI_COMPOSER_TOP.test(line.trim()));
+  if (top < 0) return null;
+  const hasPrompt = lines
+    .slice(top + 1, bottom)
+    .some((line) => KIMI_COMPOSER_PROMPT.test(line.trim()));
+  return hasPrompt ? { top, bottom } : null;
+}
+
+function dropKimiComposer(lines: string[]): string[] {
+  const composer = findKimiComposer(lines);
+  if (!composer) return lines;
+  return [...lines.slice(0, composer.top), ...lines.slice(composer.bottom + 1)];
+}
+
+function screenWithoutEditableComposer(lines: string[], agent?: KnownAgentName): string[] {
+  if (agent === "codex") return dropCodexComposer(lines);
+  if (agent === "antigravity") return dropAntigravityComposer(lines);
+  if (agent === "kimi") return dropKimiComposer(lines);
+  if (agent === "opencode") return dropOpenCodeComposer(lines);
+  if (agent === "muse") return dropMuseComposer(lines);
+  return dropComposerBlock(lines);
+}
+
+function hasSelectionContext(lines: string[]): boolean {
+  const lowerText = lines.join("\n").toLowerCase();
+  return (
+    lowerText.includes("?") ||
+    /(?:↑\/↓|up\/down).*\b(?:navigate|select)\b/.test(lowerText) ||
+    /\benter\b.*\b(?:confirm|select|accept)\b/.test(lowerText)
+  );
+}
+
+function isProviderTurnEnd(line: string, agent?: KnownAgentName): boolean {
+  const normalized = stripAnsi(line).trim();
+  if (agent === "claude") return /^✻ (?!Waiting for\b).+ for \d/.test(normalized);
+  if (agent === "codex" || agent === "grok") {
+    return /^(?:[^\s\w]\s+)?Worked for\b/.test(normalized);
+  }
+  return false;
+}
+
+function screenFromLastTurnEnd(lines: string[], agent?: KnownAgentName): string[] {
+  const turnEnd = lines.findLastIndex((line) => isProviderTurnEnd(line, agent));
+  return turnEnd >= 0 ? lines.slice(turnEnd) : lines;
+}
+
+export function isNeedsInputScreen(lines: string[], agent?: KnownAgentName): boolean {
   if (lines.length === 0) return false;
-  const tailStart = Math.max(0, lines.length - 10);
-  const tailLines = dropComposerBlock(lines.map(stripAnsi)).slice(tailStart);
+  const currentTurn = screenFromLastTurnEnd(lines, agent);
+  const tailStart = Math.max(0, currentTurn.length - 10);
+  const tailLines = screenWithoutEditableComposer(currentTurn.map(stripAnsi), agent)
+    .slice(tailStart)
+    .filter((line) => !GROK_MODEL_FOOTER.test(line));
   const tailText = tailLines.join("\n");
   const lowerTail = tailText.toLowerCase();
 
@@ -106,12 +209,8 @@ export function isNeedsInputScreen(lines: string[]): boolean {
     return true;
   }
 
-  const hasSelectedOption = tailLines.some((line) => /^[>❯]\s+\S+/.test(line.trim()));
-  const hasSelectionContext =
-    lowerTail.includes("?") ||
-    /(?:↑\/↓|up\/down).*\b(?:navigate|select)\b/.test(lowerTail) ||
-    /\benter\b.*\b(?:confirm|select|accept)\b/.test(lowerTail);
-  if (hasSelectedOption && hasSelectionContext) {
+  const hasSelectedOption = tailLines.some((line) => /^[>❯›»]\s+\S+/.test(line.trim()));
+  if (hasSelectedOption && hasSelectionContext(tailLines)) {
     return true;
   }
 
@@ -119,10 +218,10 @@ export function isNeedsInputScreen(lines: string[]): boolean {
 }
 
 const IDLE_PROMPT_PATTERNS = {
-  claude: [/^❯$/],
+  claude: [CLAUDE_COMPOSER],
   // Codex keeps its composer (`› ` or `» ` + placeholder or draft) on the cursor line.
   // Numbered menu rows such as `› 1.` are not composers.
-  codex: [/^(?:codex\s*)?[›»](?:\s+(?!\d+\.\s)\S.*)?$/i],
+  codex: [CODEX_COMPOSER],
   // Grok 4.7's composer is `❯`. `>` and `grok>` are the older prompt.
   grok: [/^(?:grok\s*)?[>❯]$/i],
   antigravity: [/^>$/],
@@ -130,7 +229,7 @@ const IDLE_PROMPT_PATTERNS = {
   pi: [/^>$/],
   copilot: [/^>$/],
   cursor: [],
-  gemini: [/^>$/],
+  gemini: [/^>$/, GEMINI_COMPOSER_PLACEHOLDER],
   amp: [/^>$/],
   // Kimi's composer is a bordered box, so the cursor line reads `│ > draft`; while a
   // turn runs the cursor leaves the box, which keeps this from lighting mid-turn. The
@@ -157,14 +256,28 @@ export function isAntigravityBusyScreen(lines: string[]): boolean {
   );
 }
 
+const GEMINI_RUNNING_STATUS = /^[\u2800-\u28FF]\s+.+\(esc to cancel,\s*\d+[hms](?:\s+\d+[hms])*\)$/;
+const GEMINI_COMPOSER_BORDER = /^[╭╰][─━═]+[╮╯]$/;
+
+export function isGeminiBusyScreen(lines: string[]): boolean {
+  const stripped = lines.map((line) => stripAnsi(line).trim());
+  const composer = stripped.findLastIndex((line) => isIdlePromptLine(line, "gemini"));
+  if (composer < 0) return false;
+  const status = stripped
+    .slice(0, composer)
+    .findLast((line) => line.length > 0 && !GEMINI_COMPOSER_BORDER.test(line));
+  return status !== undefined && GEMINI_RUNNING_STATUS.test(status);
+}
+
 // Codex keeps its composer up while a turn runs, with a status line directly above it:
 // "• Working (12s • esc to interrupt)". The header can change and a narrow pane truncates
 // the hint, so match either. Only that line counts, so a reply or diff quoting it does not.
-const CODEX_RUNNING_STATUS = /\(\d+[hms] [^)]*esc to interrupt\)(?:\s*·.*)?$|^• Working \(\d/;
+const CODEX_RUNNING_STATUS =
+  /\(\d+[hms] [^)]*esc to interrupt\)(?:\s*·.*)?$|^• .+ \(\d+[hms](?:\s+\d+[hms])*$|^• Working \(\d/;
 
 export function isCodexBusyScreen(lines: string[]): boolean {
   const stripped = lines.map((line) => stripAnsi(line).trim());
-  const composer = stripped.findLastIndex((line) => /^[›»](?:\s|$)/.test(line));
+  const composer = stripped.findLastIndex((line) => CODEX_COMPOSER.test(line));
   const status = stripped.slice(0, Math.max(composer, 0)).findLast((line) => line.length > 0);
   return status !== undefined && CODEX_RUNNING_STATUS.test(status);
 }
@@ -201,9 +314,11 @@ const GROK_RUNNING_ROW = new RegExp(
   `^${GROK_RUNNING_MARK}.*(?:\\d+h\\d+m(?:\\d+s)?|\\d+m\\d+s|\\d+[hms])$`,
 );
 const GROK_THINKING_ROW = /^(?:[^\s\w]\s+)?Thinking(?:\.{1,3}|…|⋯)?$/;
+const GROK_WORKED_FOR = /^(?:[^\s\w]\s+)?Worked for\b/;
 const GROK_REASONING_CLOSED = /^(?:[^\s\w]\s+)?(?:Thought for|Worked for)\b/;
 const GROK_STILL_RUNNING = /^◎\s+(?:waiting\b|\d+\b.*\bstill running\b)/;
 const GROK_DOCK_LINE_LIMIT = 12;
+const GROK_DRAFT_PROMPT = /^(?:grok\s*)?[>❯]\s+\S/i;
 
 export function isGrokBusyScreen(lines: string[]): boolean {
   const stripped = dropComposerBlock(lines.map((line) => stripAnsi(line).trim()));
@@ -233,16 +348,29 @@ export function isGrokBusyScreen(lines: string[]): boolean {
   return false;
 }
 
+function isGrokFinishedComposerScreen(lines: string[]): boolean {
+  const stripped = lines.map((line) => stripAnsi(line).trim());
+  const composer = grokBoxedComposerStart(stripped);
+  if (composer < 0) return false;
+  const status = stripped.slice(0, composer).findLast((line) => line.length > 0);
+  return status !== undefined && GROK_WORKED_FOR.test(status);
+}
+
 // Kimi's composer comes back when the turn ends, but work that outlives the turn keeps
 // a "[1 task running]" badge in the status bar. The badge shares the row with the
 // model/context segments ("K3 thinking: max", "context: 29%"), so require one of them
-// on the same line — a reply quoting the badge text does not keep the pane working.
+// on the same line below the composer — a reply or draft does not keep the pane working.
 const KIMI_RUNNING_TASKS = /\[\d+ tasks? running\]/;
 const KIMI_STATUS_BAR_SEGMENT = /(?:\bthinking:\s*\w+|\bcontext:\s*\d{1,3}%)/;
 
 export function isKimiBusyScreen(lines: string[]): boolean {
-  const tail = lines.slice(-6).map((line) => stripAnsi(line).trim());
-  return tail.some((line) => KIMI_RUNNING_TASKS.test(line) && KIMI_STATUS_BAR_SEGMENT.test(line));
+  const stripped = lines.map((line) => stripAnsi(line).trim());
+  const composer = findKimiComposer(stripped);
+  if (!composer) return false;
+  return stripped
+    .slice(composer.bottom + 1)
+    .slice(-6)
+    .some((line) => KIMI_RUNNING_TASKS.test(line) && KIMI_STATUS_BAR_SEGMENT.test(line));
 }
 
 // Muse leaves its composer on the cursor line throughout the turn. Its animated
@@ -263,6 +391,11 @@ function museComposerStart(lines: string[]): number {
     }
   }
   return -1;
+}
+
+function dropMuseComposer(lines: string[]): string[] {
+  const composer = museComposerStart(lines.map((line) => stripAnsi(line).trim()));
+  return composer >= 0 ? lines.slice(0, composer) : lines;
 }
 
 export function isMuseNeedsInputScreen(lines: string[]): boolean {
@@ -320,7 +453,13 @@ const OPENCODE_INTERRUPT_HINT = /(?:^|\s)esc\s+(?:again\s+to\s+)?interrupt(?:\s|
 const OPENCODE_FOOTER_SPINNER = /^(?:[■⬝·⬥◆⬩⬪\u2800-\u28ff]+|\[⋯\])(?:\s|$)/;
 const OPENCODE_COMMAND_HINT = /\S+\s+commands(?:\s|$)/i;
 
-function openCodeComposerFooter(lines: string[]): string[] | null {
+interface OpenCodeComposer {
+  start: number;
+  end: number;
+  footer: string[];
+}
+
+function findOpenCodeComposer(lines: string[]): OpenCodeComposer | null {
   const stripped = lines.map((line) => stripAnsi(line).trim());
   const shadow = stripped.findLastIndex((line) => OPENCODE_COMPOSER_SHADOW.test(line));
   const end =
@@ -334,10 +473,21 @@ function openCodeComposerFooter(lines: string[]): string[] | null {
     body.unshift(stripped[index].slice(1).trim());
   }
   if (body.length < 2 || !/\S\s+[·•]\s+\S/.test(body.slice(-4).join(" "))) return null;
-  const footer = stripped.slice(shadow >= 0 ? end + 1 : end).filter(Boolean);
+  const composerEnd = shadow >= 0 ? end + 1 : end;
+  const footer = stripped.slice(composerEnd).filter(Boolean);
   const text = footer.join(" ");
   if (!OPENCODE_INTERRUPT_HINT.test(text) && !OPENCODE_COMMAND_HINT.test(text)) return null;
-  return footer;
+  return { start: end - body.length, end: composerEnd, footer };
+}
+
+function openCodeComposerFooter(lines: string[]): string[] | null {
+  return findOpenCodeComposer(lines)?.footer ?? null;
+}
+
+function dropOpenCodeComposer(lines: string[]): string[] {
+  const composer = findOpenCodeComposer(lines);
+  if (!composer) return lines;
+  return [...lines.slice(0, composer.start), ...lines.slice(composer.end)];
 }
 
 export function isOpenCodeBusyScreen(lines: string[]): boolean {
@@ -355,7 +505,7 @@ export function isOpenCodeNeedsInputScreen(lines: string[]): boolean {
   const composerFooter = openCodeComposerFooter(lines);
   const footer = (composerFooter ?? stripped).filter(Boolean).slice(-4).join(" ");
   const permission =
-    /\bPermission required\b|\bReject permission\b/i.test(stripped.join(" ")) &&
+    /\b(?:Permission required|Reject permission|Always allow)\b/i.test(stripped.join(" ")) &&
     /\benter\s+confirm\b/i.test(footer);
   const question = /\benter\s+(?:submit|toggle|confirm)\b.*\besc\s+dismiss\b/i.test(footer);
   if (permission || question) return true;
@@ -365,6 +515,7 @@ export function isOpenCodeNeedsInputScreen(lines: string[]): boolean {
 // Agents that keep their idle-looking composer up while work still runs.
 function isAgentBusyScreen(lines: string[], agent: KnownAgentName): boolean {
   if (agent === "antigravity") return isAntigravityBusyScreen(lines);
+  if (agent === "gemini") return isGeminiBusyScreen(lines);
   if (agent === "codex") return isCodexBusyScreen(lines);
   if (agent === "claude") return isClaudeBusyScreen(lines);
   if (agent === "grok") return isGrokBusyScreen(lines);
@@ -374,10 +525,30 @@ function isAgentBusyScreen(lines: string[], agent: KnownAgentName): boolean {
   return false;
 }
 
+const CURSOR_IDLE_COMPOSERS = new Set([
+  "→ Plan, search, build anything",
+  "→ Add a follow-up",
+  "→ Add a follow-up — /plan to review and build",
+]);
+const CURSOR_BUSY_HINT = /\bctrl\+c to stop\b/i;
+const CURSOR_DECISION_STATUS = /^→\s+Waiting for decision\b/i;
+const CURSOR_DECISION_OPTION = /^→\s+\d+\.\s+\S+/;
+
+export function isCursorNeedsInputScreen(lines: string[]): boolean {
+  const stripped = lines.slice(-15).map((line) => stripAnsi(line).trim());
+  const hasDecision = stripped.some((line) => CURSOR_DECISION_STATUS.test(line));
+  const hasQuestion = stripped.some((line) => /\?\s*$/.test(line));
+  const hasOption = stripped.some((line) => CURSOR_DECISION_OPTION.test(line));
+  return hasDecision && hasQuestion && hasOption;
+}
+
 function isAgentNeedsInputScreen(lines: string[], agent: KnownAgentName): boolean {
   if (agent === "muse") return isMuseNeedsInputScreen(lines);
   if (agent === "opencode") return isOpenCodeNeedsInputScreen(lines);
-  return isNeedsInputScreen(lines);
+  if (agent === "cursor") {
+    return isCursorNeedsInputScreen(lines) || isNeedsInputScreen(lines, agent);
+  }
+  return isNeedsInputScreen(lines, agent);
 }
 
 export function isIdleAgentScreen(
@@ -395,17 +566,32 @@ export function isIdleAgentScreen(
     if (isOpenCodeNeedsInputScreen(lines)) return false;
     return openCodeComposerFooter(lines) !== null || isIdlePromptLine(cursorLine, agent);
   }
+  if (
+    (agent === "claude" || agent === "codex" || agent === "grok") &&
+    isAgentNeedsInputScreen(lines, agent)
+  ) {
+    return false;
+  }
+  if (agent === "grok") {
+    if (isIdlePromptLine(cursorLine, agent)) return true;
+    return (
+      GROK_DRAFT_PROMPT.test(stripAnsi(cursorLine).trim()) && isGrokFinishedComposerScreen(lines)
+    );
+  }
   if (agent !== "cursor") {
     return isIdlePromptLine(cursorLine, agent);
   }
-  if (isNeedsInputScreen(lines)) {
+  if (isAgentNeedsInputScreen(lines, agent)) {
     return false;
   }
-  const composerLines = lines
-    .slice(-15)
-    .map((line) => stripAnsi(line).trim())
-    .filter((line) => line.startsWith("→"));
-  return composerLines.at(-1) === "→ Plan, search, build anything";
+  const cursorLines = lines.slice(-15).map((line) => stripAnsi(line).trim());
+  const composer = cursorLines.findLastIndex((line) => line.startsWith("→"));
+  const liveFooter = cursorLines.slice(Math.max(composer, 0));
+  if (liveFooter.some((line) => CURSOR_BUSY_HINT.test(line))) {
+    return false;
+  }
+  const composerLines = cursorLines.filter((line) => line.startsWith("→"));
+  return CURSOR_IDLE_COMPOSERS.has(composerLines.at(-1) ?? "");
 }
 
 interface AgentExecutable {
@@ -657,6 +843,7 @@ export class PtyActivityScanner {
     this.currentActivity = null;
     this.initialLaunch = false;
     this.expectsCommandTitle = false;
+    this.lookedAtScreen = false;
     this.unresolvedWorkingStillness = 0;
     this.lastOutputAt = 0;
     this.options.clearActivity();
@@ -682,10 +869,25 @@ export class PtyActivityScanner {
   }
 
   handleInterrupt(): void {
+    const dismissedNeedsInput =
+      (this.activeAgent === "claude" || this.activeAgent === "codex") &&
+      this.options.getActivity().attentionReason === "needs_input";
     this.interruptedAt = Date.now();
     this.clearStillnessTimer();
-    this.currentActivity = null;
+    this.currentActivity = dismissedNeedsInput ? "attention" : null;
     this.unresolvedWorkingStillness = 0;
+  }
+
+  private shouldProbeUnknownAgentScreen(chunk: string): boolean {
+    return (
+      !this.lookedAtScreen ||
+      BRAILLE_SPINNER_REGEX.test(chunk) ||
+      /[■⬝⬥⬩⬪]/.test(chunk) ||
+      MUSE_DIAMOND_REGEX.test(chunk) ||
+      chunk.includes("⋯") ||
+      chunk.includes("◎") ||
+      chunk.includes("⸬")
+    );
   }
 
   feedOutput(chunk: string): void {
@@ -693,15 +895,7 @@ export class PtyActivityScanner {
       // A resumed session's next byte is often a clock tick. The footer that
       // names Grok is already on the screen, not in that tick.
       let detected = detectAgentFromOutput(chunk);
-      if (
-        !detected &&
-        (!this.lookedAtScreen ||
-          BRAILLE_SPINNER_REGEX.test(chunk) ||
-          /[■⬝⬥⬩⬪]/.test(chunk) ||
-          MUSE_DIAMOND_REGEX.test(chunk) ||
-          chunk.includes("◎") ||
-          chunk.includes("⸬"))
-      ) {
+      if (!detected && this.shouldProbeUnknownAgentScreen(chunk)) {
         this.lookedAtScreen = true;
         detected = detectAgentFromOutput(this.options.readLastLines(15).join("\n"));
       }
@@ -738,13 +932,14 @@ export class PtyActivityScanner {
   }
 
   // A continuously animating live status leaves no quiet gap for the stillness
-  // check. Grok, Muse, and OpenCode can resume after an approval without Enter, or
-  // start work on their own after a finished turn. Quota stays red.
+  // check. Codex, Grok, Muse, and OpenCode can resume after an approval without Enter,
+  // or start work on their own after a finished turn. Quota stays red.
   private promoteWorkingAgentScreen(): void {
     if (
       (this.initialLaunch && this.activeAgent !== "muse" && this.activeAgent !== "opencode") ||
       this.isInsideInterruptWindow() ||
-      (this.activeAgent !== "grok" &&
+      (this.activeAgent !== "codex" &&
+        this.activeAgent !== "grok" &&
         this.activeAgent !== "muse" &&
         this.activeAgent !== "opencode") ||
       (this.currentActivity === "working" && this.options.getActivity().state === "working") ||
@@ -754,7 +949,10 @@ export class PtyActivityScanner {
       return;
     }
     const lines = this.options.readLastLines(15);
-    if (isAgentBusyScreen(lines, this.activeAgent) && !isSpendLimitScreen(lines)) {
+    if (
+      isAgentBusyScreen(lines, this.activeAgent) &&
+      !isSpendLimitScreen(lines, this.activeAgent)
+    ) {
       this.initialLaunch = false;
       this.setWorking();
     }
@@ -841,7 +1039,7 @@ export class PtyActivityScanner {
     if (
       !openCodeHookNeedsInput &&
       isAgentBusyScreen(lines, this.activeAgent) &&
-      !isSpendLimitScreen(lines)
+      !isSpendLimitScreen(lines, this.activeAgent)
     ) {
       this.unresolvedWorkingStillness = 0;
       if (this.currentActivity !== "working") {
@@ -855,7 +1053,7 @@ export class PtyActivityScanner {
       return;
     }
 
-    if (isSpendLimitScreen(lines)) {
+    if (isSpendLimitScreen(lines, this.activeAgent)) {
       this.currentActivity = "attention";
       this.unresolvedWorkingStillness = 0;
       this.options.setActivity("attention", "quota");
