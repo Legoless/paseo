@@ -20,7 +20,7 @@ import {
   type DraftCreateAttempt,
 } from "@/composer/draft/create-flow";
 import { resolveTurnPresentation, TURN_LIVENESS_IDLE } from "@/timeline/turn-liveness";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { buildWorkspaceDraftAgentConfig } from "@/screens/workspace/workspace-draft-agent-config";
 import { buildDraftStoreKey } from "@/stores/draft-keys";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
@@ -347,6 +347,7 @@ export function WorkspaceDraftAgentTab({
 }: WorkspaceDraftAgentTabProps) {
   const { t } = useTranslation();
   const client = useHostRuntimeClient(serverId);
+  const isConnected = useHostRuntimeIsConnected(serverId);
   const workspaceFields = useWorkspaceFields(serverId, workspaceId, (w) => ({
     workspaceDirectory: w.workspaceDirectory,
     id: w.id,
@@ -489,7 +490,7 @@ export function WorkspaceDraftAgentTab({
         composerState,
         autoSubmitConfig,
         workspaceDirectory: draftWorkingDirectory,
-        hasClient: Boolean(client),
+        isConnected,
       });
     },
     onBeforeSubmit: async () => {
