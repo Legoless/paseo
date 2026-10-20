@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, appendFileSync } from "node:fs";
+import { existsSync, readFileSync, appendFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 
@@ -24,6 +24,10 @@ if (args.includes("models")) {
     process.stderr.write(fixture("models-unauthenticated", "stderr").join("\n"));
     process.exit(1);
   }
+  if (process.env.HOME && existsSync(path.join(process.env.HOME, "fail-models"))) {
+    process.stderr.write("Service temporarily unavailable (503)\n");
+    process.exit(1);
+  }
   process.stdout.write(
     (process.env.AGY_TEST_MODELS || fixture("models-api-key").join("\n")) + "\n",
   );
@@ -39,6 +43,27 @@ if (process.env.AGY_TEST_STARTUP === "stderr") {
   process.stderr.write("Error: authentication required. Run 'agy' to log in, then retry.\n");
   process.exit(1);
 }
+const sigbusOnce = path.join(process.cwd(), "sigbus-once");
+if (existsSync(sigbusOnce)) {
+  unlinkSync(sigbusOnce);
+  if (process.platform === "win32") {
+    process.stderr.write("Antigravity exited (SIGBUS)\n");
+    process.exit(1);
+  }
+  process.kill(process.pid, "SIGBUS");
+  await new Promise(() => {});
+}
+let interrupted = null;
+process.on("SIGINT", () => {
+  record({ signal: "SIGINT" });
+  if (process.env.AGY_TEST_IGNORE_SIGNALS === "yes") return;
+  if (interrupted) emit(interrupted);
+  process.exit(1);
+});
+process.on("SIGTERM", () => {
+  record({ signal: "SIGTERM" });
+  if (process.env.AGY_TEST_IGNORE_SIGNALS !== "yes") process.exit(1);
+});
 const resumeIndex = args.indexOf("--conversation");
 const conversationId =
   resumeIndex >= 0 ? args[resumeIndex + 1] : fixture("text-turn")[0].conversation_id;
@@ -58,11 +83,14 @@ function emit(frame) {
   }
   process.stdout.write(JSON.stringify(converted) + "\n");
 }
+const holdInit = path.join(process.cwd(), "hold-init");
+while (existsSync(holdInit)) {
+  await new Promise((resolve) => setTimeout(resolve, 10));
+}
 const init = fixture("text-turn")[0];
 if (process.env.AGY_TEST_INIT_MODEL) init.init.model = process.env.AGY_TEST_INIT_MODEL;
 if (args.includes("--model")) init.init.model = args[args.indexOf("--model") + 1];
 emit(init);
-let interrupted = null;
 const turns = new Map();
 const lines = createInterface({ input: process.stdin });
 lines.on("line", (line) => {
@@ -80,6 +108,61 @@ lines.on("line", (line) => {
     }, 10);
     return;
   }
+  if (text.includes("QUOTA_RECOVERED")) {
+    emit({
+      event: "step_update",
+      step_update: {
+        conversation_id: conversationId,
+        step_index: 1,
+        state: "DONE",
+        step_type: "agent_response",
+        text_delta: "Sent a test approval email.\n",
+      },
+    });
+    emit({
+      event: "result",
+      result: {
+        conversation_id: conversationId,
+        status: "ERROR",
+        response: "Sent a test approval email.\n",
+        error:
+          "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 3m58s.",
+      },
+    });
+    return;
+  }
+  if (text.includes("UNRECOVERED_MID_TURN_ERROR")) {
+    emit({
+      event: "step_update",
+      step_update: {
+        conversation_id: conversationId,
+        step_index: 1,
+        state: "DONE",
+        step_type: "agent_response",
+        text_delta: "Checking the channel first.\n",
+      },
+    });
+    emit({
+      event: "step_update",
+      step_update: {
+        conversation_id: conversationId,
+        step_index: 2,
+        state: "DONE",
+        step_type: "error_message",
+      },
+    });
+    emit({
+      event: "result",
+      result: {
+        conversation_id: conversationId,
+        status: "ERROR",
+        response: "",
+        error:
+          "API error (attempt 1): UNAVAILABLE (code 503): The service is currently unavailable.",
+      },
+    });
+    return;
+  }
   let name = "text-turn";
   if (text.includes("Attached image: ")) name = "image-file-external";
   if (text.includes("TOOLS")) name = "tools-default";
@@ -87,6 +170,7 @@ lines.on("line", (line) => {
   if (text.includes("SUBAGENT")) name = "subagent";
   if (text.includes("MULTI")) name = "multi-turn-reasoning";
   if (text.includes("RESUME")) name = "resume";
+  if (text.includes("RECOVERED_ERROR")) name = "mcp-project";
   if (text.includes("HANG")) name = "sigint-mid-text";
   if (text.includes("TOOL_HANG")) name = "sigint-mid-tool";
   const frames = fixture(name).slice(1);
@@ -103,15 +187,5 @@ lines.on("line", (line) => {
     if (resultCount === ordinal) emit(frame);
     if (frame.event === "result") resultCount += 1;
   }
-});
-process.on("SIGINT", () => {
-  record({ signal: "SIGINT" });
-  if (process.env.AGY_TEST_IGNORE_SIGNALS === "yes") return;
-  if (interrupted) emit(interrupted);
-  process.exit(1);
-});
-process.on("SIGTERM", () => {
-  record({ signal: "SIGTERM" });
-  if (process.env.AGY_TEST_IGNORE_SIGNALS !== "yes") process.exit(1);
 });
 lines.on("close", () => process.exit(0));

@@ -6018,6 +6018,9 @@ export class AgentManager {
     const availableProviders = (await this.listProviderAvailability())
       .filter((entry) => entry.available)
       .map((entry) => entry.provider);
+    if (!unavailableReason && availableProviders.includes(options.provider)) {
+      return client;
+    }
     const providerList = formatProviderList(availableProviders);
     const reason = unavailableReason ? ` Reason: ${unavailableReason}.` : "";
     throw new Error(

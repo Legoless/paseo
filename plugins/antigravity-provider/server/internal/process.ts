@@ -71,13 +71,6 @@ export function startDriver(options: DriverOptions): Driver {
   const exited = new Promise<void>((resolve) => {
     resolveExit = resolve;
   });
-  const startupDeadline = setTimeout(
-    () =>
-      fail(
-        new AntigravityError("Antigravity did not initialize within 30 seconds", "STARTUP_TIMEOUT"),
-      ),
-    30_000,
-  );
   child.stderr.on("data", (chunk: Buffer) => {
     stderr = (stderr + chunk.toString()).slice(-8192);
   });
@@ -86,7 +79,6 @@ export function startDriver(options: DriverOptions): Driver {
   );
   child.on("error", (error: Error) => fail(new AntigravityError(error.message, "SPAWN_ERROR")));
   child.on("close", (code, signal) => {
-    clearTimeout(startupDeadline);
     lines.close();
     const error = new AntigravityError(
       diagnostic(stderr.trim() || `Antigravity exited (${signal || code})`),
@@ -109,7 +101,6 @@ export function startDriver(options: DriverOptions): Driver {
     }
     if (state === "starting") {
       if (decoded.event === "init") {
-        clearTimeout(startupDeadline);
         state = "ready";
         resolveReady(decoded);
       } else if (decoded.event === "result") {
@@ -121,7 +112,6 @@ export function startDriver(options: DriverOptions): Driver {
   });
 
   function fail(failure: AntigravityError): void {
-    clearTimeout(startupDeadline);
     if (state === "starting") rejectReady(failure);
     if (state === "ready") options.onExit(failure);
     if (state === "exited" || state === "stopping") return;
@@ -148,7 +138,6 @@ export function startDriver(options: DriverOptions): Driver {
       if (process.platform === "win32") await cleanup;
       if (state === "exited") return;
       if (state === "starting") rejectReady(new AntigravityError("Antigravity startup canceled"));
-      clearTimeout(startupDeadline);
       state = "stopping";
       if (process.platform === "win32") {
         // Node signal emulation kills only the leader; taskkill must see the live tree.
@@ -210,13 +199,13 @@ export function probe(options: ProbeOptions): Promise<string> {
       clearTimeout(deadline);
       reject(new AntigravityError(error.message, "SPAWN_ERROR"));
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       clearTimeout(deadline);
       if (code === 0) resolve(stdout);
       else
         reject(
           new AntigravityError(
-            diagnostic(stderr.trim() || `agy exited with code ${code}`),
+            diagnostic(stderr.trim() || `agy exited with ${signal || `code ${code}`}`),
             "PROBE_ERROR",
           ),
         );

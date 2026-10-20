@@ -381,6 +381,63 @@ it("maps subagent steps to a tool carrying the child conversation ID", async () 
   );
 });
 
+it("completes turns and recycles the driver when native result carries a retried or stale error with a response", async () => {
+  const h = await harness();
+  await h.open();
+  const first = await h.completed(await h.prompt("RECOVERED_ERROR"));
+  expect(first).toMatchObject({ type: "session.turn", state: "completed" });
+  expect(first).not.toHaveProperty("error");
+  expect(h.events).toContainEqual(
+    expect.objectContaining({
+      type: "timeline.item",
+      item: expect.objectContaining({
+        type: "assistant_message",
+        text: "UNAVAILABLE\n",
+      }),
+    }),
+  );
+
+  const second = await h.completed(await h.prompt("QUOTA_RECOVERED"));
+  expect(second).toMatchObject({ type: "session.turn", state: "completed" });
+  expect(second).not.toHaveProperty("error");
+  expect(h.events).toContainEqual(
+    expect.objectContaining({
+      type: "timeline.item",
+      item: expect.objectContaining({
+        type: "assistant_message",
+        text: "Sent a test approval email.\n",
+      }),
+    }),
+  );
+
+  const third = await h.completed(await h.prompt("UNRECOVERED_MID_TURN_ERROR"));
+  expect(third).toMatchObject({
+    type: "session.turn",
+    state: "failed",
+    error: {
+      message:
+        "API error (attempt 1): UNAVAILABLE (code 503): The service is currently unavailable.",
+    },
+  });
+
+  const fourth = await h.completed(await h.prompt("HELLO"));
+  expect(fourth).toMatchObject({ type: "session.turn", state: "completed" });
+  const launches = (await h.records()).filter((entry) => entry.args?.includes("--input-format"));
+  expect(launches).toHaveLength(4);
+  expect(launches[1].args.slice(-2)).toEqual([
+    "--conversation",
+    "e5cf1e2d-c715-4328-8e67-4a85c8dc3cda",
+  ]);
+  expect(launches[2].args.slice(-2)).toEqual([
+    "--conversation",
+    "e5cf1e2d-c715-4328-8e67-4a85c8dc3cda",
+  ]);
+  expect(launches[3].args.slice(-2)).toEqual([
+    "--conversation",
+    "e5cf1e2d-c715-4328-8e67-4a85c8dc3cda",
+  ]);
+});
+
 it.each(["HANG", "TOOL_HANG"])(
   "interrupts %s, settles canceled, and respawns the same conversation",
   async (text) => {
@@ -784,6 +841,82 @@ it.each(["auth", "exit", "stderr"])(
   },
 );
 
+it("admits turns immediately while waiting for driver initialization and supports interrupting during startup", async () => {
+  const h = await harness();
+  const persistence: ProviderPersistence = {
+    version: 1,
+    data: { conversationId: "e5cf1e2d-c715-4328-8e67-4a85c8dc3cda" },
+  };
+  await h.open(persistence);
+
+  const holdInit = path.join(h.cwd, "hold-init");
+  await writeFile(holdInit, "1");
+  const firstId = await h.prompt("RESUME");
+  expect(
+    h.events.find(
+      (event) => event.type === "session.prompt_result" && event.clientMessageId === firstId,
+    ),
+  ).toMatchObject({
+    type: "session.prompt_result",
+    result: { type: "turn", turnId: expect.any(String) },
+  });
+  expect(h.events.some((event) => event.type === "session.turn" && event.state === "started")).toBe(
+    true,
+  );
+  expect((await h.records()).filter((entry) => entry.input)).toHaveLength(0);
+
+  await rm(holdInit, { force: true });
+  expect(await h.completed(firstId)).toMatchObject({
+    type: "session.turn",
+    state: "completed",
+  });
+
+  await h.request({
+    type: "session.configure",
+    requestId: "switch-effort-before-hold",
+    sessionId: "s",
+    changes: { model: "gemini-3.8-flash-low" },
+  });
+  await writeFile(holdInit, "1");
+  const canceledId = await h.prompt("RESUME");
+  await h.request({
+    type: "session.interrupt",
+    requestId: "interrupt-during-init",
+    sessionId: "s",
+  });
+  expect(await h.completed(canceledId)).toMatchObject({
+    type: "session.turn",
+    state: "canceled",
+  });
+  await rm(holdInit, { force: true });
+  expect(await h.completed(await h.prompt("RESUME"))).toMatchObject({
+    type: "session.turn",
+    state: "completed",
+  });
+});
+
+it("retries once when Antigravity exits with SIGBUS during startup", async () => {
+  const h = await harness();
+  await writeFile(path.join(h.cwd, "sigbus-once"), "1");
+  await h.open();
+  expect(h.events.some((event) => event.type === "session.ready")).toBe(true);
+
+  const persistence = h.persistence();
+  await h.connection.close();
+
+  const resumed = await harness();
+  await resumed.open(persistence);
+  await writeFile(path.join(resumed.cwd, "sigbus-once"), "1");
+  expect(await resumed.completed(await resumed.prompt("RESUME"))).toMatchObject({
+    type: "session.turn",
+    state: "completed",
+  });
+  const launches = (await resumed.records()).filter((entry) =>
+    entry.args?.includes("--input-format"),
+  );
+  expect(launches).toHaveLength(2);
+});
+
 it("rejects mid-turn auto prompts with TURN_ACTIVE and idle steers with TURN_INACTIVE", async () => {
   const h = await harness();
   await h.open();
@@ -1117,6 +1250,18 @@ describe("discovery", () => {
     await h.request({ type: "catalog", requestId: "refresh-catalog" });
     const recordsAfterRefresh = await h.records();
     expect(recordsAfterRefresh.filter((entry) => entry.args?.includes("models"))).toHaveLength(2);
+
+    await writeFile(path.join(h.cwd, "fail-models"), "1");
+    await h.request({ type: "catalog", requestId: "refresh-catalog-fallback" });
+    expect(
+      h.events.find(
+        (event) => "requestId" in event && event.requestId === "refresh-catalog-fallback",
+      ),
+    ).toMatchObject({
+      type: "catalog",
+      requestId: "refresh-catalog-fallback",
+    });
+    expect(await provider.status?.({ launch: h.launch })).toEqual({ available: true });
   });
 
   it("opens and closes non-persistent draft sessions without spawning a driver", async () => {

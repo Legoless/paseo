@@ -753,6 +753,71 @@ describe("PtyActivityScanner — full lifecycle", () => {
     expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
   });
 
+  it("keeps Claude working on its live turn spinner across stillness and re-promotes without a title change", () => {
+    const rule = "─── ultracode " + "─".repeat(50);
+    const activeTurnScreen = [
+      "⏺ Update(src/game_app_input.cpp)",
+      "  ⎿  Added 4 lines, removed 2 lines",
+      "",
+      "· Mulling… (5m 46s · ↓ 23.9k tokens)",
+      "  ⎿  Tip: Use /feedback to help us improve!",
+      "",
+      "◎ /goal active (5m)",
+      rule,
+      "❯",
+      rule,
+      "  Opus 4.7 (1M context) │ 📁 OpenAOE2 │ 🌿 main (26 files) │ 🧠 23% │ $25.67 │ 5h 9% (4h30m) │ wk 42%",
+      "  ▸▸ bypass permissions on (shift+tab to cycle) · esc to interrupt",
+    ];
+    const wrappedTipScreen = [
+      "✻ Improvising… (22m 8s · ↓ 68.5k tokens)",
+      "  ⎿  Tip: Did you know you can drag and drop image files into your terminal?",
+      "     Give it a try!",
+      "",
+      "◎ /goal active (22m)",
+      rule,
+      "❯",
+      rule,
+      "  Opus 4.7 (1M context) │ 📁 OpenDiablo2R │ 🌿 main",
+      "  ▸▸ bypass permissions on (shift+tab to cycle)",
+    ];
+
+    expect(isClaudeBusyScreen(activeTurnScreen)).toBe(true);
+    expect(isClaudeBusyScreen(wrappedTipScreen)).toBe(true);
+    expect(isIdleAgentScreen(activeTurnScreen, "❯", "claude")).toBe(false);
+    expect(isIdleAgentScreen(wrappedTipScreen, "❯", "claude")).toBe(false);
+
+    const tracker = new TerminalActivityTracker();
+    let screenLines = activeTurnScreen;
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screenLines,
+      readCursorLine: () => "❯",
+      stillnessMs: 500,
+    });
+
+    // Restored Claude screen without the welcome banner is recognized from composer + mode footer.
+    scanner.feedOutput("· Mulling… (5m 46s · ↓ 23.9k tokens)");
+    expect(scanner.getActiveAgent()).toBe("claude");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    // A stillness gap between tool execution and the next streamed chunk must not mark the turn idle.
+    vi.advanceTimersByTime(1500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    // Even if a Stop hook briefly set the tracker idle before a /goal hook resumed the turn,
+    // subsequent spinner frames without a title escape re-promote the terminal to working.
+    tracker.set("idle");
+    tracker.clearAttention();
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: null });
+
+    screenLines = wrappedTipScreen;
+    scanner.feedOutput("✻ Improvising… (22m 8s · ↓ 68.5k tokens)");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
   it("tracks Codex approval and completion", () => {
     const tracker = new TerminalActivityTracker();
     let screenLines: string[] = [];
@@ -1478,10 +1543,19 @@ describe("PtyActivityScanner — full lifecycle", () => {
     });
   });
 
-  it("keeps Grok working while the dock row above the composer is still running", () => {
+  it("finishes a closed Grok turn while parked task rows keep their clocks", () => {
     // The painted row matches the Belle terminal: ⸬, then the verb, then the
     // clock, with a blank line between the dock and the composer box.
-    const running = [
+    const open = [
+      "▼ Tasks 1",
+      "⸬ Run Start the Stormcloud supervisor for a live run  1h04m",
+      "",
+      "╭────────────────────╮",
+      "❯",
+      "Grok 4.7 (xhigh) · always-approve",
+      "Shift+Tab: mode",
+    ];
+    const parked = [
       "Worked for 59m16s",
       "",
       "▼ Tasks 1",
@@ -1499,8 +1573,17 @@ describe("PtyActivityScanner — full lifecycle", () => {
       "❯",
       "Grok 4.7 (xhigh) · always-approve",
     ];
-    expect(isGrokBusyScreen(running)).toBe(true);
-    expect(isIdleAgentScreen(running, "❯", "grok")).toBe(false);
+    expect(isGrokBusyScreen(open)).toBe(true);
+    expect(isIdleAgentScreen(open, "❯", "grok")).toBe(false);
+    expect(isGrokBusyScreen(parked)).toBe(false);
+    expect(isIdleAgentScreen(parked, "❯", "grok")).toBe(true);
+    expect(
+      isIdleAgentScreen(
+        parked.map((line) => (line === "❯" ? "❯ Anything barely works" : line)),
+        "❯ Anything barely works",
+        "grok",
+      ),
+    ).toBe(true);
     expect(isGrokBusyScreen(finished)).toBe(false);
     expect(isIdleAgentScreen(finished, "❯", "grok")).toBe(true);
     expect(
@@ -1513,8 +1596,16 @@ describe("PtyActivityScanner — full lifecycle", () => {
     expect(
       isGrokBusyScreen(["◎ 1 command · 2 monitors · 1 loop · 1 subagent still running", "❯"]),
     ).toBe(true);
+    expect(isGrokBusyScreen(["◎ 2 commands · 1 monitor still running", "❯"])).toBe(false);
     expect(isGrokBusyScreen(["◎ waiting · send a message to interrupt", "❯"])).toBe(true);
     expect(isGrokBusyScreen(["see ◎ 1 command still running in the docs", "❯"])).toBe(false);
+    expect(isGrokBusyScreen(["Worked for 51s", "◎ 1 subagent still running", "", "❯"])).toBe(true);
+    expect(
+      isGrokBusyScreen(["Worked for 51s", "◎ 1 command · 1 monitor still running", "", "❯"]),
+    ).toBe(false);
+    expect(
+      isGrokBusyScreen(["Worked for 51s", "◎ waiting · send a message to interrupt", "❯"]),
+    ).toBe(true);
     expect(isGrokBusyScreen(["⠋ Thinking", "", "╭", "❯"])).toBe(true);
     expect(isGrokBusyScreen(["⸬ Thinking...", "", "❯"])).toBe(true);
     expect(isGrokBusyScreen(["⋅ Thinking…", "", "❯"])).toBe(true);
@@ -1524,8 +1615,8 @@ describe("PtyActivityScanner — full lifecycle", () => {
     expect(isGrokBusyScreen(["Thought for 12s", "", "❯"])).toBe(false);
     expect(isGrokBusyScreen(["⠋ Thought for 12s", "", "❯"])).toBe(false);
     expect(isGrokBusyScreen(["The model is Thinking about the tests", "❯"])).toBe(false);
-    // An older Thinking header sits above the turn marker. The dock row below
-    // a closed header is still running.
+    // An older Thinking header sits above the turn marker. A dock row under
+    // Thought for is still the turn. The same row under Worked for is parked.
     expect(isGrokBusyScreen(["⠋ Thinking", "Search files", "Thought for 12s", "", "❯"])).toBe(
       false,
     );
@@ -1534,9 +1625,12 @@ describe("PtyActivityScanner — full lifecycle", () => {
     expect(
       isGrokBusyScreen(["Thought for 12s", "⸬ Run Start the supervisor  1m04s", "", "❯"]),
     ).toBe(true);
+    expect(isGrokBusyScreen(["Worked for 12s", "⸬ Run Start the supervisor  1m04s", "", "❯"])).toBe(
+      false,
+    );
 
     const tracker = new TerminalActivityTracker();
-    let screenLines = running;
+    let screenLines = open;
     const scanner = new PtyActivityScanner({
       setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
       clearActivity: () => tracker.clear(),
@@ -1557,10 +1651,22 @@ describe("PtyActivityScanner — full lifecycle", () => {
     expect(scanner.getActiveAgent()).toBe("grok");
     expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
 
-    screenLines = finished;
-    scanner.feedOutput("❯");
+    screenLines = parked;
+    scanner.feedOutput("Worked for 59m16s");
     vi.advanceTimersByTime(500);
 
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "finished",
+    });
+
+    // The parked clock keeps painting a braille frame. That is not a new turn.
+    scanner.feedOutput("⠋");
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "finished",
+    });
+    vi.advanceTimersByTime(500);
     expect(tracker.getSnapshot()).toMatchObject({
       state: "idle",
       attentionReason: "finished",
@@ -1676,13 +1782,18 @@ describe("PtyActivityScanner — full lifecycle", () => {
     expect(tracker.getSnapshot().attentionReason).toBe("quota");
   });
 
-  it("keeps Antigravity working while its status line still shows a running task", () => {
+  it("finishes an Antigravity turn when a background task stays running in the tray", () => {
     const tracker = new TerminalActivityTracker();
-    let screenLines = [
-      "Investigating storage.",
+    const screenLines = [
+      "▸ Thought for 8s, 63 tokens",
+      "The local preview server (serve.mjs) is now running in the background.",
+      "TL;DR: Started the corpus:preview server at http://127.0.0.1:4173/index.html.",
+      "─".repeat(40),
       ">",
-      "[16:31:22] du -sh /Users/legoless/Library/Developer/Xcode/DerivedData  running",
-      "Gemini 3.8 Flash · high · 1 task(s) · /tasks",
+      "─".repeat(40),
+      "  ● [09:34:08] npm run corpus:preview running",
+      "─".repeat(40),
+      "? for shortcuts                            Gemini 4 Argon · high · 1 task(s) · /tasks",
     ];
     const scanner = new PtyActivityScanner({
       setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
@@ -1697,17 +1808,9 @@ describe("PtyActivityScanner — full lifecycle", () => {
     scanner.feedInput("\r");
     scanner.feedOutput("running");
     vi.advanceTimersByTime(500);
-    vi.advanceTimersByTime(500);
-    vi.advanceTimersByTime(500);
 
-    expect(isAntigravityBusyScreen(screenLines)).toBe(true);
-    expect(isIdleAgentScreen(screenLines, ">", "antigravity")).toBe(false);
-    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
-
-    screenLines = ["Done.", ">"];
-    scanner.feedOutput(">");
-    vi.advanceTimersByTime(500);
-
+    expect(isAntigravityBusyScreen(screenLines)).toBe(false);
+    expect(isIdleAgentScreen(screenLines, ">", "antigravity")).toBe(true);
     expect(tracker.getSnapshot()).toMatchObject({
       state: "idle",
       attentionReason: "finished",
@@ -2308,7 +2411,7 @@ describe("Muse Code terminal activity", () => {
     expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
   });
 
-  it.each(["Read only", "Ask me", "Auto-review", "Unrestricted", "Launch overrides"])(
+  it.each(["Read only", "Ask me", "Auto-review", "Unrestricted", "Launch overrides", "YOLO"])(
     "recognizes a restored composer with the %s profile",
     (profile) => {
       const screen = [...composer().slice(0, -1), `echo · /private/tmp/project · ${profile}`];
@@ -2324,19 +2427,71 @@ describe("Muse Code terminal activity", () => {
     expect(isMuseBusyScreen(["◇ Thinking (1s · esc to interrupt)", "plain shell"])).toBe(false);
   });
 
-  it.each(["◇ Thinking", "◈ Working", "◆ Double checking", "◇ Finishing up"])(
-    "keeps a persistent composer working for %s",
-    (status) => {
-      const screen = [`${status} (12s · esc to interrupt)`, "", ...composer("next task")];
-      expect(isMuseBusyScreen(screen)).toBe(true);
-      expect(isIdleAgentScreen(screen, "❯ next task", "muse")).toBe(false);
-      const { tracker, scanner, paint } = terminal();
-      scanner.handleInitialCommand("muse");
-      paint(screen, "❯ next task");
-      vi.advanceTimersByTime(2500);
-      expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
-    },
-  );
+  it.each([
+    "◇ Thinking",
+    "◈ Working",
+    "▸ Thinking",
+    "▸ Calling tools",
+    "▾ Compacting context",
+    "◆ Double checking",
+    "◇ Finishing up",
+  ])("keeps a persistent composer working for %s", (status) => {
+    const screen = [`${status} (12s · esc to interrupt)`, "", ...composer("next task")];
+    expect(isMuseBusyScreen(screen)).toBe(true);
+    expect(isIdleAgentScreen(screen, "❯ next task", "muse")).toBe(false);
+    const { tracker, scanner, paint } = terminal();
+    scanner.handleInitialCommand("muse");
+    paint(screen, "❯ next task");
+    vi.advanceTimersByTime(2500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("keeps Muse working when a reasoning summary and goal checklist sit below Thinking or Calling tools", () => {
+    const thinkingWithGoals = [
+      "▸ Thinking (4m 25s · esc to interrupt)",
+      "  Analyzing a build failure to determine if it is pre-existing at the commit tip",
+      "  ✓ Set aside staged stage4 cleanup for the merge",
+      "  ✓ Merge docs/diablo2-game-state-research tip into main",
+      "  ✓ Resolve README.md conflict and complete merge",
+      "  ◆ Restore cleanup, install deps and verify tests + corpus build",
+      "  ◇ Confirm Diablo worktree untouched",
+      "",
+      "── Voice input (⌥ + v to start) ─────────────────────────",
+      "❯ ",
+      "────────────────────────────────────────────────────────",
+      "muse-wonder-full-1.0 · max · ~/Projects/legoless/Belle · YOLO",
+    ];
+    expect(detectAgentFromOutput(thinkingWithGoals.join("\n"))).toBe("muse");
+    expect(isMuseBusyScreen(thinkingWithGoals)).toBe(true);
+    expect(isIdleAgentScreen(thinkingWithGoals, "❯ ", "muse")).toBe(false);
+
+    const callingToolsWithGoals = [
+      "▸ Calling tools (10m 15s · esc to interrupt)",
+      "  ✓ Set aside staged stage4 cleanup for the merge",
+      "  ✓ Merge docs/diablo2-game-state-research tip into main",
+      "  ✓ Resolve README.md conflict and complete merge",
+      "  ◆ Restore cleanup, install deps and verify tests + corpus build",
+      "  ◇ Confirm Diablo worktree untouched",
+      "",
+      "── Voice input (⌥ + v to start) ─────────────────────────",
+      "❯ ",
+      "────────────────────────────────────────────────────────",
+      "muse-wonder-full-1.0 · max · ~/Projects/legoless/Belle · YOLO",
+    ];
+    expect(isMuseBusyScreen(callingToolsWithGoals)).toBe(true);
+    expect(isIdleAgentScreen(callingToolsWithGoals, "❯ ", "muse")).toBe(false);
+
+    const { tracker, scanner, paint } = terminal();
+    scanner.handleInitialCommand("muse-bin-1.4.10-R6427.1 --yolo");
+    scanner.feedInput("\r");
+    paint(thinkingWithGoals);
+    vi.advanceTimersByTime(2500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    paint(callingToolsWithGoals);
+    vi.advanceTimersByTime(2500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
 
   it("recognizes Muse's unadorned initial Thinking frame", () => {
     expect(isMuseBusyScreen(["◇ Thinking", "", ...composer()])).toBe(true);
@@ -2347,6 +2502,12 @@ describe("Muse Code terminal activity", () => {
     { status: ["◇ Working (2s)"] },
     { status: ["◈ Double checking (3s ·", "esc to interrupt)"] },
     { status: ["◇ Finishing up", "(1m2s · esc to interrupt)"] },
+    {
+      status: [
+        "◈ Running command · Attach lldb for all-thread… — running (29s · esc to interrupt)",
+        "  └ (ctrl+b to send to background)",
+      ],
+    },
   ])("keeps Muse working when its narrow-pane status reads $status", ({ status }) => {
     const screen = [...status, "", ...composer()];
     expect(isMuseBusyScreen(screen)).toBe(true);
@@ -2849,9 +3010,9 @@ describe("Grok and Kimi composer activity", () => {
     expect(isNeedsInputScreen(finished, "grok")).toBe(false);
     expect(isIdleAgentScreen(finished, `❯ ${draft}`, "grok")).toBe(true);
 
-    const busy = ["Worked for 4m4s", "⸬ Run tests  1m04s", ...grokComposer(draft)];
-    expect(isGrokBusyScreen(busy)).toBe(true);
-    expect(isIdleAgentScreen(busy, `❯ ${draft}`, "grok")).toBe(false);
+    const parked = ["Worked for 4m4s", "⸬ Run tests  1m04s", ...grokComposer(draft)];
+    expect(isGrokBusyScreen(parked)).toBe(false);
+    expect(isIdleAgentScreen(parked, `❯ ${draft}`, "grok")).toBe(true);
 
     const { tracker, scanner, paint } = terminal("grok");
     scanner.feedInput("\r");
@@ -2915,7 +3076,7 @@ describe("Grok and Kimi composer activity", () => {
     (agent) => {
       const restored =
         agent === "grok"
-          ? ["Worked for 4m4s", "⸬ Run tests  1m04s", ...grokComposer("")]
+          ? ["⸬ Run tests  1m04s", ...grokComposer("")]
           : kimiScreen("", " [1 task running]");
       const { tracker, scanner, paint } = terminal();
       paint(["ordinary shell output"], "");
@@ -2999,6 +3160,46 @@ describe("Antigravity, Gemini, and Cursor terminal activity", () => {
     expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
   });
 
+  it("keeps Antigravity's ruled composer idle while drafting after an interrupted turn", () => {
+    expect(detectAgentFromOutput("Antigravity CLI 1.4.2\n")).toBe("antigravity");
+
+    const draft = "> Can you add openaoe2 to paseo neo under app";
+    const interruptedWithDraft = [
+      "─".repeat(40),
+      "> Can you add open AOE2 and OpenD2R to paseo apps workspace as a project?",
+      "▸ Thought for 3.6s",
+      "● Bash(ls -la)",
+      "  └ Interrupted · What should Antigravity CLI do instead?",
+      "─".repeat(40),
+      draft,
+      "─".repeat(40),
+      "                                                             Gemini 4 Argon · high",
+    ];
+    expect(isNeedsInputScreen(interruptedWithDraft, "antigravity")).toBe(false);
+    expect(isIdleAgentScreen(interruptedWithDraft, draft, "antigravity")).toBe(true);
+
+    const wrappedDraft = [
+      "  └ Interrupted · What should Antigravity CLI do instead?",
+      "─".repeat(40),
+      "> Can you add open AOE2 and OpenD2R to paseo",
+      "  apps workspace as a project?",
+      "─".repeat(40),
+      "? for shortcuts                                              Gemini 4 Argon · high",
+    ];
+    expect(isNeedsInputScreen(wrappedDraft, "antigravity")).toBe(false);
+    expect(isIdleAgentScreen(wrappedDraft, "  apps workspace as a project?", "antigravity")).toBe(
+      true,
+    );
+
+    const { tracker, scanner, paint } = terminal("antigravity");
+    scanner.feedInput("\r");
+    tracker.interrupt();
+    scanner.handleInterrupt();
+    paint(interruptedWithDraft, draft, "app");
+    vi.advanceTimersByTime(1500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+  });
+
   it("keeps Antigravity working while a subagent is still running", () => {
     const running = [
       "The main analysis is complete; awaiting the engine revision.",
@@ -3007,7 +3208,23 @@ describe("Antigravity, Gemini, and Cursor terminal activity", () => {
       "? for shortcuts                         Gemini 4 Argon · high · 1 subagent(s)",
     ];
     expect(isAntigravityBusyScreen(running)).toBe(true);
-    expect(isAntigravityBusyScreen([">", "Gemini 4 Argon · high · 1 task(s)"])).toBe(true);
+    expect(
+      isAntigravityBusyScreen([
+        ">",
+        "? for shortcuts        Gemini 4 Argon · high · 1 task(s) · /tasks · 1 subagent(s)",
+      ]),
+    ).toBe(true);
+    expect(
+      isAntigravityBusyScreen([
+        "─".repeat(40),
+        ">",
+        "─".repeat(40),
+        "esc to cancel                                               Gemini 4 Argon · high",
+      ]),
+    ).toBe(true);
+    expect(isAntigravityBusyScreen([">", "Gemini 4 Argon · high · 1 task(s) · /tasks"])).toBe(
+      false,
+    );
     expect(isIdleAgentScreen(running, ">", "antigravity")).toBe(false);
     expect(isAntigravityBusyScreen(["The main analysis is complete.", ">", "0 subagent(s)"])).toBe(
       false,
@@ -3022,6 +3239,103 @@ describe("Antigravity, Gemini, and Cursor terminal activity", () => {
     paint(running, ">");
     vi.advanceTimersByTime(500);
     expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("detects and promotes a compacted Antigravity session in a renamed tab when its startup banner scrolled away", () => {
+    const compactedRunning = [
+      "──────────────────────────── Conversation compacted ────────────────────────────",
+      "○ Thought for 4m 55s (The `sound_compare` script might provide clues about ar...)",
+      "● Ran 12 commands (10 failed)",
+      "● Explored 2 files (RacelineEngineSoundWave.cpp, sound_com...) (ctrl+o to expand)",
+      "⠇ Reading file...",
+      "└ Tip: Use /cs to search in your codebase.",
+      "─".repeat(60),
+      "> ",
+      "─".repeat(60),
+      "esc to cancel                                              Gemini 4 Argon · high",
+    ];
+    expect(detectAgentFromOutput(compactedRunning.join("\n"))).toBe("antigravity");
+    expect(isAntigravityBusyScreen(compactedRunning)).toBe(true);
+    expect(isIdleAgentScreen(compactedRunning, "> ", "antigravity")).toBe(false);
+
+    const tracker = new TerminalActivityTracker();
+    let screenLines = compactedRunning;
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screenLines,
+      readCursorLine: () => "> ",
+      stillnessMs: 500,
+    });
+
+    // Renamed tab: no initial command or title detection, only live spinner output after compaction.
+    scanner.feedOutput("⠇ Reading file...");
+    expect(scanner.getActiveAgent()).toBe("antigravity");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    screenLines = [
+      ...compactedRunning.slice(0, 4),
+      "▸ Thought for 5m 10s",
+      "  Finished the comparison.",
+      "─".repeat(60),
+      "> ",
+      "─".repeat(60),
+      "? for shortcuts                                            Gemini 4 Argon · high",
+    ];
+    scanner.feedOutput("Finished the comparison.");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("clears Antigravity when it quits back to the shell", () => {
+    const shellPrompt = "Legoless at LegoBrain in ~/Projects/unifiedsense/raceline (main)";
+    const exited = [
+      "Resume with -c (or command below):",
+      "agy --conversation=4ce22698-2d9e-4a68-bdd3-b9c46615f29a",
+      "Welcome to the Antigravity CLI",
+      "Antigravity CLI 1.4.0",
+      "Gemini 4 Argon · high · 1 subagent(s)",
+      ">",
+      "  ● Agent(self: McLaren Engine Revision Engineer)  Run installed checks · 28m5s",
+      "Resume with -c (or command below):",
+      "agy --conversation=4ce22698-2d9e-4a68-bdd3-b9c46615f29a",
+      shellPrompt,
+    ];
+    expect(isAntigravityBusyScreen(exited)).toBe(false);
+    expect(isIdleAgentScreen(exited, shellPrompt, "antigravity")).toBe(false);
+    expect(
+      isAntigravityBusyScreen([
+        "Resume with -c (or command below):",
+        "Welcome to the Antigravity CLI",
+        ">",
+        "Gemini 4 Argon · high · 1 subagent(s)",
+      ]),
+    ).toBe(true);
+
+    const { tracker, scanner, paint } = terminal("antigravity");
+    scanner.feedInput("\r");
+    paint(
+      [
+        "Investigating.",
+        ">",
+        "  ● Agent(self: McLaren Engine Revision Engineer)  Run installed checks · 28m5s",
+        "Gemini 4 Argon · high · 1 subagent(s)",
+      ],
+      ">",
+    );
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    // The banner is in the chunk before the headless screen includes it.
+    scanner.feedOutput("Resume with -c (or command below):\n");
+    expect(tracker.getSnapshot().state).toBeNull();
+    expect(scanner.getActiveAgent()).toBeNull();
+
+    paint(exited, shellPrompt, "⣷");
+    vi.advanceTimersByTime(2000);
+    expect(tracker.getSnapshot().state).toBeNull();
+    expect(scanner.getActiveAgent()).toBeNull();
   });
 
   it("keeps Gemini working on its elapsed status and finishes at the placeholder", () => {

@@ -94,24 +94,41 @@ export async function getCatalog(
   const existing = inflightCatalogs.get(key);
   if (existing) return existing;
   const pending = (async () => {
-    const output = await probe({ launch, args: ["models"], cwd });
-    const models: ProviderModel[] = [];
-    for (const line of output.trim().split(/\r?\n/)) {
-      const [id, label, ...extra] = line.split("\t");
-      if (!id || !label || extra.length > 0)
-        throw new AntigravityError("Invalid `agy models` output", "INVALID_CATALOG");
-      if (models.some((model) => model.id === id))
-        throw new AntigravityError(`Duplicate Antigravity model: ${id}`, "INVALID_CATALOG");
-      models.push({ id, label });
+    try {
+      const output = await probe({ launch, args: ["models"], cwd });
+      const models: ProviderModel[] = [];
+      for (const line of output.trim().split(/\r?\n/)) {
+        const [id, label, ...extra] = line.split("\t");
+        if (!id || !label || extra.length > 0)
+          throw new AntigravityError("Invalid `agy models` output", "INVALID_CATALOG");
+        if (models.some((model) => model.id === id))
+          throw new AntigravityError(`Duplicate Antigravity model: ${id}`, "INVALID_CATALOG");
+        models.push({ id, label });
+      }
+      const catalog: ProviderCatalog = {
+        models: groupModels(models),
+        modes,
+        thinkingOptions: [],
+        defaultMode: "full-access",
+      };
+      catalogCache.set(key, { catalog, expiresAt: Date.now() + CATALOG_CACHE_TTL_MS });
+      return catalog;
+    } catch (error) {
+      const cached = catalogCache.get(key);
+      if (
+        cached &&
+        error instanceof AntigravityError &&
+        (error.code === "PROBE_TIMEOUT" ||
+          (error.code === "PROBE_ERROR" && !/authentication failed/i.test(error.message)))
+      ) {
+        catalogCache.set(key, {
+          catalog: cached.catalog,
+          expiresAt: Date.now() + CATALOG_CACHE_TTL_MS,
+        });
+        return cached.catalog;
+      }
+      throw error;
     }
-    const catalog: ProviderCatalog = {
-      models: groupModels(models),
-      modes,
-      thinkingOptions: [],
-      defaultMode: "full-access",
-    };
-    catalogCache.set(key, { catalog, expiresAt: Date.now() + CATALOG_CACHE_TTL_MS });
-    return catalog;
   })().finally(() => {
     inflightCatalogs.delete(key);
   });
@@ -149,6 +166,15 @@ export async function getStatus(launch: ProviderLaunch): Promise<ProviderStatus>
       return status;
     } catch (error) {
       if (!(error instanceof AntigravityError)) throw error;
+      if (
+        (cached?.status.available || catalogCache.has(key)) &&
+        (error.code === "PROBE_TIMEOUT" ||
+          (error.code === "PROBE_ERROR" && !/authentication failed/i.test(error.message)))
+      ) {
+        const status: ProviderStatus = { available: true };
+        statusCache.set(key, { status, expiresAt: Date.now() + STATUS_CACHE_TTL_MS });
+        return status;
+      }
       return { available: false, diagnostic: error.message };
     }
   })().finally(() => {

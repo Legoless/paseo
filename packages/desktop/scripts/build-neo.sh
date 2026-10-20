@@ -29,9 +29,10 @@ cd "$DESKTOP_DIR"
 npm --prefix ../.. run build:desktop:neo
 
 APP="release/mac-arm64/Paseo Neo.app"
-if ! spctl -a -vv "$APP" 2>&1 | grep -q "Notarized"; then
+SPCTL_OUTPUT="$(spctl -a -vv "$APP" 2>&1 || true)"
+if ! grep -q "Notarized" <<<"$SPCTL_OUTPUT"; then
   echo "error: build finished but $APP failed notarization check:" >&2
-  spctl -a -vv "$APP" >&2 || true
+  printf '%s\n' "$SPCTL_OUTPUT" >&2
   exit 1
 fi
 

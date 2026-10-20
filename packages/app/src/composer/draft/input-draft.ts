@@ -133,24 +133,11 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
     [draftKey],
   );
 
-  const saveDraft = useCallback(
-    (
-      update: (draft: { text: string; attachments: UserComposerAttachment[] }) => {
-        text: string;
-        attachments: UserComposerAttachment[];
-      },
-    ) => {
-      const store = useDraftStore.getState();
-      const current = store.getDraftInput(draftKey) ?? { text: "", attachments: [] };
-      const next = update(current);
-      if (!hasDraftContent(next)) {
-        store.clearDraftInput({ draftKey, lifecycle: "abandoned" });
-        return;
-      }
-      store.saveDraftInput({ draftKey, draft: next });
-    },
-    [draftKey],
-  );
+  const isMountedRef = useRef(true);
+  const appliedTextReplacementRequestRef = useRef<{ draftKey: string; requestId: number }>({
+    draftKey: "",
+    requestId: 0,
+  });
 
   const textPublication = useMemo(
     () =>
@@ -160,8 +147,37 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
     [draftKey],
   );
 
+  const saveDraft = useCallback(
+    (
+      update: (draft: { text: string; attachments: UserComposerAttachment[] }) => {
+        text: string;
+        attachments: UserComposerAttachment[];
+      },
+    ) => {
+      textPublication.flush();
+      const store = useDraftStore.getState();
+      const current = store.getDraftInput(draftKey) ?? { text: "", attachments: [] };
+      const next = update(current);
+      if (!hasDraftContent(next)) {
+        store.clearDraftInput({ draftKey, lifecycle: "abandoned" });
+        return;
+      }
+      store.saveDraftInput({ draftKey, draft: next });
+    },
+    [draftKey, textPublication],
+  );
+
   const editText = useCallback(
     (nextText: string) => {
+      if (!isMountedRef.current) {
+        useDraftStore.getState().editDraftText({ draftKey, text: nextText });
+        void useDraftStore.getState().replaceDraftText({ draftKey, text: nextText });
+        return;
+      }
+      appliedTextReplacementRequestRef.current = {
+        draftKey,
+        requestId: useDraftStore.getState().textReplacementRequestByDraftKey[draftKey] ?? 0,
+      };
       if (isWeb) {
         textPublication.stage(nextText);
       } else {
@@ -174,6 +190,10 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
   const replaceText = useCallback(
     (nextText: string) => {
       textPublication.cancel();
+      appliedTextReplacementRequestRef.current = {
+        draftKey,
+        requestId: useDraftStore.getState().textReplacementRequestByDraftKey[draftKey] ?? 0,
+      };
       useDraftStore.getState().editDraftText({ draftKey, text: nextText });
       publishTextReplacement(nextText);
     },
@@ -199,6 +219,7 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
   );
 
   useEffect(() => {
+    isMountedRef.current = true;
     const flushWhenHidden = () => {
       if (document.visibilityState === "hidden") textPublication.flush();
     };
@@ -212,6 +233,7 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
       window.addEventListener("pagehide", flush);
     }
     return () => {
+      isMountedRef.current = false;
       if (isWeb && typeof document !== "undefined") {
         document.removeEventListener("visibilitychange", flushWhenHidden);
       }
@@ -241,10 +263,6 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
   // An out-of-composer replace (custom command) lands in the store and bumps a request id;
   // re-publish it here so a mounted input actually swaps its text. Skipped until hydration,
   // which already publishes the store's text.
-  const appliedTextReplacementRequestRef = useRef<{ draftKey: string; requestId: number }>({
-    draftKey: "",
-    requestId: 0,
-  });
   useEffect(() => {
     if (!isHydrated || textReplacementRequestId === 0) {
       return;
@@ -254,9 +272,10 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
       return;
     }
     appliedTextReplacementRequestRef.current = { draftKey, requestId: textReplacementRequestId };
+    textPublication.cancel();
     const nextText = useDraftStore.getState().getDraftInput(draftKey)?.text ?? "";
     publishTextReplacement(nextText);
-  }, [draftKey, isHydrated, publishTextReplacement, textReplacementRequestId]);
+  }, [draftKey, isHydrated, publishTextReplacement, textPublication, textReplacementRequestId]);
 
   const providerSelection = useMemo<ProviderSelectionState>(
     () => ({

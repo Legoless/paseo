@@ -146,6 +146,7 @@ describe("useAgentInputDraft live contract", () => {
       drafts: {},
       createModalDraft: null,
       attachmentFocusRequestByDraftKey: {},
+      textReplacementRequestByDraftKey: {},
     });
   });
 
@@ -679,5 +680,131 @@ describe("useAgentInputDraft live contract", () => {
       lifecycle: "abandoned",
       input: { text: "", attachments: [] },
     });
+  });
+
+  it("preserves restored text and does not emit an empty textReplacement when a text-only submit fails", async () => {
+    const latest: { current: ReturnType<typeof useAgentInputDraft> | null } = { current: null };
+    function Probe() {
+      latest.current = useAgentInputDraft({
+        draftKey: "draft:failed-submit",
+        composer: { initialServerId: "host-1", isVisible: true, lockedWorkingDir: "/repo" },
+      });
+      return null;
+    }
+
+    const container = document.getElementById("root");
+    if (!container) {
+      throw new Error("Missing root container");
+    }
+    const root = createTestRoot(container);
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <Probe />
+        </QueryClientProvider>,
+      );
+    });
+    await expect.poll(() => latest.current?.isHydrated).toBe(true);
+
+    // User types a prompt in the composer.
+    const readSnapshot = () => latest.current?.textSource.getSnapshot();
+    await act(async () => {
+      latest.current!.editText("preserve my prompt on failure");
+      await expect.poll(readSnapshot).toBe("preserve my prompt on failure");
+    });
+
+    // Submit begins: submitAgentInput clears text and attachments before awaiting submitMessage.
+    await act(async () => {
+      latest.current!.editText("");
+      latest.current!.setAttachments([]);
+    });
+
+    expect(latest.current?.textSource.getSnapshot()).toBe("");
+    const replacementBeforeFailure = latest.current?.textReplacement;
+
+    // Submit fails: submitAgentInput restores text via MessageInput.replaceText -> editText,
+    // followed synchronously by setAttachments([]).
+    await act(async () => {
+      latest.current!.editText("preserve my prompt on failure");
+      latest.current!.setAttachments([]);
+    });
+
+    expect(latest.current?.textSource.getSnapshot()).toBe("preserve my prompt on failure");
+    expect(useDraftStore.getState().getDraftInput("draft:failed-submit")).toEqual({
+      text: "preserve my prompt on failure",
+      attachments: [],
+    });
+    // Must not emit an empty textReplacement that would reset the mounted DOM textarea.
+    expect(latest.current?.textReplacement).toBe(replacementBeforeFailure);
+  });
+
+  it("restores text into a remounted composer when an unmounted submit fails", async () => {
+    const firstHook: { current: ReturnType<typeof useAgentInputDraft> | null } = { current: null };
+    const secondHook: { current: ReturnType<typeof useAgentInputDraft> | null } = { current: null };
+
+    function FirstProbe() {
+      firstHook.current = useAgentInputDraft({
+        draftKey: "draft:unmounted-restore",
+        composer: { initialServerId: "host-1", isVisible: true, lockedWorkingDir: "/repo" },
+      });
+      return null;
+    }
+
+    function SecondProbe() {
+      secondHook.current = useAgentInputDraft({
+        draftKey: "draft:unmounted-restore",
+        composer: { initialServerId: "host-1", isVisible: true, lockedWorkingDir: "/repo" },
+      });
+      return null;
+    }
+
+    const container = document.getElementById("root");
+    if (!container) {
+      throw new Error("Missing root container");
+    }
+    const queryClient = new QueryClient();
+    let root = createTestRoot(container);
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <FirstProbe />
+        </QueryClientProvider>,
+      );
+    });
+    await expect.poll(() => firstHook.current?.isHydrated).toBe(true);
+
+    // Begin submit on first mount, clearing the draft.
+    await act(async () => {
+      firstHook.current!.editText("");
+      firstHook.current!.setAttachments([]);
+    });
+
+    const unmountedFirstHook = firstHook.current!;
+    await act(async () => {
+      root.unmount();
+    });
+
+    // Remount the draft tab while the original submit is still in flight.
+    root = createTestRoot(container);
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <SecondProbe />
+        </QueryClientProvider>,
+      );
+    });
+    await expect.poll(() => secondHook.current?.isHydrated).toBe(true);
+    expect(secondHook.current?.textReplacement.text).toBe("");
+
+    // Now the original unmounted submit fails and restores text + attachments.
+    await act(async () => {
+      unmountedFirstHook.editText("restored after unmount");
+      unmountedFirstHook.setAttachments([]);
+    });
+
+    await expect
+      .poll(() => secondHook.current?.textReplacement.text)
+      .toBe("restored after unmount");
+    expect(secondHook.current?.textSource.getSnapshot()).toBe("restored after unmount");
   });
 });

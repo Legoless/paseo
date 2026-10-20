@@ -168,14 +168,23 @@ export function mapAgyToolDetail(
 // "API error (attempt 1): INTERNAL (code 500)..."), but its long-lived process or session history then
 // reports that error on the result of the turn and of later turns, even ones that finished.
 // A non-empty response means the turn completed.
-function isRecoveredAgyResult(result: AgyResultPayload): boolean {
-  if (result.status !== "ERROR") return false;
-  return typeof result.response === "string" && result.response.trim().length > 0;
+function isRecoveredAgyResult(
+  result: AgyResultPayload,
+  emittedAssistantText: string,
+  hasTurnSteps: boolean,
+  unrecoveredErrorStep: boolean,
+): boolean {
+  if (result.status !== "ERROR" || result.error === "interrupted") return false;
+  if (typeof result.response === "string" && result.response.trim().length > 0) return true;
+  if (unrecoveredErrorStep) return false;
+  return emittedAssistantText.trim().length > 0 || hasTurnSteps;
 }
 
 export class AntigravityStreamDecoder {
   private lineBuffer = "";
   private emittedAssistantText = "";
+  private hasTurnSteps = false;
+  private unrecoveredErrorStep = false;
 
   constructor(
     private readonly provider: string,
@@ -186,6 +195,8 @@ export class AntigravityStreamDecoder {
 
   resetTurn(): void {
     this.emittedAssistantText = "";
+    this.hasTurnSteps = false;
+    this.unrecoveredErrorStep = false;
   }
 
   write(chunk: string, turnId?: string): void {
@@ -317,13 +328,27 @@ export class AntigravityStreamDecoder {
       });
     }
 
+    if (step.step_type === "error_message") {
+      this.unrecoveredErrorStep = true;
+      return;
+    }
+
     if (step.step_type === "agent_response" || step.step_type === "planner_response") {
+      this.hasTurnSteps = true;
+      const before = this.emittedAssistantText;
       this.handleAssistantStep(step, rawStep, turnId);
+      if (this.emittedAssistantText !== before) {
+        this.unrecoveredErrorStep = false;
+      }
     } else if (
       step.step_type === "tool" ||
       step.step_type === "tool_call" ||
       step.step_type === "call"
     ) {
+      this.hasTurnSteps = true;
+      if (step.state === "DONE") {
+        this.unrecoveredErrorStep = false;
+      }
       this.handleToolStep(step, rawStep, turnId);
     }
 
@@ -395,7 +420,15 @@ export class AntigravityStreamDecoder {
       return;
     }
 
-    if (result.status === "SUCCESS" || isRecoveredAgyResult(result)) {
+    if (
+      result.status === "SUCCESS" ||
+      isRecoveredAgyResult(
+        result,
+        this.emittedAssistantText,
+        this.hasTurnSteps,
+        this.unrecoveredErrorStep,
+      )
+    ) {
       if (result.status === "ERROR") {
         this.onProcessNeedsRecycle?.();
       }

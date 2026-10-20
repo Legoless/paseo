@@ -82,18 +82,6 @@ interface KimiComposerBounds {
   bottom: number;
 }
 
-function grokBoxedComposerStart(lines: string[]): number {
-  for (let index = lines.length - 1; index > 0; index -= 1) {
-    if (
-      GROK_COMPOSER_PROMPT.test(lines[index].trim()) &&
-      GROK_COMPOSER_CAP.test(lines[index - 1].trim())
-    ) {
-      return index - 1;
-    }
-  }
-  return -1;
-}
-
 function grokUncappedComposerStart(lines: string[]): number {
   const footer = lines.findLastIndex((line) => GROK_MODEL_FOOTER.test(line.trim()));
   if (footer <= 0 || !GROK_COMPOSER_PROMPT.test(lines[footer - 1].trim())) return -1;
@@ -120,7 +108,54 @@ function dropCodexComposer(lines: string[]): string[] {
   return [...lines.slice(0, composer), ...lines.slice(composer + 1)];
 }
 
+interface AntigravityComposerBounds {
+  top: number;
+  bottom: number;
+}
+
+function findAntigravityComposer(lines: string[]): AntigravityComposerBounds | null {
+  const stripped = lines.map((line) => stripAnsi(line).trim());
+  for (let index = stripped.length - 1; index > 0; index -= 1) {
+    if (!ANTIGRAVITY_COMPOSER.test(stripped[index]) || !HORIZONTAL_RULE.test(stripped[index - 1])) {
+      continue;
+    }
+    const bottomOffset = stripped.slice(index + 1).findIndex((line) => HORIZONTAL_RULE.test(line));
+    if (bottomOffset >= 0) {
+      return { top: index - 1, bottom: index + 1 + bottomOffset };
+    }
+    return null;
+  }
+  return null;
+}
+
+function dropAntigravityTranscriptPrompts(lines: string[]): string[] {
+  const result: string[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const current = stripAnsi(lines[index]).trim();
+    const next = index + 1 < lines.length ? stripAnsi(lines[index + 1]).trim() : "";
+    if (HORIZONTAL_RULE.test(current) && ANTIGRAVITY_COMPOSER.test(next)) {
+      index += 2;
+      while (index < lines.length && /^  \S/.test(stripAnsi(lines[index]))) {
+        index += 1;
+      }
+      continue;
+    }
+    result.push(lines[index]);
+    index += 1;
+  }
+  return result;
+}
+
 function dropAntigravityComposer(lines: string[]): string[] {
+  const boxed = findAntigravityComposer(lines);
+  if (boxed) {
+    return dropAntigravityTranscriptPrompts(lines.slice(0, boxed.top));
+  }
+  const withoutTranscriptPrompts = dropAntigravityTranscriptPrompts(lines);
+  if (withoutTranscriptPrompts.length !== lines.length) {
+    return withoutTranscriptPrompts;
+  }
   const composer = lines.findLastIndex((line) => ANTIGRAVITY_COMPOSER.test(line.trim()));
   if (composer < 0) return lines;
   const remaining = [...lines.slice(0, composer), ...lines.slice(composer + 1)];
@@ -162,18 +197,25 @@ function hasSelectionContext(lines: string[]): boolean {
   );
 }
 
+const INTERRUPTED_TURN_NOTICE = /^(?:[└⎿]\s+)?Interrupted\s+[·•]\s+What should .+ do instead\?$/i;
+
 function isProviderTurnEnd(line: string, agent?: KnownAgentName): boolean {
   const normalized = stripAnsi(line).trim();
+  if (INTERRUPTED_TURN_NOTICE.test(normalized)) return true;
   if (agent === "claude") return /^✻ (?!Waiting for\b).+ for \d/.test(normalized);
   if (agent === "codex" || agent === "grok") {
     return /^(?:[^\s\w]\s+)?Worked for\b/.test(normalized);
   }
+  if (agent === "antigravity") return /^▸\s+Thought for\b/.test(normalized);
   return false;
 }
 
 function screenFromLastTurnEnd(lines: string[], agent?: KnownAgentName): string[] {
   const turnEnd = lines.findLastIndex((line) => isProviderTurnEnd(line, agent));
-  return turnEnd >= 0 ? lines.slice(turnEnd) : lines;
+  if (turnEnd < 0) return lines;
+  return INTERRUPTED_TURN_NOTICE.test(stripAnsi(lines[turnEnd]).trim())
+    ? lines.slice(turnEnd + 1)
+    : lines.slice(turnEnd);
 }
 
 export function isNeedsInputScreen(lines: string[], agent?: KnownAgentName): boolean {
@@ -245,14 +287,49 @@ export function isIdlePromptLine(line: string, agent: KnownAgentName): boolean {
 }
 
 const ANTIGRAVITY_RUNNING_STATUS = /\[\d{1,2}:\d{2}:\d{2}\].*\brunning$/i;
+const ANTIGRAVITY_RUNNING_SUBAGENT = /^[●○]\s+Agent\(/;
 const ANTIGRAVITY_OPEN_WORK = /\b[1-9]\d*\s+(?:task|subagent)\(s\)(?=\s|$)/i;
+const ANTIGRAVITY_OPEN_SUBAGENTS = /\b[1-9]\d*\s+subagent\(s\)(?=\s|$)/i;
+const ANTIGRAVITY_ACTIVE_TURN_FOOTER = /^esc to cancel\b.*\s·\s/i;
+const ANTIGRAVITY_COMPOSER_FOOTER =
+  /^(?:esc to cancel|\?\s+for shortcuts)\b.*\s[·•]\s|\bGemini\s+\d+(?:\.\d+)?\b.*\s[·•]\s*(?:low|medium|high|xhigh|max)\b/i;
+// agy prints this as it quits. A renamed tab does not deliver the shell title, so
+// this line is the quit the scanner can see. Counts above it are that process.
+const ANTIGRAVITY_EXIT_BANNER = /Resume with -c \(or command below\):/;
 
-// The agy composer stays on `>` while a command is still running. That prompt is only
-// idle once the status line and the open-task/subagent count are gone.
+function antigravityLinesAfterExit(lines: string[]): string[] | null {
+  const stripped = lines.map((line) => stripAnsi(line).trim());
+  const exit = stripped.findLastIndex((line) => ANTIGRAVITY_EXIT_BANNER.test(line));
+  return exit >= 0 ? stripped.slice(exit + 1) : null;
+}
+
+// A `>` or a new header under the banner is another agy session. The shell prompt is not.
+function isAntigravityQuitScreen(lines: string[]): boolean {
+  const live = antigravityLinesAfterExit(lines);
+  if (!live || findAntigravityComposer(live) !== null) return false;
+  return !live.some(
+    (line) =>
+      isIdlePromptLine(line, "antigravity") ||
+      /welcome to the antigravity cli/i.test(line) ||
+      /^antigravity cli\b/i.test(line) ||
+      ANTIGRAVITY_RUNNING_STATUS.test(line) ||
+      ANTIGRAVITY_RUNNING_SUBAGENT.test(line) ||
+      ANTIGRAVITY_OPEN_WORK.test(line),
+  );
+}
+
+// The agy composer stays on `>` while a turn runs (`esc to cancel` in the footer) and
+// while background work is listed below it. Subagents wake the model when they finish,
+// whereas `[HH:MM:SS] … running` and `N task(s)` are parked background commands that
+// should not keep a finished turn working.
 export function isAntigravityBusyScreen(lines: string[]): boolean {
-  const tail = lines.slice(-20).map((line) => stripAnsi(line).trim());
+  const live = antigravityLinesAfterExit(lines);
+  const tail = (live ?? lines.map((line) => stripAnsi(line).trim())).slice(-20);
   return tail.some(
-    (line) => ANTIGRAVITY_RUNNING_STATUS.test(line) || ANTIGRAVITY_OPEN_WORK.test(line),
+    (line) =>
+      ANTIGRAVITY_ACTIVE_TURN_FOOTER.test(line) ||
+      ANTIGRAVITY_RUNNING_SUBAGENT.test(line) ||
+      ANTIGRAVITY_OPEN_SUBAGENTS.test(line),
   );
 }
 
@@ -282,33 +359,100 @@ export function isCodexBusyScreen(lines: string[]): boolean {
   return status !== undefined && CODEX_RUNNING_STATUS.test(status);
 }
 
-// After a turn Claude prints "✻ Baked for 6s · done 12:03 PM" above its composer, and
-// appends " · 1 shell still running" (shells, monitors, local agents, …) while background
-// work outlives the turn, or shows "✻ Waiting for 1 background agent to finish" instead.
-// Only the last line above the composer counts, or the one before a right-aligned notice
-// ("✘ Auto-update failed"), so a reply or an older turn line does not.
-// ponytail: a pane narrower than the line wraps it and reads as idle; join wrapped rows if that bites.
+// Claude keeps its ruled `❯` composer on the cursor line while a turn runs (showing an
+// animated `[·✢✳✶✻✽] Verb… (elapsed · …)` spinner above optional `⎿  Tip: …` and right-
+// aligned `◎ /goal active` / `✘ …` rows) and after a turn whose background work still runs
+// (`✻ Baked for 6s · … · 1 shell still running` or `✻ Waiting for 1 background agent to
+// finish`). Only the status block immediately above the composer counts, so an older turn
+// or a reply quoting status prose does not. `running Stop hooks` is excluded so a Stop
+// hook's finish stays idle while slower Stop hooks finish.
 const CLAUDE_BACKGROUND_STATUS =
   /^✻ (?:.+ · \d+ [^·]+ still running|Waiting for \d+ .+ to finish)$/;
+const CLAUDE_RUNNING_STATUS =
+  /^[·✢✳✶✻✽◐◑◒◓]\s+(?!.*\brunning Stop hooks\b)[^()\n]+?(?:…|\.\.\.)(?:\s*\([^)]*\)?)?$/i;
+const CLAUDE_COMPOSER_NOTICE = /^(?:✘\s+|◎\s+\/goal active\b)/i;
+const CLAUDE_SUBLINE = /^\s*⎿(?:\s|$)/;
+const CLAUDE_INDENTED_CONTINUATION = /^\s{2,}(?![·✢✳✶✻✽◐◑◒◓⏺●⎿])\S/;
+const CLAUDE_MODE_FOOTER =
+  /^(?:[⏵▸⏸]+\s+)?(?:bypass permissions|accept edits|plan mode|auto mode|manual mode)\s+on\b/i;
+
+function claudeComposerStart(lines: string[]): number {
+  for (let index = lines.length - 1; index > 0; index -= 1) {
+    if (
+      CLAUDE_COMPOSER.test(lines[index].trim()) &&
+      HORIZONTAL_RULE.test(lines[index - 1].trim())
+    ) {
+      return index - 1;
+    }
+  }
+  return -1;
+}
+
+function isClaudeStatusTail(rawLines: string[]): boolean {
+  if (rawLines.length === 0) return false;
+  const last = rawLines.at(-1)!.trim();
+  if (CLAUDE_BACKGROUND_STATUS.test(last) || CLAUDE_RUNNING_STATUS.test(last)) {
+    return true;
+  }
+  if (rawLines.length >= 2 && CLAUDE_INDENTED_CONTINUATION.test(rawLines.at(-1)!)) {
+    const joined = `${rawLines.at(-2)!.trim()} ${last}`;
+    return CLAUDE_BACKGROUND_STATUS.test(joined) || CLAUDE_RUNNING_STATUS.test(joined);
+  }
+  return false;
+}
 
 export function isClaudeBusyScreen(lines: string[]): boolean {
-  return dropComposerBlock(lines.map((line) => stripAnsi(line).trim()))
-    .filter((line) => line.length > 0)
-    .slice(-2)
-    .some((line) => CLAUDE_BACKGROUND_STATUS.test(line));
+  const stripped = lines.map((line) => stripAnsi(line).replace(/\s+$/, ""));
+  const composer = claudeComposerStart(stripped);
+  if (composer < 0 || isNeedsInputScreen(lines, "claude")) return false;
+  const rawAboveComposer = stripped.slice(0, composer).filter((line) => line.trim().length > 0);
+  while (
+    rawAboveComposer.length > 0 &&
+    CLAUDE_COMPOSER_NOTICE.test(rawAboveComposer.at(-1)!.trim())
+  ) {
+    rawAboveComposer.pop();
+  }
+  if (isClaudeStatusTail(rawAboveComposer)) return true;
+
+  for (let pass = 0; pass < 2; pass += 1) {
+    let cursor = rawAboveComposer.length - 1;
+    while (cursor >= 0 && CLAUDE_INDENTED_CONTINUATION.test(rawAboveComposer[cursor])) {
+      cursor -= 1;
+    }
+    if (
+      cursor < 0 ||
+      !CLAUDE_SUBLINE.test(rawAboveComposer[cursor]) ||
+      INTERRUPTED_TURN_NOTICE.test(rawAboveComposer[cursor].trim())
+    ) {
+      break;
+    }
+    rawAboveComposer.length = cursor;
+    while (
+      rawAboveComposer.length > 0 &&
+      CLAUDE_COMPOSER_NOTICE.test(rawAboveComposer.at(-1)!.trim())
+    ) {
+      rawAboveComposer.pop();
+    }
+    if (isClaudeStatusTail(rawAboveComposer)) return true;
+  }
+  return false;
 }
 
 // Grok prints "Worked for …" when the turn ends and leaves the ❯ composer up.
-// Work that is still running is the dock row above that composer. Its mark is
-// the four-dot ⸬ (a braille spinner is the other running mark) and the row
-// ends with a live elapsed time: `⸬ Run …  1h04m`. A reasoning block that is
-// still open is a spinner frame plus `Thinking` or `Thinking…`. That frame
-// cycles through `⋅` `:` `⸬` `⁙` and braille, so the mark is whatever single
-// glyph is in front of the word. `Thought for` rewrites the header when the
-// block ends. A `Thinking` line above that, or above `Worked for`, is an
-// older block. A blank line separates the dock row from the composer box.
-// The ◎ status line counts too. The window is only the lines near the composer,
-// so a braille logo higher in the scrollback does not.
+// A dock row above that composer is still this turn only until that marker
+// exists. Its mark is the four-dot ⸬ (a braille spinner is the other running
+// mark) and the row ends with a live elapsed time: `⸬ Run …  1h04m`. After
+// "Worked for", those rows are processes left up for the user. Their clocks
+// keep painting, and that must not keep the pane working. "Thought for" only
+// closes the reasoning block, so a dock row under it is still the turn. An
+// open reasoning block is a spinner frame plus `Thinking` or `Thinking…`.
+// That frame cycles through `⋅` `:` `⸬` `⁙` and braille, so the mark is
+// whatever single glyph is in front of the word. A `Thinking` line above
+// `Thought for` or `Worked for` is an older block. `◎ waiting` is the turn
+// paused. `◎ … still running` stays working only when it names a subagent or
+// a loop, because those can wake the model; commands and monitors are the
+// parked case, and a mix stays working. The window is the lines near the
+// composer, so a braille logo higher in the scrollback does not.
 const GROK_RUNNING_MARK = "(?:[\\u2800-\\u28FF]|⸬)";
 const GROK_RUNNING_ROW = new RegExp(
   `^${GROK_RUNNING_MARK}.*(?:\\d+h\\d+m(?:\\d+s)?|\\d+m\\d+s|\\d+[hms])$`,
@@ -316,11 +460,13 @@ const GROK_RUNNING_ROW = new RegExp(
 const GROK_THINKING_ROW = /^(?:[^\s\w]\s+)?Thinking(?:\.{1,3}|…|⋯)?$/;
 const GROK_WORKED_FOR = /^(?:[^\s\w]\s+)?Worked for\b/;
 const GROK_REASONING_CLOSED = /^(?:[^\s\w]\s+)?(?:Thought for|Worked for)\b/;
-const GROK_STILL_RUNNING = /^◎\s+(?:waiting\b|\d+\b.*\bstill running\b)/;
+const GROK_WAITING = /^◎\s+waiting\b/;
+const GROK_STILL_RUNNING = /^◎\s+\d+\b.*\bstill running\b/;
+const GROK_WAKES_ON_EXIT = /\b(?:subagents?|loops?)\b/;
 const GROK_DOCK_LINE_LIMIT = 12;
 const GROK_DRAFT_PROMPT = /^(?:grok\s*)?[>❯]\s+\S/i;
 
-export function isGrokBusyScreen(lines: string[]): boolean {
+function grokDock(lines: string[]): string[] {
   const stripped = dropComposerBlock(lines.map((line) => stripAnsi(line).trim()));
   const dock: string[] = [];
   for (
@@ -332,16 +478,34 @@ export function isGrokBusyScreen(lines: string[]): boolean {
     if (line.length === 0) continue;
     dock.push(line);
   }
-  // `dock` is nearest-to-composer first. `Thought for 12s` can wear the same
-  // spinner and end in a duration, and that header is finished. A dock row or
-  // ◎ still counts on either side of it; an older Thinking line does not.
+  return dock;
+}
+
+export function isGrokBusyScreen(lines: string[]): boolean {
+  // `dock` is nearest-to-composer first. The nearest `Worked for` closes this
+  // turn. Task rows between it and the composer are parked. A `Thinking` row
+  // there is a new turn. Rows above the marker are an older block.
+  const dock = grokDock(lines);
+  const turnClosedAt = dock.findIndex((line) => GROK_WORKED_FOR.test(line));
   let reasoningClosed = false;
-  for (const line of dock) {
+  for (let index = 0; index < dock.length; index += 1) {
+    const line = dock[index];
+    const aboveClosedTurn = turnClosedAt >= 0 && index > turnClosedAt;
+    const parkedUnderTurn = turnClosedAt >= 0 && index < turnClosedAt;
+    if (!aboveClosedTurn && GROK_WAITING.test(line)) return true;
+    if (!aboveClosedTurn && GROK_STILL_RUNNING.test(line) && GROK_WAKES_ON_EXIT.test(line)) {
+      return true;
+    }
+    if (parkedUnderTurn) {
+      if (GROK_THINKING_ROW.test(line)) return true;
+      continue;
+    }
+    if (aboveClosedTurn || GROK_WORKED_FOR.test(line)) continue;
     if (GROK_REASONING_CLOSED.test(line)) {
       reasoningClosed = true;
       continue;
     }
-    if (GROK_RUNNING_ROW.test(line) || GROK_STILL_RUNNING.test(line)) return true;
+    if (GROK_RUNNING_ROW.test(line)) return true;
     if (reasoningClosed) continue;
     if (GROK_THINKING_ROW.test(line)) return true;
   }
@@ -349,11 +513,7 @@ export function isGrokBusyScreen(lines: string[]): boolean {
 }
 
 function isGrokFinishedComposerScreen(lines: string[]): boolean {
-  const stripped = lines.map((line) => stripAnsi(line).trim());
-  const composer = grokBoxedComposerStart(stripped);
-  if (composer < 0) return false;
-  const status = stripped.slice(0, composer).findLast((line) => line.length > 0);
-  return status !== undefined && GROK_WORKED_FOR.test(status);
+  return grokDock(lines).some((line) => GROK_WORKED_FOR.test(line));
 }
 
 // Kimi's composer comes back when the turn ends, but work that outlives the turn keeps
@@ -374,15 +534,22 @@ export function isKimiBusyScreen(lines: string[]): boolean {
 }
 
 // Muse leaves its composer on the cursor line throughout the turn. Its animated
-// diamond status is the last non-empty row above the ruled composer; a completed
-// response also starts with a diamond, so require an elapsed time for a filled
-// diamond. Narrow panes wrap the row or truncate its interrupt hint.
-const MUSE_RUNNING_STATUS =
-  /^[◇◈◆]\s+(?:Thinking|Working|Double checking|Finishing up)\s+\(\d+[hms](?:\s*\d+[hms])*(?:\s*[·•]\s*(.*?))?\)?$/i;
-const MUSE_STARTING_STATUS = /^[◇◈]\s+(?:Thinking|Working)$/i;
+// diamond/caret status sits above the ruled composer (or above the indented
+// reasoning summary and goal checklist); a completed response also starts with
+// a diamond, so require an elapsed time for a filled diamond. Narrow panes wrap
+// the row or truncate its interrupt hint.
+const MUSE_STATUS_VERBS =
+  "(?:Thinking|Working|Calling tools|Double checking|Finishing up|Compacting context(?: before your message)?|Interrupting|(?:Running|Executing) (?:command|tool)s?(?:\\s+[·•]\\s+.+?\\s+—\\s+running)?)";
+const MUSE_RUNNING_STATUS = new RegExp(
+  `^[◇◈◆▸▾]\\s+${MUSE_STATUS_VERBS}\\s+\\(\\d+[hms](?:\\s*\\d+[hms])*(?:\\s*[·•]\\s*(.*?))?\\)?$`,
+  "i",
+);
+const MUSE_STARTING_STATUS = new RegExp(`^[◇◈▸▾]\\s+${MUSE_STATUS_VERBS}$`, "i");
+const MUSE_GOAL_ITEM = /^\s{2,}[✓✔✗✖◇◈◆]\s/;
+const MUSE_BACKGROUND_HINT = /^\s*└\s+\(ctrl\+b to send to background\)$/i;
 const MUSE_COMPOSER_RULE = /^[─━═]{2,}/;
 const MUSE_PROFILE_FOOTER =
-  /\s[·•]\s(?:Read only|Ask me|Auto-review|Unrestricted|Launch overrides)$/i;
+  /\s[·•]\s(?:Read only|Ask me|Auto-review|Unrestricted|Launch overrides|YOLO)(?:\s[·•]\s|$)/i;
 
 function museComposerStart(lines: string[]): number {
   for (let index = lines.length - 1; index > 0; index -= 1) {
@@ -424,14 +591,7 @@ export function isMuseNeedsInputScreen(lines: string[]): boolean {
   );
 }
 
-export function isMuseBusyScreen(lines: string[]): boolean {
-  const stripped = lines.map((line) => stripAnsi(line).trim());
-  const composer = museComposerStart(stripped);
-  if (composer < 0 || isMuseNeedsInputScreen(lines)) return false;
-  const statusLines = stripped
-    .slice(0, composer)
-    .filter((line) => line.length > 0)
-    .slice(-3);
+function isMuseStatusTail(statusLines: string[]): boolean {
   return statusLines.some((_, index) => {
     const status = statusLines.slice(index).join(" ");
     if (MUSE_STARTING_STATUS.test(status)) return true;
@@ -440,6 +600,32 @@ export function isMuseBusyScreen(lines: string[]): boolean {
     const hint = running[1]?.replace(/[.…]+$/, "").trim();
     return hint === undefined || "esc to interrupt".startsWith(hint);
   });
+}
+
+export function isMuseBusyScreen(lines: string[]): boolean {
+  const stripped = lines.map((line) => stripAnsi(line).trim());
+  const composer = museComposerStart(stripped);
+  if (composer < 0 || isMuseNeedsInputScreen(lines)) return false;
+  const rawAboveComposer = lines
+    .slice(0, composer)
+    .map((line) => stripAnsi(line).replace(/\s+$/, ""))
+    .filter((line) => line.trim().length > 0);
+  while (rawAboveComposer.length > 0 && MUSE_BACKGROUND_HINT.test(rawAboveComposer.at(-1)!)) {
+    rawAboveComposer.pop();
+  }
+  if (isMuseStatusTail(rawAboveComposer.slice(-3).map((line) => line.trim()))) {
+    return true;
+  }
+  while (rawAboveComposer.length > 0 && MUSE_GOAL_ITEM.test(rawAboveComposer.at(-1)!)) {
+    rawAboveComposer.pop();
+  }
+  if (isMuseStatusTail(rawAboveComposer.slice(-3).map((line) => line.trim()))) {
+    return true;
+  }
+  while (rawAboveComposer.length > 0 && /^\s{2,}\S/.test(rawAboveComposer.at(-1)!)) {
+    rawAboveComposer.pop();
+  }
+  return isMuseStatusTail(rawAboveComposer.slice(-3).map((line) => line.trim()));
 }
 
 // OpenCode's textarea stays visible while busy and has no prompt marker. Its
@@ -551,6 +737,27 @@ function isAgentNeedsInputScreen(lines: string[], agent: KnownAgentName): boolea
   return isNeedsInputScreen(lines, agent);
 }
 
+const NEEDS_INPUT_GATED_IDLE_AGENTS = new Set<KnownAgentName>([
+  "claude",
+  "codex",
+  "grok",
+  "antigravity",
+]);
+
+function isAntigravityIdleComposerScreen(lines: string[], cursorLine: string): boolean {
+  if (isIdlePromptLine(cursorLine, "antigravity")) return true;
+  const composer = findAntigravityComposer(lines);
+  if (!composer) return false;
+  const trimmedCursor = stripAnsi(cursorLine).trim();
+  if (ANTIGRAVITY_COMPOSER.test(trimmedCursor)) return true;
+  return (
+    trimmedCursor.length > 0 &&
+    lines
+      .slice(composer.top + 1, composer.bottom)
+      .some((line) => stripAnsi(line).trim() === trimmedCursor)
+  );
+}
+
 export function isIdleAgentScreen(
   lines: string[],
   cursorLine: string,
@@ -566,11 +773,11 @@ export function isIdleAgentScreen(
     if (isOpenCodeNeedsInputScreen(lines)) return false;
     return openCodeComposerFooter(lines) !== null || isIdlePromptLine(cursorLine, agent);
   }
-  if (
-    (agent === "claude" || agent === "codex" || agent === "grok") &&
-    isAgentNeedsInputScreen(lines, agent)
-  ) {
+  if (NEEDS_INPUT_GATED_IDLE_AGENTS.has(agent) && isAgentNeedsInputScreen(lines, agent)) {
     return false;
+  }
+  if (agent === "antigravity") {
+    return isAntigravityIdleComposerScreen(lines, cursorLine);
   }
   if (agent === "grok") {
     if (isIdlePromptLine(cursorLine, agent)) return true;
@@ -731,6 +938,34 @@ function isShellOwnedTitle(title: string | undefined): boolean {
   );
 }
 
+function detectRestoredAgentFromScreen(stripped: string, lines: string[]): KnownAgentName | null {
+  if (openCodeComposerFooter(lines) !== null) return "opencode";
+  const trimmed = lines.map((line) => line.trim());
+  // A restored Muse screen can have scrolled its banner away. Its voice composer
+  // together with the profile footer identifies it; the cwd-only title does not.
+  if (
+    /^\s*[─━═]{2,}.*\bVoice input\b/im.test(stripped) &&
+    museComposerStart(trimmed) >= 0 &&
+    trimmed.some((line) => MUSE_PROFILE_FOOTER.test(line))
+  ) {
+    return "muse";
+  }
+  if (claudeComposerStart(trimmed) >= 0 && trimmed.some((line) => CLAUDE_MODE_FOOTER.test(line))) {
+    return "claude";
+  }
+  const antigravityComposer = findAntigravityComposer(trimmed);
+  if (
+    antigravityComposer !== null &&
+    !isAntigravityQuitScreen(trimmed) &&
+    trimmed
+      .slice(antigravityComposer.bottom + 1)
+      .some((line) => ANTIGRAVITY_COMPOSER_FOOTER.test(line) || ANTIGRAVITY_OPEN_WORK.test(line))
+  ) {
+    return "antigravity";
+  }
+  return null;
+}
+
 export function detectAgentFromOutput(chunk: string): KnownAgentName | null {
   if (!chunk) return null;
   const stripped = stripAnsi(chunk);
@@ -742,33 +977,27 @@ export function detectAgentFromOutput(chunk: string): KnownAgentName | null {
   if (/\bwelcome to grok build\b/i.test(stripped) || /\bgrok\s+\d+\.\d+/i.test(stripped)) {
     return "grok";
   }
-  if (/welcome to the antigravity cli/i.test(stripped) || /google antigravity/i.test(stripped)) {
+  if (
+    /welcome to the antigravity cli/i.test(stripped) ||
+    /google antigravity/i.test(stripped) ||
+    /\bantigravity cli\s+v?\d+\.\d+/i.test(stripped)
+  ) {
     return "antigravity";
   }
   if (/\bopencode\s+v\d/i.test(stripped)) return "opencode";
-  if (openCodeComposerFooter(stripped.split(/\r?\n/)) !== null) return "opencode";
   if (/\bcursor agent\s+v\d{4}\./i.test(stripped.replace(/\r?\n/g, " "))) return "cursor";
   if (/\bwelcome to kimi code\b/i.test(stripped)) return "kimi";
   // The welcome banner is not reprinted on resume/restore; the status bar's context
   // meter ("context: 29% (290k/1M)") is the stable marker on those screens.
   if (/\bcontext:\s*\d{1,3}%\s*\(\d[\d.,]*[km]?\/\d+[km]\)/i.test(stripped)) return "kimi";
   if (/^\s*muse code\s+v?\d+\.\d+/im.test(stripped)) return "muse";
-  // A restored Muse screen can have scrolled its banner away. Its voice composer
-  // together with the profile footer identifies it; the cwd-only title does not.
-  const lines = stripped.split(/\r?\n/);
-  if (
-    /^\s*[─━═]{2,}.*\bVoice input\b/im.test(stripped) &&
-    museComposerStart(lines.map((line) => line.trim())) >= 0 &&
-    lines.some((line) => MUSE_PROFILE_FOOTER.test(line.trim()))
-  ) {
-    return "muse";
-  }
 
-  return null;
+  return detectRestoredAgentFromScreen(stripped, stripped.split(/\r?\n/));
 }
 
 const BRAILLE_SPINNER_REGEX = /[\u2800-\u28FF]/;
-const MUSE_DIAMOND_REGEX = /[◇◈◆]/;
+const MUSE_DIAMOND_REGEX = /[◇◈◆▸▾]/;
+const CLAUDE_SPINNER_REGEX = /[·✢✳✶✻✽◐◑◒◓]/;
 // Claude Code titles the tab "◐ …"/"◑ …" only while a turn runs, and "✳ …" when idle or a
 // dialog waits. Its spinner is not braille and it repaints too often for a stillness check,
 // so this title is the one output signal that a turn resumed after a needs-input stop, such
@@ -851,7 +1080,7 @@ export class PtyActivityScanner {
 
   feedInput(input: string): void {
     this.interruptedAt = null;
-    if (!this.activeAgent) return;
+    if (!this.activeAgent || this.disarmQuitAntigravity()) return;
 
     if (input === "\r" || input === "\n") {
       this.initialLaunch = false;
@@ -884,6 +1113,8 @@ export class PtyActivityScanner {
       BRAILLE_SPINNER_REGEX.test(chunk) ||
       /[■⬝⬥⬩⬪]/.test(chunk) ||
       MUSE_DIAMOND_REGEX.test(chunk) ||
+      CLAUDE_SPINNER_REGEX.test(chunk) ||
+      chunk.includes("…") ||
       chunk.includes("⋯") ||
       chunk.includes("◎") ||
       chunk.includes("⸬")
@@ -897,7 +1128,7 @@ export class PtyActivityScanner {
       let detected = detectAgentFromOutput(chunk);
       if (!detected && this.shouldProbeUnknownAgentScreen(chunk)) {
         this.lookedAtScreen = true;
-        detected = detectAgentFromOutput(this.options.readLastLines(15).join("\n"));
+        detected = detectAgentFromOutput(this.options.readLastLines(25).join("\n"));
       }
       if (detected) {
         this.activeAgent = detected;
@@ -906,6 +1137,10 @@ export class PtyActivityScanner {
         return;
       }
     }
+
+    // The banner is in this chunk. The headless screen does not have it yet:
+    // feedOutput runs before the PTY chunk is parsed. A later chunk sees it there.
+    if (this.disarmQuitAntigravity(chunk)) return;
 
     this.unresolvedWorkingStillness = 0;
 
@@ -920,7 +1155,14 @@ export class PtyActivityScanner {
         (this.currentActivity !== "working" ||
           this.options.getActivity().attentionReason === "needs_input")) ||
         (this.currentActivity !== "working" &&
+          // A parked Grok task keeps a braille clock after Worked for. That frame
+          // must not relight a closed turn. A busy Grok screen is promoted below.
+          // Antigravity's logo is braille too. A frame only counts once the live
+          // screen is actually busy, so a quit banner's scrollback cannot relight.
           this.activeAgent !== "opencode" &&
+          this.activeAgent !== "grok" &&
+          (this.activeAgent !== "antigravity" ||
+            isAntigravityBusyScreen(this.options.readLastLines(20))) &&
           BRAILLE_SPINNER_REGEX.test(chunk) &&
           !this.options.getActivity().attentionReason))
     ) {
@@ -932,13 +1174,19 @@ export class PtyActivityScanner {
   }
 
   // A continuously animating live status leaves no quiet gap for the stillness
-  // check. Codex, Grok, Muse, and OpenCode can resume after an approval without Enter,
-  // or start work on their own after a finished turn. Quota stays red.
+  // check. Antigravity, Claude, Codex, Grok, Muse, and OpenCode can resume after an
+  // approval without Enter, or start/continue work on their own. Quota stays red.
   private promoteWorkingAgentScreen(): void {
     if (
-      (this.initialLaunch && this.activeAgent !== "muse" && this.activeAgent !== "opencode") ||
+      (this.initialLaunch &&
+        this.activeAgent !== "antigravity" &&
+        this.activeAgent !== "claude" &&
+        this.activeAgent !== "muse" &&
+        this.activeAgent !== "opencode") ||
       this.isInsideInterruptWindow() ||
-      (this.activeAgent !== "codex" &&
+      (this.activeAgent !== "antigravity" &&
+        this.activeAgent !== "claude" &&
+        this.activeAgent !== "codex" &&
         this.activeAgent !== "grok" &&
         this.activeAgent !== "muse" &&
         this.activeAgent !== "opencode") ||
@@ -948,7 +1196,7 @@ export class PtyActivityScanner {
     ) {
       return;
     }
-    const lines = this.options.readLastLines(15);
+    const lines = this.options.readLastLines(25);
     if (
       isAgentBusyScreen(lines, this.activeAgent) &&
       !isSpendLimitScreen(lines, this.activeAgent)
@@ -960,6 +1208,18 @@ export class PtyActivityScanner {
 
   private isInsideInterruptWindow(): boolean {
     return this.interruptedAt !== null && Date.now() - this.interruptedAt < this.stillnessMs;
+  }
+
+  // agy quits by printing the banner, then the shell prompt. Drop the agent before
+  // a braille frame or the next Enter can mark that shell as a turn.
+  private disarmQuitAntigravity(chunk?: string): boolean {
+    if (this.activeAgent !== "antigravity") return false;
+    const quit =
+      (chunk !== undefined && ANTIGRAVITY_EXIT_BANNER.test(stripAnsi(chunk))) ||
+      isAntigravityQuitScreen(this.options.readLastLines(20));
+    if (!quit) return false;
+    this.handleCommandFinished();
+    return true;
   }
 
   private setWorking(): void {
@@ -1033,7 +1293,7 @@ export class PtyActivityScanner {
       this.currentActivity = null;
     }
 
-    const lines = this.options.readLastLines(15);
+    const lines = this.options.readLastLines(25);
     const openCodeHookNeedsInput = this.hasOpenCodeHookNeedsInput();
 
     if (
