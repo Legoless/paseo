@@ -171,6 +171,14 @@ describe("isSpendLimitScreen", () => {
     ];
     expect(isSpendLimitScreen(screen)).toBe(false);
   });
+
+  it("recognizes Cursor's account usage notice without matching source errors", () => {
+    expect(isSpendLimitScreen(["You're out of usage. Switch to Auto."])).toBe(true);
+    expect(isSpendLimitScreen(["You’re out of usage. Switch to Auto."])).toBe(true);
+    expect(isSpendLimitScreen(["You are out of usage. Switch to Auto."])).toBe(true);
+    expect(isSpendLimitScreen(['throw new Error("You\'re out of usage")'])).toBe(false);
+    expect(isSpendLimitScreen(["Error: Increase limits for faster responses"])).toBe(false);
+  });
 });
 
 describe("isNeedsInputScreen", () => {
@@ -3392,6 +3400,38 @@ describe("Antigravity, Gemini, and Cursor terminal activity", () => {
       expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
       tracker.clearAttention();
     }
+  });
+
+  it("marks Cursor's out-of-usage error below its footer as quota instead of finished", () => {
+    const { tracker, scanner, paint } = terminal("cursor");
+    const composer = "→ Add a follow-up";
+    const screen = [
+      "Edit sim_effects.gd Interrupted",
+      "Edit map_loader.gd Interrupted",
+      "Edit sim_world.gd Interrupted",
+      "Goal active (10h 54m 1s)",
+      composer,
+      "Grok 4.7 500K Extra High Fast · MAX · 79.2% · 116 files edited Run Everything",
+      "~/Projects/legoless/OpenAOE2 · main",
+      "",
+      "\x1b[31mError: Increase limits for faster responses\x1b[0m",
+      "You're out of usage. Switch to Auto, or ask your admin to increase your limit",
+      "to continue.",
+    ];
+
+    scanner.feedInput("\r");
+    paint(screen, composer);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "quota" });
+
+    tracker.clearAttention();
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: null });
+
+    scanner.feedInput("\r");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    paint(["Done", composer], composer);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
   });
 
   it("keeps Cursor pending decisions orange instead of clearing them", () => {

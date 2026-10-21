@@ -45,7 +45,7 @@ const TYPOGRAPHIC_APOSTROPHE = /[\u2018\u2019\u201a\u201b\u2032\u02bc]/g;
 // Phrases the CLIs print when the account itself cannot continue. Kept specific
 // so a source file that merely mentions "spend limit" does not light the pane.
 const SPEND_LIMIT_NOTICE =
-  /you(?:'ve| have) hit your (?:(?:monthly|weekly|daily|session) )?(?:spend |usage )?limit\b|spend limit (?:has been )?reached|usage limit (?:has been )?reached|\bout of (?:credits|quota|extra usage)\b|\b(?:quota|rate limit) (?:exceeded|exhausted|reached)\b|\binsufficient quota\b|\bcredit balance is too low\b|\bexhausted your (?:(?:daily|weekly|monthly|session) )?(?:capacity|quota|credits)\b|\bsubscription limit\b/;
+  /you(?:'ve| have) hit your (?:(?:monthly|weekly|daily|session) )?(?:spend |usage )?limit\b|spend limit (?:has been )?reached|usage limit (?:has been )?reached|\bout of (?:credits|quota|extra usage)\b|\byou(?:'re| are) out of usage\b|\b(?:quota|rate limit) (?:exceeded|exhausted|reached)\b|\binsufficient quota\b|\bcredit balance is too low\b|\bexhausted your (?:(?:daily|weekly|monthly|session) )?(?:capacity|quota|credits)\b|\bsubscription limit\b/;
 const SOURCE_ERROR_EXPRESSION = /\bthrow\s+new\s+[\w$]*error\s*\(/i;
 
 export function isSpendLimitScreen(lines: string[], agent?: KnownAgentName): boolean {
