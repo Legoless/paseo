@@ -302,6 +302,14 @@ describe("terminal-emulator-runtime", () => {
     expect(committed).toEqual(["first", "second", "clear", "third"]);
   });
 
+  it("keeps a screen clear and its redraw in one synchronized frame", () => {
+    const { runtime, writeTexts } = createRuntimeWithTerminal();
+
+    runtime.write({ data: terminalOutput("\x1b[2J\x1b[Hhello") });
+
+    expect(writeTexts).toEqual(["\x1b[?2026h\x1b[2J\x1b[Hhello\x1b[?2026l"]);
+  });
+
   it("falls back to timeout commit for a barrier op when the gate sentinel never fires", () => {
     vi.useFakeTimers();
     const { runtime, terminal } = createRuntimeWithTerminal();

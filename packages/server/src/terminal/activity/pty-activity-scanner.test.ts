@@ -6,6 +6,7 @@ import {
   isAntigravityBusyScreen,
   isClaudeBusyScreen,
   isCodexBusyScreen,
+  isCursorBusyScreen,
   isCursorNeedsInputScreen,
   isGeminiBusyScreen,
   isGrokBusyScreen,
@@ -54,6 +55,9 @@ describe("detectAgentFromCommand", () => {
     expect(detectAgentFromCommand("pi /path")).toBe("pi");
     expect(detectAgentFromCommand("copilot")).toBe("copilot");
     expect(detectAgentFromCommand("cursor")).toBe("cursor");
+    expect(detectAgentFromCommand("cursor-agent")).toBe("cursor");
+    expect(detectAgentFromCommand("agent")).toBe("cursor");
+    expect(detectAgentFromCommand("agent --resume")).toBe("cursor");
     expect(detectAgentFromCommand("gemini")).toBe("gemini");
     expect(detectAgentFromCommand("amp")).toBe("amp");
   });
@@ -93,6 +97,10 @@ describe("detectAgentFromTitle", () => {
   it("detects agent-owned display titles", () => {
     expect(detectAgentFromTitle("✳ Claude Code")).toBe("claude");
     expect(detectAgentFromTitle("OpenAI Codex")).toBe("codex");
+    expect(detectAgentFromTitle("codex")).toBe("codex");
+    expect(detectAgentFromTitle("OpenAI Codex v0.155.1")).toBe("codex");
+    expect(detectAgentFromTitle("Codex Session")).toBeNull();
+    expect(detectAgentFromTitle("Codex Session Audit")).toBeNull();
     expect(detectAgentFromTitle("Google Antigravity")).toBe("antigravity");
     expect(detectAgentFromTitle("Cursor Agent")).toBe("cursor");
     expect(detectAgentFromTitle("Muse Code 1.4.6")).toBe("muse");
@@ -117,6 +125,26 @@ describe("detectAgentFromOutput", () => {
     expect(detectAgentFromOutput("Welcome to the Antigravity CLI")).toBe("antigravity");
     expect(detectAgentFromOutput("OpenCode v1.18.31")).toBe("opencode");
     expect(detectAgentFromOutput("  Cursor Agent\r\n  v2026.09.18-9a7762b")).toBe("cursor");
+    expect(
+      detectAgentFromOutput(
+        [
+          "OpenAI Codex v0.155.1",
+          "Editing merge.py",
+          "→ Add a follow-up",
+          "ctrl+c to stop",
+          "Claude Opus 5.5 1M Extra High · MAX · 60% · 60 files edited",
+          "Run Everything",
+        ].join("\n"),
+      ),
+    ).toBe("cursor");
+    expect(
+      detectAgentFromOutput(
+        ["→ Plan, search, build anything", "GPT-5.6 Sol 1M Extra High · MAX"].join("\n"),
+      ),
+    ).toBe("cursor");
+    expect(detectAgentFromOutput("→ Add a follow-up")).toBeNull();
+    expect(detectAgentFromOutput("ctrl+c to stop")).toBeNull();
+    expect(detectAgentFromOutput("Run Everything")).toBeNull();
     expect(detectAgentFromOutput("▐█▛█▛█▌  Welcome to Kimi Code!")).toBe("kimi");
     expect(detectAgentFromOutput("\x1b[1mMuse Code 1.4.6\x1b[0m")).toBe("muse");
     expect(
@@ -426,6 +454,17 @@ describe("isIdleAgentScreen", () => {
         "Ask When Needed  K3 thinking: max  ~/proj  main",
       ]),
     ).toBe(false);
+  });
+
+  it("keeps Cursor working while ctrl+c to stop sits under the composer", () => {
+    const busy = ["→ Add a follow-up", "ctrl+c to stop", "60 files edited", "Run Everything"];
+    const sameLine = ["→ Add a follow-up    ctrl+c to stop"];
+    const quoted = ["The server is running; ctrl+c to stop it.", "→ Add a follow-up"];
+    expect(isCursorBusyScreen(busy)).toBe(true);
+    expect(isCursorBusyScreen(sameLine)).toBe(true);
+    expect(isIdleAgentScreen(busy, "", "cursor")).toBe(false);
+    expect(isCursorBusyScreen(quoted)).toBe(false);
+    expect(isIdleAgentScreen(quoted, "", "cursor")).toBe(true);
   });
 
   it("does not treat Cursor's submitted composer as idle", () => {
@@ -1504,6 +1543,62 @@ describe("PtyActivityScanner — full lifecycle", () => {
       state: "idle",
       attentionReason: "finished",
     });
+  });
+
+  it("treats a Cursor screen titled like Codex as Cursor and keeps the turn working", () => {
+    const tracker = new TerminalActivityTracker();
+    const screen = [
+      "OpenAI Codex v0.155.1",
+      "Editing merge.py",
+      "Tip: Use /run-everything to skip all approvals.",
+      "→ Add a follow-up",
+      "ctrl+c to stop",
+      "2 tasks",
+      "Claude Opus 5.5 1M Extra High · MAX · 60% · 60 files edited",
+      "Run Everything",
+    ];
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screen,
+      readCursorLine: () => "",
+      stillnessMs: 500,
+    });
+
+    scanner.handleCommandStarted();
+    scanner.handleTitleChange("Codex Session Audit");
+    expect(scanner.getActiveAgent()).toBe("codex");
+
+    scanner.feedOutput("ctrl+c to stop");
+    expect(scanner.getActiveAgent()).toBe("cursor");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    vi.advanceTimersByTime(2000);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("recognizes a resumed Cursor screen that never reprints its banner", () => {
+    const tracker = new TerminalActivityTracker();
+    const screen = [
+      "→ Add a follow-up",
+      "ctrl+c to stop",
+      "Claude Opus 5.5 1M Extra High · MAX · 60% · 60 files edited",
+    ];
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screen,
+      readCursorLine: () => "",
+      stillnessMs: 500,
+    });
+
+    scanner.feedOutput("tick");
+    expect(scanner.getActiveAgent()).toBe("cursor");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    vi.advanceTimersByTime(2000);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
   });
 
   it("detects Grok Build and Antigravity CLIs", () => {

@@ -135,6 +135,20 @@ describe("TerminalOutputCoalescer", () => {
     expect(flushes).toEqual([{ payload: "post-snapshot", chars: 13, bytes: 13 }]);
   });
 
+  test("holds a screen clear until the trailing window so the redraw stays with it", () => {
+    const { coalescer, flushes, runScheduled, scheduled } = createHarness();
+
+    coalescer.handle("\x1b[2J\x1b[3J\x1b[H");
+    coalescer.handle("frame");
+
+    expect(scheduled.size).toBe(1);
+    expect(flushes).toEqual([]);
+
+    runScheduled();
+
+    expect(flushes).toEqual([{ payload: "\x1b[2J\x1b[3J\x1b[Hframe", chars: 16, bytes: 16 }]);
+  });
+
   test("preserves ordering across leading and trailing flushes", () => {
     const { coalescer, flushes, runScheduled, advance } = createHarness();
 

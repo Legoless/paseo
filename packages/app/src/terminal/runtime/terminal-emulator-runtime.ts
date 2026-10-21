@@ -163,6 +163,8 @@ const DEFAULT_TOUCH_SCROLL_LINE_HEIGHT_PX = 18;
 const FIT_TIMEOUT_DELAYS_MS = [0, 16, 48, 120, 250, 500, 1_000, 2_000];
 const OUTPUT_OPERATION_TIMEOUT_MS = 5_000;
 const EMPTY_TERMINAL_OUTPUT = new Uint8Array(0);
+const SYNCHRONIZED_OUTPUT_START = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x68]);
+const SYNCHRONIZED_OUTPUT_END = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x6c]);
 const RESET_TERMINAL_OUTPUT = new Uint8Array([0x1b, 0x63]);
 const terminalOutputEncoder = new TextEncoder();
 
@@ -177,6 +179,35 @@ function prependTerminalOutput(
   const output = new Uint8Array(prefix.length + data.length);
   output.set(prefix, 0);
   output.set(data, prefix.length);
+  return output;
+}
+
+// Cursor's renderer emits ESC [ 2 J / ESC [ 3 J and then the new frame. xterm can
+// paint the clear when a large write yields mid-parse. Holding the frame in
+// synchronized-output mode paints the clear and the redraw together.
+function terminalOutputClearsScreen(data: TerminalOutputData): boolean {
+  for (let index = 0; index + 3 < data.length; index += 1) {
+    if (data[index] !== 0x1b || data[index + 1] !== 0x5b) {
+      continue;
+    }
+    const kind = data[index + 2];
+    if ((kind === 0x32 || kind === 0x33) && data[index + 3] === 0x4a) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function withSynchronizedScreenClear(data: TerminalOutputData): TerminalOutputData {
+  if (!terminalOutputClearsScreen(data)) {
+    return data;
+  }
+  const output = new Uint8Array(
+    SYNCHRONIZED_OUTPUT_START.length + data.length + SYNCHRONIZED_OUTPUT_END.length,
+  );
+  output.set(SYNCHRONIZED_OUTPUT_START, 0);
+  output.set(data, SYNCHRONIZED_OUTPUT_START.length);
+  output.set(SYNCHRONIZED_OUTPUT_END, SYNCHRONIZED_OUTPUT_START.length + data.length);
   return output;
 }
 
@@ -1116,7 +1147,7 @@ export class TerminalEmulatorRuntime {
     };
     this.pendingWriteCommits.add(commit);
     try {
-      terminal.write(operation.data, commit);
+      terminal.write(withSynchronizedScreenClear(operation.data), commit);
     } catch {
       commit();
     }
@@ -1203,7 +1234,7 @@ export class TerminalEmulatorRuntime {
     }, OUTPUT_OPERATION_TIMEOUT_MS);
 
     try {
-      terminal.write(data, () => {
+      terminal.write(withSynchronizedScreenClear(data), () => {
         if (shouldRefitAfterSnapshot) {
           // A refit resizes xterm, which flushes its write buffer. Let the parser
           // finish this callback before refitting or submitting queued live output.

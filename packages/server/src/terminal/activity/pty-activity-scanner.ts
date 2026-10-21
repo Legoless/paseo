@@ -708,6 +708,7 @@ function isAgentBusyScreen(lines: string[], agent: KnownAgentName): boolean {
   if (agent === "kimi") return isKimiBusyScreen(lines);
   if (agent === "muse") return isMuseBusyScreen(lines);
   if (agent === "opencode") return isOpenCodeBusyScreen(lines);
+  if (agent === "cursor") return isCursorBusyScreen(lines);
   return false;
 }
 
@@ -719,6 +720,50 @@ const CURSOR_IDLE_COMPOSERS = new Set([
 const CURSOR_BUSY_HINT = /\bctrl\+c to stop\b/i;
 const CURSOR_DECISION_STATUS = /^→\s+Waiting for decision\b/i;
 const CURSOR_DECISION_OPTION = /^→\s+\d+\.\s+\S+/;
+// Resume and a scrolled-away banner leave the composer and this footer. The chat
+// title is not usable: Cursor names the tab after the task ("Codex Session …").
+const CURSOR_FOOTER_MARKER = /\bctrl\+c to stop\b|\bRun Everything\b|\b\d+\s+files edited\b/i;
+const CURSOR_MODEL_FOOTER = /·[^·\n]*\b(?:extra high|max)\b/i;
+
+function cursorTail(lines: string[]): string[] {
+  return lines.slice(-15).map((line) => stripAnsi(line).trim());
+}
+
+function isCursorComposerLine(line: string): boolean {
+  if (CURSOR_IDLE_COMPOSERS.has(line) || CURSOR_DECISION_STATUS.test(line)) return true;
+  for (const composer of CURSOR_IDLE_COMPOSERS) {
+    if (line.startsWith(`${composer} `)) return true;
+  }
+  return false;
+}
+
+function chunkHasCursorChrome(chunk: string): boolean {
+  return (
+    chunk.includes("→") ||
+    /ctrl\+c to stop/i.test(chunk) ||
+    chunk.includes("Run Everything") ||
+    /\bfiles edited\b/i.test(chunk) ||
+    /cursor agent/i.test(chunk)
+  );
+}
+
+// `ctrl+c to stop` sits on or under the live composer while a turn runs. A reply
+// that quotes the hint above the composer is not that row.
+export function isCursorBusyScreen(lines: string[]): boolean {
+  const tail = cursorTail(lines);
+  const composer = tail.findLastIndex((line) => line.startsWith("→"));
+  if (composer < 0) return false;
+  return tail.slice(composer).some((line) => CURSOR_BUSY_HINT.test(line));
+}
+
+function isCursorAgentScreen(lines: string[]): boolean {
+  const tail = cursorTail(lines).filter((line) => line.length > 0);
+  if (tail.some((line) => CURSOR_DECISION_STATUS.test(line))) return true;
+  const composer = tail.findLastIndex((line) => isCursorComposerLine(line));
+  if (composer < 0) return false;
+  const footer = tail.slice(composer).join(" ");
+  return CURSOR_FOOTER_MARKER.test(footer) || CURSOR_MODEL_FOOTER.test(footer);
+}
 
 export function isCursorNeedsInputScreen(lines: string[]): boolean {
   const stripped = lines.slice(-15).map((line) => stripAnsi(line).trim());
@@ -814,7 +859,8 @@ const AGENT_EXECUTABLES: readonly AgentExecutable[] = [
   { agent: "opencode", names: ["opencode"] },
   { agent: "pi", names: ["pi"] },
   { agent: "copilot", names: ["copilot"] },
-  { agent: "cursor", names: ["cursor", "cursor-agent"] },
+  // `agent` is the current Cursor CLI. `cursor` and `cursor-agent` are the older names.
+  { agent: "cursor", names: ["cursor", "cursor-agent", "agent"] },
   { agent: "gemini", names: ["gemini"] },
   { agent: "amp", names: ["amp"] },
   { agent: "kimi", names: ["kimi", "kimi-code"] },
@@ -823,7 +869,8 @@ const AGENT_EXECUTABLES: readonly AgentExecutable[] = [
 
 const AGENT_DISPLAY_TITLES: readonly { agent: KnownAgentName; pattern: RegExp }[] = [
   { agent: "claude", pattern: /^(?:✳\s*)?claude code(?:\s|$)/i },
-  { agent: "codex", pattern: /^(?:openai\s+)?codex(?:\s|$)/i },
+  // A trailing word is a chat title ("Codex Session …"), which Cursor also uses.
+  { agent: "codex", pattern: /^(?:openai\s+)?codex(?:\s+v?\d[\w.]*)?$/i },
   { agent: "grok", pattern: /^grok build(?:\s|$)/i },
   { agent: "antigravity", pattern: /^(?:google\s+)?antigravity(?:\s|$)/i },
   { agent: "opencode", pattern: /^opencode(?:\s|$)/i },
@@ -892,6 +939,27 @@ function detectAgentDisplayTitle(normalized: string): KnownAgentName | null {
 
 const LAUNCH_TURN_FLAGS = /^(?:-p|--print|--prompt|--message)(?:=|$)/;
 const UNRESOLVED_WORKING_STILLNESS_LIMIT = 3;
+// The title arrives before the TUI paints, and feedOutput runs before the chunk is
+// on the screen, so a chat-titled Cursor session needs more than one look.
+const TITLE_GUESS_CHECKS = 8;
+// These CLIs keep a composer on screen during a turn, so a busy screen is the
+// signal. The launch set also accepts that screen before the first Enter.
+const PROMOTED_DURING_LAUNCH = new Set<KnownAgentName>([
+  "antigravity",
+  "claude",
+  "cursor",
+  "muse",
+  "opencode",
+]);
+const PROMOTED_AGENTS = new Set<KnownAgentName>([
+  "antigravity",
+  "claude",
+  "codex",
+  "cursor",
+  "grok",
+  "muse",
+  "opencode",
+]);
 
 function commandStartsTurn(command: string): boolean {
   const agent = detectAgentFromCommand(command);
@@ -969,6 +1037,10 @@ function detectRestoredAgentFromScreen(stripped: string, lines: string[]): Known
 export function detectAgentFromOutput(chunk: string): KnownAgentName | null {
   if (!chunk) return null;
   const stripped = stripAnsi(chunk);
+  const lines = stripped.split(/\r?\n/);
+  // Before the banner checks. A visible transcript can name another product
+  // ("OpenAI Codex") while the live chrome is still Cursor.
+  if (isCursorAgentScreen(lines)) return "cursor";
 
   if (/\bclaude code\s+v?\d/i.test(stripped) || /✳\s*claude\b/i.test(stripped)) return "claude";
   if (/\bopenai codex\b/i.test(stripped) || /\bcodex\s+v\d/i.test(stripped)) return "codex";
@@ -992,7 +1064,7 @@ export function detectAgentFromOutput(chunk: string): KnownAgentName | null {
   if (/\bcontext:\s*\d{1,3}%\s*\(\d[\d.,]*[km]?\/\d+[km]\)/i.test(stripped)) return "kimi";
   if (/^\s*muse code\s+v?\d+\.\d+/im.test(stripped)) return "muse";
 
-  return detectRestoredAgentFromScreen(stripped, stripped.split(/\r?\n/));
+  return detectRestoredAgentFromScreen(stripped, lines);
 }
 
 const BRAILLE_SPINNER_REGEX = /[\u2800-\u28FF]/;
@@ -1016,6 +1088,10 @@ export class PtyActivityScanner {
   // One look at a screen the scanner does not recognize yet. A restored Grok
   // session's next byte is often only the task clock, while the footer is already painted.
   private lookedAtScreen = false;
+  // A window title can name the chat ("Codex Session …") before the screen does.
+  // The guess stays provisional for a few frames so a later paint can replace it.
+  private titleGuess = false;
+  private titleChecks = 0;
   private stillnessTimer: NodeJS.Timeout | null = null;
   private lastOutputAt = 0;
   private readonly options: PtyActivityScannerOptions;
@@ -1035,6 +1111,8 @@ export class PtyActivityScanner {
     const detected = detectAgentFromCommand(command);
     if (!detected) return;
     this.activeAgent = detected;
+    this.titleGuess = false;
+    this.titleChecks = 0;
     if (commandStartsTurn(command)) {
       this.initialLaunch = false;
       this.setWorking();
@@ -1062,6 +1140,8 @@ export class PtyActivityScanner {
       : detectAgentFromTitle(title);
     if (detected && !this.activeAgent) {
       this.activeAgent = detected;
+      this.titleGuess = true;
+      this.titleChecks = 0;
       this.initialLaunch = true;
     }
   }
@@ -1073,6 +1153,8 @@ export class PtyActivityScanner {
     this.initialLaunch = false;
     this.expectsCommandTitle = false;
     this.lookedAtScreen = false;
+    this.titleGuess = false;
+    this.titleChecks = 0;
     this.unresolvedWorkingStillness = 0;
     this.lastOutputAt = 0;
     this.options.clearActivity();
@@ -1117,8 +1199,26 @@ export class PtyActivityScanner {
       chunk.includes("…") ||
       chunk.includes("⋯") ||
       chunk.includes("◎") ||
-      chunk.includes("⸬")
+      chunk.includes("⸬") ||
+      chunkHasCursorChrome(chunk)
     );
+  }
+
+  // Title detection runs before the TUI paints, and Cursor's title is the chat name.
+  // feedOutput runs before the chunk is on the screen, so look at this chunk and the
+  // screen already painted. A transcript that names another CLI does not confirm it.
+  private reconcileTitleGuess(chunk: string): void {
+    if (!this.titleGuess || !this.activeAgent) return;
+    const screenIsCursor =
+      detectAgentFromOutput(chunk) === "cursor" ||
+      detectAgentFromOutput(this.options.readLastLines(25).join("\n")) === "cursor";
+    if (screenIsCursor) {
+      this.activeAgent = "cursor";
+      this.titleGuess = false;
+      return;
+    }
+    this.titleChecks += 1;
+    if (this.titleChecks >= TITLE_GUESS_CHECKS) this.titleGuess = false;
   }
 
   feedOutput(chunk: string): void {
@@ -1136,6 +1236,8 @@ export class PtyActivityScanner {
       } else {
         return;
       }
+    } else if (this.titleGuess) {
+      this.reconcileTitleGuess(chunk);
     }
 
     // The banner is in this chunk. The headless screen does not have it yet:
@@ -1174,22 +1276,14 @@ export class PtyActivityScanner {
   }
 
   // A continuously animating live status leaves no quiet gap for the stillness
-  // check. Antigravity, Claude, Codex, Grok, Muse, and OpenCode can resume after an
-  // approval without Enter, or start/continue work on their own. Quota stays red.
+  // check. Antigravity, Claude, Codex, Cursor, Grok, Muse, and OpenCode can resume
+  // after an approval without Enter, or start/continue work on their own. Quota stays red.
   private promoteWorkingAgentScreen(): void {
     if (
-      (this.initialLaunch &&
-        this.activeAgent !== "antigravity" &&
-        this.activeAgent !== "claude" &&
-        this.activeAgent !== "muse" &&
-        this.activeAgent !== "opencode") ||
+      !this.activeAgent ||
+      (this.initialLaunch && !PROMOTED_DURING_LAUNCH.has(this.activeAgent)) ||
       this.isInsideInterruptWindow() ||
-      (this.activeAgent !== "antigravity" &&
-        this.activeAgent !== "claude" &&
-        this.activeAgent !== "codex" &&
-        this.activeAgent !== "grok" &&
-        this.activeAgent !== "muse" &&
-        this.activeAgent !== "opencode") ||
+      !PROMOTED_AGENTS.has(this.activeAgent) ||
       (this.currentActivity === "working" && this.options.getActivity().state === "working") ||
       this.hasOpenCodeHookNeedsInput() ||
       this.options.getActivity().attentionReason === "quota"
