@@ -197,6 +197,31 @@ function hasSelectionContext(lines: string[]): boolean {
   );
 }
 
+// Codex draws dismissible account banners above the live composer. The hint is
+// "Press a number to choose · esc to dismiss · type to continue". The `› 1.`
+// action is not an approval: typing still goes to the composer. A `?` in the
+// server copy, or in `? for shortcuts`, must not make that row look like one.
+const CODEX_DISMISSIBLE_BANNER_HINT = /esc to dismiss\s*[·•]\s*type to continue/i;
+const CODEX_BANNER_ACTION = /^(?:[›»>❯]\s*)?\d+\.\s+\S/;
+
+function withoutCodexDismissibleBanner(lines: string[]): string[] {
+  const hint = lines.findIndex((line) => CODEX_DISMISSIBLE_BANNER_HINT.test(line));
+  if (hint < 0) return lines;
+  const drop = new Set<number>([hint]);
+  let sawAction = false;
+  for (let index = hint - 1; index >= 0; index -= 1) {
+    const trimmed = lines[index].trim();
+    if (trimmed.length === 0) {
+      if (sawAction) break;
+      continue;
+    }
+    if (!CODEX_BANNER_ACTION.test(trimmed)) break;
+    drop.add(index);
+    sawAction = true;
+  }
+  return lines.filter((_, index) => !drop.has(index));
+}
+
 const INTERRUPTED_TURN_NOTICE = /^(?:[└⎿]\s+)?Interrupted\s+[·•]\s+What should .+ do instead\?$/i;
 
 function isProviderTurnEnd(line: string, agent?: KnownAgentName): boolean {
@@ -225,7 +250,8 @@ export function isNeedsInputScreen(lines: string[], agent?: KnownAgentName): boo
   const tailLines = screenWithoutEditableComposer(currentTurn.map(stripAnsi), agent)
     .slice(tailStart)
     .filter((line) => !GROK_MODEL_FOOTER.test(line));
-  const tailText = tailLines.join("\n");
+  const scannedLines = agent === "codex" ? withoutCodexDismissibleBanner(tailLines) : tailLines;
+  const tailText = scannedLines.join("\n");
   const lowerTail = tailText.toLowerCase();
 
   if (/[[(][yY]\/[nN][\])]/.test(tailText) || /\[(yes|no)\/(yes|no)\]/i.test(tailText)) {
@@ -247,12 +273,12 @@ export function isNeedsInputScreen(lines: string[], agent?: KnownAgentName): boo
     return true;
   }
 
-  if (tailLines.some((line) => /^\?\s+\S+/.test(line.trim()))) {
+  if (scannedLines.some((line) => /^\?\s+\S+/.test(line.trim()))) {
     return true;
   }
 
-  const hasSelectedOption = tailLines.some((line) => /^[>❯›»]\s+\S+/.test(line.trim()));
-  if (hasSelectedOption && hasSelectionContext(tailLines)) {
+  const hasSelectedOption = scannedLines.some((line) => /^[>❯›»]\s+\S+/.test(line.trim()));
+  if (hasSelectedOption && hasSelectionContext(scannedLines)) {
     return true;
   }
 

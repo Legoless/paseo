@@ -2922,6 +2922,43 @@ describe("Claude and Codex composer activity", () => {
     },
   );
 
+  it("leaves Codex's dismissible security banner on a finished turn", () => {
+    const composerLine = "› Ask Codex to do anything";
+    const screen = [
+      "Worked for 3m 56s",
+      "Set up security for Daybreak mode",
+      "Set up Advanced Account security with a hardware security key. Verify each new",
+      "hardware security key with Persona. Already Persona-verified? You can keep using",
+      "Codex while you finish setup.",
+      "",
+      "› 1. Set up security",
+      "  2. Not now",
+      "",
+      "Press a number to choose · esc to dismiss · type to continue",
+      composerLine,
+      "  GPT-6.1-Sol ultra · main · Context 93% left · weekly 0% left",
+      "  ← for agents · ? for shortcuts",
+    ];
+    expect(isNeedsInputScreen(screen, "codex")).toBe(false);
+    expect(isIdleAgentScreen(screen, composerLine, "codex")).toBe(true);
+
+    const approval = [
+      "Would you like to proceed?",
+      "› 1. Yes, proceed (y)",
+      "  2. No",
+      composerLine,
+      "  ← for agents · ? for shortcuts",
+    ];
+    expect(isNeedsInputScreen(approval, "codex")).toBe(true);
+    expect(isIdleAgentScreen(approval, "› 1. Yes, proceed (y)", "codex")).toBe(false);
+
+    const { tracker, scanner, paint } = terminal("codex");
+    scanner.feedInput("\r");
+    paint(screen, composerLine);
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
   it("keeps Codex working on a truncated dynamic header nearest its composer", () => {
     const busy = ["• Planning the fix (1m 02s", "› Ask Codex to do anything"];
     expect(isCodexBusyScreen(busy)).toBe(true);
