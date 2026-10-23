@@ -10,6 +10,7 @@ import {
   humanizeProcessTitle,
   normalizeProcessTitle,
   resolveZshShellIntegrationDir,
+  type TerminalActivityTransition,
   type TerminalSession,
 } from "./terminal.js";
 import {
@@ -1312,9 +1313,16 @@ describe("terminal activity interruption", () => {
       await createTerminal({
         workspaceId: "ws-test",
         cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: [
+          "-e",
+          'process.stdout.write("Claude Code v2.1.284\\r\\n"); process.stdin.setRawMode(true); process.stdin.resume();',
+        ],
       }),
     );
+    await waitForState(session, (state) => getLines(state).join("\n").includes("Claude Code"));
     session.setActivity("working");
+    expect(session.getActivity()).toMatchObject({ state: "working" });
 
     session.send({ type: "input", data });
 
@@ -1330,8 +1338,14 @@ describe("terminal activity interruption", () => {
       await createTerminal({
         workspaceId: "ws-test",
         cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: [
+          "-e",
+          'process.stdout.write("Claude Code v2.1.284\\r\\n"); process.stdin.setRawMode(true); process.stdin.resume();',
+        ],
       }),
     );
+    await waitForState(session, (state) => getLines(state).join("\n").includes("Claude Code"));
     session.setActivity("working");
 
     session.send({ type: "input", data });
@@ -1374,6 +1388,29 @@ describe("terminal restore", () => {
     expect(text.indexOf("old-output")).toBeLessThan(text.indexOf("Session restored"));
     expect(text.indexOf("Session restored")).toBeLessThan(text.indexOf("live-output"));
     expect(session.getActivity()).toBeNull();
+  });
+
+  it("keeps a restored shell idle despite agent output in its saved screen", async () => {
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: [
+          "-e",
+          `${FIRST_PROMPT} process.stdout.write("$ "); process.stdin.setRawMode(true); process.stdin.on("data", () => process.stdout.write("\\r\\nshell-command\\r\\n$ "));`,
+        ],
+        restore: { seed: "Claude Code v2.1.284\r\n-- Session restored --\r\n" },
+      }),
+    );
+    await waitForState(session, (state) => getLines(state).includes("$"));
+
+    session.send({ type: "input", data: "\r" });
+    await waitForState(session, (state) => getLines(state).includes("shell-command"));
+    session.setActivity("working", undefined, "old-agent-session");
+
+    expect(session.getActivity()).toBeNull();
+    expect(deriveTerminalActivityStatusBucket(session.getActivity())).toBeNull();
   });
 
   // An OSC 7 sequence as a shell prints it: this machine's host and a percent-encoded path.
@@ -1654,6 +1691,66 @@ describe("terminal restore", () => {
 });
 
 describe("terminal pty activity scanning", () => {
+  it.each([
+    ["working", undefined],
+    ["idle", undefined],
+    ["attention", undefined],
+    ["attention", "quota"],
+  ] as const)("ignores %s/%s agent hook reports in a plain shell", async (hookState, reason) => {
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: [
+          "-e",
+          'process.stdout.write("$ "); process.stdin.setRawMode(true); process.stdin.resume();',
+        ],
+      }),
+    );
+    await waitForState(session, (state) => getLines(state).includes("$"));
+    const changes: TerminalActivityTransition[] = [];
+    session.onActivityChange((transition) => changes.push(transition));
+
+    session.setActivity(hookState, reason, "late-agent-session");
+
+    expect(session.getActivity()).toBeNull();
+    expect(deriveTerminalActivityStatusBucket(session.getActivity())).toBeNull();
+    expect(changes).toEqual([]);
+  });
+
+  it("keeps a returned shell unadorned when late agent hooks arrive", async () => {
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: [
+          "-e",
+          'process.stdout.write("Claude Code v2.1.284\\r\\n"); process.stdin.setRawMode(true); process.stdin.on("data", () => process.stdout.write("\\x1b]633;D;0\\x07\\r\\n$ "));',
+        ],
+      }),
+    );
+    await waitForState(session, (state) => getLines(state).join("\n").includes("Claude Code"));
+    session.setActivity("working", undefined, "agent-session");
+    expect(deriveTerminalActivityStatusBucket(session.getActivity())).toBe("running");
+
+    session.send({ type: "input", data: "exit" });
+    await waitForState(session, (state) => getLines(state).includes("$"));
+    expect(session.getActivity()).toBeNull();
+    const changes: TerminalActivityTransition[] = [];
+    session.onActivityChange((transition) => changes.push(transition));
+
+    session.setActivity("working", undefined, "agent-session");
+    session.setActivity("attention", "quota", "agent-session");
+    session.setActivity("idle", undefined, "agent-session");
+    session.send({ type: "input", data: "\r" });
+
+    expect(session.getActivity()).toBeNull();
+    expect(deriveTerminalActivityStatusBucket(session.getActivity())).toBeNull();
+    expect(changes).toEqual([]);
+  });
+
   it("settles a late Codex working hook without another PTY repaint", async () => {
     const session = trackSession(
       await createTerminal({

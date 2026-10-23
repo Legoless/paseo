@@ -32,6 +32,28 @@ async function waitForCondition(
 let manager: TerminalManager;
 const temporaryDirs: string[] = [];
 
+async function createKnownAgentTerminal(options: Parameters<TerminalManager["createTerminal"]>[0]) {
+  const session = await manager.createTerminal({
+    ...options,
+    command: process.execPath,
+    args: [
+      "-e",
+      'process.stdout.write("Claude Code v2.1.284\\r\\n"); setInterval(() => {}, 1000);',
+    ],
+  });
+  await waitForCondition(
+    () =>
+      session.getState().grid.some((row) =>
+        row
+          .map((cell) => cell.char)
+          .join("")
+          .includes("Claude Code"),
+      ),
+    5000,
+  );
+  return session;
+}
+
 afterEach(async () => {
   if (manager) {
     const terminalsByCwd = await Promise.all(
@@ -592,7 +614,7 @@ it("setTerminalActivity returns true and emits terminals-changed", async () => {
     );
   });
 
-  const session = await manager.createTerminal({ cwd, workspaceId: "ws-test" });
+  const session = await createKnownAgentTerminal({ cwd, workspaceId: "ws-test" });
   await expect(manager.setTerminalActivity(session.id, "working")).resolves.toBe(true);
 
   const hasWorkingActivity = (entries: ActivityEntry[]) =>
@@ -620,7 +642,7 @@ it("clearTerminalAttention returns attention terminals to idle", async () => {
     );
   });
 
-  const session = await manager.createTerminal({ cwd, workspaceId: "ws-test" });
+  const session = await createKnownAgentTerminal({ cwd, workspaceId: "ws-test" });
   await manager.setTerminalActivity(session.id, "attention");
 
   await expect(manager.clearTerminalAttention(session.id)).resolves.toBe(true);
@@ -637,7 +659,7 @@ it("clearTerminalAttention returns attention terminals to idle", async () => {
 
 it("clearTerminalAttention leaves non-attention terminals unchanged", async () => {
   manager = createTerminalManager();
-  const session = await manager.createTerminal({
+  const session = await createKnownAgentTerminal({
     cwd: realpathSync(tmpdir()),
     workspaceId: "ws-test",
   });
@@ -656,7 +678,7 @@ it("emits workspace contribution event when activity bucket changes", async () =
     events.push(event);
   });
 
-  const session = await manager.createTerminal({ cwd, workspaceId: "ws-test" });
+  const session = await createKnownAgentTerminal({ cwd, workspaceId: "ws-test" });
   await manager.setTerminalActivity(session.id, "working");
 
   expect(events).toEqual([
@@ -694,7 +716,7 @@ it("emits workspace contribution event when a contributing terminal is removed",
     events.push(event);
   });
 
-  const session = await manager.createTerminal({ cwd, workspaceId: "ws-test" });
+  const session = await createKnownAgentTerminal({ cwd, workspaceId: "ws-test" });
   await manager.setTerminalActivity(session.id, "working");
   events.length = 0;
   manager.killTerminal(session.id);

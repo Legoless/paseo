@@ -41,6 +41,7 @@ async function reportActivity(state) {
 }
 
 (async () => {
+  process.stdout.write("Claude Code v2.1.284\\n");
   for (const state of states) {
     await waitForTrigger(state);
     await reportActivity(state);

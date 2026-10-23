@@ -10696,6 +10696,31 @@ async function flushTerminalContributionWork(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+async function createKnownAgentTerminal(
+  terminalManager: TerminalManager,
+  options: Parameters<TerminalManager["createTerminal"]>[0],
+) {
+  const terminal = await terminalManager.createTerminal({
+    ...options,
+    command: process.execPath,
+    args: [
+      "-e",
+      'process.stdout.write("Claude Code v2.1.284\\r\\n"); setInterval(() => {}, 1000);',
+    ],
+  });
+  await expect
+    .poll(
+      () =>
+        terminal
+          .getState()
+          .grid.map((row) => row.map((cell) => cell.char).join(""))
+          .join("\n"),
+      { timeout: 5000 },
+    )
+    .toContain("Claude Code");
+  return terminal;
+}
+
 async function waitForWorkspaceUpdate(
   emitted: SessionOutboundMessage[],
   predicate: (message: Extract<SessionOutboundMessage, { type: "workspace_update" }>) => boolean,
@@ -10887,7 +10912,7 @@ test("terminal activity contribution change updates the correct workspace", asyn
     onMessage: (message) => emitted.push(message),
   });
 
-  const terminal = await terminalManager.createTerminal({
+  const terminal = await createKnownAgentTerminal(terminalManager, {
     cwd,
     workspaceId: workspace.workspaceId,
   });
@@ -10965,7 +10990,7 @@ test("same-cwd terminal activity updates only the workspace that owns the termin
     onMessage: (message) => emitted.push(message),
   });
 
-  const terminal = await terminalManager.createTerminal({
+  const terminal = await createKnownAgentTerminal(terminalManager, {
     cwd,
     workspaceId: workspaceB.workspaceId,
   });
@@ -11052,7 +11077,7 @@ test("a worktree terminal updates only the workspace that owns it", async () => 
   // The terminal is stamped with the worktree workspace at creation. Its cwd is
   // a subdirectory, but ownership is the workspaceId, so only the worktree
   // workspace (never the enclosing root) reflects the activity.
-  const terminal = await terminalManager.createTerminal({
+  const terminal = await createKnownAgentTerminal(terminalManager, {
     cwd: terminalCwd,
     workspaceId: workspaceWorktree.workspaceId,
   });
@@ -11161,7 +11186,7 @@ test("removing a contributing terminal clears workspace status", async () => {
     onMessage: (message) => emitted.push(message),
   });
 
-  const terminal = await terminalManager.createTerminal({
+  const terminal = await createKnownAgentTerminal(terminalManager, {
     cwd,
     workspaceId: workspace.workspaceId,
   });

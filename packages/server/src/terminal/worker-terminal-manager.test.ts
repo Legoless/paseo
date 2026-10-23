@@ -1173,8 +1173,14 @@ it("clears finished attention on a real terminal", async () => {
     await manager.createTerminal({
       workspaceId: "ws-test",
       cwd,
-      ...nodeTerminalCommand("setInterval(() => {}, 1000);"),
+      ...nodeTerminalCommand(
+        'process.stdout.write("Claude Code v2.1.284\\r\\n"); setInterval(() => {}, 1000);',
+      ),
     }),
+  );
+  await waitForCondition(
+    async () => (await renderedTerminalText(manager!, session.id)).includes("Claude Code"),
+    5000,
   );
 
   // A working -> idle transition is how the real tracker records a "finished"

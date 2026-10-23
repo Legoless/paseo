@@ -20,6 +20,7 @@ export interface PtyActivityScannerOptions {
   hasHookNeedsInput?: () => boolean;
   readLastLines: (limit: number) => string[];
   readCursorLine: () => string;
+  initialScreenIsHistory?: boolean;
   stillnessMs?: number;
 }
 
@@ -964,6 +965,7 @@ function detectAgentDisplayTitle(normalized: string): KnownAgentName | null {
 }
 
 const LAUNCH_TURN_FLAGS = /^(?:-p|--print|--prompt|--message)(?:=|$)/;
+const AGENT_DETECTION_OUTPUT_LIMIT = 8192;
 const UNRESOLVED_WORKING_STILLNESS_LIMIT = 3;
 // The title arrives before the TUI paints, and feedOutput runs before the chunk is
 // on the screen, so a chat-titled Cursor session needs more than one look.
@@ -1114,6 +1116,10 @@ export class PtyActivityScanner {
   // One look at a screen the scanner does not recognize yet. A restored Grok
   // session's next byte is often only the task clock, while the footer is already painted.
   private lookedAtScreen = false;
+  // Once the shell returns, existing screen content belongs to a previous command.
+  // A new agent must identify itself through fresh output, its command, or its title.
+  private canProbeScreenForAgent: boolean;
+  private agentDetectionOutput = "";
   // A window title can name the chat ("Codex Session …") before the screen does.
   // The guess stays provisional for a few frames so a later paint can replace it.
   private titleGuess = false;
@@ -1125,6 +1131,7 @@ export class PtyActivityScanner {
 
   constructor(options: PtyActivityScannerOptions) {
     this.options = options;
+    this.canProbeScreenForAgent = !options.initialScreenIsHistory;
     this.stillnessMs = options.stillnessMs ?? 1200;
   }
 
@@ -1137,6 +1144,7 @@ export class PtyActivityScanner {
     const detected = detectAgentFromCommand(command);
     if (!detected) return;
     this.activeAgent = detected;
+    this.agentDetectionOutput = "";
     this.titleGuess = false;
     this.titleChecks = 0;
     if (commandStartsTurn(command)) {
@@ -1166,6 +1174,7 @@ export class PtyActivityScanner {
       : detectAgentFromTitle(title);
     if (detected && !this.activeAgent) {
       this.activeAgent = detected;
+      this.agentDetectionOutput = "";
       this.titleGuess = true;
       this.titleChecks = 0;
       this.initialLaunch = true;
@@ -1179,6 +1188,8 @@ export class PtyActivityScanner {
     this.initialLaunch = false;
     this.expectsCommandTitle = false;
     this.lookedAtScreen = false;
+    this.canProbeScreenForAgent = false;
+    this.agentDetectionOutput = "";
     this.titleGuess = false;
     this.titleChecks = 0;
     this.unresolvedWorkingStillness = 0;
@@ -1216,6 +1227,7 @@ export class PtyActivityScanner {
   }
 
   private shouldProbeUnknownAgentScreen(chunk: string): boolean {
+    if (!this.canProbeScreenForAgent) return false;
     return (
       !this.lookedAtScreen ||
       BRAILLE_SPINNER_REGEX.test(chunk) ||
@@ -1249,15 +1261,20 @@ export class PtyActivityScanner {
 
   feedOutput(chunk: string): void {
     if (!this.activeAgent) {
+      // PTY chunks can split an identifying banner. Keep only fresh output since the last
+      // shell boundary so assembling those bytes cannot rediscover an exited agent.
+      const freshOutput = this.agentDetectionOutput + chunk;
+      this.agentDetectionOutput = freshOutput.slice(-AGENT_DETECTION_OUTPUT_LIMIT);
+      let detected = detectAgentFromOutput(freshOutput);
       // A resumed session's next byte is often a clock tick. The footer that
       // names Grok is already on the screen, not in that tick.
-      let detected = detectAgentFromOutput(chunk);
       if (!detected && this.shouldProbeUnknownAgentScreen(chunk)) {
         this.lookedAtScreen = true;
         detected = detectAgentFromOutput(this.options.readLastLines(25).join("\n"));
       }
       if (detected) {
         this.activeAgent = detected;
+        this.agentDetectionOutput = "";
         this.initialLaunch = true;
       } else {
         return;

@@ -1348,6 +1348,66 @@ describe("PtyActivityScanner — full lifecycle", () => {
     },
   );
 
+  it("keeps an idle shell clear when the previous agent remains in scrollback", () => {
+    const tracker = new TerminalActivityTracker();
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => ["OpenAI Codex", "› Ask Codex to do anything", "$ "],
+      readCursorLine: () => "$ ",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("codex");
+    scanner.feedInput("\r");
+    scanner.handleCommandFinished();
+    scanner.feedOutput("\x1b[?2004h$ ");
+    scanner.feedInput("\r");
+
+    expect(scanner.getActiveAgent()).toBeNull();
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+
+    scanner.handleCommandStarted();
+    scanner.handleTitleChange("ls");
+    scanner.feedOutput("file.txt\r\n");
+    expect(scanner.getActiveAgent()).toBeNull();
+
+    scanner.handleCommandStarted();
+    scanner.feedOutput("OpenAI Codex\r\n› Ask Codex to do anything");
+    scanner.feedInput("\r");
+    expect(scanner.getActiveAgent()).toBe("codex");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("recognizes a fresh agent banner split across chunks after a shell command finishes", () => {
+    const tracker = new TerminalActivityTracker();
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => ["Claude Code v2.1.284", "$ "],
+      readCursorLine: () => "$ ",
+      stillnessMs: 500,
+    });
+
+    scanner.handleCommandFinished();
+    scanner.feedOutput("OpenAI ");
+    scanner.handleCommandFinished();
+    scanner.feedOutput("Codex\r\n$ ");
+    scanner.feedInput("\r");
+    expect(scanner.getActiveAgent()).toBeNull();
+    expect(tracker.getSnapshot()).toMatchObject({ state: null, attentionReason: null });
+
+    scanner.feedOutput("OpenAI ");
+    expect(scanner.getActiveAgent()).toBeNull();
+    scanner.feedOutput("Codex\r\n› Ask Codex to do anything");
+    scanner.feedInput("\r");
+
+    expect(scanner.getActiveAgent()).toBe("codex");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
   it("starts working when the spawn command already includes a prompt", () => {
     const tracker = new TerminalActivityTracker();
     let cursorLine = "Refactoring parser";
@@ -3212,7 +3272,7 @@ describe("Grok and Kimi composer activity", () => {
   );
 
   it.each<GrokKimiAgent>(["grok", "kimi"])(
-    "rechecks a restored %s screen after an earlier command finishes",
+    "recognizes a fresh %s screen after an earlier command finishes",
     (agent) => {
       const restored =
         agent === "grok"
@@ -3223,7 +3283,7 @@ describe("Grok and Kimi composer activity", () => {
       expect(scanner.getActiveAgent()).toBeNull();
       scanner.handleCommandFinished();
 
-      paint(restored, agent === "grok" ? "❯" : "│ >", agent === "grok" ? "1m05s" : "29%");
+      paint(restored, agent === "grok" ? "❯" : "│ >");
       expect(scanner.getActiveAgent()).toBe(agent);
       vi.advanceTimersByTime(500);
       expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });

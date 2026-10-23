@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createTerminalManager, type TerminalManager } from "../terminal/terminal-manager.js";
+import type { TerminalSession } from "../terminal/terminal.js";
 import { createTerminalActivityRouteHandler } from "./bootstrap.js";
 
 interface MockResponse {
@@ -28,6 +29,19 @@ async function waitForCondition(
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
   throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`);
+}
+
+async function waitForTerminalText(session: TerminalSession, text: string): Promise<void> {
+  await waitForCondition(
+    () =>
+      session.getState().grid.some((row) =>
+        row
+          .map((cell) => cell.char)
+          .join("")
+          .includes(text),
+      ),
+    10000,
+  );
 }
 
 function createMockResponse(): MockResponse {
@@ -92,13 +106,15 @@ it("accepts terminalId and token reports through the route into the tracker", as
 
   const session = await manager.createTerminal({
     cwd,
+    workspaceId: "ws-test",
     command: process.execPath,
     args: [
       "-e",
-      `require("node:fs").writeFileSync(${JSON.stringify(envPath)}, JSON.stringify({ terminalId: process.env.PASEO_TERMINAL_ID, token: process.env.PASEO_ACTIVITY_TOKEN, url: process.env.PASEO_TERMINAL_ACTIVITY_URL })); setInterval(() => {}, 1000);`,
+      `require("node:fs").writeFileSync(${JSON.stringify(envPath)}, JSON.stringify({ terminalId: process.env.PASEO_TERMINAL_ID, token: process.env.PASEO_ACTIVITY_TOKEN, url: process.env.PASEO_TERMINAL_ACTIVITY_URL })); process.stdout.write("Claude Code v2.1.284\\r\\n"); setInterval(() => {}, 1000);`,
     ],
   });
   await waitForCondition(() => existsSync(envPath), 10000);
+  await waitForTerminalText(session, "Claude Code");
   const env = JSON.parse(readFileSync(envPath, "utf8")) as {
     terminalId: string;
     token: string;
@@ -128,13 +144,15 @@ it("accepts quota and sessionId reports and ignores a nested session's idle", as
   });
   const session = await manager.createTerminal({
     cwd,
+    workspaceId: "ws-test",
     command: process.execPath,
     args: [
       "-e",
-      `require("node:fs").writeFileSync(${JSON.stringify(envPath)}, JSON.stringify({ terminalId: process.env.PASEO_TERMINAL_ID, token: process.env.PASEO_ACTIVITY_TOKEN })); setInterval(() => {}, 1000);`,
+      `require("node:fs").writeFileSync(${JSON.stringify(envPath)}, JSON.stringify({ terminalId: process.env.PASEO_TERMINAL_ID, token: process.env.PASEO_ACTIVITY_TOKEN })); process.stdout.write("Claude Code v2.1.284\\r\\n"); setInterval(() => {}, 1000);`,
     ],
   });
   await waitForCondition(() => existsSync(envPath), 10000);
+  await waitForTerminalText(session, "Claude Code");
   const env = JSON.parse(readFileSync(envPath, "utf8")) as { terminalId: string; token: string };
   const handler = createTerminalActivityRouteHandler(manager);
   const post = async (body: Record<string, unknown>): Promise<number> => {
@@ -155,6 +173,40 @@ it("accepts quota and sessionId reports and ignores a nested session's idle", as
   expect(session.getActivity()).toMatchObject({ state: "idle", attentionReason: "quota" });
 
   expect(await post({ state: "done" })).toBe(400);
+});
+
+it("ignores valid activity reports for a plain shell", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "terminal-activity-route-shell-"));
+  temporaryDirs.push(cwd);
+  manager = createTerminalManager();
+  const token = "plain-shell-activity-token";
+  const session = await manager.createTerminal({
+    cwd,
+    workspaceId: "ws-test",
+    activityToken: token,
+    command: process.execPath,
+    args: [
+      "-e",
+      'process.stdout.write("\\x1b]633;A\\x07plain shell ready\\r\\n$ "); setInterval(() => {}, 1000);',
+    ],
+  });
+  await waitForTerminalText(session, "plain shell ready");
+  expect(manager.validateTerminalActivityToken(session.id, token)).toBe("valid");
+  const handler = createTerminalActivityRouteHandler(manager);
+
+  for (const state of ["running", "needs-input", "quota", "idle"]) {
+    const response = createMockResponse();
+    await handler(
+      createMockRequest({
+        body: { terminalId: session.id, token, state, sessionId: "foreign-agent-session" },
+      }),
+      response as unknown as express.Response,
+      () => undefined,
+    );
+
+    expect(response.statusCode).toBe(204);
+    expect(session.getActivity()).toBeNull();
+  }
 });
 
 it("rejects non-loopback activity reports before token handling", async () => {

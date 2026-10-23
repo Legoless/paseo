@@ -1177,6 +1177,8 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     hasHookNeedsInput: () => activityTracker.hasHookNeedsInput(),
     readLastLines: (limit) => extractLastOutputLines(terminal, limit),
     readCursorLine: () => extractCursorLine(terminal),
+    // A saved screen belongs to the old process, not the shell or CLI being spawned.
+    initialScreenIsHistory: Boolean(options.restore?.seed),
   });
   activityScanner.handleInitialCommand(command ? [command, ...args].join(" ") : undefined);
   let resumeTarget: TerminalResumeTarget | null = null;
@@ -1778,6 +1780,8 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     attentionReason?: TerminalActivityAttentionReason,
     sessionId?: string,
   ): void {
+    // Hooks can outlive their CLI or inherit another pane's environment.
+    if (activityScanner.getActiveAgent() === null) return;
     activityTracker.set(state, attentionReason, sessionId);
     activityScanner.handleHookActivityChange();
     // The pane's agent is the hook session the tracker accepted as the turn owner. A nested
