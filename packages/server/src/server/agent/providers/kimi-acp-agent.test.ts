@@ -304,6 +304,140 @@ describe("Kimi ACP native prompt failures", () => {
     });
   });
 
+  test("surfaces a failed turn after message replay pushes its detailed error outside the journal tail", async () => {
+    await withKimiJournal(async ({ context, journalPath }) => {
+      const message = `OAuthConnectionError: ${OAUTH_ERROR.message}`;
+      await writeFile(
+        journalPath,
+        stringifyJournalRows([
+          {
+            type: "turn.ended",
+            time: context.startedAt,
+            turnId: 7,
+            reason: "failed",
+            error: OAUTH_ERROR,
+          },
+          {
+            type: "agent.message.appended",
+            time: context.startedAt,
+            content: "replayed assistant message".repeat(4000),
+          },
+          {
+            type: "agent.turn.ended",
+            time: context.startedAt,
+            turnId: 7,
+            outcome: "failed",
+            errorMessage: message,
+          },
+        ]),
+      );
+
+      await expect(validateKimiPromptResponse(context)).rejects.toMatchObject({
+        name: "KimiNativeTurnError",
+        message,
+      });
+    });
+  });
+
+  test.each(["done", "aborted"])(
+    "does not replay a previous failure after the current compact summary is %s",
+    async (outcome) => {
+      await withKimiJournal(async ({ context, journalPath }) => {
+        await writeFile(
+          journalPath,
+          stringifyJournalRows([
+            {
+              type: "turn.ended",
+              time: context.startedAt,
+              reason: "failed",
+              error: OAUTH_ERROR,
+            },
+            { type: "agent.turn.ended", time: context.startedAt, turnId: 7, outcome },
+          ]),
+        );
+
+        await expect(validateKimiPromptResponse(context)).resolves.toBeUndefined();
+      });
+    },
+  );
+
+  test("ignores historical compact failures replayed after the current turn", async () => {
+    await withKimiJournal(async ({ context, journalPath }) => {
+      await writeFile(
+        journalPath,
+        stringifyJournalRows([
+          { type: "turn.ended", time: context.startedAt, reason: "completed" },
+          {
+            type: "agent.turn.ended",
+            time: context.startedAt - 1,
+            turnId: 6,
+            outcome: "failed",
+            errorMessage: OAUTH_ERROR.message,
+          },
+        ]),
+      );
+
+      await expect(validateKimiPromptResponse(context)).resolves.toBeUndefined();
+    });
+  });
+
+  test("preserves quota classification from a compact failed summary", async () => {
+    const message = "Authentication required: 403 You've reached your 5-hour usage limit.";
+    await withKimiJournal(async ({ context, journalPath }) => {
+      await writeFile(
+        journalPath,
+        stringifyJournalRows([
+          {
+            type: "agent.turn.ended",
+            time: context.startedAt,
+            turnId: 7,
+            outcome: "failed",
+            errorMessage: message,
+          },
+        ]),
+      );
+
+      await expect(validateKimiPromptResponse(context)).rejects.toMatchObject({
+        name: "KimiNativeTurnError",
+        message,
+        code: "quota",
+      });
+    });
+  });
+
+  test("reports a compact failure even when its error message is missing", async () => {
+    await withKimiJournal(async ({ context, journalPath }) => {
+      await writeFile(
+        journalPath,
+        stringifyJournalRows([
+          { type: "agent.turn.ended", time: context.startedAt, turnId: 7, outcome: "failed" },
+        ]),
+      );
+
+      await expect(validateKimiPromptResponse(context)).rejects.toThrow(
+        "Kimi failed to complete the turn",
+      );
+    });
+  });
+
+  test("waits for a partially written compact failure summary", async () => {
+    await withKimiJournal(async ({ context, journalPath }) => {
+      const summary = JSON.stringify({
+        type: "agent.turn.ended",
+        time: context.startedAt,
+        turnId: 7,
+        outcome: "failed",
+        errorMessage: OAUTH_ERROR.message,
+      });
+      await writeFile(journalPath, summary.slice(0, -1));
+      const validation = expect(validateKimiPromptResponse(context)).rejects.toThrow(
+        OAUTH_ERROR.message,
+      );
+      await appendFile(journalPath, "}\n");
+      await validation;
+    });
+  });
+
   test("reclassifies a usage-limit 403 as quota instead of Kimi's misleading auth name", async () => {
     const quotaError = {
       code: "internal",

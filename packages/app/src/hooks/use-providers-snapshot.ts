@@ -30,21 +30,33 @@ export type ProvidersSnapshotClient = Pick<
 
 export type SelectorOpenRefetchDecision = "refetch-stale" | "refetch-always";
 
+const CATALOG_STALE_TIME_MS = 5 * 60 * 1000;
+
 export function selectorOpenRefetchDecision(input: {
   entries: ProviderSnapshotEntry[] | undefined;
   selectedProvider: AgentProvider | null | undefined;
+  now?: number;
 }): SelectorOpenRefetchDecision {
-  if (!input.selectedProvider) {
-    return "refetch-stale";
+  if (input.selectedProvider) {
+    const selectedEntry = input.entries?.find((entry) => entry.provider === input.selectedProvider);
+    // Cold failures have no catalog to fall back on, so opening the picker must retry them.
+    const needsRetry =
+      !selectedEntry || selectedEntry.status === "loading" || selectedEntry.status === "error";
+    if (needsRetry) {
+      return "refetch-always";
+    }
   }
-  const selectedEntry = input.entries?.find((entry) => entry.provider === input.selectedProvider);
-  // A cold failure has no catalog to fall back on and replica queries never go stale on their own,
-  // so opening the picker is the only moment left to re-probe it. Without this the provider stays
-  // broken until the user finds the Retry button behind the error page.
-  if (!selectedEntry || selectedEntry.status === "loading" || selectedEntry.status === "error") {
-    return "refetch-always";
-  }
-  return "refetch-stale";
+
+  // Replica queries do not age out. Use catalog timestamps so unrelated provider pushes
+  // cannot keep an older model list fresh indefinitely.
+  const now = input.now ?? Date.now();
+  const hasExpiredCatalog = input.entries?.some((entry) => {
+    const hasCatalog = entry.enabled && entry.status === "ready";
+    if (!hasCatalog) return false;
+    const fetchedAt = Date.parse(entry.fetchedAt ?? "");
+    return !Number.isFinite(fetchedAt) || now - fetchedAt >= CATALOG_STALE_TIME_MS;
+  });
+  return hasExpiredCatalog ? "refetch-always" : "refetch-stale";
 }
 
 interface UseProvidersSnapshotResult {

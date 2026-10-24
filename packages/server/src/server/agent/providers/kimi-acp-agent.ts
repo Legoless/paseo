@@ -29,6 +29,13 @@ const KimiTurnEndSchema = z.object({
     .nullish(),
 });
 
+const KimiAgentTurnEndSchema = z.object({
+  type: z.literal("agent.turn.ended"),
+  time: z.number(),
+  outcome: z.enum(["done", "failed", "aborted"]),
+  errorMessage: z.string().optional(),
+});
+
 class KimiNativeTurnError extends Error {
   readonly code?: string;
 
@@ -82,10 +89,18 @@ export async function validateKimiPromptResponse(context: ACPPromptResponseConte
         continue;
       }
       const parsed = KimiTurnEndSchema.safeParse(value);
-      if (!parsed.success || parsed.data.time < context.startedAt) continue;
-      const { reason, error } = parsed.data;
-      if (reason !== "failed") return;
-      throw new KimiNativeTurnError(error);
+      if (parsed.success) {
+        if (parsed.data.time < context.startedAt) continue;
+        const { reason, error } = parsed.data;
+        if (reason !== "failed") return;
+        throw new KimiNativeTurnError(error);
+      }
+      // Kimi replays produced messages after turn.ended, which can push that
+      // record outside the bounded tail. The compact summary follows the replay.
+      const summary = KimiAgentTurnEndSchema.safeParse(value);
+      if (!summary.success || summary.data.time < context.startedAt) continue;
+      if (summary.data.outcome !== "failed") return;
+      throw new KimiNativeTurnError({ message: summary.data.errorMessage });
     }
     const remaining = deadline - Date.now();
     if (remaining <= 0) return;

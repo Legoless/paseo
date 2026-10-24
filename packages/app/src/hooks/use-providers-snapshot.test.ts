@@ -468,11 +468,92 @@ describe("applyProvidersSnapshotUpdate", () => {
 });
 
 describe("selectorOpenRefetchDecision", () => {
+  const fetchedAt = "2026-10-23T20:00:00.000Z";
+  const now = Date.parse(fetchedAt);
+
+  it("rechecks a ready model catalog when the picker opens after five minutes", () => {
+    expect(
+      selectorOpenRefetchDecision({
+        entries: [
+          {
+            ...codexEntry("ready", [readyCodexModel]),
+            fetchedAt,
+          },
+        ],
+        selectedProvider: "codex",
+        now: Date.parse("2026-10-23T20:05:00.000Z"),
+      }),
+    ).toBe("refetch-always");
+  });
+
+  it("keeps a populated model catalog fresh until five minutes have elapsed", () => {
+    expect(
+      selectorOpenRefetchDecision({
+        entries: [{ ...codexEntry("ready", [readyCodexModel]), fetchedAt }],
+        selectedProvider: "codex",
+        now: now + 5 * 60 * 1000 - 1,
+      }),
+    ).toBe("refetch-stale");
+  });
+
+  it("rechecks expired catalogs when no provider is selected", () => {
+    expect(
+      selectorOpenRefetchDecision({
+        entries: [{ ...codexEntry("ready", [readyCodexModel]), fetchedAt }],
+        selectedProvider: null,
+        now: now + 6 * 60 * 1000,
+      }),
+    ).toBe("refetch-always");
+  });
+
+  it.each([undefined, "invalid"])(
+    "rechecks ready catalogs with an unknown fetch time (%s)",
+    (unknownFetchedAt) => {
+      expect(
+        selectorOpenRefetchDecision({
+          entries: [{ ...codexEntry("ready", [readyCodexModel]), fetchedAt: unknownFetchedAt }],
+          selectedProvider: "codex",
+          now,
+        }),
+      ).toBe("refetch-always");
+    },
+  );
+
+  it("rechecks an old Kimi catalog even when another provider was just updated", () => {
+    expect(
+      selectorOpenRefetchDecision({
+        entries: [
+          {
+            ...codexEntry("ready", [readyCodexModel]),
+            fetchedAt: "2026-10-23T20:06:00.000Z",
+          },
+          { provider: "kimi", status: "ready", enabled: true, fetchedAt },
+        ],
+        selectedProvider: "codex",
+        now: now + 6 * 60 * 1000,
+      }),
+    ).toBe("refetch-always");
+  });
+
+  it("does not let a disabled provider expire a fresh catalog", () => {
+    expect(
+      selectorOpenRefetchDecision({
+        entries: [
+          { ...codexEntry("ready", [readyCodexModel]), fetchedAt },
+          { provider: "kimi", status: "ready", enabled: false },
+        ],
+        selectedProvider: "codex",
+        now,
+      }),
+    ).toBe("refetch-stale");
+  });
+
   it("refetches stale entries when no provider is selected", async () => {
     expect(
       selectorOpenRefetchDecision({
-        entries: [codexEntry("ready", [readyCodexModel])],
+        entries: [{ ...codexEntry("ready", [readyCodexModel]), fetchedAt }],
         selectedProvider: null,
+        now,
       }),
     ).toBe("refetch-stale");
   });
@@ -492,11 +573,22 @@ describe("selectorOpenRefetchDecision", () => {
     ).toBe("refetch-always");
   });
 
+  it("retries a failed provider when the picker opens", () => {
+    expect(
+      selectorOpenRefetchDecision({
+        entries: [codexEntry("error")],
+        selectedProvider: "codex",
+        now,
+      }),
+    ).toBe("refetch-always");
+  });
+
   it("keeps a stale-only refetch when the selected provider is ready with no models", async () => {
     expect(
       selectorOpenRefetchDecision({
-        entries: [codexEntry("ready", [])],
+        entries: [{ ...codexEntry("ready", []), fetchedAt }],
         selectedProvider: "codex",
+        now,
       }),
     ).toBe("refetch-stale");
   });
@@ -504,8 +596,9 @@ describe("selectorOpenRefetchDecision", () => {
   it("keeps a stale-only refetch when the selected provider is ready with models", async () => {
     expect(
       selectorOpenRefetchDecision({
-        entries: [codexEntry("ready", [readyCodexModel])],
+        entries: [{ ...codexEntry("ready", [readyCodexModel]), fetchedAt }],
         selectedProvider: "codex",
+        now,
       }),
     ).toBe("refetch-stale");
   });
