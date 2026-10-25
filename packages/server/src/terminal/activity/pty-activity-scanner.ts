@@ -109,22 +109,37 @@ function dropCodexComposer(lines: string[]): string[] {
   return [...lines.slice(0, composer), ...lines.slice(composer + 1)];
 }
 
+const ANTIGRAVITY_MENU_FIRST_OPTION = /^>\s+(?:\d+\.\s+|Yes,\b)/i;
+const ANTIGRAVITY_MENU_NEXT_OPTION = /^  (?:\d+\.\s+|No,\b)/i;
+const ANTIGRAVITY_DIALOG_NAV_HINT = /(?:↑\/↓|up\/down).*\b(?:navigate|select)\b/i;
+
 interface AntigravityComposerBounds {
   top: number;
   bottom: number;
 }
 
 function findAntigravityComposer(lines: string[]): AntigravityComposerBounds | null {
-  const stripped = lines.map((line) => stripAnsi(line).trim());
+  const raw = lines.map(stripAnsi);
+  const stripped = raw.map((line) => line.trim());
   for (let index = stripped.length - 1; index > 0; index -= 1) {
     if (!ANTIGRAVITY_COMPOSER.test(stripped[index]) || !HORIZONTAL_RULE.test(stripped[index - 1])) {
       continue;
     }
     const bottomOffset = stripped.slice(index + 1).findIndex((line) => HORIZONTAL_RULE.test(line));
-    if (bottomOffset >= 0) {
-      return { top: index - 1, bottom: index + 1 + bottomOffset };
+    if (bottomOffset < 0) return null;
+    const bottom = index + 1 + bottomOffset;
+    const inner = raw.slice(index + 1, bottom);
+    const isWrappedDraft = inner.every((line) => line.trim().length === 0 || line.startsWith("  "));
+    const isMenuOptions =
+      ANTIGRAVITY_MENU_FIRST_OPTION.test(stripped[index]) &&
+      inner.some((line) => ANTIGRAVITY_MENU_NEXT_OPTION.test(line));
+    const hasDialogNavBelow = stripped
+      .slice(bottom + 1)
+      .some((line) => ANTIGRAVITY_DIALOG_NAV_HINT.test(line));
+    if (!isWrappedDraft || isMenuOptions || hasDialogNavBelow) {
+      return null;
     }
-    return null;
+    return { top: index - 1, bottom };
   }
   return null;
 }
@@ -190,7 +205,10 @@ function screenWithoutEditableComposer(lines: string[], agent?: KnownAgentName):
 }
 
 function hasSelectionContext(lines: string[]): boolean {
-  const lowerText = lines.join("\n").toLowerCase();
+  const lowerText = lines
+    .join("\n")
+    .toLowerCase()
+    .replace(/\?\s+for shortcuts\b/g, "");
   return (
     lowerText.includes("?") ||
     /(?:↑\/↓|up\/down).*\b(?:navigate|select)\b/.test(lowerText) ||
@@ -232,7 +250,6 @@ function isProviderTurnEnd(line: string, agent?: KnownAgentName): boolean {
   if (agent === "codex" || agent === "grok") {
     return /^(?:[^\s\w]\s+)?Worked for\b/.test(normalized);
   }
-  if (agent === "antigravity") return /^▸\s+Thought for\b/.test(normalized);
   return false;
 }
 
@@ -244,12 +261,11 @@ function screenFromLastTurnEnd(lines: string[], agent?: KnownAgentName): string[
     : lines.slice(turnEnd);
 }
 
-export function isNeedsInputScreen(lines: string[], agent?: KnownAgentName): boolean {
+function matchesGenericNeedsInput(lines: string[], agent?: KnownAgentName): boolean {
   if (lines.length === 0) return false;
   const currentTurn = screenFromLastTurnEnd(lines, agent);
-  const tailStart = Math.max(0, currentTurn.length - 10);
   const tailLines = screenWithoutEditableComposer(currentTurn.map(stripAnsi), agent)
-    .slice(tailStart)
+    .slice(-10)
     .filter((line) => !GROK_MODEL_FOOTER.test(line));
   const scannedLines = agent === "codex" ? withoutCodexDismissibleBanner(tailLines) : tailLines;
   const tailText = scannedLines.join("\n");
@@ -274,7 +290,7 @@ export function isNeedsInputScreen(lines: string[], agent?: KnownAgentName): boo
     return true;
   }
 
-  if (scannedLines.some((line) => /^\?\s+\S+/.test(line.trim()))) {
+  if (scannedLines.some((line) => /^\?\s+(?!for shortcuts\b)\S+/i.test(line.trim()))) {
     return true;
   }
 
@@ -284,6 +300,11 @@ export function isNeedsInputScreen(lines: string[], agent?: KnownAgentName): boo
   }
 
   return false;
+}
+
+export function isNeedsInputScreen(lines: string[], agent?: KnownAgentName): boolean {
+  if (agent === "antigravity") return isAntigravityNeedsInputScreen(lines);
+  return matchesGenericNeedsInput(lines, agent);
 }
 
 const IDLE_PROMPT_PATTERNS = {
@@ -315,49 +336,109 @@ export function isIdlePromptLine(line: string, agent: KnownAgentName): boolean {
 
 const ANTIGRAVITY_RUNNING_STATUS = /\[\d{1,2}:\d{2}:\d{2}\].*\brunning$/i;
 const ANTIGRAVITY_RUNNING_SUBAGENT = /^[●○]\s+Agent\(/;
+const ANTIGRAVITY_RUNNING_COMMAND = /^[●○]\s+Running\b/;
 const ANTIGRAVITY_OPEN_WORK = /\b[1-9]\d*\s+(?:task|subagent)\(s\)(?=\s|$)/i;
-const ANTIGRAVITY_OPEN_SUBAGENTS = /\b[1-9]\d*\s+subagent\(s\)(?=\s|$)/i;
-const ANTIGRAVITY_ACTIVE_TURN_FOOTER = /^esc to cancel\b.*\s·\s/i;
+const ANTIGRAVITY_ACTIVE_TURN_FOOTER = /^esc to cancel\b.*\s[·•]\s/i;
 const ANTIGRAVITY_COMPOSER_FOOTER =
   /^(?:esc to cancel|\?\s+for shortcuts)\b.*\s[·•]\s|\bGemini\s+\d+(?:\.\d+)?\b.*\s[·•]\s*(?:low|medium|high|xhigh|max)\b/i;
+const ANTIGRAVITY_TRAY_ALERT =
+  /\bhas a question\b|\baction required(?:\s*\(\d+\s+left\))?(?:\s|$)/i;
+const ANTIGRAVITY_QUESTION_HEADER = /^the agent has a question for you:/i;
 // agy prints this as it quits. A renamed tab does not deliver the shell title, so
 // this line is the quit the scanner can see. Counts above it are that process.
 const ANTIGRAVITY_EXIT_BANNER = /Resume with -c \(or command below\):/;
 
-function antigravityLinesAfterExit(lines: string[]): string[] | null {
-  const stripped = lines.map((line) => stripAnsi(line).trim());
-  const exit = stripped.findLastIndex((line) => ANTIGRAVITY_EXIT_BANNER.test(line));
-  return exit >= 0 ? stripped.slice(exit + 1) : null;
+function antigravityLiveRawLines(lines: string[]): string[] {
+  const exit = lines.findLastIndex((line) => ANTIGRAVITY_EXIT_BANNER.test(stripAnsi(line).trim()));
+  return exit >= 0 ? lines.slice(exit + 1) : lines;
 }
 
 // A `>` or a new header under the banner is another agy session. The shell prompt is not.
 function isAntigravityQuitScreen(lines: string[]): boolean {
-  const live = antigravityLinesAfterExit(lines);
-  if (!live || findAntigravityComposer(live) !== null) return false;
-  return !live.some(
-    (line) =>
+  const exit = lines.findLastIndex((line) => ANTIGRAVITY_EXIT_BANNER.test(stripAnsi(line).trim()));
+  if (exit < 0) return false;
+  const rawAfterExit = lines.slice(exit + 1);
+  if (findAntigravityComposer(rawAfterExit) !== null) return false;
+  return !rawAfterExit.some((rawLine) => {
+    const line = stripAnsi(rawLine).trim();
+    return (
       isIdlePromptLine(line, "antigravity") ||
       /welcome to the antigravity cli/i.test(line) ||
       /^antigravity cli\b/i.test(line) ||
       ANTIGRAVITY_RUNNING_STATUS.test(line) ||
       ANTIGRAVITY_RUNNING_SUBAGENT.test(line) ||
-      ANTIGRAVITY_OPEN_WORK.test(line),
+      ANTIGRAVITY_OPEN_WORK.test(line)
+    );
+  });
+}
+
+function antigravityTrayLines(lines: string[]): string[] | null {
+  const composer = findAntigravityComposer(lines);
+  if (composer !== null) {
+    return lines.slice(composer.bottom + 1);
+  }
+  const stripped = lines.map((line) => stripAnsi(line).trim());
+  const barePrompt = stripped.findLastIndex((line) => isIdlePromptLine(line, "antigravity"));
+  if (barePrompt < 0) return null;
+  const below = stripped.slice(barePrompt + 1).filter((line) => line.length > 0);
+  const isFooterOrTray = below.every(
+    (line) =>
+      HORIZONTAL_RULE.test(line) ||
+      ANTIGRAVITY_COMPOSER_FOOTER.test(line) ||
+      ANTIGRAVITY_RUNNING_STATUS.test(line) ||
+      ANTIGRAVITY_RUNNING_SUBAGENT.test(line) ||
+      /\b\d+\s+(?:task|subagent)\(s\)(?=\s|$)/i.test(line) ||
+      ANTIGRAVITY_TRAY_ALERT.test(line),
+  );
+  return isFooterOrTray ? lines.slice(barePrompt + 1) : null;
+}
+
+// Antigravity's approval, workspace-trust, and ask_question modals replace the ruled
+// `>` composer box, whereas assistant replies sit directly above it with no turn-end
+// marker. While the composer is on screen, only subagent/workflow alerts in the tray
+// below it (`<agent> has a question`, `Action required`) require user input.
+export function isAntigravityNeedsInputScreen(lines: string[]): boolean {
+  if (isAntigravityQuitScreen(lines)) return false;
+  const live = antigravityLiveRawLines(lines);
+  const tray = antigravityTrayLines(live);
+  if (tray !== null) {
+    return tray
+      .map((line) => stripAnsi(line).trim())
+      .some((line) => !ANTIGRAVITY_RUNNING_STATUS.test(line) && ANTIGRAVITY_TRAY_ALERT.test(line));
+  }
+  const trimmed = live.map((line) => stripAnsi(line).trim()).filter((line) => line.length > 0);
+  if (trimmed.slice(-15).some((line) => ANTIGRAVITY_QUESTION_HEADER.test(line))) {
+    return true;
+  }
+  return matchesGenericNeedsInput(live, "antigravity");
+}
+
+function isAntigravityBusyLine(line: string): boolean {
+  return (
+    ANTIGRAVITY_ACTIVE_TURN_FOOTER.test(line) ||
+    ANTIGRAVITY_RUNNING_STATUS.test(line) ||
+    ANTIGRAVITY_RUNNING_SUBAGENT.test(line) ||
+    ANTIGRAVITY_OPEN_WORK.test(line)
   );
 }
 
 // The agy composer stays on `>` while a turn runs (`esc to cancel` in the footer) and
-// while background work is listed below it. Subagents wake the model when they finish,
-// whereas `[HH:MM:SS] … running` and `N task(s)` are parked background commands that
-// should not keep a finished turn working.
+// while background tasks or subagents sit in the tray below it (`[HH:MM:SS] … running`,
+// `● Agent(…)`, `N task(s)`, `N subagent(s)`). `run_command` backgrounds commands past
+// its 10s wait and wakes the model on completion, and `[HH:MM:SS]` is the static start
+// timestamp, so keep the screen working across quiet stretches. Scope to the tray when
+// the composer is visible so a reply quoting a count or timestamp does not relight it.
 export function isAntigravityBusyScreen(lines: string[]): boolean {
-  const live = antigravityLinesAfterExit(lines);
-  const tail = (live ?? lines.map((line) => stripAnsi(line).trim())).slice(-20);
-  return tail.some(
-    (line) =>
-      ANTIGRAVITY_ACTIVE_TURN_FOOTER.test(line) ||
-      ANTIGRAVITY_RUNNING_SUBAGENT.test(line) ||
-      ANTIGRAVITY_OPEN_SUBAGENTS.test(line),
-  );
+  if (isAntigravityQuitScreen(lines) || isAntigravityNeedsInputScreen(lines)) return false;
+  const live = antigravityLiveRawLines(lines);
+  const tray = antigravityTrayLines(live);
+  if (tray !== null) {
+    return tray.some((line) => isAntigravityBusyLine(stripAnsi(line).trim()));
+  }
+  return live.slice(-20).some((rawLine) => {
+    const line = stripAnsi(rawLine).trim();
+    return isAntigravityBusyLine(line) || ANTIGRAVITY_RUNNING_COMMAND.test(line);
+  });
 }
 
 const GEMINI_RUNNING_STATUS = /^[\u2800-\u28FF]\s+.+\(esc to cancel,\s*\d+[hms](?:\s+\d+[hms])*\)$/;
@@ -801,6 +882,7 @@ export function isCursorNeedsInputScreen(lines: string[]): boolean {
 }
 
 function isAgentNeedsInputScreen(lines: string[], agent: KnownAgentName): boolean {
+  if (agent === "antigravity") return isAntigravityNeedsInputScreen(lines);
   if (agent === "muse") return isMuseNeedsInputScreen(lines);
   if (agent === "opencode") return isOpenCodeNeedsInputScreen(lines);
   if (agent === "cursor") {
@@ -1049,13 +1131,18 @@ function detectRestoredAgentFromScreen(stripped: string, lines: string[]): Known
   if (claudeComposerStart(trimmed) >= 0 && trimmed.some((line) => CLAUDE_MODE_FOOTER.test(line))) {
     return "claude";
   }
-  const antigravityComposer = findAntigravityComposer(trimmed);
+  const antigravityComposer = findAntigravityComposer(lines);
   if (
     antigravityComposer !== null &&
-    !isAntigravityQuitScreen(trimmed) &&
+    !isAntigravityQuitScreen(lines) &&
     trimmed
       .slice(antigravityComposer.bottom + 1)
-      .some((line) => ANTIGRAVITY_COMPOSER_FOOTER.test(line) || ANTIGRAVITY_OPEN_WORK.test(line))
+      .some(
+        (line) =>
+          ANTIGRAVITY_COMPOSER_FOOTER.test(line) ||
+          ANTIGRAVITY_RUNNING_STATUS.test(line) ||
+          ANTIGRAVITY_OPEN_WORK.test(line),
+      )
   ) {
     return "antigravity";
   }
@@ -1234,6 +1321,7 @@ export class PtyActivityScanner {
       /[■⬝⬥⬩⬪]/.test(chunk) ||
       MUSE_DIAMOND_REGEX.test(chunk) ||
       CLAUDE_SPINNER_REGEX.test(chunk) ||
+      chunk.includes("●") ||
       chunk.includes("…") ||
       chunk.includes("⋯") ||
       chunk.includes("◎") ||

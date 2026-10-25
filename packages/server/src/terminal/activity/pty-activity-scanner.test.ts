@@ -4,6 +4,7 @@ import {
   detectAgentFromOutput,
   detectAgentFromTitle,
   isAntigravityBusyScreen,
+  isAntigravityNeedsInputScreen,
   isClaudeBusyScreen,
   isCodexBusyScreen,
   isCursorBusyScreen,
@@ -1945,17 +1946,17 @@ describe("PtyActivityScanner — full lifecycle", () => {
     expect(tracker.getSnapshot().attentionReason).toBe("quota");
   });
 
-  it("finishes an Antigravity turn when a background task stays running in the tray", () => {
+  it("keeps Antigravity working while a background task stays running in the tray and finishes when it clears", () => {
     const tracker = new TerminalActivityTracker();
-    const screenLines = [
+    const rule = "─".repeat(40);
+    let screenLines = [
       "▸ Thought for 8s, 63 tokens",
-      "The local preview server (serve.mjs) is now running in the background.",
-      "TL;DR: Started the corpus:preview server at http://127.0.0.1:4173/index.html.",
-      "─".repeat(40),
+      "Running the corpus check in the background and waiting for completion.",
+      rule,
       ">",
-      "─".repeat(40),
-      "  ● [09:34:08] npm run corpus:preview running",
-      "─".repeat(40),
+      rule,
+      "  ● [09:34:08] npm run corpus:check running",
+      rule,
       "? for shortcuts                            Gemini 4 Argon · high · 1 task(s) · /tasks",
     ];
     const scanner = new PtyActivityScanner({
@@ -1970,6 +1971,24 @@ describe("PtyActivityScanner — full lifecycle", () => {
     scanner.handleInitialCommand("agy");
     scanner.feedInput("\r");
     scanner.feedOutput("running");
+    vi.advanceTimersByTime(2500);
+
+    expect(isAntigravityBusyScreen(screenLines)).toBe(true);
+    expect(isIdleAgentScreen(screenLines, ">", "antigravity")).toBe(false);
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "working",
+      attentionReason: null,
+    });
+
+    screenLines = [
+      "▸ Thought for 8s, 63 tokens",
+      "The corpus check finished cleanly (previously 1 task(s) running).",
+      rule,
+      ">",
+      rule,
+      "? for shortcuts                            Gemini 4 Argon · high",
+    ];
+    scanner.feedOutput("finished");
     vi.advanceTimersByTime(500);
 
     expect(isAntigravityBusyScreen(screenLines)).toBe(false);
@@ -3422,13 +3441,11 @@ describe("Antigravity, Gemini, and Cursor terminal activity", () => {
         "esc to cancel                                               Gemini 4 Argon · high",
       ]),
     ).toBe(true);
-    expect(isAntigravityBusyScreen([">", "Gemini 4 Argon · high · 1 task(s) · /tasks"])).toBe(
-      false,
-    );
+    expect(isAntigravityBusyScreen([">", "Gemini 4 Argon · high · 1 task(s) · /tasks"])).toBe(true);
     expect(isIdleAgentScreen(running, ">", "antigravity")).toBe(false);
-    expect(isAntigravityBusyScreen(["The main analysis is complete.", ">", "0 subagent(s)"])).toBe(
-      false,
-    );
+    expect(
+      isAntigravityBusyScreen(["The main analysis is complete.", ">", "0 task(s) · 0 subagent(s)"]),
+    ).toBe(false);
 
     const { tracker, scanner, paint } = terminal("antigravity");
     scanner.feedInput("\r");
@@ -3536,6 +3553,132 @@ describe("Antigravity, Gemini, and Cursor terminal activity", () => {
     vi.advanceTimersByTime(2000);
     expect(tracker.getSnapshot().state).toBeNull();
     expect(scanner.getActiveAgent()).toBeNull();
+  });
+
+  it("keeps Antigravity working while a task runs below the composer and finishes without false needs_input on confirm/run prose", () => {
+    const rule = "─".repeat(68);
+    const runningWithBackgroundTask = [
+      "○ Thought for 33.1s (Wall-clock timing checks need reliable exec...)",
+      "● Explored 1 file (run_all.sh)",
+      "● Running (rm -rf /Users/legoless/.gemini/ant...) (ctrl+o to expand)",
+      "",
+      "  test_per_ai now matches the HEAD Feudal Age baseline (899 s);",
+      "  running test_per_ai.gd under caffeinate -i to confirm 78/0",
+      "  without OS idle throttling before launching the full 36-suite",
+      "  tests/run_all.sh run.",
+      "",
+      rule,
+      "> ",
+      rule,
+      "  ● [15:00:27] rm -rf /Users/legoless/.gemini/antigravity-... running",
+      rule,
+      "? for shortcuts          Gemini 4 Argon · high · 1 task(s) · /tasks",
+    ];
+    expect(isAntigravityNeedsInputScreen(runningWithBackgroundTask)).toBe(false);
+    expect(isNeedsInputScreen(runningWithBackgroundTask, "antigravity")).toBe(false);
+    expect(isAntigravityBusyScreen(runningWithBackgroundTask)).toBe(true);
+    expect(isIdleAgentScreen(runningWithBackgroundTask, "> ", "antigravity")).toBe(false);
+
+    const { tracker, paint } = terminal("antigravity");
+    // Even without an explicit Enter (e.g. attached/restored mid-run) and across long quiet
+    // stretches exceeding UNRESOLVED_WORKING_STILLNESS_LIMIT, the running task stays working.
+    paint(runningWithBackgroundTask, "> ");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    vi.advanceTimersByTime(5000);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    const finishedAfterTask = [
+      "○ Thought for 33.1s (Wall-clock timing checks need reliable exec...)",
+      "● Explored 1 file (run_all.sh)",
+      "● Ran (rm -rf /Users/legoless/.gemini/ant...) (ctrl+o to expand)",
+      "",
+      "  test_per_ai now matches the HEAD Feudal Age baseline (899 s);",
+      "  confirmed 78/0 and completed the full 36-suite tests/run_all.sh run.",
+      "  Allow the command to run? Confirm before continuing or answer [y/N].",
+      "",
+      rule,
+      "> ",
+      rule,
+      "? for shortcuts                               Gemini 4 Argon · high",
+    ];
+    expect(isAntigravityBusyScreen(finishedAfterTask)).toBe(false);
+    expect(isAntigravityNeedsInputScreen(finishedAfterTask)).toBe(false);
+    expect(isIdleAgentScreen(finishedAfterTask, "> ", "antigravity")).toBe(true);
+
+    paint(finishedAfterTask, "> ");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+  });
+
+  it("flags Antigravity approval modals, ask_question prompts, and subagent tray alerts as needs_input", () => {
+    const rule = "─".repeat(60);
+    const commandApproval = [
+      rule,
+      "> Deploy the branch",
+      "○ Thought for 1.8s",
+      "Run this command?",
+      "  git push origin main",
+      "Reason: Push commits to remote",
+      rule,
+      "> 1. Yes, allow",
+      "  2. No, deny",
+      rule,
+      "  ↑/↓ Navigate · enter Confirm",
+    ];
+    expect(isAntigravityNeedsInputScreen(commandApproval)).toBe(true);
+    expect(isIdleAgentScreen(commandApproval, "> 1. Yes, allow", "antigravity")).toBe(false);
+
+    const askQuestion = [
+      "The agent has a question for you:",
+      "Select deployment target",
+      "> 1. Desktop (Recommended)",
+      "  2. Web",
+      "  3. Write-in...",
+    ];
+    expect(isAntigravityNeedsInputScreen(askQuestion)).toBe(true);
+    expect(isIdleAgentScreen(askQuestion, "> 1. Desktop (Recommended)", "antigravity")).toBe(false);
+
+    const subagentQuestion = [
+      "Waiting on subagent investigation.",
+      rule,
+      "> ",
+      rule,
+      "  ● Agent(research: Codebase Researcher) has a question",
+      "? for shortcuts                         Gemini 4 Argon · high · 1 subagent(s)",
+    ];
+    expect(isAntigravityNeedsInputScreen(subagentQuestion)).toBe(true);
+    expect(isAntigravityBusyScreen(subagentQuestion)).toBe(false);
+    expect(isIdleAgentScreen(subagentQuestion, "> ", "antigravity")).toBe(false);
+
+    const actionRequired = [
+      rule,
+      "> ",
+      rule,
+      "  Action required (1 left)",
+      "? for shortcuts                         Gemini 4 Argon · high · 1 subagent(s)",
+    ];
+    expect(isAntigravityNeedsInputScreen(actionRequired)).toBe(true);
+    expect(isAntigravityBusyScreen(actionRequired)).toBe(false);
+
+    const { tracker, scanner, paint } = terminal("antigravity");
+    scanner.feedInput("\r");
+    paint(subagentQuestion, "> ");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+
+    paint(
+      [
+        "Waiting on subagent investigation.",
+        rule,
+        "> ",
+        rule,
+        "  ● Agent(research: Codebase Researcher)  Inspecting files · 12s",
+        "? for shortcuts                         Gemini 4 Argon · high · 1 subagent(s)",
+      ],
+      "> ",
+      "Inspecting files",
+    );
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
   });
 
   it("keeps Gemini working on its elapsed status and finishes at the placeholder", () => {
