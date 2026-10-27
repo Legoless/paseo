@@ -126,6 +126,8 @@ export const es = {
     input: {
       accessibilityLabel: "Agente de mensajes...",
       terminalAccessibilityLabel: "Terminal prompt",
+      fullscreen: "Pantalla completa",
+      exitFullscreen: "Salir de pantalla completa",
       focusHint: "{{shortcut}}para enfocar",
       addAttachment: "Agregar archivo adjunto",
       interruptAgent: "agente de interrupción",
@@ -630,6 +632,9 @@ export const es = {
         "Recarga para restaurar este terminal. Las demás pestañas no se ven afectadas.",
       reload: "Recargar terminal",
     },
+    sheet: {
+      openAsTab: "Abrir como pestaña",
+    },
     tabs: {
       loading: "Cargando...",
       modified: "Cambios sin guardar",
@@ -645,7 +650,7 @@ export const es = {
       },
       switcher: {
         trigger: "Cambiar pestañas ({{count}}abierto)",
-        title: "Cambiar pestaña",
+        title: "Pestañas del workspace",
         searchPlaceholder: "Pestañas de búsqueda",
       },
       menu: {
@@ -1794,13 +1799,18 @@ export const es = {
     title: "Agregar proveedor",
     search: "Proveedores de búsqueda",
     noProviders: "No se encontraron proveedores",
+    clearSearch: "Borrar búsqueda",
     actions: {
       add: "Agregar",
+      addProvider: "Añadir {{provider}}",
       adding: "Añadiendo",
       installed: "Instalado",
       cancel: "Cancelar",
       installInstructions: "Instrucciones de instalación",
       installInstructionsFor: "Instrucciones de instalación de{{provider}}",
+    },
+    types: {
+      acp: "ACP",
     },
     errors: {
       unableToInstall: "No se puede instalar el proveedor",

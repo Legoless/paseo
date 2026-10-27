@@ -126,6 +126,8 @@ export const ja = {
     input: {
       accessibilityLabel: "エージェントにメッセージ...",
       terminalAccessibilityLabel: "Terminal prompt",
+      fullscreen: "全画面表示",
+      exitFullscreen: "全画面表示を終了",
       focusHint: "{{shortcut}}でフォーカス",
       addAttachment: "添付ファイルを追加",
       interruptAgent: "エージェントを中断",
@@ -630,6 +632,9 @@ export const ja = {
         "再読み込みしてこのターミナルを復元します。他のタブには影響しません。",
       reload: "ターミナルを再読み込み",
     },
+    sheet: {
+      openAsTab: "タブで開く",
+    },
     tabs: {
       loading: "読み込み中...",
       modified: "未保存の変更",
@@ -645,7 +650,7 @@ export const ja = {
       },
       switcher: {
         trigger: "タブを切り替え（{{count}}件開いています）",
-        title: "タブを切り替え",
+        title: "ワークスペースのタブ",
         searchPlaceholder: "タブを検索",
       },
       menu: {
@@ -1765,13 +1770,18 @@ export const ja = {
     title: "プロバイダーを追加",
     search: "プロバイダーを検索",
     noProviders: "プロバイダーが見つかりません",
+    clearSearch: "検索をクリア",
     actions: {
       add: "追加",
+      addProvider: "{{provider}} を追加",
       adding: "追加中",
       installed: "インストール済み",
       cancel: "キャンセル",
       installInstructions: "インストール手順",
       installInstructionsFor: "{{provider}}のインストール手順",
+    },
+    types: {
+      acp: "ACP",
     },
     errors: {
       unableToInstall: "プロバイダーをインストールできません",

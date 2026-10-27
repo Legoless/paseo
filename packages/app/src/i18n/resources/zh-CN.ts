@@ -125,6 +125,8 @@ export const zhCN = {
     input: {
       accessibilityLabel: "给 Agent 发消息...",
       terminalAccessibilityLabel: "Terminal prompt",
+      fullscreen: "全屏",
+      exitFullscreen: "退出全屏",
       focusHint: "{{shortcut}} 聚焦",
       addAttachment: "添加附件",
       interruptAgent: "中断 Agent",
@@ -622,6 +624,9 @@ export const zhCN = {
       rendererStoppedDescription: "重新加载以恢复此终端。其他标签页不受影响。",
       reload: "重新加载终端",
     },
+    sheet: {
+      openAsTab: "作为标签页打开",
+    },
     tabs: {
       loading: "正在加载...",
       modified: "未保存的更改",
@@ -637,7 +642,7 @@ export const zhCN = {
       },
       switcher: {
         trigger: "切换标签（已打开 {{count}} 个）",
-        title: "切换标签",
+        title: "Workspace 标签",
         searchPlaceholder: "搜索标签",
       },
       menu: {
@@ -1729,13 +1734,18 @@ export const zhCN = {
     title: "添加 provider",
     search: "搜索 providers",
     noProviders: "未找到 providers",
+    clearSearch: "清除搜索",
     actions: {
       add: "添加",
+      addProvider: "添加 {{provider}}",
       adding: "正在添加",
       installed: "已安装",
       cancel: "取消",
       installInstructions: "安装说明",
       installInstructionsFor: "{{provider}} 安装说明",
+    },
+    types: {
+      acp: "ACP",
     },
     errors: {
       unableToInstall: "无法安装 provider",

@@ -2,7 +2,6 @@ import { router } from "expo-router";
 import {
   CircleGauge,
   FolderPlus,
-  Layers,
   Plus,
   Server,
   Settings,
@@ -37,6 +36,7 @@ import { SidebarNavRows } from "@/components/sidebar/sidebar-nav-rows";
 import { SidebarHelpMenu } from "@/components/sidebar/sidebar-help-menu";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { DensityIcon } from "@/components/ui/density-icon";
+import { SidebarSectionHeader } from "@/components/sidebar/sidebar-section-header";
 import { Shortcut } from "@/components/ui/shortcut";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HEADER_INNER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout";
@@ -823,7 +823,6 @@ function DesktopSidebar({
   );
 }
 
-const ThemedLayers = withUnistyles(Layers);
 const ThemedPlus = withUnistyles(Plus);
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -860,42 +859,36 @@ function WorkspacesSectionHeader() {
   }, [createProjectlessWorkspace]);
 
   return (
-    <View style={styles.workspacesSectionHeader}>
-      <View style={styles.workspacesSectionHeaderRow}>
-        <ThemedLayers size={14} uniProps={foregroundMutedColorMapping} />
-        <Text style={styles.workspacesSectionTitle}>Workspaces</Text>
-        <View style={styles.workspacesSectionActions}>
-          <Tooltip delayDuration={300}>
-            <TooltipTrigger asChild>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t("sidebar.actions.newWorkspace")}
-                testID="sidebar-new-workspace"
-                style={headerIconButtonStyle}
-                onPress={handleNewWorkspacePress}
-              >
-                {renderNewWorkspaceIcon}
-              </Pressable>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" align="center" offset={8}>
-              {/* No shortcut chord here: Cmd+N opens the New Workspace screen, this
-                creates one outright. Same label, different actions. */}
-              <IconTooltipContent label={t("sidebar.actions.newWorkspace")} />
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip delayDuration={300}>
-            <TooltipTrigger asChild>
-              <View>
-                <SidebarDisplayPreferencesMenu />
-              </View>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" align="center" offset={8}>
-              <IconTooltipContent label="Display preferences" />
-            </TooltipContent>
-          </Tooltip>
-        </View>
-      </View>
-    </View>
+    <SidebarSectionHeader title="Workspaces">
+      <Tooltip delayDuration={300}>
+        <TooltipTrigger asChild>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("sidebar.actions.newWorkspace")}
+            testID="sidebar-new-workspace"
+            style={headerIconButtonStyle}
+            onPress={handleNewWorkspacePress}
+          >
+            {renderNewWorkspaceIcon}
+          </Pressable>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" align="center" offset={8}>
+          {/* No shortcut chord here: Cmd+N opens the New Workspace screen, this
+            creates one outright. Same label, different actions. */}
+          <IconTooltipContent label={t("sidebar.actions.newWorkspace")} />
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip delayDuration={300}>
+        <TooltipTrigger asChild>
+          <View>
+            <SidebarDisplayPreferencesMenu />
+          </View>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" align="center" offset={8}>
+          <IconTooltipContent label="Display preferences" />
+        </TooltipContent>
+      </Tooltip>
+    </SidebarSectionHeader>
   );
 }
 
@@ -925,34 +918,6 @@ const styles = StyleSheet.create((theme) => ({
   },
   sidebarHeaderGroupBelowChrome: {
     paddingTop: 0,
-  },
-  workspacesSectionHeader: {
-    paddingHorizontal: theme.spacing[2],
-    justifyContent: "center",
-    userSelect: "none",
-  },
-  // Mirrors the compact SidebarHeaderRow box (minHeight 32) so the row reads as one of
-  // the header rows above it while carrying its own trailing actions instead of a press.
-  // Vertical padding is 2, not the SidebarHeaderRow's spacing[1.5], because the 28pt
-  // action buttons are the tallest content and must still fit the 32pt box.
-  workspacesSectionHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    minHeight: 32,
-    paddingVertical: 2,
-    paddingHorizontal: theme.spacing[2],
-  },
-  workspacesSectionTitle: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.base,
-    fontWeight: theme.fontWeight.normal,
-  },
-  workspacesSectionActions: {
-    marginLeft: "auto",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[1],
   },
   workspacesHeaderIconButton: {
     width: 28,

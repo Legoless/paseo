@@ -126,6 +126,8 @@ export const ptBR = {
     input: {
       accessibilityLabel: "Enviar mensagem ao agente...",
       terminalAccessibilityLabel: "Terminal prompt",
+      fullscreen: "Tela cheia",
+      exitFullscreen: "Sair da tela cheia",
       focusHint: "{{shortcut}} para focar",
       addAttachment: "Adicionar anexo",
       interruptAgent: "Interromper agente",
@@ -628,6 +630,9 @@ export const ptBR = {
         "Recarregue para restaurar este terminal. As outras abas não são afetadas.",
       reload: "Recarregar terminal",
     },
+    sheet: {
+      openAsTab: "Abrir como aba",
+    },
     tabs: {
       loading: "Carregando...",
       modified: "Alterações não salvas",
@@ -643,7 +648,7 @@ export const ptBR = {
       },
       switcher: {
         trigger: "Alternar abas ({{count}} abertas)",
-        title: "Alternar aba",
+        title: "Abas do workspace",
         searchPlaceholder: "Buscar abas",
       },
       menu: {
@@ -1778,13 +1783,18 @@ export const ptBR = {
     title: "Adicionar provedor",
     search: "Buscar provedores",
     noProviders: "Nenhum provedor encontrado",
+    clearSearch: "Limpar pesquisa",
     actions: {
       add: "Adicionar",
+      addProvider: "Adicionar {{provider}}",
       adding: "Adicionando",
       installed: "Instalado",
       cancel: "Cancelar",
       installInstructions: "Instruções de instalação",
       installInstructionsFor: "Instruções de instalação de {{provider}}",
+    },
+    types: {
+      acp: "ACP",
     },
     errors: {
       unableToInstall: "Não foi possível instalar provedor",

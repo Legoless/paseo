@@ -140,7 +140,7 @@ describe("useAgentInputDraft live contract", () => {
   beforeEach(() => {
     asyncStorage.clear();
     document.body.innerHTML = "<div id='root'></div>";
-    localStorage.clear();
+    window.localStorage?.clear();
 
     useDraftStore.setState({
       drafts: {},
@@ -209,6 +209,8 @@ describe("useAgentInputDraft live contract", () => {
     });
 
     const hydratedTextReplacement = getLatest().textReplacement;
+    // The editor applies a retained caret to the hydrated text, so hydration announces itself.
+    expect(hydratedTextReplacement.kind).toBe("hydrated");
 
     await act(async () => {
       getLatest().editText("hello world");
@@ -222,6 +224,7 @@ describe("useAgentInputDraft live contract", () => {
     });
 
     expect(getLatest().textReplacement).not.toBe(hydratedTextReplacement);
+    expect(getLatest().textReplacement.kind).toBe("replace");
     expect(getLatest().textReplacement.text).toBe("replacement text");
 
     await act(async () => {

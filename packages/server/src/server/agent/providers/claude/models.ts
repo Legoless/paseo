@@ -254,6 +254,17 @@ function readAppliedEffort(settings: unknown): string | undefined {
   return typeof effort === "string" ? effort : undefined;
 }
 
+/** A `[1m]` suffix is an explicit million-token window. This branch has no static model catalog,
+ * so every other id waits for the discovered definition or a reported usage window. */
+export function getClaudeContextWindowMaxTokens(
+  modelId: string | null | undefined,
+): number | undefined {
+  if (modelId?.trim().toLowerCase().endsWith("[1m]")) {
+    return 1_000_000;
+  }
+  return undefined;
+}
+
 export async function getClaudeModelsWithSettings(
   logger: Logger,
   configDir: string | undefined,

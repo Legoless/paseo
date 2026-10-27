@@ -18,7 +18,7 @@ import {
   type ActiveWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
 import { StyleSheet } from "react-native-unistyles";
-import { density, densityFontSize } from "@/styles/density";
+import { density } from "@/styles/density";
 import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
 import { getSidebarRowBackdrop } from "@/components/sidebar/sidebar-row-backdrop";
 import { type GestureType } from "react-native-gesture-handler";
@@ -96,7 +96,7 @@ import {
   WorkspaceMemberMenuItems,
 } from "@/components/sidebar/workspace-member-menu";
 import { useLongPressDragInteraction } from "@/components/sidebar/use-long-press-drag-interaction";
-import { PinnedSectionHeader } from "@/components/sidebar/pinned-section-header";
+import { SidebarSectionHeader } from "@/components/sidebar/sidebar-section-header";
 import { SidebarGroupToggleRow } from "@/components/sidebar/sidebar-group-toggle-row";
 import { useLimitedSidebarGroup } from "@/components/sidebar/use-limited-sidebar-group";
 import {
@@ -1804,6 +1804,7 @@ function WorkspaceSectionList({
   onToggleWorkspacePin: ToggleSidebarWorkspacePin;
   onPinnedWorkspaceReorder: (workspaces: SidebarWorkspacePlacement[]) => void;
 }) {
+  const { t } = useTranslation();
   const showShortcutBadges = useShowShortcutBadges();
   const pinnedCollapsed = useSidebarCollapsedSectionsStore((state) => state.collapsedPinned);
   const togglePinnedCollapsed = useSidebarCollapsedSectionsStore(
@@ -2129,7 +2130,12 @@ function WorkspaceSectionList({
     <>
       {pinnedChats.length > 0 ? (
         <View style={styles.pinnedSection} testID="sidebar-pinned-section">
-          <PinnedSectionHeader collapsed={pinnedCollapsed} onToggle={togglePinnedCollapsed} />
+          <SidebarSectionHeader
+            title={t("sidebar.pinned.title")}
+            collapsed={pinnedCollapsed}
+            onToggle={togglePinnedCollapsed}
+            testID="sidebar-pinned-section-header"
+          />
           {pinnedCollapsed ? null : (
             <>
               <DraggableList
@@ -2253,7 +2259,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   uncategorizedName: {
     color: theme.colors.foregroundMuted,
-    fontSize: densityFontSize(theme, "base"),
+    fontSize: theme.fontSize.base,
     fontWeight: "400",
     minWidth: 0,
     flex: 1,

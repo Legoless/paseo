@@ -125,6 +125,8 @@ export const ko = {
     input: {
       accessibilityLabel: "에이전트에게 메시지...",
       terminalAccessibilityLabel: "Terminal prompt",
+      fullscreen: "전체 화면",
+      exitFullscreen: "전체 화면 종료",
       focusHint: "{{shortcut}}로 포커스",
       addAttachment: "첨부 추가",
       interruptAgent: "에이전트 중단",
@@ -626,6 +628,9 @@ export const ko = {
         "다시 로드하여 이 터미널을 복원합니다. 다른 탭은 영향을 받지 않습니다.",
       reload: "터미널 다시 로드",
     },
+    sheet: {
+      openAsTab: "탭으로 열기",
+    },
     tabs: {
       loading: "불러오는 중...",
       modified: "저장되지 않은 변경사항",
@@ -641,7 +646,7 @@ export const ko = {
       },
       switcher: {
         trigger: "탭 전환 ({{count}}개 열림)",
-        title: "탭 전환",
+        title: "워크스페이스 탭",
         searchPlaceholder: "탭 검색",
       },
       menu: {
@@ -1759,13 +1764,18 @@ export const ko = {
     title: "프로바이더 추가",
     search: "프로바이더 검색",
     noProviders: "프로바이더를 찾을 수 없습니다",
+    clearSearch: "검색 지우기",
     actions: {
       add: "추가",
+      addProvider: "{{provider}} 추가",
       adding: "추가 중",
       installed: "설치됨",
       cancel: "취소",
       installInstructions: "설치 안내",
       installInstructionsFor: "{{provider}} 설치 안내",
+    },
+    types: {
+      acp: "ACP",
     },
     errors: {
       unableToInstall: "프로바이더를 설치할 수 없습니다",

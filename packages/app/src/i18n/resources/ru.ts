@@ -126,6 +126,8 @@ export const ru = {
     input: {
       accessibilityLabel: "Написать агенту...",
       terminalAccessibilityLabel: "Terminal prompt",
+      fullscreen: "Полный экран",
+      exitFullscreen: "Выйти из полноэкранного режима",
       focusHint: "{{shortcut}}, для фокуса",
       addAttachment: "Добавить вложение",
       interruptAgent: "Прервать агента",
@@ -631,6 +633,9 @@ export const ru = {
         "Перезагрузите, чтобы восстановить этот терминал. Другие вкладки не затронуты.",
       reload: "Перезагрузить терминал",
     },
+    sheet: {
+      openAsTab: "Открыть во вкладке",
+    },
     tabs: {
       loading: "Загрузка...",
       modified: "Несохранённые изменения",
@@ -646,7 +651,7 @@ export const ru = {
       },
       switcher: {
         trigger: "Переключить вкладки (открыто: {{count}})",
-        title: "Переключить вкладку",
+        title: "Вкладки рабочего пространства",
         searchPlaceholder: "Поиск вкладок",
       },
       menu: {
@@ -1777,13 +1782,18 @@ export const ru = {
     title: "Добавить провайдера",
     search: "Поиск провайдеров",
     noProviders: "Провайдеры не найдены",
+    clearSearch: "Очистить поиск",
     actions: {
       add: "Добавить",
+      addProvider: "Добавить {{provider}}",
       adding: "Добавление",
       installed: "Установлено",
       cancel: "Отмена",
       installInstructions: "Инструкции по установке",
       installInstructionsFor: "Инструкции по установке {{provider}}",
+    },
+    types: {
+      acp: "ACP",
     },
     errors: {
       unableToInstall: "Не удалось установить провайдера",
