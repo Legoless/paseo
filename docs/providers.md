@@ -87,7 +87,11 @@ initial session supplies modes and the current model; it does not override the m
 returned by a resolver. Kimi 2.1.1 maps some native failures, including OAuth connection errors,
 to a successful ACP `end_turn`. Its shim checks the current turn's structured native journal before
 accepting that result; keep this recovery in the Kimi shim rather than inferring failures from empty
-replies or stderr across ACP providers.
+replies or stderr across ACP providers. Kimi also resolves `session/prompt` with `end_turn` when the
+text was only queued behind an engine turn that is still running. The shim rejects that result when
+the journal has no marker for this prompt and an older turn is still open. Before the next prompt,
+the manager replaces the process when the session reports that native turn still open. Do not respawn
+from inside `startTurn`: `loadSession` replays history through the live subscribers.
 
 ### Direct
 

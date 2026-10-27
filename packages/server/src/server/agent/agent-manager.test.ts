@@ -11580,6 +11580,142 @@ test("forced cancellation reconciles a provider session that still owns its fore
   expect(record?.archivedAt ?? null).toBeNull();
 }, 10_000);
 
+test("replaces a provider runtime that still owns a native turn before the next prompt", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-native-turn-"));
+  const storagePath = join(workdir, "agents");
+  const storage = new AgentStorage(storagePath, logger);
+
+  class NativeTurnSession extends TestAgentSession {
+    readonly startPrompts: string[] = [];
+    closed = false;
+
+    constructor(
+      config: AgentSessionConfig,
+      private readonly nativeTurnOpen: boolean,
+    ) {
+      super(config);
+    }
+
+    override async startTurn(prompt: AgentPromptInput): Promise<{ turnId: string }> {
+      this.startPrompts.push(typeof prompt === "string" ? prompt : "structured");
+      return super.startTurn(prompt);
+    }
+
+    override async close(): Promise<void> {
+      this.closed = true;
+    }
+
+    async nativeTurnStillOpen(): Promise<boolean> {
+      return this.nativeTurnOpen;
+    }
+  }
+
+  const client = new (class extends TestAgentClient {
+    readonly created: NativeTurnSession[] = [];
+    readonly resumed: NativeTurnSession[] = [];
+
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      const session = new NativeTurnSession(config, true);
+      this.created.push(session);
+      return session;
+    }
+
+    override async resumeSession(
+      _handle: AgentPersistenceHandle,
+      config?: Partial<AgentSessionConfig>,
+    ): Promise<AgentSession> {
+      const session = new NativeTurnSession(
+        { provider: this.provider, cwd: config?.cwd ?? workdir },
+        false,
+      );
+      this.resumed.push(session);
+      return session;
+    }
+  })();
+
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000520",
+  });
+
+  const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+  const collectedEvents: AgentStreamEvent[] = [];
+  for await (const event of manager.streamAgent(snapshot.id, "hello again")) {
+    collectedEvents.push(event);
+  }
+
+  expect(client.created).toHaveLength(1);
+  expect(client.created[0]?.closed).toBe(true);
+  expect(client.created[0]?.startPrompts).toEqual([]);
+  expect(client.resumed).toHaveLength(1);
+  expect(client.resumed[0]?.startPrompts).toEqual(["hello again"]);
+  expect(collectedEvents.some((event) => event.type === "turn_completed")).toBe(true);
+  expect(manager.getAgent(snapshot.id)?.lifecycle).toBe("idle");
+
+  for await (const _event of manager.streamAgent(snapshot.id, "second")) {
+    // The replacement process is idle, so this prompt stays on it.
+  }
+  expect(client.resumed).toHaveLength(1);
+  expect(client.resumed[0]?.startPrompts).toEqual(["hello again", "second"]);
+}, 10_000);
+
+test("keeps the provider runtime when its native turn is already finished", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-native-turn-idle-"));
+  const storagePath = join(workdir, "agents");
+  const storage = new AgentStorage(storagePath, logger);
+
+  class IdleNativeTurnSession extends TestAgentSession {
+    readonly startPrompts: string[] = [];
+
+    override async startTurn(prompt: AgentPromptInput): Promise<{ turnId: string }> {
+      this.startPrompts.push(typeof prompt === "string" ? prompt : "structured");
+      return super.startTurn(prompt);
+    }
+
+    async nativeTurnStillOpen(): Promise<boolean> {
+      return false;
+    }
+  }
+
+  const client = new (class extends TestAgentClient {
+    created: IdleNativeTurnSession | null = null;
+    resumeCount = 0;
+
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      this.created = new IdleNativeTurnSession(config);
+      return this.created;
+    }
+
+    override async resumeSession(): Promise<AgentSession> {
+      this.resumeCount += 1;
+      throw new Error("idle native turn must not reload the runtime");
+    }
+  })();
+
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000521",
+  });
+
+  const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+  const collectedEvents: AgentStreamEvent[] = [];
+  for await (const event of manager.streamAgent(snapshot.id, "hello")) {
+    collectedEvents.push(event);
+  }
+
+  expect(client.resumeCount).toBe(0);
+  expect(client.created?.startPrompts).toEqual(["hello"]);
+  expect(collectedEvents.some((event) => event.type === "turn_completed")).toBe(true);
+}, 10_000);
+
 test("forced cancellation keeps the existing session when no replacement can be built", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-forced-cancel-degrade-"));
   const storagePath = join(workdir, "agents");

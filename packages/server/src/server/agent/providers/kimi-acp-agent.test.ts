@@ -6,7 +6,11 @@ import { describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../test-utils/test-logger.js";
 import { type ACPPromptResponseContext, type SpawnedACPProcess } from "./acp-agent.js";
-import { KimiACPAgentClient, validateKimiPromptResponse } from "./kimi-acp-agent.js";
+import {
+  KimiACPAgentClient,
+  kimiNativeTurnStillOpen,
+  validateKimiPromptResponse,
+} from "./kimi-acp-agent.js";
 
 function modelConfigOption(currentValue: string): SessionConfigOption {
   return {
@@ -580,6 +584,134 @@ describe("Kimi ACP native prompt failures", () => {
       await expect(
         validateKimiPromptResponse({ ...context, response: { stopReason: "cancelled" } }),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  test("rejects an empty end_turn while an older native turn is still open", async () => {
+    await withKimiJournal(async ({ context, journalPath }) => {
+      await writeFile(
+        journalPath,
+        stringifyJournalRows([
+          { type: "agent.turn.started", time: context.startedAt - 1_000 },
+          { type: "llm.request", time: context.startedAt + 10 },
+          { type: "context.append_loop_event", time: context.startedAt + 20 },
+        ]),
+      );
+
+      await expect(validateKimiPromptResponse(context)).rejects.toMatchObject({
+        name: "KimiNativeTurnError",
+        message: "Kimi left this prompt queued behind a turn that is still running. Send it again.",
+        code: "kimi_turn_busy",
+      });
+    });
+  });
+
+  test.each(["agent.turn.ended", "turn.ended"] as const)(
+    "accepts end_turn when %s for this prompt is already closed",
+    async (type) => {
+      await withKimiJournal(async ({ context, journalPath }) => {
+        await writeFile(
+          journalPath,
+          stringifyJournalRows([
+            { type: "llm.request", time: context.startedAt - 30 },
+            type === "agent.turn.ended"
+              ? { type, time: context.startedAt, outcome: "done" }
+              : { type, time: context.startedAt, reason: "completed", error: null },
+          ]),
+        );
+
+        await expect(validateKimiPromptResponse(context)).resolves.toBeUndefined();
+      });
+    },
+  );
+
+  test("accepts end_turn when this prompt has a native marker and an older turn was open", async () => {
+    await withKimiJournal(async ({ context, journalPath }) => {
+      await writeFile(
+        journalPath,
+        stringifyJournalRows([
+          { type: "llm.request", time: context.startedAt - 30 },
+          { type: "turn.prompt", time: context.startedAt },
+        ]),
+      );
+
+      await expect(validateKimiPromptResponse(context)).resolves.toBeUndefined();
+    });
+  });
+
+  test("does not treat cancellation as a prompt queued behind an open turn", async () => {
+    await withKimiJournal(async ({ context, journalPath }) => {
+      await writeFile(
+        journalPath,
+        stringifyJournalRows([
+          { type: "llm.request", time: context.startedAt - 30 },
+          { type: "agent.turn.ended", time: context.startedAt, outcome: "aborted" },
+        ]),
+      );
+
+      await expect(
+        validateKimiPromptResponse({ ...context, response: { stopReason: "cancelled" } }),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  test("accepts end_turn when the open turn finishes flushing", async () => {
+    await withKimiJournal(async ({ context, journalPath }) => {
+      await writeFile(
+        journalPath,
+        stringifyJournalRows([{ type: "llm.request", time: context.startedAt - 20 }]),
+      );
+      const validation = expect(validateKimiPromptResponse(context)).resolves.toBeUndefined();
+      await appendFile(
+        journalPath,
+        `${JSON.stringify({
+          type: "agent.turn.ended",
+          time: context.startedAt,
+          outcome: "done",
+        })}\n`,
+      );
+      await validation;
+    });
+  });
+
+  test("reports a native turn still open until a close record lands", async () => {
+    await withKimiJournal(async ({ context, journalPath }) => {
+      await writeFile(
+        journalPath,
+        stringifyJournalRows([{ type: "context.append_loop_event", time: context.startedAt }]),
+      );
+      await expect(kimiNativeTurnStillOpen(context)).resolves.toBe(true);
+
+      await appendFile(
+        journalPath,
+        `${JSON.stringify({ type: "prompt.completed", time: context.startedAt + 1 })}\n`,
+      );
+      await expect(kimiNativeTurnStillOpen(context)).resolves.toBe(false);
+    });
+  });
+
+  test("ignores usage records after a native turn has closed", async () => {
+    await withKimiJournal(async ({ context, journalPath }) => {
+      await writeFile(
+        journalPath,
+        stringifyJournalRows([
+          { type: "llm.request", time: context.startedAt },
+          { type: "agent.turn.ended", time: context.startedAt, outcome: "done" },
+          { type: "usage.record", time: context.startedAt + 1 },
+        ]),
+      );
+
+      await expect(kimiNativeTurnStillOpen(context)).resolves.toBe(false);
+    });
+  });
+
+  test("treats a missing journal as no open native turn", async () => {
+    await withKimiJournal(async ({ context, journalPath }) => {
+      await rm(journalPath, { force: true });
+      await expect(kimiNativeTurnStillOpen(context)).resolves.toBe(false);
+      await expect(kimiNativeTurnStillOpen({ ...context, sessionId: "../session" })).resolves.toBe(
+        false,
+      );
     });
   });
 });

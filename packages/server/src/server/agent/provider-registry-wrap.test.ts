@@ -21,6 +21,7 @@ type OptionalAgentSessionMethodName = {
 }[keyof AgentSession];
 
 const OPTIONAL_AGENT_SESSION_METHOD_NAMES = [
+  "nativeTurnStillOpen",
   "steerActiveTurn",
   "listCommands",
   "setModel",
@@ -77,6 +78,11 @@ class FakeSession implements AgentSession {
   async startTurn() {
     this.recordedCalls.push("startTurn");
     return { turnId: "turn-1" };
+  }
+
+  async nativeTurnStillOpen(): Promise<boolean> {
+    this.recordedCalls.push("nativeTurnStillOpen");
+    return false;
   }
 
   async steerActiveTurn(
@@ -189,6 +195,7 @@ describe("wrapSessionProvider", () => {
     const session = new FakeSession();
     const wrapped = wrapSessionProvider("custom-claude", session);
 
+    await wrapped.nativeTurnStillOpen?.();
     await wrapped.steerActiveTurn?.("follow-up", { expectedTurnId: "turn-1" });
     await wrapped.listCommands?.();
     await wrapped.setModel?.("sonnet");
@@ -204,6 +211,7 @@ describe("wrapSessionProvider", () => {
       { prompt: "follow-up", options: { expectedTurnId: "turn-1" } },
     ]);
     expect(session.recordedCalls).toEqual([
+      "nativeTurnStillOpen",
       "steerActiveTurn",
       "listCommands",
       "setModel",
@@ -245,5 +253,11 @@ describe("wrapSessionProvider", () => {
     const session: AgentSession = new FakeSession();
     session.steerActiveTurn = undefined;
     expect(wrapSessionProvider("custom-claude", session).steerActiveTurn).toBeUndefined();
+  });
+
+  test("leaves native turn probing unavailable when the provider has no implementation", () => {
+    const session: AgentSession = new FakeSession();
+    session.nativeTurnStillOpen = undefined;
+    expect(wrapSessionProvider("custom-claude", session).nativeTurnStillOpen).toBeUndefined();
   });
 });

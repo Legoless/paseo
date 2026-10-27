@@ -5,6 +5,7 @@ import { checkProviderLaunchAvailable, resolveProviderLaunch } from "../provider
 import {
   ACPAgentClient,
   type ACPCatalogModelResolver,
+  type ACPNativeTurnProbe,
   type ACPPromptResponseValidator,
   type ACPClientCapabilityMeta,
   type ACPConfigFeatureOption,
@@ -32,6 +33,7 @@ interface GenericACPAgentClientOptions {
   extensionCommandsParser?: ACPExtensionCommandsParser;
   catalogModelResolver?: ACPCatalogModelResolver;
   promptResponseValidator?: ACPPromptResponseValidator;
+  nativeTurnProbe?: ACPNativeTurnProbe;
   thinkingOptionWriter?: (
     connection: ClientSideConnection,
     sessionId: string,
@@ -64,6 +66,7 @@ export class GenericACPAgentClient extends ACPAgentClient {
       extensionCommandsParser: options.extensionCommandsParser,
       catalogModelResolver: options.catalogModelResolver,
       promptResponseValidator: options.promptResponseValidator,
+      nativeTurnProbe: options.nativeTurnProbe,
       thinkingOptionWriter: options.thinkingOptionWriter,
       now: options.now,
     });

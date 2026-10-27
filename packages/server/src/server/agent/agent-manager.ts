@@ -3030,14 +3030,45 @@ export class AgentManager {
       throw new Error(`Agent ${agentId} already has an active run`);
     }
 
-    if (this.foregroundMutationTails.has(agentId) || this.lifecycleMutationTails.has(agentId)) {
+    // Kimi can settle session/prompt while its engine turn is still running.
+    // Replace that process before admission. The pending run has to be installed
+    // with no await after the probe's lifecycle tail clears: a later swap deletes it.
+    const probesNativeTurn = typeof existingAgent.session.nativeTurnStillOpen === "function";
+    if (
+      probesNativeTurn ||
+      this.foregroundMutationTails.has(agentId) ||
+      this.lifecycleMutationTails.has(agentId)
+    ) {
       return async function* streamAfterMutations(this: AgentManager) {
         await this.waitForAgentMutations(agentId);
+        if (probesNativeTurn) {
+          await this.releaseStuckNativeTurn(agentId);
+          await this.waitForAgentMutations(agentId);
+        }
         yield* this.admitForegroundAgentStream(agentId, prompt, options);
       }.call(this);
     }
 
     return this.admitForegroundAgentStream(agentId, prompt, options);
+  }
+
+  private async releaseStuckNativeTurn(agentId: string): Promise<void> {
+    // Two sends must not both observe the old process. This lane is the same
+    // one reload uses, and it runs before the pending run exists.
+    await this.runLifecycleMutation(agentId, async () => {
+      const agent = this.agents.get(agentId);
+      if (!agent?.session.nativeTurnStillOpen) return;
+      if (this.hasInFlightRun(agentId) || agent.activeForegroundTurnId) return;
+      const stillOpen = await agent.session.nativeTurnStillOpen();
+      const latest = this.agents.get(agentId);
+      if (!latest || latest.session !== agent.session) return;
+      if (!stillOpen || this.hasInFlightRun(agentId) || latest.activeForegroundTurnId) return;
+      this.logger.warn(
+        { agentId, provider: latest.provider },
+        "Replacing provider runtime that still owns a native turn",
+      );
+      await this.swapRegisteredSessionRuntime(agentId);
+    });
   }
 
   // Drain every mutation that is queued by the time the previous tail

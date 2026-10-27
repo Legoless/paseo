@@ -688,6 +688,12 @@ export interface AgentSession {
   readonly initialTimeline?: ImportedTimelineEntry[];
   run(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<AgentRunResult>;
   startTurn(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<{ turnId: string }>;
+  /**
+   * True when this process still owns a provider turn whose prompt RPC already
+   * settled. The manager replaces the runtime before the next prompt. Omit when
+   * the provider keeps the RPC and the engine turn in lockstep.
+   */
+  nativeTurnStillOpen?(): Promise<boolean>;
   steerActiveTurn?(prompt: AgentPromptInput, options: SteerActiveTurnOptions): Promise<SteerResult>;
   subscribe(callback: (event: AgentStreamEvent) => void): () => void;
   streamHistory(): AsyncGenerator<AgentStreamEvent>;

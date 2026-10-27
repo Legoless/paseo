@@ -52,14 +52,39 @@ class KimiNativeTurnError extends Error {
 }
 
 const KIMI_QUOTA_MESSAGE = /usage limit|\bquota\b|rate limit/i;
+const KIMI_JOURNAL_FLUSH_WAIT_MS = 1_000;
+const KIMI_OPEN_TURN_SETTLE_MS = 400;
+const KIMI_JOURNAL_POLL_MS = 25;
+const KIMI_SESSION_ID = /^[A-Za-z0-9_-]+$/;
 
-// COMPAT(kimiSilentTurnFailure): added in v0.9.1, remove after 2027-01-03 once Kimi
-// reports non-auth failures through ACP instead of mapping them to end_turn.
-export async function validateKimiPromptResponse(context: ACPPromptResponseContext): Promise<void> {
-  if (context.response.stopReason !== "end_turn" || !/^[A-Za-z0-9_-]+$/.test(context.sessionId)) {
-    return;
-  }
-  const cwd = context.cwd.replace(/\\/g, "/").replace(/\/+$/, "");
+// Step and tool activity is appended as loop events. A long turn's start record
+// scrolls out of the tail, so the last boundary in the tail decides ownership.
+const KIMI_TURN_OPEN_TYPES = new Set([
+  "agent.turn.started",
+  "turn.prompt",
+  "llm.request",
+  "context.append_loop_event",
+]);
+const KIMI_TURN_CLOSE_TYPES = new Set([
+  "agent.turn.ended",
+  "turn.ended",
+  "prompt.completed",
+  "prompt.aborted",
+]);
+
+const KimiJournalEventSchema = z.object({
+  type: z.string(),
+  time: z.number(),
+});
+
+interface KimiJournalLocation {
+  sessionId: string;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+}
+
+function resolveKimiJournalPath(input: KimiJournalLocation): string {
+  const cwd = input.cwd.replace(/\\/g, "/").replace(/\/+$/, "");
   const basename = cwd.split("/").pop() ?? cwd;
   const slug =
     basename
@@ -69,43 +94,123 @@ export async function validateKimiPromptResponse(context: ACPPromptResponseConte
       .slice(0, 40)
       .replace(/^-+|-+$/g, "") || "workspace";
   const workDirKey = `wd_${slug === "." || slug === ".." ? "workspace" : slug}_${createHash("sha256").update(cwd).digest("hex").slice(0, 12)}`;
-  const home = context.env.KIMI_CODE_HOME || join(context.env.HOME || homedir(), ".kimi-code");
-  const journalPath = resolve(
-    context.cwd,
+  const home = input.env.KIMI_CODE_HOME || join(input.env.HOME || homedir(), ".kimi-code");
+  return resolve(
+    input.cwd,
     home,
     "sessions",
     workDirKey,
-    context.sessionId,
+    input.sessionId,
     "agents/main/wire.jsonl",
   );
-  const deadline = Date.now() + 1000;
-  while (true) {
-    const tail = (await readKimiJournalTail(journalPath)) ?? "";
-    for (const line of tail.split("\n").toReversed()) {
-      let value: unknown;
-      try {
-        value = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      const parsed = KimiTurnEndSchema.safeParse(value);
-      if (parsed.success) {
-        if (parsed.data.time < context.startedAt) continue;
-        const { reason, error } = parsed.data;
-        if (reason !== "failed") return;
-        throw new KimiNativeTurnError(error);
-      }
-      // Kimi replays produced messages after turn.ended, which can push that
-      // record outside the bounded tail. The compact summary follows the replay.
-      const summary = KimiAgentTurnEndSchema.safeParse(value);
-      if (!summary.success || summary.data.time < context.startedAt) continue;
-      if (summary.data.outcome !== "failed") return;
+}
+
+function kimiJournalEventType(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const type = (value as { type?: unknown }).type;
+  return typeof type === "string" ? type : null;
+}
+
+function kimiJournalTailHasOpenTurn(tail: string): boolean {
+  let turnOpen = false;
+  for (const line of tail.split("\n")) {
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const type = kimiJournalEventType(value);
+    if (!type) continue;
+    if (KIMI_TURN_OPEN_TYPES.has(type)) {
+      turnOpen = true;
+    } else if (KIMI_TURN_CLOSE_TYPES.has(type)) {
+      turnOpen = false;
+    }
+  }
+  return turnOpen;
+}
+
+// True when this ACP prompt already has a native journal marker. An older open
+// turn keeps emitting llm.request after startedAt, so that event is not a marker.
+function kimiPromptHasMarker(tail: string, startedAt: number): "accepted" | "none" {
+  for (const line of tail.split("\n").toReversed()) {
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const parsed = KimiTurnEndSchema.safeParse(value);
+    if (parsed.success) {
+      if (parsed.data.time < startedAt) continue;
+      if (parsed.data.reason !== "failed") return "accepted";
+      throw new KimiNativeTurnError(parsed.data.error);
+    }
+    // Kimi replays produced messages after turn.ended, which can push that
+    // record outside the bounded tail. The compact summary follows the replay.
+    const summary = KimiAgentTurnEndSchema.safeParse(value);
+    if (summary.success) {
+      if (summary.data.time < startedAt) continue;
+      if (summary.data.outcome !== "failed") return "accepted";
       throw new KimiNativeTurnError({ message: summary.data.errorMessage });
     }
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) return;
-    await setTimeout(Math.min(25, remaining));
+    const event = KimiJournalEventSchema.safeParse(value);
+    if (!event.success || event.data.time < startedAt) continue;
+    if (
+      event.data.type === "turn.prompt" ||
+      event.data.type === "agent.turn.started" ||
+      event.data.type === "prompt.completed"
+    ) {
+      return "accepted";
+    }
   }
+  return "none";
+}
+
+// COMPAT(kimiSilentTurnFailure): added in v0.9.1, remove after 2027-01-03 once Kimi
+// reports non-auth failures through ACP instead of mapping them to end_turn.
+export async function validateKimiPromptResponse(context: ACPPromptResponseContext): Promise<void> {
+  if (context.response.stopReason !== "end_turn" || !KIMI_SESSION_ID.test(context.sessionId)) {
+    return;
+  }
+  const journalPath = resolveKimiJournalPath(context);
+  const deadline = Date.now() + KIMI_JOURNAL_FLUSH_WAIT_MS;
+  let tail = "";
+  while (true) {
+    tail = (await readKimiJournalTail(journalPath)) ?? "";
+    if (kimiPromptHasMarker(tail, context.startedAt) === "accepted") return;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await setTimeout(Math.min(KIMI_JOURNAL_POLL_MS, remaining));
+  }
+  // session/prompt resolves end_turn when Kimi only queued the text behind an
+  // engine turn that is still running. There is no assistant output and no new
+  // turn.prompt. Completing here leaves the user message unanswered.
+  if (kimiJournalTailHasOpenTurn(tail)) {
+    throw new KimiNativeTurnError({
+      message: "Kimi left this prompt queued behind a turn that is still running. Send it again.",
+      code: "kimi_turn_busy",
+    });
+  }
+}
+
+// Kimi's ACP driver can settle while the engine turn keeps running. The next
+// prompt then queues forever on that process. Poll only after a first read says
+// the turn is open, so a journal that already ended does not restart the process.
+export async function kimiNativeTurnStillOpen(context: KimiJournalLocation): Promise<boolean> {
+  if (!KIMI_SESSION_ID.test(context.sessionId)) return false;
+  const journalPath = resolveKimiJournalPath(context);
+  const first = await readKimiJournalTail(journalPath);
+  if (first == null || !kimiJournalTailHasOpenTurn(first)) return false;
+  const deadline = Date.now() + KIMI_OPEN_TURN_SETTLE_MS;
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    await setTimeout(Math.min(KIMI_JOURNAL_POLL_MS, remaining));
+    const tail = await readKimiJournalTail(journalPath);
+    if (tail == null || !kimiJournalTailHasOpenTurn(tail)) return false;
+  }
+  return true;
 }
 
 async function readKimiJournalTail(journalPath: string): Promise<string | null> {
@@ -211,6 +316,7 @@ export class KimiACPAgentClient extends GenericACPAgentClient {
       label: options.label,
       catalogModelResolver: resolveKimiCatalogModels,
       promptResponseValidator: validateKimiPromptResponse,
+      nativeTurnProbe: kimiNativeTurnStillOpen,
     });
   }
 }

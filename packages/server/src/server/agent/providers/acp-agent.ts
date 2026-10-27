@@ -598,6 +598,14 @@ export interface ACPPromptResponseContext {
 
 export type ACPPromptResponseValidator = (context: ACPPromptResponseContext) => Promise<void>;
 
+export interface ACPNativeTurnProbeContext {
+  sessionId: string;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+}
+
+export type ACPNativeTurnProbe = (context: ACPNativeTurnProbeContext) => Promise<boolean>;
+
 interface ACPAgentClientOptions {
   provider: string;
   logger: Logger;
@@ -606,6 +614,7 @@ interface ACPAgentClientOptions {
   defaultModes?: AgentMode[];
   catalogModelResolver?: ACPCatalogModelResolver;
   promptResponseValidator?: ACPPromptResponseValidator;
+  nativeTurnProbe?: ACPNativeTurnProbe;
   modelTransformer?: (models: AgentModelDefinition[]) => AgentModelDefinition[];
   sessionResponseTransformer?: (response: SessionStateResponse) => SessionStateResponse;
   configOptionsTransformer?: (configOptions: SessionConfigOption[]) => SessionConfigOption[];
@@ -638,6 +647,7 @@ interface ACPAgentSessionOptions {
   defaultCommand: [string, ...string[]];
   defaultModes: AgentMode[];
   promptResponseValidator?: ACPPromptResponseValidator;
+  nativeTurnProbe?: ACPNativeTurnProbe;
   modelTransformer?: (models: AgentModelDefinition[]) => AgentModelDefinition[];
   sessionResponseTransformer?: (response: SessionStateResponse) => SessionStateResponse;
   configOptionsTransformer?: (configOptions: SessionConfigOption[]) => SessionConfigOption[];
@@ -1066,6 +1076,7 @@ export class ACPAgentClient implements AgentClient {
   protected readonly defaultModes: AgentMode[];
   private readonly catalogModelResolver?: ACPCatalogModelResolver;
   private readonly promptResponseValidator?: ACPPromptResponseValidator;
+  private readonly nativeTurnProbe?: ACPNativeTurnProbe;
   private readonly modelTransformer?: (models: AgentModelDefinition[]) => AgentModelDefinition[];
   private readonly sessionResponseTransformer?: (
     response: SessionStateResponse,
@@ -1109,6 +1120,7 @@ export class ACPAgentClient implements AgentClient {
     this.defaultModes = options.defaultModes ?? [];
     this.catalogModelResolver = options.catalogModelResolver;
     this.promptResponseValidator = options.promptResponseValidator;
+    this.nativeTurnProbe = options.nativeTurnProbe;
     this.modelTransformer = options.modelTransformer;
     this.sessionResponseTransformer = options.sessionResponseTransformer;
     this.configOptionsTransformer = options.configOptionsTransformer;
@@ -1142,6 +1154,7 @@ export class ACPAgentClient implements AgentClient {
         defaultCommand: this.defaultCommand,
         defaultModes: this.defaultModes,
         promptResponseValidator: this.promptResponseValidator,
+        nativeTurnProbe: this.nativeTurnProbe,
         modelTransformer: this.modelTransformer,
         sessionResponseTransformer: this.sessionResponseTransformer,
         configOptionsTransformer: this.configOptionsTransformer,
@@ -1200,6 +1213,7 @@ export class ACPAgentClient implements AgentClient {
       defaultCommand: this.defaultCommand,
       defaultModes: this.defaultModes,
       promptResponseValidator: this.promptResponseValidator,
+      nativeTurnProbe: this.nativeTurnProbe,
       modelTransformer: this.modelTransformer,
       sessionResponseTransformer: this.sessionResponseTransformer,
       configOptionsTransformer: this.configOptionsTransformer,
@@ -1852,6 +1866,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   private readonly defaultCommand: [string, ...string[]];
   private readonly defaultModes: AgentMode[];
   private readonly promptResponseValidator?: ACPPromptResponseValidator;
+  private readonly nativeTurnProbe?: ACPNativeTurnProbe;
   protected readonly modelTransformer?: (models: AgentModelDefinition[]) => AgentModelDefinition[];
   private readonly sessionResponseTransformer?: (
     response: SessionStateResponse,
@@ -1930,6 +1945,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     this.defaultCommand = options.defaultCommand;
     this.defaultModes = options.defaultModes;
     this.promptResponseValidator = options.promptResponseValidator;
+    this.nativeTurnProbe = options.nativeTurnProbe;
     this.modelTransformer = options.modelTransformer;
     this.sessionResponseTransformer = options.sessionResponseTransformer;
     this.configOptionsTransformer = options.configOptionsTransformer;
@@ -1959,6 +1975,18 @@ export class ACPAgentSession implements AgentSession, ACPClient {
 
   get id(): string | null {
     return this.sessionId;
+  }
+
+  async nativeTurnStillOpen(): Promise<boolean> {
+    if (!this.nativeTurnProbe || !this.sessionId) return false;
+    return this.nativeTurnProbe({
+      sessionId: this.sessionId,
+      cwd: this.config.cwd,
+      env: createProviderEnv({
+        runtimeSettings: this.runtimeSettings,
+        overlays: [this.launchEnv],
+      }),
+    });
   }
 
   async initializeNewSession(): Promise<void> {
