@@ -1,9 +1,12 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { StringDecoder } from "node:string_decoder";
 import type { Logger } from "pino";
 import { z } from "zod";
 
 import { terminateWithTreeKill } from "../../../../utils/tree-kill.js";
+import { ProviderLineReader, ProviderStreamLimitError } from "../jsonl-frame-decoder.js";
+
+/** Codex serializes one JSON-RPC message per LF-terminated line. 128 MiB matches the provider cap. */
+export const CODEX_PROVIDER_LINE_BYTES = 128 * 1024 * 1024;
 
 const DEFAULT_TIMEOUT_MS = 14 * 24 * 60 * 60 * 1000;
 const APP_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 2_000;
@@ -28,10 +31,25 @@ interface JsonRpcNotification {
 }
 
 interface PendingRequest {
+  method: string;
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
 }
+
+/** A response past the provider line cap. Only its request fails; the session stays up. */
+export class CodexAppServerResponseTooLargeError extends Error {
+  constructor(
+    readonly method: string,
+    readonly limitBytes: number,
+  ) {
+    super(`Codex app-server response to ${method} exceeds ${limitBytes} bytes`);
+    this.name = "CodexAppServerResponseTooLargeError";
+  }
+}
+
+// Codex serializes a response with `id` first, so its head names the request.
+const OVERSIZED_RESPONSE_HEAD = /^\{"id":(\d+),"result":/;
 
 export class CodexAppServerRpcError extends Error {
   constructor(
@@ -167,39 +185,6 @@ function readProviderTurnId(params: unknown): string | undefined {
   return isRecord(turn) && typeof turn.id === "string" ? turn.id : undefined;
 }
 
-/**
- * Splits stdout into lines on "\n" only. `node:readline` additionally treats U+2028 and U+2029
- * as line terminators, but Codex emits those characters raw inside JSON strings, so readline
- * would cut a single JSON-RPC message into pieces that fail to parse.
- */
-function createNewlineLineReader(
-  input: NodeJS.ReadableStream,
-  onLine: (line: string) => void,
-): { close(): void } {
-  const decoder = new StringDecoder("utf8");
-  // Text after the last "\n", kept as parts and joined once its line ends, so a large line
-  // arriving in many chunks is scanned and copied once instead of once per chunk.
-  let unterminated: string[] = [];
-  const onData = (chunk: Buffer | string): void => {
-    const text = typeof chunk === "string" ? chunk : decoder.write(chunk);
-    let lineStart = 0;
-    let index = text.indexOf("\n");
-    while (index !== -1) {
-      unterminated.push(text.slice(lineStart, index));
-      const line = unterminated.join("");
-      unterminated = [];
-      onLine(line.endsWith("\r") ? line.slice(0, -1) : line);
-      lineStart = index + 1;
-      index = text.indexOf("\n", lineStart);
-    }
-    if (lineStart < text.length) {
-      unterminated.push(text.slice(lineStart));
-    }
-  };
-  input.on("data", onData);
-  return { close: () => void input.off("data", onData) };
-}
-
 export class CodexAppServerClient {
   private readonly stdoutLineReader: { close(): void };
   private readonly pending = new Map<number, PendingRequest>();
@@ -215,11 +200,25 @@ export class CodexAppServerClient {
     private readonly logger: Logger,
     private readonly getTraceContext: () => CodexAppServerTraceContext = () => ({}),
   ) {
-    this.stdoutLineReader = createNewlineLineReader(child.stdout, (line) => {
-      void this.handleLine(line).catch((error) => {
-        this.logger.warn({ error, line }, "Failed to handle Codex app-server stdout line");
-      });
-    });
+    // Split only on LF. Codex emits U+2028 and U+2029 raw inside JSON strings, and a reader
+    // that treats those as line breaks would cut one JSON-RPC message into pieces.
+    const reader = new ProviderLineReader(
+      CODEX_PROVIDER_LINE_BYTES,
+      (line) => {
+        void this.handleLine(line).catch((error) => {
+          this.logger.warn({ error, line }, "Failed to handle Codex app-server stdout line");
+        });
+      },
+      (error) => this.handleStreamLimit(error),
+    );
+    const onData = (chunk: Buffer | string) => reader.write(chunk);
+    child.stdout.on("data", onData);
+    this.stdoutLineReader = {
+      close: () => {
+        reader.close();
+        child.stdout.off("data", onData);
+      },
+    };
 
     child.stderr.on("data", (chunk) => {
       this.stderrBuffer += chunk.toString();
@@ -255,6 +254,10 @@ export class CodexAppServerClient {
     this.requestHandlers.set(method, handler);
   }
 
+  hasPendingRequests(): boolean {
+    return this.pending.size > 0;
+  }
+
   request(method: string, params?: unknown, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<unknown> {
     if (this.disposed) {
       return Promise.reject(new Error("Codex app-server client is closed"));
@@ -268,7 +271,7 @@ export class CodexAppServerClient {
         this.pending.delete(id);
         reject(new Error(`Codex app-server request timed out for ${method}`));
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { method, resolve, reject, timer });
     });
   }
 
@@ -311,6 +314,28 @@ export class CodexAppServerClient {
     if (result === "kill-timeout") {
       throw new Error("Codex app-server did not report exit after SIGKILL");
     }
+  }
+
+  private handleStreamLimit(failure: ProviderStreamLimitError): void {
+    const responseId = OVERSIZED_RESPONSE_HEAD.exec(failure.lineHead)?.[1];
+    const pending = responseId === undefined ? undefined : this.pending.get(Number(responseId));
+    if (pending) {
+      clearTimeout(pending.timer);
+      this.pending.delete(Number(responseId));
+      this.logger.warn(
+        { method: pending.method, limitBytes: failure.limitBytes },
+        "Codex app-server response exceeded the line cap",
+      );
+      pending.reject(new CodexAppServerResponseTooLargeError(pending.method, failure.limitBytes));
+      return;
+    }
+    // A lost notification or server request cannot be replayed. Fail the session,
+    // including live turns with no pending RPC, rather than dropping a stream unit.
+    this.stdoutLineReader.close();
+    this.handleUnexpectedTermination(failure);
+    void this.dispose().catch((err) => {
+      this.logger.warn({ err }, "Failed to terminate oversized Codex stdout producer");
+    });
   }
 
   private handleUnexpectedTermination(error: Error): void {

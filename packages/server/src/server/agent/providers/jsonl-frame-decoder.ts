@@ -1,3 +1,92 @@
+// Provider-process stdout only; these are not app/daemon wire limits.
+export const JSONL_PROVIDER_LINE_BYTES = 64 * 1024 * 1024;
+
+// Enough of an oversized line to read which response it was, e.g. `{"id":12,"result":`.
+const OVERSIZED_LINE_HEAD_BYTES = 64;
+
+export class ProviderStreamLimitError extends Error {
+  readonly code = "PROVIDER_STREAM_LINE_TOO_LARGE";
+
+  constructor(
+    readonly limitBytes: number,
+    /** The first bytes of the oversized line; the rest is discarded unread. */
+    readonly lineHead = "",
+  ) {
+    super(
+      `Provider stdout line exceeds ${limitBytes} bytes. Start a new thread or reduce the provider response size.`,
+    );
+    this.name = "ProviderStreamLimitError";
+  }
+}
+
+function readLineHead(parts: Buffer[]): string {
+  const head: Buffer[] = [];
+  let bytes = 0;
+  for (const part of parts) {
+    if (bytes >= OVERSIZED_LINE_HEAD_BYTES) break;
+    head.push(part.subarray(0, OVERSIZED_LINE_HEAD_BYTES - bytes));
+    bytes += head[head.length - 1].byteLength;
+  }
+  return Buffer.concat(head).toString("utf8");
+}
+
+/**
+ * Admits raw UTF-8 bytes before retaining, decoding or joining a complete line.
+ * An oversized line is reported with its head and skipped up to its newline;
+ * the owner closes the reader if the stream cannot continue without it.
+ */
+export class ProviderLineReader {
+  private parts: Buffer[] = [];
+  private bytes = 0;
+  private skippingOversizedLine = false;
+  private stopped = false;
+
+  constructor(
+    private readonly limitBytes: number,
+    private readonly onLine: (line: string) => void,
+    private readonly onLimit: (error: ProviderStreamLimitError) => void,
+  ) {}
+
+  write(chunk: Buffer | string): void {
+    if (this.stopped) return;
+    const buffer = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
+    let start = 0;
+    while (start < buffer.byteLength && !this.stopped) {
+      const newline = buffer.indexOf(10, start);
+      const end = newline === -1 ? buffer.byteLength : newline;
+      if (this.skippingOversizedLine) {
+        if (newline === -1) return;
+        this.skippingOversizedLine = false;
+        start = newline + 1;
+        continue;
+      }
+      const length = end - start;
+      if (length > this.limitBytes - this.bytes) {
+        const head = readLineHead([...this.parts, buffer.subarray(start, end)]);
+        this.parts = [];
+        this.bytes = 0;
+        this.skippingOversizedLine = true;
+        this.onLimit(new ProviderStreamLimitError(this.limitBytes, head));
+        continue;
+      }
+      if (length) this.parts.push(buffer.subarray(start, end));
+      this.bytes += length;
+      if (newline === -1) return;
+      const line = Buffer.concat(this.parts, this.bytes).toString("utf8");
+      this.parts = [];
+      this.bytes = 0;
+      this.onLine(line.endsWith("\r") ? line.slice(0, -1) : line);
+      start = newline + 1;
+    }
+  }
+
+  close(): void {
+    this.stopped = true;
+    this.parts = [];
+    this.bytes = 0;
+  }
+}
+
 const V2_FRAME_BYTES = 1024 * 1024;
 const V2_REASSEMBLED_BYTES = 64 * 1024 * 1024;
 const V2_CHUNK_BYTES = 256 * 1024;
@@ -87,7 +176,6 @@ export class JsonlFrameDecoder {
       problem(problem: JsonlFrameProblem, detail?: unknown): void;
     },
   ) {}
-
   write(text: string): void {
     this.lineBuffer += text;
     let newline = this.lineBuffer.indexOf("\n");
