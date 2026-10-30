@@ -16,7 +16,11 @@ import { join } from "node:path";
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { AgentManager } from "./agent-manager.js";
 import { AgentStorage } from "./agent-storage.js";
-import { setupFinishNotification, waitForAgentRunStartWithTimeout } from "./agent-prompt.js";
+import {
+  setupFinishNotification,
+  startAgentRun,
+  waitForAgentRunStartWithTimeout,
+} from "./agent-prompt.js";
 import type { AgentManagerEvent, ManagedAgent } from "./agent-manager.js";
 import type {
   AgentClient,
@@ -592,7 +596,10 @@ class SlowStartAgentSession implements AgentSession {
     this.releaseStartTurn = resolve;
   });
 
-  constructor(private readonly startDelayMs: number | null) {}
+  constructor(
+    private readonly startDelayMs: number | null,
+    readonly nativeTurnStillOpen?: () => Promise<boolean>,
+  ) {}
 
   async run(): Promise<AgentRunResult> {
     return { sessionId: this.id, finalText: "", timeline: [] };
@@ -667,14 +674,17 @@ class SlowStartAgentClient implements AgentClient {
   readonly capabilities = RUN_START_TEST_CAPABILITIES;
   readonly sessions: SlowStartAgentSession[] = [];
 
-  constructor(private readonly startDelayMs: number | null) {}
+  constructor(
+    private readonly startDelayMs: number | null,
+    private readonly nativeTurnStillOpen?: () => Promise<boolean>,
+  ) {}
 
   async isAvailable(): Promise<boolean> {
     return true;
   }
 
   async createSession(): Promise<AgentSession> {
-    const session = new SlowStartAgentSession(this.startDelayMs);
+    const session = new SlowStartAgentSession(this.startDelayMs, this.nativeTurnStillOpen);
     this.sessions.push(session);
     return session;
   }
@@ -692,14 +702,17 @@ class SlowStartAgentClient implements AgentClient {
  * Real AgentManager driving a real agent, so the run-start wait exercises the production
  * run-state and agent_state subscription path rather than a replaced method.
  */
-async function createRunStartScenario(startDelayMs: number | null): Promise<{
+async function createRunStartScenario(
+  startDelayMs: number | null,
+  nativeTurnStillOpen?: () => Promise<boolean>,
+): Promise<{
   agentManager: AgentManager;
   agentId: string;
-  startRun: () => Promise<void>;
+  startRun: () => Promise<{ started: Promise<void> }>;
   cleanup: () => Promise<void>;
 }> {
   const workdir = mkdtempSync(join(tmpdir(), "agent-run-start-budget-"));
-  const client = new SlowStartAgentClient(startDelayMs);
+  const client = new SlowStartAgentClient(startDelayMs, nativeTurnStillOpen);
   const agentManager = new AgentManager({
     clients: { codex: client },
     logger: createTestLogger(),
@@ -708,32 +721,155 @@ async function createRunStartScenario(startDelayMs: number | null): Promise<{
     workspaceId: undefined,
   });
 
-  let drained: Promise<void> = Promise.resolve();
   return {
     agentManager,
     agentId: snapshot.id,
-    // streamAgent registers the pending run synchronously, so the wait always observes it.
     startRun: async () => {
-      const run = agentManager.streamAgent(snapshot.id, "start the run");
-      drained = (async () => {
-        for await (const _event of run) {
-          // Drain whatever the turn produces.
-        }
-      })().catch(() => undefined);
+      const dispatch = await startAgentRun(
+        agentManager,
+        snapshot.id,
+        "start the run",
+        createTestLogger(),
+      );
+      if (dispatch.disposition !== "turn_started") throw new Error("Expected a foreground turn");
+      return dispatch;
     },
     cleanup: async () => {
-      // Release any turn still held open, then close. The drain is deliberately not
-      // awaited: depending on how far the turn got, the stream ends either from the
-      // release or from the close, and teardown must not depend on which.
+      // Release any turn still held open before closing the provider session.
       for (const session of client.sessions) {
         session.release();
       }
       await agentManager.closeAgent(snapshot.id).catch(() => undefined);
-      void drained;
       rmSync(workdir, { recursive: true, force: true });
     },
   };
 }
+
+test("waiting for a run start includes the native-turn probe", async () => {
+  let finishProbe!: (open: boolean) => void;
+  const probe = new Promise<boolean>((resolve) => {
+    finishProbe = resolve;
+  });
+  const scenario = await createRunStartScenario(0, () => probe);
+  vi.useFakeTimers();
+
+  try {
+    const { started } = await scenario.startRun();
+    const wait = waitForAgentRunStartWithTimeout(scenario.agentManager, scenario.agentId, started);
+
+    finishProbe(false);
+    await Promise.all([expect(wait).resolves.toBeUndefined(), vi.advanceTimersByTimeAsync(0)]);
+  } finally {
+    finishProbe(false);
+    vi.useRealTimers();
+    await scenario.cleanup();
+  }
+});
+
+test("a failed native-turn probe reports its error to the sender", async () => {
+  const scenario = await createRunStartScenario(0, async () => {
+    throw new Error("Native turn probe failed");
+  });
+
+  try {
+    const { started } = await scenario.startRun();
+    await expect(
+      waitForAgentRunStartWithTimeout(scenario.agentManager, scenario.agentId, started),
+    ).rejects.toThrow("Native turn probe failed");
+    expect(scenario.agentManager.getAgent(scenario.agentId)?.lifecycle).toBe("idle");
+  } finally {
+    await scenario.cleanup();
+  }
+});
+
+test("a completed turn still acknowledges its own successful start", async () => {
+  const scenario = await createRunStartScenario(0, async () => false);
+  vi.useFakeTimers();
+
+  try {
+    const { started } = await scenario.startRun();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(scenario.agentManager.getAgent(scenario.agentId)?.lifecycle).toBe("idle");
+    await expect(
+      waitForAgentRunStartWithTimeout(scenario.agentManager, scenario.agentId, started),
+    ).resolves.toBeUndefined();
+  } finally {
+    vi.useRealTimers();
+    await scenario.cleanup();
+  }
+});
+
+test("the run start budget includes a stalled native-turn probe", async () => {
+  let finishProbe!: (open: boolean) => void;
+  const probe = new Promise<boolean>((resolve) => {
+    finishProbe = resolve;
+  });
+  const scenario = await createRunStartScenario(0, () => probe);
+  vi.useFakeTimers();
+
+  try {
+    const { started } = await scenario.startRun();
+    const wait = waitForAgentRunStartWithTimeout(scenario.agentManager, scenario.agentId, started);
+    await Promise.all([
+      expect(wait).rejects.toThrow("codex run did not start within 60 seconds (phase: run start)"),
+      vi.advanceTimersByTimeAsync(EXPECTED_RUN_START_BUDGET_MS),
+    ]);
+  } finally {
+    finishProbe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    vi.useRealTimers();
+    await scenario.cleanup();
+  }
+});
+
+test("a disconnected sender stops waiting during the native-turn probe", async () => {
+  let finishProbe!: (open: boolean) => void;
+  const probe = new Promise<boolean>((resolve) => {
+    finishProbe = resolve;
+  });
+  const scenario = await createRunStartScenario(0, () => probe);
+  const request = new AbortController();
+  vi.useFakeTimers();
+
+  try {
+    const { started } = await scenario.startRun();
+    const wait = waitForAgentRunStartWithTimeout(
+      scenario.agentManager,
+      scenario.agentId,
+      started,
+      request.signal,
+    );
+    request.abort(new Error("Sender disconnected"));
+    await expect(wait).rejects.toThrow("Sender disconnected");
+    finishProbe(false);
+    await Promise.all([expect(started).resolves.toBeUndefined(), vi.advanceTimersByTimeAsync(1)]);
+  } finally {
+    finishProbe(false);
+    vi.useRealTimers();
+    await scenario.cleanup();
+  }
+});
+
+test("canceling a stalled provider startup rejects its send acknowledgement", async () => {
+  const scenario = await createRunStartScenario(null);
+  vi.useFakeTimers();
+
+  try {
+    const { started } = await scenario.startRun();
+    const wait = waitForAgentRunStartWithTimeout(scenario.agentManager, scenario.agentId, started);
+    const cancellation = scenario.agentManager.cancelAgentRun(scenario.agentId);
+
+    await Promise.all([
+      expect(wait).rejects.toThrow("run was canceled before its turn started"),
+      expect(cancellation).resolves.toEqual({ status: "settled" }),
+      vi.advanceTimersByTimeAsync(3_000),
+    ]);
+    expect(scenario.agentManager.hasInFlightRun(scenario.agentId)).toBe(false);
+  } finally {
+    vi.useRealTimers();
+    await scenario.cleanup();
+  }
+});
 
 test("waiting for a run start outlasts the slowest provider startup budget", async () => {
   // A provider is still allowed to be starting here, so the outer wait must not abort it.
@@ -741,8 +877,8 @@ test("waiting for a run start outlasts the slowest provider startup budget", asy
   vi.useFakeTimers();
 
   try {
-    await scenario.startRun();
-    const wait = waitForAgentRunStartWithTimeout(scenario.agentManager, scenario.agentId);
+    const { started } = await scenario.startRun();
+    const wait = waitForAgentRunStartWithTimeout(scenario.agentManager, scenario.agentId, started);
     let settled = false;
     const markSettled = () => {
       settled = true;
@@ -767,8 +903,8 @@ test("waiting for a run start still gives up at the run start budget", async () 
   vi.useFakeTimers();
 
   try {
-    await scenario.startRun();
-    const wait = waitForAgentRunStartWithTimeout(scenario.agentManager, scenario.agentId);
+    const { started } = await scenario.startRun();
+    const wait = waitForAgentRunStartWithTimeout(scenario.agentManager, scenario.agentId, started);
     const rejection = expect(wait).rejects.toThrow(
       "codex run did not start within 60 seconds (phase: run start)",
     );

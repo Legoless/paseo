@@ -220,14 +220,17 @@ interface StubAgentOptions {
   supportsStreaming: boolean;
   startError?: string;
   interruptError?: string;
+  nativeTurnProbe?: () => Promise<boolean>;
 }
 
 class StubAgentSession implements AgentSession {
   readonly provider = "codex" as const;
   readonly capabilities;
+  readonly nativeTurnStillOpen?: () => Promise<boolean>;
   private activeTurnId: string | null = null;
 
   constructor(private readonly options: StubAgentOptions) {
+    this.nativeTurnStillOpen = options.nativeTurnProbe;
     this.capabilities = {
       supportsStreaming: options.supportsStreaming,
       supportsSessionPersistence: true,
@@ -402,7 +405,7 @@ class RejectingMcpResumeClient implements AgentClient {
   }
 }
 
-test("createAgent fails when the initial turn cannot start", async () => {
+test("createAgent preserves the agent and its error when the initial turn cannot start", async () => {
   const testAgent = new StubAgentClient({
     sessionId: "start-turn-failure-session",
     supportsStreaming: false,
@@ -421,19 +424,141 @@ test("createAgent fails when the initial turn cannot start", async () => {
     await client.connect();
     await client.fetchAgents({ subscribe: {} });
 
-    await expect(
-      client.createAgent({
-        provider: "codex",
-        cwd: tmpCwd(),
-        title: "Start failure agent",
-        modeId: "full-access",
-        model: "gpt-5.4-mini",
-        initialPrompt: "Run exactly: sleep 30",
-      }),
-    ).rejects.toThrow("Initial turn failed to start");
+    const agent = await client.createAgent({
+      provider: "codex",
+      cwd: tmpCwd(),
+      title: "Start failure agent",
+      modeId: "full-access",
+      model: "gpt-5.4-mini",
+      initialPrompt: "Run exactly: sleep 30",
+    });
+    expect(agent).toMatchObject({
+      status: "error",
+      lastError: "Initial turn failed to start",
+    });
+    await expect(client.fetchAgent({ agentId: agent.id })).resolves.toMatchObject({
+      agent: { id: agent.id, status: "error", lastError: "Initial turn failed to start" },
+    });
   } finally {
     await client.close();
     await daemon.close();
+  }
+});
+
+function holdNativeTurnProbe() {
+  let entered!: () => void;
+  let finish!: (error?: Error) => void;
+  const probing = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const released = new Promise<Error | undefined>((resolve) => {
+    finish = resolve;
+  });
+  return {
+    probing,
+    finish,
+    probe: async () => {
+      entered();
+      const error = await released;
+      if (error) throw error;
+      return false;
+    },
+  };
+}
+
+test("send_agent_message waits for native turn admission and acknowledges retries once", async () => {
+  const probe = holdNativeTurnProbe();
+  const cwd = tmpCwd();
+  const daemon = await createTestPaseoDaemon({
+    agentClients: {
+      codex: new StubAgentClient({
+        sessionId: "deferred-native-turn-session",
+        supportsStreaming: true,
+        nativeTurnProbe: probe.probe,
+      }),
+    },
+  });
+  const client = new DaemonClient({
+    url: `ws://127.0.0.1:${daemon.port}/ws`,
+    appVersion: "0.1.82",
+  });
+
+  try {
+    await client.connect();
+    await client.fetchAgents({ subscribe: {} });
+    const agent = await client.createAgent({ provider: "codex", cwd });
+    const messageId = "deferred-native-turn-message";
+    let outcome = "pending";
+    const sent = client.sendMessage(agent.id, "Commit and push all", { messageId }).then(
+      () => {
+        outcome = "accepted";
+        return outcome;
+      },
+      (error: Error) => {
+        outcome = error.message;
+        return outcome;
+      },
+    );
+
+    await probe.probing;
+    const whileProbing = await client.fetchAgent({ agentId: agent.id });
+    expect(whileProbing?.agent.status).toBe("idle");
+    expect(outcome).toBe("pending");
+
+    probe.finish();
+    await expect(sent).resolves.toBe("accepted");
+    await expect(
+      client.sendMessage(agent.id, "Commit and push all", { messageId }),
+    ).resolves.toBeUndefined();
+    expect(
+      daemon.daemon.agentManager
+        .getTimeline(agent.id)
+        .filter((item) => item.type === "user_message"),
+    ).toMatchObject([{ text: "Commit and push all", clientMessageId: messageId }]);
+    expect(daemon.daemon.agentManager.getAgent(agent.id)?.lifecycle).toBe("running");
+  } finally {
+    probe.finish();
+    await client.close();
+    await daemon.close();
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("send_agent_message reports a native turn admission failure", async () => {
+  const probe = holdNativeTurnProbe();
+  const cwd = tmpCwd();
+  const daemon = await createTestPaseoDaemon({
+    agentClients: {
+      codex: new StubAgentClient({
+        sessionId: "failed-native-turn-session",
+        supportsStreaming: true,
+        nativeTurnProbe: probe.probe,
+      }),
+    },
+  });
+  const client = new DaemonClient({
+    url: `ws://127.0.0.1:${daemon.port}/ws`,
+    appVersion: "0.1.82",
+  });
+
+  try {
+    await client.connect();
+    await client.fetchAgents({ subscribe: {} });
+    const agent = await client.createAgent({ provider: "codex", cwd });
+    const sent = client.sendMessage(agent.id, "Commit and push all");
+    const rejected = expect(sent).rejects.toThrow("Native turn journal could not be read");
+    await probe.probing;
+    await client.fetchAgent({ agentId: agent.id });
+    probe.finish(new Error("Native turn journal could not be read"));
+
+    await rejected;
+    expect(daemon.daemon.agentManager.getTimeline(agent.id)).toEqual([]);
+    expect(daemon.daemon.agentManager.hasInFlightRun(agent.id)).toBe(false);
+  } finally {
+    probe.finish();
+    await client.close();
+    await daemon.close();
+    rmSync(cwd, { recursive: true, force: true });
   }
 });
 

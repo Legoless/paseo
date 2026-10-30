@@ -1110,6 +1110,7 @@ test("orders a concurrent replacement after a pending accepted steer", async () 
     })();
     await consumeInitial;
     await vi.waitFor(() => expect(session.startCount).toBe(2));
+    await manager.waitForAgentRunStart(agent.id);
 
     expect(session.interruptCount).toBe(1);
     expect(
@@ -8801,62 +8802,83 @@ test("streamAgent clears pending run when startTurn fails before a turn id exist
   );
 });
 
-test("acknowledged cancellation settles a pending run before it has a turn id", async () => {
-  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-cancel-pending-start-"));
-  const startEntered = deferred<void>();
-  let rejectStart!: (error: Error) => void;
-  const stalledStart = new Promise<{ turnId: string }>((_resolve, reject) => {
-    rejectStart = reject;
-  });
+test.each([
+  {
+    lateResult: "rejection",
+    finishStart: (start: Deferred<{ turnId: string }>) =>
+      start.reject(new Error("released canceled start")),
+  },
+  {
+    lateResult: "turn id",
+    finishStart: (start: Deferred<{ turnId: string }>) =>
+      start.resolve({ turnId: "late-canceled-turn" }),
+  },
+])(
+  "acknowledged cancellation settles a pending run before it has a turn id: late $lateResult",
+  async ({ finishStart }) => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-cancel-pending-start-"));
+    const startEntered = deferred<void>();
+    const stalledStart = deferred<{ turnId: string }>();
 
-  class PendingStartSession extends TestAgentSession {
-    override async startTurn(): Promise<{ turnId: string }> {
-      startEntered.resolve();
-      return await stalledStart;
+    class PendingStartSession extends TestAgentSession {
+      override async startTurn(): Promise<{ turnId: string }> {
+        startEntered.resolve();
+        return await stalledStart.promise;
+      }
+
+      override async interrupt(): Promise<void> {}
     }
 
-    override async interrupt(): Promise<void> {}
-  }
-
-  class PendingStartClient extends TestAgentClient {
-    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
-      return new PendingStartSession(config);
+    class PendingStartClient extends TestAgentClient {
+      override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+        return new PendingStartSession(config);
+      }
     }
-  }
 
-  const manager = new AgentManager({
-    clients: { codex: new PendingStartClient() },
-    registry: new AgentStorage(join(workdir, "agents"), logger),
-    logger,
-    idFactory: () => "00000000-0000-4000-8000-000000000132",
-  });
-
-  try {
-    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
-      workspaceId: undefined,
+    const manager = new AgentManager({
+      clients: { codex: new PendingStartClient() },
+      registry: new AgentStorage(join(workdir, "agents"), logger),
+      logger,
+      idFactory: () => "00000000-0000-4000-8000-000000000132",
     });
-    const firstRun = manager.runAgent(agent.id, "start a turn");
-    void firstRun.catch(() => undefined);
-    await startEntered.promise;
 
-    expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
-    expect(manager.hasInFlightRun(agent.id)).toBe(true);
+    try {
+      const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+        workspaceId: undefined,
+      });
+      const firstRun = manager.runAgent(agent.id, "start a turn");
+      void firstRun.catch(() => undefined);
+      await startEntered.promise;
 
-    await expect(manager.cancelAgentRun(agent.id)).resolves.toEqual({ status: "settled" });
-    expect(manager.hasInFlightRun(agent.id)).toBe(false);
-    expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+      expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+      expect(manager.hasInFlightRun(agent.id)).toBe(true);
 
-    rejectStart(new Error("released canceled start"));
-    await expect(firstRun).rejects.toThrow("released canceled start");
-    expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
-  } finally {
-    rejectStart(new Error("test cleanup"));
-    if (manager.getAgent("00000000-0000-4000-8000-000000000132")) {
-      await manager.closeAgent("00000000-0000-4000-8000-000000000132");
+      await expect(manager.cancelAgentRun(agent.id)).resolves.toEqual({ status: "settled" });
+      expect(manager.hasInFlightRun(agent.id)).toBe(false);
+      expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+
+      await expect(firstRun).rejects.toThrow("run was canceled before its turn started");
+      const nextRun = manager.streamAgent(agent.id, "start a replacement turn");
+      await expect(nextRun.next()).resolves.toMatchObject({
+        done: false,
+        value: { type: "turn_started", turnId: "turn-1" },
+      });
+      finishStart(stalledStart);
+      await stalledStart.promise.catch(() => undefined);
+      expect(manager.getAgent(agent.id)?.activeForegroundTurnId).toBe("turn-1");
+      expect(manager.hasInFlightRun(agent.id)).toBe(true);
+      await drainAsyncGenerator(nextRun);
+      expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+      expect(manager.hasInFlightRun(agent.id)).toBe(false);
+    } finally {
+      stalledStart.reject(new Error("test cleanup"));
+      if (manager.getAgent("00000000-0000-4000-8000-000000000132")) {
+        await manager.closeAgent("00000000-0000-4000-8000-000000000132");
+      }
+      rmSync(workdir, { recursive: true, force: true });
     }
-    rmSync(workdir, { recursive: true, force: true });
-  }
-});
+  },
+);
 
 test("archiveAgent persists archivedAt and updatedAt before emitting closed state", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-archive-"));

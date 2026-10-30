@@ -39,6 +39,10 @@ export interface StartAgentRunOptions {
 
 export type PromptDispatchDisposition = "out_of_band" | "steered" | "turn_started";
 
+export type PromptDispatchResult =
+  | { disposition: "out_of_band" | "steered" }
+  | { disposition: "turn_started"; started: Promise<void> };
+
 async function steerOrReplaceActiveRun(
   agentManager: AgentRunController,
   agentId: string,
@@ -86,9 +90,11 @@ async function startOrReplaceRun(
 
 async function drainAgentRunIterator(
   iterator: AsyncGenerator<import("./agent-sdk-types.js").AgentStreamEvent>,
+  onStarted: () => void,
 ): Promise<void> {
-  for await (const _ of iterator) {
+  for await (const event of iterator) {
     // Events are broadcast via AgentManager subscribers.
+    if (event.type === "turn_started") onStarted();
   }
 }
 
@@ -98,7 +104,7 @@ export async function startAgentRun(
   prompt: AgentPromptInput,
   logger: Logger,
   options?: StartAgentRunOptions,
-): Promise<{ disposition: PromptDispatchDisposition }> {
+): Promise<PromptDispatchResult> {
   const snapshot = agentManager.getAgent(agentId);
   logger.trace(
     {
@@ -137,7 +143,7 @@ async function startAgentRunInner(
   prompt: AgentPromptInput,
   logger: Logger,
   options?: StartAgentRunOptions,
-): Promise<{ disposition: PromptDispatchDisposition }> {
+): Promise<PromptDispatchResult> {
   const snapshot = agentManager.getAgent(agentId);
   const steered = await steerOrReplaceActiveRun(agentManager, agentId, prompt, options);
   if (steered?.disposition === "steered") {
@@ -156,11 +162,22 @@ async function startAgentRunInner(
     },
     "agent.session.start_stream.iterator_returned",
   );
+  // Admission can await provider recovery before AgentManager has a pending run.
+  // Keep the acknowledgement tied to this iterator, even if its turn finishes
+  // before the sender starts waiting or another prompt replaces it.
+  let resolveStarted!: () => void;
+  let rejectStarted!: (error: unknown) => void;
+  const started = new Promise<void>((resolve, reject) => {
+    resolveStarted = resolve;
+    rejectStarted = reject;
+  });
+  // Background callers do not await startup; the drain still logs their failures.
+  void started.catch(() => undefined);
   options?.onDispatch?.("turn_started");
   void (async () => {
     try {
       try {
-        await drainAgentRunIterator(iterator);
+        await drainAgentRunIterator(iterator, resolveStarted);
       } catch (error) {
         if (!isStaleProviderSessionError(error)) throw error;
         logger.info(
@@ -169,8 +186,9 @@ async function startAgentRunInner(
         );
         await agentManager.reloadAgentSession(agentId);
         const retry = await startOrReplaceRun(agentManager, agentId, prompt, options);
-        await drainAgentRunIterator(retry.iterator);
+        await drainAgentRunIterator(retry.iterator, resolveStarted);
       }
+      rejectStarted(new Error(`Agent ${agentId} run finished before starting`));
       logger.trace(
         {
           agentId,
@@ -180,6 +198,7 @@ async function startAgentRunInner(
         "agent.session.iterator.drained",
       );
     } catch (error) {
+      rejectStarted(error);
       logger.trace(
         {
           agentId,
@@ -192,7 +211,7 @@ async function startAgentRunInner(
       logger.error({ err: error, agentId }, "Agent stream failed");
     }
   })();
-  return { disposition: "turn_started" };
+  return { disposition: "turn_started", started };
 }
 
 /**
@@ -264,6 +283,7 @@ const AGENT_RUN_START_TIMEOUT_MS = 60_000;
 export async function waitForAgentRunStartWithTimeout(
   agentManager: AgentManager,
   agentId: string,
+  started: Promise<void>,
   signal?: AbortSignal,
 ): Promise<void> {
   const provider = agentManager.getAgent(agentId)?.provider ?? "provider";
@@ -278,12 +298,18 @@ export async function waitForAgentRunStartWithTimeout(
     AGENT_RUN_START_TIMEOUT_MS,
   );
 
+  const startSignal = signal ? AbortSignal.any([startAbort.signal, signal]) : startAbort.signal;
+  let onAbort: (() => void) | undefined;
   try {
-    await agentManager.waitForAgentRunStart(agentId, {
-      signal: signal ? AbortSignal.any([startAbort.signal, signal]) : startAbort.signal,
+    startSignal.throwIfAborted();
+    const aborted = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(startSignal.reason);
+      startSignal.addEventListener("abort", onAbort, { once: true });
     });
+    await Promise.race([started, aborted]);
   } finally {
     clearTimeout(startTimeout);
+    if (onAbort) startSignal.removeEventListener("abort", onAbort);
   }
 }
 
@@ -312,14 +338,14 @@ async function resolvePromptSource(
  */
 export async function sendPromptToAgent(
   params: SendPromptToAgentParams,
-): Promise<{ disposition: PromptDispatchDisposition }> {
+): Promise<PromptDispatchResult> {
   const unarchive = params.unarchive ?? true;
 
   const record = await params.agentStorage.get(params.agentId);
   let archivedAtToRestore: string | null = null;
   if (record?.archivedAt) {
     if (!unarchive) {
-      return { disposition: "turn_started" };
+      return { disposition: "turn_started", started: Promise.resolve() };
     }
     if (await unarchiveAgentState(params.agentStorage, params.agentManager, params.agentId)) {
       archivedAtToRestore = record.archivedAt;
@@ -386,7 +412,11 @@ export async function startCreatedAgentInitialPrompt(
   );
 
   if (dispatchResult.disposition === "turn_started") {
-    await waitForAgentRunStartWithTimeout(params.agentManager, params.agentId);
+    await waitForAgentRunStartWithTimeout(
+      params.agentManager,
+      params.agentId,
+      dispatchResult.started,
+    );
   }
 
   const refreshedSnapshot = params.agentManager.getAgent(params.agentId) ?? params.snapshot ?? null;

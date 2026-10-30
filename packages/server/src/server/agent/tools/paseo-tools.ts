@@ -1908,7 +1908,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       }
 
       const notifying = Boolean(callerAgentId && notifyOnFinish);
-      const { disposition } = await sendPromptToAgent({
+      const dispatch = await sendPromptToAgent({
         agentManager,
         agentStorage,
         agentId,
@@ -1923,17 +1923,19 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       });
 
       // Return once the provider has accepted the turn, so the status reports it running.
-      if (disposition === "turn_started") {
-        await waitForAgentRunStartWithTimeout(agentManager, agentId).catch((error) => {
-          stopNotification?.();
-          throw error;
-        });
+      if (dispatch.disposition === "turn_started") {
+        await waitForAgentRunStartWithTimeout(agentManager, agentId, dispatch.started).catch(
+          (error) => {
+            stopNotification?.();
+            throw error;
+          },
+        );
       }
       const currentSnapshot = agentManager.getAgent(agentId);
 
       const responseData = {
         success: true,
-        disposition,
+        disposition: dispatch.disposition,
         status: currentSnapshot?.lifecycle ?? "idle",
         guidance: notifying
           ? PROMPTED_AGENT_NOTIFICATION_GUIDANCE
