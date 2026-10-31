@@ -147,13 +147,25 @@ function assertChildWithPipes(
   }
 }
 
-// Node reports a failed spawn (missing binary or missing cwd) as a child
-// `error` event; without a listener it becomes an uncaught exception.
-function rejectOnSpawnError(child: ChildProcess, stderrChunks: string[]): Promise<never> {
+// Watch process failures as well as spawn errors: the SDK leaves initialize
+// pending when the child exits without replying. `close` waits for stderr to
+// drain, so the failure includes the launcher's diagnostic.
+function rejectOnProcessFailure(child: ChildProcess, stderrChunks: string[]): Promise<never> {
   return new Promise<never>((_, reject) => {
     child.once("error", (error) => {
       const stderr = stderrChunks.join("").trim();
       reject(new Error(stderr ? `${String(error)}\n${stderr}` : String(error)));
+    });
+    child.once("close", (code, signal) => {
+      const stderr = stderrChunks.join("").trim();
+      const status = signal ? `signal ${signal}` : `exit code ${code ?? "unknown"}`;
+      reject(
+        new Error(
+          `ACP agent process exited before initialization completed (${status})${
+            stderr ? `\n${stderr}` : ""
+          }`,
+        ),
+      );
     });
   });
 }
@@ -725,7 +737,7 @@ interface ACPProcessTransport {
   connection: ClientSideConnection;
   stderrChunks: string[];
   spawnReady: Promise<void>;
-  spawnError: Promise<never>;
+  processError: Promise<never>;
 }
 
 interface ACPImportPromptPreviews {
@@ -1682,6 +1694,7 @@ export class ACPAgentClient implements AgentClient {
       client?: ACPClient;
     },
   ): Promise<SpawnedACPProcess> {
+    const configuredOptions = ACPProviderOptionsSchema.parse(options?.providerOptions ?? {});
     const transport = await this.spawnTransport(launchEnv, options?.client);
     const probe: UninitializedACPProcess = {
       child: transport.child,
@@ -1693,7 +1706,7 @@ export class ACPAgentClient implements AgentClient {
       const initialize = await this.initializeTransport(
         transport,
         options?.initializeTimeoutMs,
-        options?.providerOptions,
+        configuredOptions.clientCapabilities,
       );
       const initializedProbe: SpawnedACPProcess = {
         ...probe,
@@ -1727,7 +1740,7 @@ export class ACPAgentClient implements AgentClient {
       stderrChunks.push(chunk.toString());
     });
 
-    const spawnErrorPromise = rejectOnSpawnError(child, stderrChunks);
+    const processErrorPromise = rejectOnProcessFailure(child, stderrChunks);
     const spawnReadyPromise = new Promise<void>((resolve) => {
       child.once("spawn", () => {
         resolve();
@@ -1746,16 +1759,15 @@ export class ACPAgentClient implements AgentClient {
       connection,
       stderrChunks,
       spawnReady: spawnReadyPromise,
-      spawnError: spawnErrorPromise,
+      processError: processErrorPromise,
     };
   }
 
   protected async initializeTransport(
     transport: ACPProcessTransport,
     initializeTimeoutMs?: number,
-    providerOptions?: Record<string, unknown>,
+    clientCapabilities?: ACPClientCapabilities,
   ): Promise<InitializeResponse> {
-    const configuredOptions = ACPProviderOptionsSchema.parse(providerOptions ?? {});
     let timeout: ReturnType<typeof setTimeout> | null = null;
     const initializeTimeoutPromise = initializeTimeoutMs
       ? new Promise<never>((_, reject) => {
@@ -1772,11 +1784,11 @@ export class ACPAgentClient implements AgentClient {
             protocolVersion: PROTOCOL_VERSION,
             clientCapabilities: buildACPClientCapabilities(
               this.clientCapabilityMeta,
-              configuredOptions.clientCapabilities ?? this.clientCapabilities,
+              clientCapabilities ?? this.clientCapabilities,
             ),
             clientInfo: { name: "Paseo", version: "dev" },
           }),
-          transport.spawnError,
+          transport.processError,
           ...(initializeTimeoutPromise ? [initializeTimeoutPromise] : []),
         ]),
       );
@@ -1857,7 +1869,7 @@ export class ACPAgentClient implements AgentClient {
       try {
         transport = await this.spawnTransport(PROBE_ENV);
         await withTimeout(
-          Promise.race([transport.spawnReady, transport.spawnError]),
+          Promise.race([transport.spawnReady, transport.processError]),
           phaseTimeoutMs,
           `ACP spawn timed out after ${phaseTimeoutMs}ms`,
         );
@@ -3335,7 +3347,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     child.stderr.on("data", (chunk: Buffer | string) => {
       stderrChunks.push(chunk.toString());
     });
-    const spawnError = rejectOnSpawnError(child, stderrChunks);
+    const processError = rejectOnProcessFailure(child, stderrChunks);
     child.once("exit", (code, signal) => {
       if (this.closed || this.historyRuntimeReleased) {
         return;
@@ -3386,7 +3398,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
           ),
           clientInfo: { name: "Paseo", version: "dev" },
         }),
-        spawnError,
+        processError,
       ]),
     );
 
