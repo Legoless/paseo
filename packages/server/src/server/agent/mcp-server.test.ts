@@ -245,7 +245,15 @@ function buildAgentManagerSpies() {
     hasInFlightRun: vi.fn().mockReturnValue(false),
     tryRunOutOfBand: vi.fn().mockReturnValue(false),
     subscribe: vi.fn().mockReturnValue(() => {}),
-    streamAgent: vi.fn(() => (async function* noop() {})()),
+    streamAgent: vi.fn(() =>
+      (async function* noop() {
+        yield {
+          type: "turn_started",
+          provider: "claude",
+          turnId: "turn-1",
+        };
+      })(),
+    ),
     waitForAgentRunStart: vi.fn().mockResolvedValue(undefined),
     respondToPermission: vi.fn(),
     cancelAgentRun: vi.fn(),

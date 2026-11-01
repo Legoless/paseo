@@ -320,7 +320,7 @@ async function resolvePromptSource(
 ): Promise<AgentPromptSource | undefined> {
   if (!source) return undefined;
   const title = (
-    manager.getAgent(source.agentId)?.config.title ?? (await storage.get(source.agentId))?.title
+    manager.getAgent(source.agentId)?.config?.title ?? (await storage.get(source.agentId))?.title
   )?.trim();
   return title ? { ...source, title } : source;
 }

@@ -4073,11 +4073,12 @@ export class AgentManager {
           return;
         }
         finished = true;
+        const resolvedStatus = currentStatus;
         cleanup();
         void this.getLastAssistantMessage(agentId)
           .then((lastMessage) => {
             resolvePromise({
-              status: currentStatus,
+              status: resolvedStatus,
               permission,
               lastMessage,
             });
@@ -4111,6 +4112,9 @@ export class AgentManager {
               hasStarted = true;
               return;
             }
+            if (this.runs.hasPendingRun(agentId)) {
+              return;
+            }
             if (!waitForActive || hasStarted) {
               if (terminalStatusOverride) {
                 currentStatus = terminalStatusOverride;
@@ -4140,6 +4144,9 @@ export class AgentManager {
         },
         { agentId, replayState: true },
       );
+      if (finished) {
+        cleanup();
+      }
     });
   }
 
