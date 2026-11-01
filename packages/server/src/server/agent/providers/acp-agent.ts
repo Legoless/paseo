@@ -4057,6 +4057,21 @@ function normalizeConfigFeatureValue(value: unknown): string {
   throw new Error(`ACP feature value must be a string`);
 }
 
+function normalizeThoughtLevelLabel(name: string): string {
+  const match = /^thinking[\s:_-]+(.+)$/i.exec(name.trim());
+  if (!match) {
+    return name;
+  }
+  const stripped = match[1]?.trim() ?? "";
+  if (!stripped) {
+    return name;
+  }
+  if (stripped.replace(/[\s_-]+/g, "").toLowerCase() === "xhigh") {
+    return "Extra High";
+  }
+  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+}
+
 export function deriveSelectorOptions(
   configOptions: SessionConfigOption[] | null | undefined,
   category: string,
@@ -4068,7 +4083,7 @@ export function deriveSelectorOptions(
 
   return flattenSelectOptions(option.options).map((value) => ({
     id: value.value,
-    label: value.name,
+    label: category === "thought_level" ? normalizeThoughtLevelLabel(value.name) : value.name,
     description: value.description ?? undefined,
     isDefault: value.value === option.currentValue,
     metadata: value.group ? { group: value.group } : undefined,

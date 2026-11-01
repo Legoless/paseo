@@ -46,8 +46,8 @@ function booleanThinkingConfigOption(): SessionConfigOption {
     type: "select",
     currentValue: "off",
     options: [
-      { value: "off", name: "Off" },
-      { value: "on", name: "On" },
+      { value: "off", name: "Thinking Off" },
+      { value: "on", name: "Thinking On" },
     ],
   };
 }
@@ -60,10 +60,11 @@ function effortThinkingConfigOption(): SessionConfigOption {
     type: "select",
     currentValue: "medium",
     options: [
-      { value: "off", name: "Off" },
-      { value: "low", name: "Low" },
-      { value: "medium", name: "Medium" },
-      { value: "high", name: "High" },
+      { value: "off", name: "Thinking Off" },
+      { value: "low", name: "Thinking Low" },
+      { value: "medium", name: "Thinking Medium" },
+      { value: "high", name: "Thinking High" },
+      { value: "max", name: "Thinking Max" },
     ],
   };
 }
@@ -131,14 +132,15 @@ describe("KimiACPAgentClient per-model thinking options", () => {
     const kimiK3 = catalog.models.find((model) => model.id === "kimi-k3");
 
     expect(kimiForCoding?.thinkingOptions).toEqual([
-      expect.objectContaining({ id: "off", isDefault: true }),
-      expect.objectContaining({ id: "on", isDefault: false }),
+      expect.objectContaining({ id: "off", label: "Off", isDefault: true }),
+      expect.objectContaining({ id: "on", label: "On", isDefault: false }),
     ]);
     expect(kimiK3?.thinkingOptions).toEqual([
-      expect.objectContaining({ id: "off", isDefault: false }),
-      expect.objectContaining({ id: "low", isDefault: false }),
-      expect.objectContaining({ id: "medium", isDefault: true }),
-      expect.objectContaining({ id: "high", isDefault: false }),
+      expect.objectContaining({ id: "off", label: "Off", isDefault: false }),
+      expect.objectContaining({ id: "low", label: "Low", isDefault: false }),
+      expect.objectContaining({ id: "medium", label: "Medium", isDefault: true }),
+      expect.objectContaining({ id: "high", label: "High", isDefault: false }),
+      expect.objectContaining({ id: "max", label: "Max", isDefault: false }),
     ]);
   });
 
@@ -211,10 +213,11 @@ describe("KimiACPAgentClient per-model thinking options", () => {
     expect(kimiForCoding?.thinkingOptions).toBeUndefined();
     expect(kimiForCoding?.defaultThinkingOptionId).toBeUndefined();
     expect(kimiK3?.thinkingOptions).toEqual([
-      expect.objectContaining({ id: "off", isDefault: false }),
-      expect.objectContaining({ id: "low", isDefault: false }),
-      expect.objectContaining({ id: "medium", isDefault: true }),
-      expect.objectContaining({ id: "high", isDefault: false }),
+      expect.objectContaining({ id: "off", label: "Off", isDefault: false }),
+      expect.objectContaining({ id: "low", label: "Low", isDefault: false }),
+      expect.objectContaining({ id: "medium", label: "Medium", isDefault: true }),
+      expect.objectContaining({ id: "high", label: "High", isDefault: false }),
+      expect.objectContaining({ id: "max", label: "Max", isDefault: false }),
     ]);
     expect(kimiK3?.defaultThinkingOptionId).toBe("medium");
   });

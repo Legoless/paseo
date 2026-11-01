@@ -32,13 +32,22 @@ export function formatAgentModeLabel(mode: ControlLabelInput): string {
   return formatControlLabel(mode, mode.label == null);
 }
 
+function stripThinkingLabelPrefix(value: string): string {
+  const match = /^thinking[\s:_-]+(.+)$/i.exec(value);
+  if (!match) {
+    return value;
+  }
+  const stripped = match[1]?.trim() ?? "";
+  return stripped || value;
+}
+
 export function formatThinkingOptionLabel(option: ControlLabelInput): string {
-  const rawLabel = (option.label ?? option.id).trim();
+  const rawLabel = stripThinkingLabelPrefix((option.label ?? option.id).trim());
   const compactLabel = rawLabel.replace(/[\s_-]+/g, "").toLowerCase();
 
   if (compactLabel === "xhigh" || compactLabel === "extrahigh") {
     return i18n.t("agentControls.thinking.extraHigh");
   }
 
-  return formatControlLabel(option, true);
+  return sentenceCase(splitCompactLabel(rawLabel, true));
 }

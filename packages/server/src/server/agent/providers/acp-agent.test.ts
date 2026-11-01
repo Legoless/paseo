@@ -2074,6 +2074,56 @@ describe("deriveModelDefinitionsFromACP", () => {
       },
     ]);
   });
+
+  test("strips redundant Thinking prefix from ACP thought_level option labels", () => {
+    const result = deriveModelDefinitionsFromACP("kimi", null, [
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "kimi-code/k3.1-pro",
+        options: [{ value: "kimi-code/k3.1-pro", name: "K3.1 Pro" }],
+      },
+      {
+        id: "thinking",
+        name: "Thinking",
+        category: "thought_level",
+        type: "select",
+        currentValue: "max",
+        options: [
+          { value: "low", name: "Thinking Low" },
+          { value: "high", name: "Thinking High" },
+          { value: "max", name: "Thinking Max" },
+        ],
+      },
+    ]);
+
+    expect(result[0]?.thinkingOptions).toEqual([
+      {
+        id: "low",
+        label: "Low",
+        description: undefined,
+        isDefault: false,
+        metadata: undefined,
+      },
+      {
+        id: "high",
+        label: "High",
+        description: undefined,
+        isDefault: false,
+        metadata: undefined,
+      },
+      {
+        id: "max",
+        label: "Max",
+        description: undefined,
+        isDefault: true,
+        metadata: undefined,
+      },
+    ]);
+    expect(result[0]?.defaultThinkingOptionId).toBe("max");
+  });
 });
 
 describe("ACPAgentClient modelTransformer", () => {

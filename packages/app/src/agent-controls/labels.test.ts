@@ -30,6 +30,18 @@ describe("formatThinkingOptionLabel", () => {
     expect(formatThinkingOptionLabel({ id: "xhigh", label: "XHigh" })).toBe("Extra high");
   });
 
+  it("strips redundant thinking prefixes from provider labels", () => {
+    expect(formatThinkingOptionLabel({ id: "off", label: "Thinking Off" })).toBe("Off");
+    expect(formatThinkingOptionLabel({ id: "on", label: "Thinking On" })).toBe("On");
+    expect(formatThinkingOptionLabel({ id: "low", label: "Thinking Low" })).toBe("Low");
+    expect(formatThinkingOptionLabel({ id: "high", label: "Thinking High" })).toBe("High");
+    expect(formatThinkingOptionLabel({ id: "max", label: "Thinking Max" })).toBe("Max");
+    expect(formatThinkingOptionLabel({ id: "max", label: "Thinking max" })).toBe("Max");
+    expect(formatThinkingOptionLabel({ id: "xhigh", label: "Thinking Xhigh" })).toBe("Extra high");
+    expect(formatThinkingOptionLabel({ id: "think", label: "Think" })).toBe("Think");
+    expect(formatThinkingOptionLabel({ id: "thinking", label: "Thinking" })).toBe("Thinking");
+  });
+
   it("preserves provider-supplied xhigh labels with extra detail", () => {
     expect(formatThinkingOptionLabel({ id: "xhigh", label: "XHigh (56 | 8m)" })).toBe(
       "X high (56 | 8m)",
