@@ -772,6 +772,41 @@ describe("Kimi ACP native prompt failures", () => {
       await expect(kimiNativeTurnStillOpen(context)).resolves.toBe(true);
     });
   });
+
+  test("treats manual and auto full compaction as active until complete without leaving a phantom open turn", async () => {
+    await withKimiJournal(async ({ context, journalPath }) => {
+      await writeFile(
+        journalPath,
+        stringifyJournalRows([
+          { type: "turn.ended", time: context.startedAt - 50, reason: "completed", error: null },
+          { type: "full_compaction.begin", source: "manual", time: context.startedAt },
+          { type: "llm.request", time: context.startedAt + 5 },
+        ]),
+      );
+      await expect(kimiNativeTurnStillOpen(context)).resolves.toBe(true);
+
+      await appendFile(
+        journalPath,
+        stringifyJournalRows([
+          { type: "context.apply_compaction", time: context.startedAt + 10 },
+          { type: "full_compaction.complete", time: context.startedAt + 15 },
+        ]),
+      );
+      await expect(kimiNativeTurnStillOpen(context)).resolves.toBe(false);
+      await expect(validateKimiPromptResponse(context)).resolves.toBeUndefined();
+
+      await writeFile(
+        journalPath,
+        stringifyJournalRows([
+          { type: "agent.turn.started", time: context.startedAt },
+          { type: "full_compaction.begin", source: "auto", time: context.startedAt + 5 },
+          { type: "llm.request", time: context.startedAt + 10 },
+          { type: "full_compaction.complete", time: context.startedAt + 15 },
+        ]),
+      );
+      await expect(kimiNativeTurnStillOpen(context)).resolves.toBe(true);
+    });
+  });
 });
 
 describe("KimiACPAgentClient background work and autonomous turns", () => {
@@ -1164,6 +1199,86 @@ describe("KimiACPAgentClient background work and autonomous turns", () => {
             info: { taskId: "bash-2", status: "completed" },
             time: wakeupAt + 50,
           },
+        ]),
+      );
+
+      await vi.waitFor(() => {
+        expect(lastBackgroundWorkCount(events)).toBe(0);
+      });
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("delivers monitor events buffered before subscribe and tracks full compaction without opening a stuck autonomous turn", async () => {
+    const { client, cwd, journalPath } = await createInProcessKimiFixture();
+    const session = await client.createSession({ provider: "acp", cwd });
+
+    try {
+      const now = Date.now();
+      await appendFile(
+        journalPath,
+        stringifyJournalRows([
+          {
+            type: "task.started",
+            agentId: "main",
+            info: { taskId: "early-task", status: "running", kind: "process" },
+            time: now,
+          },
+        ]),
+      );
+      // Let the native session monitor poll while `session` still has zero subscribers,
+      // matching AgentManager's `listCommands()` / `persistSnapshot()` window before subscribe.
+      await new Promise((resolve) => setTimeout(resolve, 45));
+
+      const events: AgentStreamEvent[] = [];
+      session.subscribe((event) => events.push(event));
+
+      expect(events[0]).toMatchObject({ type: "thread_started", sessionId: "session_test" });
+      expect(events[1]).toMatchObject({ type: "background_work_changed", count: 1 });
+
+      await appendFile(
+        journalPath,
+        stringifyJournalRows([
+          {
+            type: "task.terminated",
+            agentId: "main",
+            info: { taskId: "early-task", status: "completed" },
+            time: now + 50,
+          },
+          {
+            type: "goal.create",
+            agentId: "main",
+            goalId: "paused-goal",
+            status: "paused",
+            time: now + 55,
+          },
+        ]),
+      );
+
+      await vi.waitFor(() => {
+        expect(lastBackgroundWorkCount(events)).toBe(0);
+      });
+
+      await appendFile(
+        journalPath,
+        stringifyJournalRows([
+          { type: "full_compaction.begin", source: "manual", agentId: "main", time: now + 100 },
+          { type: "llm.request", agentId: "main", time: now + 105 },
+          { type: "usage.record", agentId: "main", time: now + 110 },
+          { type: "context.apply_compaction", agentId: "main", time: now + 115 },
+        ]),
+      );
+
+      await vi.waitFor(() => {
+        expect(lastBackgroundWorkCount(events)).toBe(1);
+      });
+      expect(events.filter((event) => event.type === "turn_started")).toEqual([]);
+
+      await appendFile(
+        journalPath,
+        stringifyJournalRows([
+          { type: "full_compaction.complete", agentId: "main", time: now + 120 },
         ]),
       );
 

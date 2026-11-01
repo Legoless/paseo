@@ -3321,6 +3321,116 @@ describe("Grok and Kimi composer activity", () => {
     expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
   });
 
+  it("keeps Kimi working on narrow split-pane truncated badges, AgentSwarm status rows, and multi-row docks above the composer", () => {
+    const narrowScreen = (line1: string, above: string[] = []) => [
+      ...above,
+      ...kimiComposer(""),
+      line1,
+      "context: 74% (755k/1M)",
+    ];
+
+    // Narrow split-pane footer truncation (`truncateToWidth(leftLine, width, "…")`).
+    expect(isKimiBusyScreen(narrowScreen("Never Ask  K3.1 Pro thinking: max  [1…"))).toBe(true);
+    expect(isKimiBusyScreen(narrowScreen("Never Ask  K3.1 Pro thinking: max  [1 task…"))).toBe(
+      true,
+    );
+    expect(
+      isKimiBusyScreen(narrowScreen("Never Ask  K3.1 Pro thinking: max  [2 agents run…")),
+    ).toBe(true);
+    expect(isKimiBusyScreen(narrowScreen("Never Ask  [goal ● active · 14h…"))).toBe(true);
+    expect(isKimiBusyScreen(narrowScreen("Never Ask  [goal ● a…"))).toBe(true);
+    expect(
+      isKimiBusyScreen(
+        narrowScreen("Never Ask  [goal ● paused · 14h34m · 3 turns]  K3.1 Pro thinking: max  [1…"),
+      ),
+    ).toBe(true);
+
+    // Paused/blocked goals and git/PR badges truncated at the pane edge must stay idle.
+    expect(isKimiBusyScreen(narrowScreen("Never Ask  [goal ● paused · 14h…"))).toBe(false);
+    expect(isKimiBusyScreen(narrowScreen("Never Ask  [goal ● blocked · 14h…"))).toBe(false);
+    expect(isKimiBusyScreen(narrowScreen("Never Ask  [goal ● …"))).toBe(false);
+    expect(
+      isKimiBusyScreen(narrowScreen("Never Ask  K3.1 Pro thinking: max  ~/proj  main [+1…")),
+    ).toBe(false);
+    expect(
+      isKimiBusyScreen(narrowScreen("Never Ask  K3.1 Pro thinking: max  ~/proj  main [↑1…")),
+    ).toBe(false);
+    expect(
+      isKimiBusyScreen(narrowScreen("Never Ask  K3.1 Pro thinking: max  ~/proj  main [PR#12…")),
+    ).toBe(false);
+
+    // Inline AgentSwarm moon-spinner status rows replace ActivityPaneComponent while active.
+    expect(
+      isKimiBusyScreen(
+        narrowScreen("Never Ask  K3.1 Pro thinking: max", [
+          " ◈ AgentSwarm  3/4 completed",
+          " 🌑 Orchestrating…",
+        ]),
+      ),
+    ).toBe(true);
+    expect(
+      isKimiBusyScreen(
+        narrowScreen("Never Ask  K3.1 Pro thinking: max", [
+          " ◈ AgentSwarm  1/4 completed",
+          " 🌑 Prompting…  Audit auth module",
+        ]),
+      ),
+    ).toBe(true);
+    expect(
+      isKimiBusyScreen(
+        narrowScreen("Never Ask  K3.1 Pro thinking: max", [
+          " ◈ AgentSwarm  2/4 completed",
+          " 🌗 Working…  ▰▰▱▱",
+        ]),
+      ),
+    ).toBe(true);
+    expect(
+      isKimiBusyScreen(
+        narrowScreen("Never Ask  K3.1 Pro thinking: max", [
+          " ◈ AgentSwarm  4/4 completed",
+          " ✓ Completed.  ▰▰▰▰",
+        ]),
+      ),
+    ).toBe(false);
+
+    // Multi-row `/btw`, notification, or queued-message docks between the spinner and `╭───╮`.
+    expect(
+      isKimiBusyScreen(
+        narrowScreen("Never Ask  K3.1 Pro thinking: max", [
+          "🌗 · Tip: ctrl-s to add guidance",
+          "────────────────────",
+          "Side question (/btw)",
+          "Line 1 of answer",
+          "Line 2 of answer",
+          "Line 3 of answer",
+          "Line 4 of answer",
+          "Line 5 of answer",
+          "esc to close",
+        ]),
+      ),
+    ).toBe(true);
+
+    // Queued-message dock keeps the pane working even if the spinner scrolled above the 25-row window.
+    expect(
+      isKimiBusyScreen(
+        narrowScreen("Never Ask  K3.1 Pro thinking: max", [
+          "────────────────────",
+          "  › run tests next",
+          "  ↑ to edit · will send after current task",
+        ]),
+      ),
+    ).toBe(true);
+    expect(
+      isKimiBusyScreen(
+        narrowScreen("Never Ask  K3.1 Pro thinking: max", [
+          "────────────────────",
+          "  › summarize changes",
+          "  ↑ to edit · will send after compaction",
+        ]),
+      ),
+    ).toBe(true);
+  });
+
   it("discovers a restored Kimi screen from a moon-spinner tick and a zero-token context footer", () => {
     const { tracker, scanner, paint } = terminal();
     const restored = [

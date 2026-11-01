@@ -65,7 +65,7 @@ const KIMI_JOURNAL_POLL_MS = 25;
 const KIMI_JOURNAL_TAIL_INITIAL_BYTES = 64 * 1024;
 const KIMI_JOURNAL_TAIL_MAX_BYTES = 2 * 1024 * 1024;
 const KIMI_SESSION_MONITOR_POLL_MS = 200;
-const KIMI_BACKGROUND_ZERO_SETTLE_MS = 80;
+const KIMI_BACKGROUND_ZERO_SETTLE_MS = 500;
 const KIMI_SESSION_ID = /^[A-Za-z0-9_-]+$/;
 
 // Step and tool activity is appended as loop events. A long turn's start record
@@ -82,6 +82,8 @@ const KIMI_TURN_CLOSE_TYPES = new Set([
   "prompt.completed",
   "prompt.aborted",
 ]);
+const KIMI_COMPACTION_OPEN_TYPE = "full_compaction.begin";
+const KIMI_COMPACTION_CLOSE_TYPES = new Set(["full_compaction.complete", "full_compaction.cancel"]);
 
 const KimiJournalEventSchema = z.object({
   type: z.string(),
@@ -124,6 +126,7 @@ function kimiJournalEventType(value: unknown): string | null {
 
 function kimiJournalTailHasOpenTurn(tail: string): boolean {
   let turnOpen = false;
+  let compactionOpen = false;
   for (const line of tail.split("\n")) {
     let value: unknown;
     try {
@@ -133,13 +136,21 @@ function kimiJournalTailHasOpenTurn(tail: string): boolean {
     }
     const type = kimiJournalEventType(value);
     if (!type) continue;
-    if (KIMI_TURN_OPEN_TYPES.has(type)) {
+    if (type === KIMI_COMPACTION_OPEN_TYPE) {
+      compactionOpen = true;
+    } else if (KIMI_COMPACTION_CLOSE_TYPES.has(type)) {
+      compactionOpen = false;
+    } else if (type === "llm.request") {
+      if (!compactionOpen) {
+        turnOpen = true;
+      }
+    } else if (KIMI_TURN_OPEN_TYPES.has(type)) {
       turnOpen = true;
     } else if (KIMI_TURN_CLOSE_TYPES.has(type)) {
       turnOpen = false;
     }
   }
-  return turnOpen;
+  return turnOpen || compactionOpen;
 }
 
 // True when this ACP prompt already has a native journal marker. An older open
@@ -171,7 +182,9 @@ function kimiPromptHasMarker(tail: string, startedAt: number): "accepted" | "non
     if (
       event.data.type === "turn.prompt" ||
       event.data.type === "agent.turn.started" ||
-      event.data.type === "prompt.completed"
+      event.data.type === "prompt.completed" ||
+      event.data.type === KIMI_COMPACTION_OPEN_TYPE ||
+      KIMI_COMPACTION_CLOSE_TYPES.has(event.data.type)
     ) {
       return "accepted";
     }
@@ -234,7 +247,13 @@ function kimiJournalTailHasBoundary(tail: string): boolean {
       continue;
     }
     const type = kimiJournalEventType(value);
-    if (type && (KIMI_TURN_OPEN_TYPES.has(type) || KIMI_TURN_CLOSE_TYPES.has(type))) {
+    if (
+      type &&
+      (KIMI_TURN_OPEN_TYPES.has(type) ||
+        KIMI_TURN_CLOSE_TYPES.has(type) ||
+        type === KIMI_COMPACTION_OPEN_TYPE ||
+        KIMI_COMPACTION_CLOSE_TYPES.has(type))
+    ) {
       return true;
     }
   }
@@ -297,6 +316,28 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 
 function isMainKimiAgentRecord(record: Record<string, unknown>): boolean {
   return record.agentId === undefined || record.agentId === "main";
+}
+
+function parseMainKimiJournalRecord(
+  line: string,
+): (Record<string, unknown> & { type: string }) | null {
+  if (!line.trim()) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (
+    !isObjectRecord(parsed) ||
+    typeof parsed.type !== "string" ||
+    !isMainKimiAgentRecord(parsed)
+  ) {
+    return null;
+  }
+  return parsed as Record<string, unknown> & { type: string };
 }
 
 function readKimiNativeTurnId(record: Record<string, unknown>): string | null {
@@ -447,6 +488,7 @@ export async function createKimiNativeSessionMonitor(
   const foregroundNativeTurnIds = new Set<string>();
   const closedNativeTurnIds = new Set<string>();
   let activeGoal = false;
+  let compacting = false;
   let emittedBackgroundWorkCount = 0;
   let currentNativeTurnOwner: "foreground" | "autonomous" | null = null;
   let autonomousTurn: KimiAutonomousTurnState | null = null;
@@ -458,7 +500,8 @@ export async function createKimiNativeSessionMonitor(
   let zeroSettleTimer: NodeJS.Timeout | null = null;
   let syncChain: Promise<void> = Promise.resolve();
 
-  const desiredBackgroundWorkCount = (): number => runningTaskIds.size + (activeGoal ? 1 : 0);
+  const desiredBackgroundWorkCount = (): number =>
+    runningTaskIds.size + (activeGoal ? 1 : 0) + (compacting ? 1 : 0);
 
   const clearZeroSettleTimer = (): void => {
     if (zeroSettleTimer) {
@@ -791,7 +834,7 @@ export async function createKimiNativeSessionMonitor(
         }
         return true;
       case "goal.create":
-        activeGoal = true;
+        activeGoal = typeof record.status === "string" ? record.status === "active" : true;
         return true;
       case "goal.update":
         if (typeof record.status === "string") {
@@ -800,6 +843,13 @@ export async function createKimiNativeSessionMonitor(
         return true;
       case "goal.clear":
         activeGoal = false;
+        return true;
+      case KIMI_COMPACTION_OPEN_TYPE:
+        compacting = true;
+        return true;
+      case "full_compaction.complete":
+      case "full_compaction.cancel":
+        compacting = false;
         return true;
       default:
         return false;
@@ -846,24 +896,15 @@ export async function createKimiNativeSessionMonitor(
   };
 
   const processJournalLine = (line: string): void => {
-    if (!line.trim() || closed || runtimeExited) {
+    if (closed || runtimeExited) {
       return;
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      return;
-    }
-    if (
-      !isObjectRecord(parsed) ||
-      typeof parsed.type !== "string" ||
-      !isMainKimiAgentRecord(parsed)
-    ) {
+    const parsed = parseMainKimiJournalRecord(line);
+    if (!parsed) {
       return;
     }
 
-    const type = parsed.type;
+    const { type } = parsed;
     if (applyBackgroundStateRecord(type, parsed)) {
       return;
     }
@@ -882,14 +923,21 @@ export async function createKimiNativeSessionMonitor(
       }
       return;
     }
-    if (type === "context.append_loop_event" || type === "llm.request") {
-      if (claimForegroundNativeTurn(nativeTurnId, true)) {
-        return;
-      }
-      const turn = openAutonomousTurn(nativeTurnId);
-      if (type === "context.append_loop_event") {
-        emitAutonomousLoopEvent(turn, parsed.event);
-      }
+    if (type !== "context.append_loop_event" && type !== "llm.request") {
+      return;
+    }
+    if (claimForegroundNativeTurn(nativeTurnId, true)) {
+      return;
+    }
+    // Manual `/compact` writes `llm.request` inside `full_compaction.begin`..`.complete`
+    // without `agent.turn.started` or `turn.ended`; keep that work under `compacting`
+    // instead of opening a turn that has no turn-close record.
+    if (type === "llm.request" && compacting && autonomousTurn === null) {
+      return;
+    }
+    const turn = openAutonomousTurn(nativeTurnId);
+    if (type === "context.append_loop_event") {
+      emitAutonomousLoopEvent(turn, parsed.event);
     }
   };
 
@@ -974,6 +1022,7 @@ export async function createKimiNativeSessionMonitor(
       currentNativeTurnOwner = null;
       runningTaskIds.clear();
       activeGoal = false;
+      compacting = false;
 
       if (emittedBackgroundWorkCount > 0) {
         emitBackgroundWorkCount(0);
@@ -1000,6 +1049,7 @@ export async function createKimiNativeSessionMonitor(
       currentNativeTurnOwner = null;
       runningTaskIds.clear();
       activeGoal = false;
+      compacting = false;
       if (emittedBackgroundWorkCount > 0) {
         emitBackgroundWorkCount(0);
       }

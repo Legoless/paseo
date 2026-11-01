@@ -626,36 +626,80 @@ function isGrokFinishedComposerScreen(lines: string[]): boolean {
 
 // Kimi 2.4+ keeps the `│ >` composer focused throughout a turn and renders its live
 // activity row above the top border: a moon-phase loader while waiting or running tools
-// (`🌑`, `🌗 · Tip: …`, `🌒 Retrying …`) and a braille loader while thinking, composing,
-// or compacting (`⠋ Working…`, `⠋ Compacting…`). Background tasks, subagents, and active
-// `/goal` loops outlive a turn and show badges across the two-line status bar below the
-// composer (`[1 task running]`, `[2 agents running]`, `[goal ● active · …]`), paired with
-// `thinking` or `context: NN%` on the status rows so draft or reply text never matches.
+// (`🌑`, `🌗 · Tip: …`, `🌒 Retrying …`, or inline `AgentSwarm` status rows such as
+// `🌑 Orchestrating…` / `🌑 Prompting…`), a braille loader while thinking, composing,
+// or compacting (`⠋ Working…`, `⠋ Compacting…`), and queued-message dock hints while a
+// turn or compaction is running. Panels such as queued messages, `/btw`, and `NotifyUser`
+// sit between the spinner and the composer, so scan the full above-composer dock.
+// Background tasks, subagents, and active `/goal` loops show badges on the status bar
+// below the composer (`[1 task running]`, `[2 agents running]`, `[goal ● active · …]`,
+// which narrow split panes truncate with `…`), paired with `thinking` or `context: NN%`
+// on the status rows so draft or reply text never matches.
 const KIMI_MOON_SPINNER_REGEX = /[🌑🌒🌓🌔🌕🌖🌗🌘]/u;
 const KIMI_MOON_SPINNER_ROW =
-  /^(?:🌑|🌒|🌓|🌔|🌕|🌖|🌗|🌘)(?:$|\s+(?:[·•]\s|(?:Retrying|Working|Compacting|Thinking)\b))/iu;
+  /^(?:🌑|🌒|🌓|🌔|🌕|🌖|🌗|🌘)(?:$|\s+(?:[·•]\s|(?:Retrying|Working|Compacting|Thinking|Orchestrating|Prompting|Rate limited)\b))/iu;
 const KIMI_BRAILLE_ACTIVITY_ROW =
   /^[\u2800-\u28FF]\s+(?:Working|Compacting|Thinking)(?:…|\.\.\.)(?:\s|$)/i;
+const KIMI_QUEUE_DOCK_RULE = /^[─━]{3,}$/;
+const KIMI_QUEUE_BUSY_HINT =
+  /^(?:\d+\s+queued\s+[·•]\s+)?↑ to edit\s+[·•]\s+(?:ctrl-s to steer\b|will send after\b)/i;
 const KIMI_FOOTER_BUSY_BADGE = /\[\d+\s+(?:tasks?|agents?)\s+running\]|\[goal\s*●\s*active\b/i;
+const KIMI_FOOTER_TRUNCATED_BADGE = /\[([^\]]*)…$/;
+const KIMI_TRUNCATED_TASK_LABELS = [
+  "task running",
+  "tasks running",
+  "agent running",
+  "agents running",
+];
 const KIMI_STATUS_BAR_SEGMENT = /\bthinking(?::\s*\w+)?\b|\bcontext:\s*\d{1,3}%/i;
+const KIMI_ABOVE_COMPOSER_LINE_LIMIT = 20;
+
+function hasTruncatedKimiBusyBadge(line: string): boolean {
+  const match = KIMI_FOOTER_TRUNCATED_BADGE.exec(line);
+  if (!match) return false;
+  const fragment = match[1].trimStart();
+  const goalPrefix = /^goal\s*●\s*(.*)$/i.exec(fragment);
+  if (goalPrefix) {
+    const status = goalPrefix[1].toLowerCase();
+    return status.length > 0 && ("active".startsWith(status) || status.startsWith("active "));
+  }
+  const countMatch = /^(\d+)(.*)$/.exec(fragment);
+  if (!countMatch || /^0+$/.test(countMatch[1])) return false;
+  const rest = countMatch[2];
+  if (rest.length === 0) return true;
+  if (!/^\s/.test(rest)) return false;
+  const suffix = rest.trimStart().toLowerCase();
+  return (
+    suffix.length === 0 || KIMI_TRUNCATED_TASK_LABELS.some((label) => label.startsWith(suffix))
+  );
+}
 
 export function isKimiBusyScreen(lines: string[]): boolean {
   const stripped = lines.map((line) => stripAnsi(line).trim());
   const composer = findKimiComposer(stripped);
   if (!composer) return false;
-  const aboveComposer = stripped.slice(0, composer.top).filter(Boolean).slice(-6);
+  const aboveComposer = stripped
+    .slice(0, composer.top)
+    .filter(Boolean)
+    .slice(-KIMI_ABOVE_COMPOSER_LINE_LIMIT);
   if (
     aboveComposer.some(
-      (line) => KIMI_MOON_SPINNER_ROW.test(line) || KIMI_BRAILLE_ACTIVITY_ROW.test(line),
+      (line, index) =>
+        KIMI_MOON_SPINNER_ROW.test(line) ||
+        KIMI_BRAILLE_ACTIVITY_ROW.test(line) ||
+        (KIMI_QUEUE_BUSY_HINT.test(line) &&
+          aboveComposer.slice(0, index).some((prev) => KIMI_QUEUE_DOCK_RULE.test(prev))),
     )
   ) {
     return true;
   }
-  const footer = stripped
-    .slice(composer.bottom + 1, composer.bottom + 7)
-    .filter(Boolean)
-    .join(" ");
-  return KIMI_FOOTER_BUSY_BADGE.test(footer) && KIMI_STATUS_BAR_SEGMENT.test(footer);
+  const footerLines = stripped.slice(composer.bottom + 1, composer.bottom + 7).filter(Boolean);
+  const footer = footerLines.join(" ");
+  if (!KIMI_STATUS_BAR_SEGMENT.test(footer)) return false;
+  return (
+    KIMI_FOOTER_BUSY_BADGE.test(footer) ||
+    footerLines.some((line) => hasTruncatedKimiBusyBadge(line))
+  );
 }
 
 // Muse leaves its composer on the cursor line throughout the turn. Its animated

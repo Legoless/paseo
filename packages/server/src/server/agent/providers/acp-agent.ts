@@ -1944,6 +1944,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   private agentCapabilities: ACPAgentCapabilities | null = null;
   private sessionId: string | null = null;
   private readonly earlySessionUpdates: SessionNotification[] = [];
+  private readonly pendingMonitorEvents: AgentStreamEvent[] = [];
   private currentMode: string | null = null;
   private availableModes: AgentMode[];
   private currentModel: string | null = null;
@@ -2129,6 +2130,10 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       logger: this.logger,
       isForegroundTurnActive: () => this.activeForegroundTurnId !== null,
       emit: (event) => {
+        if (this.subscribers.size === 0) {
+          this.pendingMonitorEvents.push(event);
+          return;
+        }
         this.pushEvent(event);
       },
     });
@@ -2138,6 +2143,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     const monitor = this.nativeSessionMonitor;
     this.nativeSessionMonitor = null;
     await monitor?.close();
+    this.pendingMonitorEvents.length = 0;
   }
 
   // History resumes exist to replay persisted events into the canonical
@@ -2280,6 +2286,11 @@ export class ACPAgentSession implements AgentSession, ACPClient {
         provider: this.provider,
         sessionId: this.sessionId,
       });
+    }
+    if (this.pendingMonitorEvents.length > 0) {
+      for (const event of this.pendingMonitorEvents.splice(0)) {
+        this.pushEvent(event);
+      }
     }
     return () => {
       this.subscribers.delete(callback);
