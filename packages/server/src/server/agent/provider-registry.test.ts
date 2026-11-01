@@ -456,6 +456,7 @@ vi.mock("./providers/kimi-acp-agent.js", () => ({
       supportsToolInvocations: true,
     };
     readonly provider = "acp";
+    readonly exclusiveSessionPersistence = true;
     readonly runtimeSettings?: unknown;
 
     constructor(options: { command: string[]; env?: Record<string, string> }) {
@@ -884,7 +885,9 @@ test("kimi provider extending acp uses KimiACPAgentClient", () => {
     },
   });
 
-  expect(registry.kimi.createClient(logger).provider).toBe("kimi");
+  const kimiClient = registry.kimi.createClient(logger);
+  expect(kimiClient.provider).toBe("kimi");
+  expect(kimiClient.exclusiveSessionPersistence).toBe(true);
   expect(mockState.constructorArgs.kimi).toEqual([
     {
       command: ["kimi", "acp"],

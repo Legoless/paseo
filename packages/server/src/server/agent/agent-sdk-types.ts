@@ -776,6 +776,11 @@ export interface ResolveAgentDefaultModeInput {
 export interface AgentClient {
   readonly provider: AgentProvider;
   readonly capabilities: AgentCapabilityFlags;
+  /**
+   * True when the provider holds an exclusive process lock on the persisted session, so a
+   * replacement runtime must close the existing session before calling `resumeSession`.
+   */
+  readonly exclusiveSessionPersistence?: boolean;
   createSession(
     config: AgentSessionConfig,
     launchContext?: AgentLaunchContext,

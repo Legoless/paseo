@@ -14,12 +14,14 @@ export function AgentStatusDot({
   requiresAttention,
   attentionReason,
   pendingPermissionCount,
+  backgroundWorkCount,
   showInactive = false,
 }: {
   status: string | null | undefined;
   requiresAttention: boolean | null | undefined;
   attentionReason?: "finished" | "error" | "permission" | null;
   pendingPermissionCount?: number;
+  backgroundWorkCount?: number;
   showInactive?: boolean;
 }) {
   const { theme } = useUnistyles();
@@ -36,6 +38,7 @@ export function AgentStatusDot({
     requiresAttention: Boolean(requiresAttention),
     attentionReason: attentionReason ?? null,
     pendingPermissionCount: pendingPermissionCount ?? 0,
+    backgroundWorkCount,
   });
   const color = getStatusDotColor({ theme, bucket, showDoneAsInactive: showInactive });
 

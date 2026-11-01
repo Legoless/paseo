@@ -90,8 +90,16 @@ accepting that result; keep this recovery in the Kimi shim rather than inferring
 replies or stderr across ACP providers. Kimi also resolves `session/prompt` with `end_turn` when the
 text was only queued behind an engine turn that is still running. The shim rejects that result when
 the journal has no marker for this prompt and an older turn is still open. Before the next prompt,
-the manager replaces the process when the session reports that native turn still open. Do not respawn
-from inside `startTurn`: `loadSession` replays history through the live subscribers.
+the manager closes the old process before resuming when the session reports that native turn still
+open; Kimi holds a PID lock per session (`session_<id>.lock`), so opening a replacement before
+closing the live CLI fails `session/load` with `This session is in use by another Kimi Code CLI
+instance` (`exclusiveSessionPersistence`). Do not respawn
+from inside `startTurn`: `loadSession` replays history through the live subscribers. Live Kimi
+sessions also follow `agents/main/wire.jsonl` because `kimi acp` resolves `session/prompt` while
+detached tasks, subagents, or `/goal` loops keep running and drops subsequent autonomous wakeup turns
+from stdout; the shim reports those background items through `background_work_changed` and streams
+post-prompt autonomous turns from the journal, seeding resumed sessions at EOF so orphaned tasks from
+an earlier process do not stick.
 
 ### Direct
 

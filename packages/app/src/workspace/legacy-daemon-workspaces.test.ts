@@ -3,7 +3,10 @@ import type { DaemonClient, FetchAgentsEntry } from "@getpaseo/client/internal/d
 import { useSessionStore, type Agent } from "@/stores/session-store";
 import { deriveWorkspaceAgentVisibility } from "@/workspace-tabs/agent-visibility";
 import { buildAgentDirectoryState } from "@/utils/agent-directory-sync";
-import { applyLegacyDaemonWorkspaceOwnership } from "./legacy-daemon-workspaces";
+import {
+  applyLegacyDaemonWorkspaceOwnership,
+  buildLegacyDaemonWorkspaceSnapshot,
+} from "./legacy-daemon-workspaces";
 
 const SERVER_ID = "srv_legacy";
 
@@ -104,5 +107,19 @@ describe("applyLegacyDaemonWorkspaceOwnership", () => {
 
     expect(stampedUpdate.workspaceId).toBe("/repo/app");
     expect(visibility.activeAgentIds).toEqual(new Set(["agent-running"]));
+  });
+
+  it("keeps legacy workspaces running while an idle agent still has background work", () => {
+    const entry = legacyAgent({ id: "agent-bg", cwd: "/repo/app", status: "idle" });
+    entry.agent.backgroundWorkCount = 1;
+    entry.agent.requiresAttention = true;
+    entry.agent.attentionReason = "finished";
+
+    const snapshot = buildLegacyDaemonWorkspaceSnapshot({
+      serverId: SERVER_ID,
+      entries: [entry],
+    });
+
+    expect(snapshot.workspaces.get("/repo/app")?.status).toBe("running");
   });
 });

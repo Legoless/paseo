@@ -281,6 +281,7 @@ export function buildLegacyWorkspaces(
     const status = deriveAgentStateBucket({
       status: entry.agent.status,
       pendingPermissionCount: entry.agent.pendingPermissions.length,
+      backgroundWorkCount: entry.agent.backgroundWorkCount,
       requiresAttention: entry.agent.requiresAttention,
       attentionReason: entry.agent.attentionReason,
     });

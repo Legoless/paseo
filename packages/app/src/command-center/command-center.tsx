@@ -461,6 +461,9 @@ function ResultContent({ result }: { result: CommandCenterResult }) {
             <AgentStatusDot
               status={agent.status}
               requiresAttention={agent.requiresAttention}
+              attentionReason={agent.attentionReason}
+              pendingPermissionCount={agent.pendingPermissionCount}
+              backgroundWorkCount={agent.backgroundWorkCount}
               showInactive
             />
           </View>

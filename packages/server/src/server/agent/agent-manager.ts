@@ -1661,11 +1661,15 @@ export class AgentManager {
   private async reloadAgentSessionInternal(
     agentId: string,
     overrides?: Partial<AgentSessionConfig>,
-    options?: { rehydrateFromDisk?: boolean },
+    options?: {
+      rehydrateFromDisk?: boolean;
+      skipInFlightCancel?: boolean;
+      preserveStateOnCloseFailure?: boolean;
+    },
   ): Promise<ManagedAgent> {
     this.assertAcceptingAgentRegistrations();
     let existing = this.requireSessionAgent(agentId);
-    if (this.hasInFlightRun(agentId)) {
+    if (!options?.skipInFlightCancel && this.hasInFlightRun(agentId)) {
       await this.cancelAgentRunBefore(agentId, "reload");
       existing = this.requireSessionAgent(agentId);
     }
@@ -1750,25 +1754,59 @@ export class AgentManager {
         restoring: true,
       });
     } catch (error) {
-      if (closedExisting) {
-        this.emitClosedAgent(closedExisting, { persist: false });
-      } else if (this.agents.get(agentId) === existing) {
-        existing.lifecycle = "error";
-        existing.lastError = error instanceof Error ? error.message : String(error);
-        this.emitState(existing);
-      }
+      this.handleReloadSessionFailure({
+        agentId,
+        existing,
+        closedExisting,
+        error,
+        preserveStateOnCloseFailure: options?.preserveStateOnCloseFailure === true,
+      });
       throw error;
     } finally {
       if (!handedToRegistration) {
-        if (hadPreviousPaseoToolPolicy) {
-          this.paseoToolPolicies.set(agentId, previousPaseoToolPolicy);
-        } else {
-          this.paseoToolPolicies.delete(agentId);
-        }
-        if (session) {
-          await this.closeUnregisteredSession(session);
-        }
+        await this.cleanupUnregisteredReload({
+          agentId,
+          hadPreviousPaseoToolPolicy,
+          previousPaseoToolPolicy,
+          session,
+        });
       }
+    }
+  }
+
+  private handleReloadSessionFailure(params: {
+    agentId: string;
+    existing: ActiveManagedAgent;
+    closedExisting: ManagedAgentClosed | undefined;
+    error: unknown;
+    preserveStateOnCloseFailure: boolean;
+  }): void {
+    const { agentId, existing, closedExisting, error, preserveStateOnCloseFailure } = params;
+    if (closedExisting) {
+      this.emitClosedAgent(closedExisting, { persist: false });
+      return;
+    }
+    if (!preserveStateOnCloseFailure && this.agents.get(agentId) === existing) {
+      existing.lifecycle = "error";
+      existing.lastError = error instanceof Error ? error.message : String(error);
+      this.emitState(existing);
+    }
+  }
+
+  private async cleanupUnregisteredReload(params: {
+    agentId: string;
+    hadPreviousPaseoToolPolicy: boolean;
+    previousPaseoToolPolicy: ProviderPaseoToolsPolicy | undefined;
+    session: AgentSession | undefined;
+  }): Promise<void> {
+    const { agentId, hadPreviousPaseoToolPolicy, previousPaseoToolPolicy, session } = params;
+    if (hadPreviousPaseoToolPolicy) {
+      this.paseoToolPolicies.set(agentId, previousPaseoToolPolicy);
+    } else {
+      this.paseoToolPolicies.delete(agentId);
+    }
+    if (session) {
+      await this.closeUnregisteredSession(session);
     }
   }
 
@@ -3059,20 +3097,24 @@ export class AgentManager {
 
   private async releaseStuckNativeTurn(agentId: string): Promise<void> {
     // Two sends must not both observe the old process. This lane is the same
-    // one reload uses, and it runs before the pending run exists.
+    // one reload uses, and it runs before the pending run exists. Close the old
+    // runtime before resuming: Kimi holds an exclusive PID lock per session, so
+    // opening the replacement first fails `session/load` while the stuck CLI lives.
     await this.runLifecycleMutation(agentId, async () => {
       const agent = this.agents.get(agentId);
       if (!agent?.session.nativeTurnStillOpen) return;
-      if (this.hasInFlightRun(agentId) || agent.activeForegroundTurnId) return;
+      if (this.runs.hasPendingRun(agentId) || agent.activeForegroundTurnId) return;
       const stillOpen = await agent.session.nativeTurnStillOpen();
       const latest = this.agents.get(agentId);
       if (!latest || latest.session !== agent.session) return;
-      if (!stillOpen || this.hasInFlightRun(agentId) || latest.activeForegroundTurnId) return;
+      if (!stillOpen || this.runs.hasPendingRun(agentId) || latest.activeForegroundTurnId) return;
       this.logger.warn(
         { agentId, provider: latest.provider },
         "Replacing provider runtime that still owns a native turn",
       );
-      await this.swapRegisteredSessionRuntime(agentId);
+      await this.trackAgentRegistrationOperation(
+        this.reloadAgentSessionInternal(agentId, undefined, { skipInFlightCancel: true }),
+      );
     });
   }
 
@@ -3649,7 +3691,8 @@ export class AgentManager {
         turnId: runTurnId,
       });
       await run.settledPromise;
-      providerRuntimeSuspect = run.kind === "foreground";
+      providerRuntimeSuspect =
+        run.kind === "foreground" || typeof agent.session.nativeTurnStillOpen === "function";
     } else if (settlement === "timed_out" && run.kind === "foreground") {
       this.logger.warn(
         { agentId, kind: run.kind },
@@ -3672,6 +3715,7 @@ export class AgentManager {
         provider: agent.provider,
         reason: "interrupted",
       });
+      providerRuntimeSuspect = typeof agent.session.nativeTurnStillOpen === "function";
     }
 
     if (agent.pendingPermissions.size > 0) {
@@ -3710,7 +3754,20 @@ export class AgentManager {
     }
     try {
       await this.trackAgentRegistrationOperation(
-        this.runLifecycleMutation(agentId, () => this.swapRegisteredSessionRuntime(agentId)),
+        this.runLifecycleMutation(agentId, async () => {
+          const existing = this.agents.get(agentId);
+          if (this.runs.hasRun(agentId) || !existing?.session) {
+            return;
+          }
+          if (this.usesExclusiveSessionPersistence(existing)) {
+            await this.reloadAgentSessionInternal(agentId, undefined, {
+              skipInFlightCancel: true,
+              preserveStateOnCloseFailure: true,
+            });
+            return;
+          }
+          await this.swapRegisteredSessionRuntime(agentId);
+        }),
       );
       this.logger.info(
         { agentId },
@@ -3725,6 +3782,11 @@ export class AgentManager {
         "cancelAgentRun: failed to swap provider session after forced cancellation",
       );
     }
+  }
+
+  private usesExclusiveSessionPersistence(agent: ActiveManagedAgent): boolean {
+    const provider = agent.persistence?.provider ?? agent.provider;
+    return this.clients.get(provider)?.exclusiveSessionPersistence === true;
   }
 
   private async cancelAgentRunBefore(

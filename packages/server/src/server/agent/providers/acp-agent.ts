@@ -606,6 +606,33 @@ export interface ACPNativeTurnProbeContext {
 
 export type ACPNativeTurnProbe = (context: ACPNativeTurnProbeContext) => Promise<boolean>;
 
+export interface ACPNativeSessionMonitorContext {
+  provider: string;
+  sessionId: string;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  fromStart: boolean;
+  logger: Logger;
+  isForegroundTurnActive: () => boolean;
+  emit: (event: AgentStreamEvent) => void;
+}
+
+export interface ACPNativeSessionMonitor {
+  syncBeforeForegroundTurnEnd?(): Promise<void>;
+  hasActiveAutonomousTurn?(): boolean;
+  onRuntimeExited?(exit: {
+    code: number | null;
+    signal: NodeJS.Signals | null;
+    handledByForegroundTurn: boolean;
+    diagnostic?: string;
+  }): void;
+  close(): Promise<void>;
+}
+
+export type ACPNativeSessionMonitorFactory = (
+  context: ACPNativeSessionMonitorContext,
+) => Promise<ACPNativeSessionMonitor | null> | ACPNativeSessionMonitor | null;
+
 interface ACPAgentClientOptions {
   provider: string;
   logger: Logger;
@@ -615,6 +642,7 @@ interface ACPAgentClientOptions {
   catalogModelResolver?: ACPCatalogModelResolver;
   promptResponseValidator?: ACPPromptResponseValidator;
   nativeTurnProbe?: ACPNativeTurnProbe;
+  nativeSessionMonitorFactory?: ACPNativeSessionMonitorFactory;
   modelTransformer?: (models: AgentModelDefinition[]) => AgentModelDefinition[];
   sessionResponseTransformer?: (response: SessionStateResponse) => SessionStateResponse;
   configOptionsTransformer?: (configOptions: SessionConfigOption[]) => SessionConfigOption[];
@@ -648,6 +676,7 @@ interface ACPAgentSessionOptions {
   defaultModes: AgentMode[];
   promptResponseValidator?: ACPPromptResponseValidator;
   nativeTurnProbe?: ACPNativeTurnProbe;
+  nativeSessionMonitorFactory?: ACPNativeSessionMonitorFactory;
   modelTransformer?: (models: AgentModelDefinition[]) => AgentModelDefinition[];
   sessionResponseTransformer?: (response: SessionStateResponse) => SessionStateResponse;
   configOptionsTransformer?: (configOptions: SessionConfigOption[]) => SessionConfigOption[];
@@ -1077,6 +1106,7 @@ export class ACPAgentClient implements AgentClient {
   private readonly catalogModelResolver?: ACPCatalogModelResolver;
   private readonly promptResponseValidator?: ACPPromptResponseValidator;
   private readonly nativeTurnProbe?: ACPNativeTurnProbe;
+  private readonly nativeSessionMonitorFactory?: ACPNativeSessionMonitorFactory;
   private readonly modelTransformer?: (models: AgentModelDefinition[]) => AgentModelDefinition[];
   private readonly sessionResponseTransformer?: (
     response: SessionStateResponse,
@@ -1121,6 +1151,7 @@ export class ACPAgentClient implements AgentClient {
     this.catalogModelResolver = options.catalogModelResolver;
     this.promptResponseValidator = options.promptResponseValidator;
     this.nativeTurnProbe = options.nativeTurnProbe;
+    this.nativeSessionMonitorFactory = options.nativeSessionMonitorFactory;
     this.modelTransformer = options.modelTransformer;
     this.sessionResponseTransformer = options.sessionResponseTransformer;
     this.configOptionsTransformer = options.configOptionsTransformer;
@@ -1155,6 +1186,7 @@ export class ACPAgentClient implements AgentClient {
         defaultModes: this.defaultModes,
         promptResponseValidator: this.promptResponseValidator,
         nativeTurnProbe: this.nativeTurnProbe,
+        nativeSessionMonitorFactory: this.nativeSessionMonitorFactory,
         modelTransformer: this.modelTransformer,
         sessionResponseTransformer: this.sessionResponseTransformer,
         configOptionsTransformer: this.configOptionsTransformer,
@@ -1214,6 +1246,7 @@ export class ACPAgentClient implements AgentClient {
       defaultModes: this.defaultModes,
       promptResponseValidator: this.promptResponseValidator,
       nativeTurnProbe: this.nativeTurnProbe,
+      nativeSessionMonitorFactory: this.nativeSessionMonitorFactory,
       modelTransformer: this.modelTransformer,
       sessionResponseTransformer: this.sessionResponseTransformer,
       configOptionsTransformer: this.configOptionsTransformer,
@@ -1867,6 +1900,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   private readonly defaultModes: AgentMode[];
   private readonly promptResponseValidator?: ACPPromptResponseValidator;
   private readonly nativeTurnProbe?: ACPNativeTurnProbe;
+  private readonly nativeSessionMonitorFactory?: ACPNativeSessionMonitorFactory;
   protected readonly modelTransformer?: (models: AgentModelDefinition[]) => AgentModelDefinition[];
   private readonly sessionResponseTransformer?: (
     response: SessionStateResponse,
@@ -1934,6 +1968,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   private historyRuntimeReleased = false;
   private replayingHistory = false;
   private bootstrapThreadEventPending = false;
+  private nativeSessionMonitor: ACPNativeSessionMonitor | null = null;
   private readonly terminateProcess: ProcessTerminator;
 
   constructor(config: AgentSessionConfig, options: ACPAgentSessionOptions) {
@@ -1946,6 +1981,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     this.defaultModes = options.defaultModes;
     this.promptResponseValidator = options.promptResponseValidator;
     this.nativeTurnProbe = options.nativeTurnProbe;
+    this.nativeSessionMonitorFactory = options.nativeSessionMonitorFactory;
     this.modelTransformer = options.modelTransformer;
     this.sessionResponseTransformer = options.sessionResponseTransformer;
     this.configOptionsTransformer = options.configOptionsTransformer;
@@ -2009,6 +2045,9 @@ export class ACPAgentSession implements AgentSession, ACPClient {
         await this.sessionUpdate(update);
       }
       await this.applyConfiguredOverrides();
+      if (this.nativeSessionMonitorFactory) {
+        await this.startNativeSessionMonitor(true);
+      }
     } catch (error) {
       await this.closeAfterInitializationFailure(error);
     }
@@ -2066,10 +2105,39 @@ export class ACPAgentSession implements AgentSession, ACPClient {
 
       if (this.resumePurpose === "history") {
         await this.releaseHistoryRuntime();
+      } else if (this.nativeSessionMonitorFactory) {
+        await this.startNativeSessionMonitor(false);
       }
     } catch (error) {
       await this.closeAfterInitializationFailure(error);
     }
+  }
+
+  private async startNativeSessionMonitor(fromStart: boolean): Promise<void> {
+    if (!this.nativeSessionMonitorFactory || !this.sessionId || this.closed) {
+      return;
+    }
+    this.nativeSessionMonitor = await this.nativeSessionMonitorFactory({
+      provider: this.provider,
+      sessionId: this.sessionId,
+      cwd: this.config.cwd,
+      env: createProviderEnv({
+        runtimeSettings: this.runtimeSettings,
+        overlays: [this.launchEnv],
+      }),
+      fromStart,
+      logger: this.logger,
+      isForegroundTurnActive: () => this.activeForegroundTurnId !== null,
+      emit: (event) => {
+        this.pushEvent(event);
+      },
+    });
+  }
+
+  private async closeNativeSessionMonitor(): Promise<void> {
+    const monitor = this.nativeSessionMonitor;
+    this.nativeSessionMonitor = null;
+    await monitor?.close();
   }
 
   // History resumes exist to replay persisted events into the canonical
@@ -2171,6 +2239,10 @@ export class ACPAgentSession implements AgentSession, ACPClient {
               overlays: [this.launchEnv],
             }),
           });
+          if (this.closed || this.activeForegroundTurnId !== turnId) return;
+        }
+        if (this.nativeSessionMonitor?.syncBeforeForegroundTurnEnd) {
+          await this.nativeSessionMonitor.syncBeforeForegroundTurnEnd();
           if (this.closed || this.activeForegroundTurnId !== turnId) return;
         }
         this.handlePromptResponse(response, turnId);
@@ -2744,7 +2816,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
 
     this.cancelPendingPermissions();
 
-    if (this.activeForegroundTurnId) {
+    if (this.activeForegroundTurnId || this.nativeSessionMonitor?.hasActiveAutonomousTurn?.()) {
       await this.connection.cancel({ sessionId: this.sessionId });
     }
   }
@@ -2754,6 +2826,10 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       return;
     }
     this.closed = true;
+
+    if (this.nativeSessionMonitor) {
+      await this.closeNativeSessionMonitor();
+    }
 
     this.deliverTranslatedEvents(this.flushPendingUserMessage());
     this.settleCommandsReady();
@@ -3145,16 +3221,30 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       if (this.closed || this.historyRuntimeReleased) {
         return;
       }
+      const diagnostic = stderrChunks.join("").trim() || undefined;
       if (this.activeForegroundTurnId) {
         this.synthesizeCanceledToolCalls();
         this.finishTurn({
           type: "turn_failed",
           provider: this.provider,
           error: `ACP agent exited unexpectedly (${code ?? "null"}${signal ? `, ${signal}` : ""})`,
-          diagnostic: stderrChunks.join("").trim() || undefined,
+          diagnostic,
           turnId: this.activeForegroundTurnId,
         });
+        this.nativeSessionMonitor?.onRuntimeExited?.({
+          code,
+          signal,
+          handledByForegroundTurn: true,
+          diagnostic,
+        });
+        return;
       }
+      this.nativeSessionMonitor?.onRuntimeExited?.({
+        code,
+        signal,
+        handledByForegroundTurn: false,
+        diagnostic,
+      });
     });
 
     const stream = createLoggedNdJsonStream(

@@ -110,8 +110,8 @@ export function useAggregatedAgents(options?: {
 
     // Sort by: running agents first, then by most recent activity
     allAgents.sort((left, right) => {
-      const leftRunning = left.turn.phase === "open";
-      const rightRunning = right.turn.phase === "open";
+      const leftRunning = left.turn.phase === "open" || (left.backgroundWorkCount ?? 0) > 0;
+      const rightRunning = right.turn.phase === "open" || (right.backgroundWorkCount ?? 0) > 0;
       if (leftRunning && !rightRunning) {
         return -1;
       }

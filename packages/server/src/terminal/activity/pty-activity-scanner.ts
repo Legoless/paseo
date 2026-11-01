@@ -321,9 +321,9 @@ const IDLE_PROMPT_PATTERNS = {
   cursor: [],
   gemini: [/^>$/, GEMINI_COMPOSER_PLACEHOLDER],
   amp: [/^>$/],
-  // Kimi's composer is a bordered box, so the cursor line reads `│ > draft`; while a
-  // turn runs the cursor leaves the box, which keeps this from lighting mid-turn. The
-  // border is required: approval options start with "> " too ("│ >" vs "> Allow once").
+  // Kimi's composer is a bordered box (`│ >`), while approvals and questions replace
+  // that box (`> Allow once`). Kimi 2.4+ keeps the cursor in `│ >` during a turn so the
+  // user can queue guidance; `isKimiBusyScreen` keeps active turns and background work working.
   kimi: [/^│\s*>(?:\s|$)/],
   muse: [/^❯(?:\s+.*)?$/],
 } satisfies Record<KnownAgentName, readonly RegExp[]>;
@@ -624,21 +624,38 @@ function isGrokFinishedComposerScreen(lines: string[]): boolean {
   return grokDock(lines).some((line) => GROK_WORKED_FOR.test(line));
 }
 
-// Kimi's composer comes back when the turn ends, but work that outlives the turn keeps
-// a "[1 task running]" badge in the status bar. The badge shares the row with the
-// model/context segments ("K3 thinking: max", "context: 29%"), so require one of them
-// on the same line below the composer — a reply or draft does not keep the pane working.
-const KIMI_RUNNING_TASKS = /\[\d+ tasks? running\]/;
-const KIMI_STATUS_BAR_SEGMENT = /(?:\bthinking:\s*\w+|\bcontext:\s*\d{1,3}%)/;
+// Kimi 2.4+ keeps the `│ >` composer focused throughout a turn and renders its live
+// activity row above the top border: a moon-phase loader while waiting or running tools
+// (`🌑`, `🌗 · Tip: …`, `🌒 Retrying …`) and a braille loader while thinking, composing,
+// or compacting (`⠋ Working…`, `⠋ Compacting…`). Background tasks, subagents, and active
+// `/goal` loops outlive a turn and show badges across the two-line status bar below the
+// composer (`[1 task running]`, `[2 agents running]`, `[goal ● active · …]`), paired with
+// `thinking` or `context: NN%` on the status rows so draft or reply text never matches.
+const KIMI_MOON_SPINNER_REGEX = /[🌑🌒🌓🌔🌕🌖🌗🌘]/u;
+const KIMI_MOON_SPINNER_ROW =
+  /^(?:🌑|🌒|🌓|🌔|🌕|🌖|🌗|🌘)(?:$|\s+(?:[·•]\s|(?:Retrying|Working|Compacting|Thinking)\b))/iu;
+const KIMI_BRAILLE_ACTIVITY_ROW =
+  /^[\u2800-\u28FF]\s+(?:Working|Compacting|Thinking)(?:…|\.\.\.)(?:\s|$)/i;
+const KIMI_FOOTER_BUSY_BADGE = /\[\d+\s+(?:tasks?|agents?)\s+running\]|\[goal\s*●\s*active\b/i;
+const KIMI_STATUS_BAR_SEGMENT = /\bthinking(?::\s*\w+)?\b|\bcontext:\s*\d{1,3}%/i;
 
 export function isKimiBusyScreen(lines: string[]): boolean {
   const stripped = lines.map((line) => stripAnsi(line).trim());
   const composer = findKimiComposer(stripped);
   if (!composer) return false;
-  return stripped
-    .slice(composer.bottom + 1)
-    .slice(-6)
-    .some((line) => KIMI_RUNNING_TASKS.test(line) && KIMI_STATUS_BAR_SEGMENT.test(line));
+  const aboveComposer = stripped.slice(0, composer.top).filter(Boolean).slice(-6);
+  if (
+    aboveComposer.some(
+      (line) => KIMI_MOON_SPINNER_ROW.test(line) || KIMI_BRAILLE_ACTIVITY_ROW.test(line),
+    )
+  ) {
+    return true;
+  }
+  const footer = stripped
+    .slice(composer.bottom + 1, composer.bottom + 7)
+    .filter(Boolean)
+    .join(" ");
+  return KIMI_FOOTER_BUSY_BADGE.test(footer) && KIMI_STATUS_BAR_SEGMENT.test(footer);
 }
 
 // Muse leaves its composer on the cursor line throughout the turn. Its animated
@@ -1058,6 +1075,7 @@ const PROMOTED_DURING_LAUNCH = new Set<KnownAgentName>([
   "antigravity",
   "claude",
   "cursor",
+  "kimi",
   "muse",
   "opencode",
 ]);
@@ -1067,6 +1085,7 @@ const PROMOTED_AGENTS = new Set<KnownAgentName>([
   "codex",
   "cursor",
   "grok",
+  "kimi",
   "muse",
   "opencode",
 ]);
@@ -1130,6 +1149,13 @@ function detectRestoredAgentFromScreen(stripped: string, lines: string[]): Known
   }
   if (claudeComposerStart(trimmed) >= 0 && trimmed.some((line) => CLAUDE_MODE_FOOTER.test(line))) {
     return "claude";
+  }
+  const kimiComposer = findKimiComposer(trimmed);
+  if (
+    kimiComposer !== null &&
+    trimmed.slice(kimiComposer.bottom + 1).some((line) => /\bcontext:\s*\d{1,3}%/i.test(line))
+  ) {
+    return "kimi";
   }
   const antigravityComposer = findAntigravityComposer(lines);
   if (
@@ -1318,6 +1344,7 @@ export class PtyActivityScanner {
     return (
       !this.lookedAtScreen ||
       BRAILLE_SPINNER_REGEX.test(chunk) ||
+      KIMI_MOON_SPINNER_REGEX.test(chunk) ||
       /[■⬝⬥⬩⬪]/.test(chunk) ||
       MUSE_DIAMOND_REGEX.test(chunk) ||
       CLAUDE_SPINNER_REGEX.test(chunk) ||
@@ -1380,24 +1407,7 @@ export class PtyActivityScanner {
     if (
       !this.initialLaunch &&
       !this.isInsideInterruptWindow() &&
-      ((this.activeAgent === "claude" &&
-        CLAUDE_BUSY_TITLE_REGEX.test(chunk) &&
-        // A busy title means no dialog is open, so it also undoes a needs-input hook that
-        // landed after the user answered (Claude sends it ~6s after the dialog opens). A
-        // hook's finish is left alone: the title still spins while slower Stop hooks run.
-        (this.currentActivity !== "working" ||
-          this.options.getActivity().attentionReason === "needs_input")) ||
-        (this.currentActivity !== "working" &&
-          // A parked Grok task keeps a braille clock after Worked for. That frame
-          // must not relight a closed turn. A busy Grok screen is promoted below.
-          // Antigravity's logo is braille too. A frame only counts once the live
-          // screen is actually busy, so a quit banner's scrollback cannot relight.
-          this.activeAgent !== "opencode" &&
-          this.activeAgent !== "grok" &&
-          (this.activeAgent !== "antigravity" ||
-            isAntigravityBusyScreen(this.options.readLastLines(20))) &&
-          BRAILLE_SPINNER_REGEX.test(chunk) &&
-          !this.options.getActivity().attentionReason))
+      (this.shouldPromoteClaudeBusyTitle(chunk) || this.shouldPromoteBrailleSpinner(chunk))
     ) {
       this.setWorking();
     }
@@ -1406,8 +1416,47 @@ export class PtyActivityScanner {
     this.scheduleStillnessCheck();
   }
 
+  private shouldPromoteClaudeBusyTitle(chunk: string): boolean {
+    if (this.activeAgent !== "claude" || !CLAUDE_BUSY_TITLE_REGEX.test(chunk)) {
+      return false;
+    }
+    // A busy title means no dialog is open, so it also undoes a needs-input hook that
+    // landed after the user answered (Claude sends it ~6s after the dialog opens). A
+    // hook's finish is left alone: the title still spins while slower Stop hooks run.
+    return (
+      this.currentActivity !== "working" ||
+      this.options.getActivity().attentionReason === "needs_input"
+    );
+  }
+
+  private shouldPromoteBrailleSpinner(chunk: string): boolean {
+    if (
+      this.currentActivity === "working" ||
+      // A parked Grok task keeps a braille clock after Worked for. That frame
+      // must not relight a closed turn. A busy Grok screen is promoted below.
+      // Antigravity's logo is braille too. A frame only counts once the live
+      // screen is actually busy, so a quit banner's scrollback cannot relight.
+      this.activeAgent === "opencode" ||
+      this.activeAgent === "grok" ||
+      !BRAILLE_SPINNER_REGEX.test(chunk) ||
+      Boolean(this.options.getActivity().attentionReason)
+    ) {
+      return false;
+    }
+    if (
+      this.activeAgent === "kimi" &&
+      findKimiComposer(this.options.readLastLines(25).map((line) => stripAnsi(line).trim())) !==
+        null
+    ) {
+      return false;
+    }
+    return (
+      this.activeAgent !== "antigravity" || isAntigravityBusyScreen(this.options.readLastLines(20))
+    );
+  }
+
   // A continuously animating live status leaves no quiet gap for the stillness
-  // check. Antigravity, Claude, Codex, Cursor, Grok, Muse, and OpenCode can resume
+  // check. Antigravity, Claude, Codex, Cursor, Grok, Kimi, Muse, and OpenCode can resume
   // after an approval without Enter, or start/continue work on their own. Quota stays red.
   private promoteWorkingAgentScreen(): void {
     if (

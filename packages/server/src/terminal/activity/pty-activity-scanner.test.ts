@@ -3265,6 +3265,75 @@ describe("Grok and Kimi composer activity", () => {
     expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
   });
 
+  it("keeps Kimi 2.4+ turns working while the cursor stays in the composer and promotes autonomous or shortcut-resumed work", () => {
+    const twoLineFooter = (badges = "") => [
+      `Ask When Needed${badges}  K2.7 Coding Fast  ~/proj  main`,
+      "context: 29% (290k/1M)",
+    ];
+    const kimi24Screen = (above: string[], badges = "") => [
+      ...above,
+      ...kimiComposer(""),
+      ...twoLineFooter(badges),
+    ];
+
+    expect(isKimiBusyScreen(kimi24Screen(["🌑"]))).toBe(true);
+    expect(isKimiBusyScreen(kimi24Screen(["🌗 · Tip: ctrl-s to add guidance"]))).toBe(true);
+    expect(isKimiBusyScreen(kimi24Screen(["🌒 Retrying (1/3) · 429 rate limited"]))).toBe(true);
+    expect(isKimiBusyScreen(kimi24Screen(["⠋ Working… · Tip: /compact"]))).toBe(true);
+    expect(isKimiBusyScreen(kimi24Screen(["⠋ Compacting…"]))).toBe(true);
+    expect(isKimiBusyScreen(kimi24Screen(["🌕 Full moon tonight"]))).toBe(false);
+    expect(isKimiBusyScreen(kimi24Screen([], "  [1 task running]"))).toBe(true);
+    expect(isKimiBusyScreen(kimi24Screen([], "  [2 agents running]"))).toBe(true);
+    expect(isKimiBusyScreen(kimi24Screen([], "  [goal ● active · 23m · 2 turns]"))).toBe(true);
+    expect(isKimiBusyScreen(kimi24Screen([], "  [goal ● paused · 23m · 2 turns]"))).toBe(false);
+    expect(isKimiBusyScreen(kimi24Screen([], "  [goal ● blocked · 23m · 2 turns]"))).toBe(false);
+
+    const { tracker, scanner, paint } = terminal("kimi");
+    scanner.feedInput("\r");
+
+    // Cursor stays inside `│ >` during the entire turn in Kimi 2.4+.
+    paint(kimi24Screen(["🌗 · Tip: ctrl-s to add guidance"]), "│ >", "🌗");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    // Approval dialog replaces the composer; answering with "1" (no Enter) remounts it busy.
+    paint(
+      ["Allow Kimi Code to run Shell: npm test?", "> 1. Allow once", "  2. Deny"],
+      "> 1. Allow once",
+    );
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "needs_input" });
+
+    scanner.feedInput("1");
+    paint(kimi24Screen(["⠋ Working…"]), "│ >", "⠋ Working…");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    // Foreground turn settles to green once all work stops.
+    paint(kimi24Screen(["● Done."]), "│ >", "● Done.");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+
+    // Autonomous wakeup or /goal next turn animates faster than stillnessMs and must clear green immediately.
+    paint(kimi24Screen(["🌑"], "  [goal ● active · 1m · 2 turns]"), "│ >", "🌑");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+    vi.advanceTimersByTime(120);
+    paint(kimi24Screen(["🌒"], "  [goal ● active · 1m · 2 turns]"), "│ >", "🌒");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("discovers a restored Kimi screen from a moon-spinner tick and a zero-token context footer", () => {
+    const { tracker, scanner, paint } = terminal();
+    const restored = [
+      "🌒 · Tip: ctrl-s to add guidance",
+      ...kimiComposer(""),
+      "Ask When Needed  K2.7 Coding Fast  ~/proj  main",
+      "context: 0%",
+    ];
+    paint(restored, "│ >", "🌒");
+    expect(scanner.getActiveAgent()).toBe("kimi");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
   it.each<GrokKimiAgent>(["grok", "kimi"])(
     "ignores quota wording in a %s draft and keeps a real banner red",
     (agent) => {

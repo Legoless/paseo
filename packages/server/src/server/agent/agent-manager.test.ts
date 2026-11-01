@@ -11646,6 +11646,11 @@ test("replaces a provider runtime that still owns a native turn before the next 
       _handle: AgentPersistenceHandle,
       config?: Partial<AgentSessionConfig>,
     ): Promise<AgentSession> {
+      if (this.created.some((existing) => !existing.closed)) {
+        throw new Error(
+          "Internal error: This session is in use by another Kimi Code CLI instance.",
+        );
+      }
       const session = new NativeTurnSession(
         { provider: this.provider, cwd: config?.cwd ?? workdir },
         false,
@@ -11736,6 +11741,193 @@ test("keeps the provider runtime when its native turn is already finished", asyn
   expect(client.resumeCount).toBe(0);
   expect(client.created?.startPrompts).toEqual(["hello"]);
   expect(collectedEvents.some((event) => event.type === "turn_completed")).toBe(true);
+}, 10_000);
+
+test("replaces a runtime that still owns a native turn when an autonomous wakeup races in during the probe", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-native-turn-autonomous-race-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+
+  class RacingNativeTurnSession extends TestAgentSession {
+    readonly startPrompts: string[] = [];
+    closed = false;
+
+    constructor(
+      config: AgentSessionConfig,
+      private readonly emitAutonomousOnProbe: boolean,
+    ) {
+      super(config);
+    }
+
+    override async startTurn(prompt: AgentPromptInput): Promise<{ turnId: string }> {
+      this.startPrompts.push(typeof prompt === "string" ? prompt : "structured");
+      return super.startTurn(prompt);
+    }
+
+    override async close(): Promise<void> {
+      this.closed = true;
+    }
+
+    async nativeTurnStillOpen(): Promise<boolean> {
+      if (this.emitAutonomousOnProbe) {
+        this.pushEvent({
+          type: "turn_started",
+          provider: this.provider,
+          turnId: "autonomous-wakeup-1",
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      return this.emitAutonomousOnProbe;
+    }
+  }
+
+  const client = new (class extends TestAgentClient {
+    readonly exclusiveSessionPersistence = true;
+    readonly created: RacingNativeTurnSession[] = [];
+    readonly resumed: RacingNativeTurnSession[] = [];
+
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      const session = new RacingNativeTurnSession(config, true);
+      this.created.push(session);
+      return session;
+    }
+
+    override async resumeSession(
+      _handle: AgentPersistenceHandle,
+      config?: Partial<AgentSessionConfig>,
+    ): Promise<AgentSession> {
+      if (this.created.some((existing) => !existing.closed)) {
+        throw new Error(
+          "Internal error: This session is in use by another Kimi Code CLI instance.",
+        );
+      }
+      const session = new RacingNativeTurnSession(
+        { provider: this.provider, cwd: config?.cwd ?? workdir },
+        false,
+      );
+      this.resumed.push(session);
+      return session;
+    }
+  })();
+
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000522",
+  });
+
+  try {
+    const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    const collectedEvents: AgentStreamEvent[] = [];
+    for await (const event of manager.streamAgent(snapshot.id, "commit and push")) {
+      collectedEvents.push(event);
+    }
+
+    expect(client.created[0]?.closed).toBe(true);
+    expect(client.resumed).toHaveLength(1);
+    expect(client.resumed[0]?.startPrompts).toEqual(["commit and push"]);
+    expect(collectedEvents.some((event) => event.type === "turn_completed")).toBe(true);
+    expect(manager.getAgent(snapshot.id)?.lifecycle).toBe("idle");
+  } finally {
+    await storage.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+}, 10_000);
+
+test("forced-cancel reconcile closes an exclusive-persistence session before resuming and preserves idle on close hang", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-exclusive-forced-cancel-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+
+  class OptionallyHangingWedgedSession extends WedgedForegroundSession {
+    constructor(
+      config: AgentSessionConfig,
+      private readonly shouldHangClose: () => boolean,
+    ) {
+      super(config);
+    }
+
+    override async close(): Promise<void> {
+      if (this.shouldHangClose()) {
+        await new Promise(() => {});
+      }
+      await super.close();
+    }
+  }
+
+  class ExclusiveWedgedClient extends WedgedForegroundClient {
+    override readonly exclusiveSessionPersistence = true;
+    hangOnClose = false;
+
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      const session = new OptionallyHangingWedgedSession(config, () => this.hangOnClose);
+      this.wedgedSessions.push(session);
+      return session;
+    }
+
+    override async resumeSession(
+      handle: AgentPersistenceHandle,
+      config?: Partial<AgentSessionConfig>,
+      launchContext?: AgentLaunchContext,
+    ): Promise<AgentSession> {
+      if (this.wedgedSessions.some((existing) => !existing.closed)) {
+        throw new Error(
+          "Internal error: This session is in use by another Kimi Code CLI instance.",
+        );
+      }
+      return super.resumeSession(handle, config, launchContext);
+    }
+  }
+
+  const client = new ExclusiveWedgedClient();
+  let nextId = 523;
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+    idFactory: () => `00000000-0000-4000-8000-${String(nextId++).padStart(12, "0")}`,
+    rescueTimeouts: {
+      ...FAST_CANCEL_RESCUE_TIMEOUTS,
+      reloadSessionCloseMs: 10,
+    },
+  });
+
+  try {
+    const first = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    const firstDrain = collectAgentStream(manager.streamAgent(first.id, "hanging prompt"));
+    await manager.waitForAgentRunStart(first.id);
+
+    expect((await manager.cancelAgentRun(first.id)).status).toBe("settled");
+    await firstDrain;
+
+    expect(client.wedgedSessions[0]?.closed).toBe(true);
+    expect(client.resumedSessions).toHaveLength(1);
+    expect(manager.getAgent(first.id)?.lifecycle).toBe("idle");
+
+    const followUp = await collectAgentStream(manager.streamAgent(first.id, "after cancel"));
+    expect(followUp.error).toBeUndefined();
+    expect(followUp.events.some((event) => event.type === "turn_completed")).toBe(true);
+
+    client.hangOnClose = true;
+    const second = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    const secondDrain = collectAgentStream(manager.streamAgent(second.id, "hanging prompt 2"));
+    await manager.waitForAgentRunStart(second.id);
+
+    expect((await manager.cancelAgentRun(second.id)).status).toBe("settled");
+    await secondDrain;
+
+    expect(client.resumedSessions).toHaveLength(1);
+    expect(manager.getAgent(second.id)?.session).toBe(client.wedgedSessions[1]);
+    expect(manager.getAgent(second.id)?.lifecycle).toBe("idle");
+  } finally {
+    await storage.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
 }, 10_000);
 
 test("forced cancellation keeps the existing session when no replacement can be built", async () => {

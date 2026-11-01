@@ -502,6 +502,9 @@ function wrapClientProvider(
     get capabilities() {
       return inner.capabilities;
     },
+    get exclusiveSessionPersistence() {
+      return inner.exclusiveSessionPersistence;
+    },
     createSession: async (config, launchContext, options) =>
       wrapSessionProvider(
         provider,
