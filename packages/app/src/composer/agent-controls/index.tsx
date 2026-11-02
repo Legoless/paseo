@@ -52,7 +52,11 @@ import { buildProviderSwitchDraftSetup, switchAgentProviderToDraft } from "@/cli
 import { useHostFeature } from "@/runtime/host-features";
 import { buildLiveAgentModelSelectorProviders, resolveLiveAgentModelPick } from "./live-model-pick";
 import { resolveProviderDefinition } from "@/utils/provider-definitions";
-import { mergeProviderPreferences, useFormPreferences } from "@/hooks/use-form-preferences";
+import {
+  mergeProviderPreferences,
+  mergeProviderSettings,
+  useFormPreferences,
+} from "@/hooks/use-form-preferences";
 import { Combobox, ComboboxItem, type ComboboxOption } from "@/components/ui/combobox";
 import {
   AgentModeControl,
@@ -1678,7 +1682,7 @@ export const AgentControls = memo(function AgentControls({
       try {
         await client.setAgentModel(agentId, modelId);
         await updatePreferences((current) =>
-          mergeProviderPreferences({
+          mergeProviderSettings({
             preferences: current,
             provider: agentProvider,
             updates: { model: modelId },
@@ -1822,7 +1826,7 @@ export const AgentControls = memo(function AgentControls({
       }
       if (activeModelId) {
         void updatePreferences((current) =>
-          mergeProviderPreferences({
+          mergeProviderSettings({
             preferences: current,
             provider: agentProvider,
             updates: {
@@ -1853,7 +1857,7 @@ export const AgentControls = memo(function AgentControls({
         return;
       }
       void updatePreferences((current) =>
-        mergeProviderPreferences({
+        mergeProviderSettings({
           preferences: current,
           provider: agentProvider,
           updates: {

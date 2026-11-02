@@ -136,23 +136,32 @@ function applyProviderPreferenceUpdates(
   return next;
 }
 
-export function mergeProviderPreferences(args: {
+interface ProviderPreferenceMerge {
   preferences: FormPreferences;
   provider: AgentProvider;
   updates: Omit<Partial<ProviderPreferences>, "mode"> & { mode?: string | null };
-}): FormPreferences {
+}
+
+// Remembers what this provider's next agent starts with, without choosing the provider for the
+// next new agent. A setting changed on a running agent goes here: tuning a Grok agent's mode must
+// not make the next blank composer start on Grok.
+export function mergeProviderSettings(args: ProviderPreferenceMerge): FormPreferences {
   const { preferences, provider, updates } = args;
   const existingProviderPreferences = preferences.providerPreferences ?? {};
   const existing = existingProviderPreferences[provider] ?? {};
 
   return {
     ...preferences,
-    provider,
     providerPreferences: {
       ...existingProviderPreferences,
       [provider]: applyProviderPreferenceUpdates(existing, updates),
     },
   };
+}
+
+// Also makes the provider the one the next new agent starts with.
+export function mergeProviderPreferences(args: ProviderPreferenceMerge): FormPreferences {
+  return { ...mergeProviderSettings(args), provider: args.provider };
 }
 
 export function mergeCreateAgentSelectionPreferences(args: {

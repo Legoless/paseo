@@ -4,6 +4,7 @@ import {
   applyAgentProfilePreferences,
   mergeCreateAgentSelectionPreferences,
   mergeProviderPreferences,
+  mergeProviderSettings,
   parseFormPreferences,
 } from "./preferences";
 import { FakeCreateAgentPreferenceStorage } from "./test-utils/fake-preference-storage";
@@ -176,6 +177,29 @@ describe("create agent preferences", () => {
         mock: { model: "one-minute-stream", mode: "approval-test", featureValues: {} },
       },
     });
+  });
+
+  it("remembers a running agent's settings without choosing its provider for new agents", () => {
+    const next = mergeProviderSettings({
+      preferences: { provider: "claude", providerPreferences: { claude: { model: "opus" } } },
+      provider: "grok",
+      updates: {
+        mode: "always-approve",
+        model: "grok-4.7",
+        thinkingByModel: { "grok-4.7": "xhigh" },
+      },
+    });
+
+    expect(next.provider).toBe("claude");
+    expect(next.providerPreferences?.claude).toEqual({ model: "opus" });
+    expect(next.providerPreferences?.grok).toMatchObject({
+      mode: "always-approve",
+      model: "grok-4.7",
+      thinkingByModel: { "grok-4.7": "xhigh" },
+    });
+    expect(
+      mergeProviderPreferences({ preferences: next, provider: "grok", updates: {} }).provider,
+    ).toBe("grok");
   });
 
   it("loads invalid stored preferences as empty preferences", () => {

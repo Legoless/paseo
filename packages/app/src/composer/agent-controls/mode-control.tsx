@@ -19,7 +19,7 @@ import { useComposerControlLayout } from "@/composer/agent-controls/layout-conte
 import { AgentControlTrigger } from "@/composer/agent-controls/control";
 import { useSessionStore } from "@/stores/session-store";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { mergeProviderPreferences, useFormPreferences } from "@/hooks/use-form-preferences";
+import { mergeProviderSettings, useFormPreferences } from "@/hooks/use-form-preferences";
 import { resolveProviderDefinition } from "@/utils/provider-definitions";
 import { useToast } from "@/contexts/toast-context";
 import { toErrorMessage } from "@/utils/error-messages";
@@ -277,7 +277,7 @@ export function useLiveAgentModeControl(
     (modeId: string) => {
       if (!client || !slice?.provider) return;
       void updatePreferences((current) =>
-        mergeProviderPreferences({
+        mergeProviderSettings({
           preferences: current,
           provider: slice.provider,
           updates: { mode: modeId || undefined },
