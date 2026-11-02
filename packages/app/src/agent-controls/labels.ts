@@ -41,8 +41,17 @@ function stripThinkingLabelPrefix(value: string): string {
   return stripped || value;
 }
 
+// Grok's built-in catalog names efforts "Extra High Effort" and its downloaded one "Extra High",
+// so the same effort renders one way whichever catalog the provider reported.
+function stripEffortLabelSuffix(value: string): string {
+  const match = /^(.+?)[\s_-]+effort$/i.exec(value);
+  return match?.[1]?.trim() || value;
+}
+
 export function formatThinkingOptionLabel(option: ControlLabelInput): string {
-  const rawLabel = stripThinkingLabelPrefix((option.label ?? option.id).trim());
+  const rawLabel = stripEffortLabelSuffix(
+    stripThinkingLabelPrefix((option.label ?? option.id).trim()),
+  );
   const compactLabel = rawLabel.replace(/[\s_-]+/g, "").toLowerCase();
 
   if (compactLabel === "xhigh" || compactLabel === "extrahigh") {

@@ -42,6 +42,18 @@ describe("formatThinkingOptionLabel", () => {
     expect(formatThinkingOptionLabel({ id: "thinking", label: "Thinking" })).toBe("Thinking");
   });
 
+  it("strips a redundant effort suffix from provider labels", () => {
+    expect(formatThinkingOptionLabel({ id: "xhigh", label: "Extra High Effort" })).toBe(
+      "Extra high",
+    );
+    expect(formatThinkingOptionLabel({ id: "high", label: "High Effort" })).toBe("High");
+    expect(formatThinkingOptionLabel({ id: "low", label: "low-effort" })).toBe("Low");
+    expect(formatThinkingOptionLabel({ id: "effort", label: "Effort" })).toBe("Effort");
+    expect(formatThinkingOptionLabel({ id: "max", label: "Max effort (slow)" })).toBe(
+      "Max effort (slow)",
+    );
+  });
+
   it("preserves provider-supplied xhigh labels with extra detail", () => {
     expect(formatThinkingOptionLabel({ id: "xhigh", label: "XHigh (56 | 8m)" })).toBe(
       "X high (56 | 8m)",
