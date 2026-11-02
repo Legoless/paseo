@@ -5009,6 +5009,7 @@ class ClaudeAgentSession implements AgentSession {
       events.push({ type: "turn_completed", provider: "claude", usage });
       return;
     }
+    if (usage) events.push({ type: "usage_updated", provider: "claude", usage });
     events.push(...this.sidechainTracker.finishAll("failed"));
     const errorMessage =
       "errors" in message && Array.isArray(message.errors) && message.errors.length > 0
