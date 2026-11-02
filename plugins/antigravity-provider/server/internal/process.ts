@@ -1,8 +1,13 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import path from "node:path";
 import { spawnProcess } from "@getpaseo/plugin/server";
 import { signalProcess } from "./signals.js";
 import { createInterface } from "node:readline";
 import type { ProviderLaunch, ProviderSessionConfig } from "@getpaseo/plugin/server/provider";
+import { agyCliHome } from "./home.js";
+import { watchMcpWaits, type McpWait } from "./mcp-wait.js";
 import {
   AntigravityError,
   decodeFrame,
@@ -18,12 +23,16 @@ interface DriverOptions {
   model?: string;
   conversationId: string | null;
   onFrame(frame: Frame): void;
+  onMcpWait(wait: McpWait): void;
   onExit(error: AntigravityError): void;
 }
 
 export interface Driver {
   ready: Promise<Init>;
   selection: string;
+  // Call before prompting a driver that is already running, so waits it logged earlier stay
+  // with the earlier turn or startup.
+  skipWrittenMcpWaits(): void;
   prompt(text: string): Promise<void>;
   stop(reason: "interrupt" | "close"): Promise<void>;
 }
@@ -32,7 +41,7 @@ export function selection(config: ProviderSessionConfig): string {
   return JSON.stringify([config.model, config.mode, config.thinkingOption]);
 }
 
-function driverArgs(options: DriverOptions): string[] {
+function driverArgs(options: DriverOptions, logFile: string | null): string[] {
   const { config, conversationId } = options;
   const args = [
     ...options.launch.args,
@@ -45,13 +54,33 @@ function driverArgs(options: DriverOptions): string[] {
     "--disable-slash-commands",
     "--dangerously-skip-permissions",
   ];
+  if (logFile) args.push("--log-file", logFile);
   if (options.model) args.push("--model", options.model);
   if (conversationId) args.push("--conversation", conversationId);
   return args;
 }
 
+// agy reports MCP connection waits only in its log, so each driver owns a named log file next
+// to agy's own instead of sharing the newest cli-<time>.log with every other agy process.
+function driverLogFile(options: DriverOptions): string | null {
+  const directory = path.join(agyCliHome(options.config, options.launch), "log");
+  try {
+    mkdirSync(directory, { recursive: true });
+  } catch {
+    return null;
+  }
+  return path.join(directory, `cli-${logStamp(new Date())}-paseo-${randomUUID().slice(0, 8)}.log`);
+}
+
+function logStamp(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const day = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
+  return `${day}_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
 export function startDriver(options: DriverOptions): Driver {
-  const child = spawnProcess(options.launch.command, driverArgs(options), {
+  const logFile = driverLogFile(options);
+  const child = spawnProcess(options.launch.command, driverArgs(options, logFile), {
     cwd: options.config.cwd,
     env: { AGY_CLI_DISABLE_AUTO_UPDATE: "1", ...options.launch.env, ...options.config.env },
     detached: process.platform !== "win32",
@@ -71,15 +100,24 @@ export function startDriver(options: DriverOptions): Driver {
   const exited = new Promise<void>((resolve) => {
     resolveExit = resolve;
   });
+  const mcpWaits = logFile
+    ? watchMcpWaits(logFile, (wait) => {
+        if (state === "starting" || state === "ready") options.onMcpWait(wait);
+      })
+    : null;
   child.stderr.on("data", (chunk: Buffer) => {
     stderr = (stderr + chunk.toString()).slice(-8192);
   });
   child.stdin.on("error", (error: Error) =>
     fail(new AntigravityError(error.message, "STDIN_ERROR")),
   );
-  child.on("error", (error: Error) => fail(new AntigravityError(error.message, "SPAWN_ERROR")));
+  child.on("error", (error: Error) => {
+    mcpWaits?.stop();
+    fail(new AntigravityError(error.message, "SPAWN_ERROR"));
+  });
   child.on("close", (code, signal) => {
     lines.close();
+    mcpWaits?.stop();
     const error = new AntigravityError(
       diagnostic(stderr.trim() || `Antigravity exited (${signal || code})`),
       "PROCESS_EXIT",
@@ -124,6 +162,9 @@ export function startDriver(options: DriverOptions): Driver {
   return {
     ready,
     selection: selection(options.config),
+    skipWrittenMcpWaits() {
+      mcpWaits?.skipWritten();
+    },
     prompt(text) {
       if (state !== "ready")
         return Promise.reject(new AntigravityError("Antigravity is not ready"));

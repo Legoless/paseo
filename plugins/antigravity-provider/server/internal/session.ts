@@ -13,6 +13,7 @@ import type {
 } from "@getpaseo/plugin/server/provider";
 import { startDriver, selection, type Driver } from "./process.js";
 import { nativeModel, validateSelection } from "./catalog.js";
+import type { McpWait } from "./mcp-wait.js";
 import { PromptFiles } from "./prompt.js";
 import { toolItem } from "./timeline.js";
 import { readTranscriptItems } from "./transcript.js";
@@ -37,6 +38,8 @@ interface Turn {
   switching: boolean;
   hasSteps: boolean;
   unrecoveredErrorStep: boolean;
+  mcpWaitDriver: Driver | null;
+  mcpWaitNotices: number;
 }
 type State =
   | { type: "dormant" }
@@ -138,6 +141,8 @@ export class Session {
       switching: readyDriver === null,
       hasSteps: false,
       unrecoveredErrorStep: false,
+      mcpWaitDriver: null,
+      mcpWaitNotices: 0,
     };
     this.state = { type: "running", driver: readyDriver ?? priorDriver?.driver ?? null, turn };
     this.emit({
@@ -214,6 +219,8 @@ export class Session {
   ): Promise<void> {
     try {
       let driver = readyDriver;
+      // A fresh process's startup waits hold this turn; a running one's earlier waits do not.
+      readyDriver?.skipWrittenMcpWaits();
       if (!driver) {
         if (priorDriver) {
           await priorDriver.driver.stop(priorDriver.reason);
@@ -359,6 +366,7 @@ export class Session {
         model: nativeModel(this.config, this.options.catalog()),
         conversationId: this.conversationId,
         onFrame: (frame) => this.accept(frame, driver),
+        onMcpWait: (wait) => this.acceptMcpWait(wait, driver),
         onExit: (error) => this.failTurn(error, driver),
       });
       onSpawn(driver);
@@ -516,6 +524,31 @@ export class Session {
         state: "completed",
       });
     }
+  }
+
+  // Without this notice a turn held on MCP servers looks wedged: agy streams nothing until they
+  // connect or time out. agy repeats the line every 30s, so report once per process in a turn;
+  // a steer respawns agy, which connects its MCP servers again.
+  private acceptMcpWait(wait: McpWait, sourceDriver: Driver): void {
+    if (this.state.type !== "running" || this.state.driver !== sourceDriver) return;
+    const { turn } = this.state;
+    if (turn.mcpWaitDriver === sourceDriver) return;
+    turn.mcpWaitDriver = sourceDriver;
+    const id =
+      turn.mcpWaitNotices === 0
+        ? `${turn.id}:mcp-wait`
+        : `${turn.id}:mcp-wait:${turn.mcpWaitNotices}`;
+    turn.mcpWaitNotices += 1;
+    this.emit({
+      type: "session.notice",
+      sessionId: this.options.id,
+      notice: {
+        id,
+        severity: "warning",
+        title: "Antigravity is waiting for MCP servers to connect",
+        description: `${wait.servers.join(", ")} still connecting after ${wait.elapsed}. Antigravity holds the turn until its MCP servers connect or time out. Plugin servers are named <plugin>_<server>. If one keeps timing out, turn off its plugin with agy plugin disable <plugin>, or a server you added with agy mcp disable <name>.`,
+      },
+    });
   }
 
   private acceptStep(step: Step, turn: Turn): void {

@@ -64,6 +64,8 @@ process.on("SIGTERM", () => {
   record({ signal: "SIGTERM" });
   if (process.env.AGY_TEST_IGNORE_SIGNALS !== "yes") process.exit(1);
 });
+const logFileIndex = args.indexOf("--log-file");
+const nativeLog = logFileIndex >= 0 ? args[logFileIndex + 1] : null;
 const resumeIndex = args.indexOf("--conversation");
 const conversationId =
   resumeIndex >= 0 ? args[resumeIndex + 1] : fixture("text-turn")[0].conversation_id;
@@ -87,6 +89,11 @@ const holdInit = path.join(process.cwd(), "hold-init");
 while (existsSync(holdInit)) {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
+if (nativeLog && process.env.AGY_TEST_STARTUP_MCP_WAIT)
+  appendFileSync(
+    nativeLog,
+    `I1102 10:21:18.412620     109 mcp_manager.go:990] MCP: 1 server(s) still connecting after 30s: ${process.env.AGY_TEST_STARTUP_MCP_WAIT}\n`,
+  );
 const init = fixture("text-turn")[0];
 if (process.env.AGY_TEST_INIT_MODEL) init.init.model = process.env.AGY_TEST_INIT_MODEL;
 if (args.includes("--model")) init.init.model = args[args.indexOf("--model") + 1];
@@ -97,6 +104,27 @@ lines.on("line", (line) => {
   const input = JSON.parse(line);
   record({ input });
   const text = input.message.content;
+  if (text.includes("MCP_WAIT")) holdForMcpServers();
+  else respond(text);
+});
+// agy logs this every 30s while plugin MCP servers hold the turn; stdout stays silent.
+function holdForMcpServers() {
+  const waiting = "2 server(s) still connecting after";
+  const servers = "data-agent-kit-plugin_dak-kc, gemini-api_gemini-api-docs";
+  if (nativeLog)
+    appendFileSync(
+      nativeLog,
+      `I1102 15:22:32.185175    2758 mcp_manager.go:990] MCP: ${waiting} 30s: ${servers}\n` +
+        `I1102 15:23:02.185547    2758 mcp_manager.go:990] MCP: ${waiting} 1m0s: ${servers}\n`,
+    );
+  const frames = fixture("text-turn").slice(1);
+  const timer = setInterval(() => {
+    if (!existsSync(path.join(process.cwd(), "release-mcp"))) return;
+    clearInterval(timer);
+    for (const frame of frames) emit(frame);
+  }, 10);
+}
+function respond(text) {
   if (text.includes("TOOL_GATE")) {
     const toolFrames = fixture("tools-default").slice(1);
     interrupted = fixture("sigint-mid-tool").at(-1);
@@ -187,5 +215,5 @@ lines.on("line", (line) => {
     if (resultCount === ordinal) emit(frame);
     if (frame.event === "result") resultCount += 1;
   }
-});
+}
 lines.on("close", () => process.exit(0));

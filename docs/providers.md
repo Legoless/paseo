@@ -633,6 +633,8 @@ Tests use `isProviderAvailable(provider)` to skip when the binary or credentials
 
 **`AgentProvider` is always `string`.** The type alias is `type AgentProvider = string`. Provider IDs are validated against the manifest at runtime, not at the type level.
 
+**Antigravity holds a turn while MCP servers connect.** `agy` does not start a turn until its MCP servers connect or time out, which takes up to five minutes for a plugin server with eager tools. It writes nothing to stdout or stderr meanwhile. The wait shows only in its log, as `MCP: N server(s) still connecting after 30s: <names>` every 30 s. Each driver passes `--log-file` (a root flag, so it goes before any subcommand) with its own file next to agy's `cli-<time>.log` files, tails that file, and posts a notice naming the servers, once per `agy` process in a turn. A steer respawns `agy`, which connects its MCP servers again. A turn that reuses a running process ignores waits already in its log. Without the notice the app shows "No response — the turn may be stuck".
+
 **Auth patterns vary.** Some providers need API keys in env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`), some use OAuth tokens (`CLAUDE_CODE_OAUTH_TOKEN`), some use auth files (`~/.codex/auth.json`), and some handle auth entirely in their CLI binary (Copilot). Your `isAvailable()` method should check whatever is needed.
 
 **The manifest mode list and the agent class mode list are separate.** The manifest in `provider-manifest.ts` includes UI metadata (`icon`, `colorTier`). The agent class defines modes without UI metadata (just `id`, `label`, `description`). Keep them in sync.

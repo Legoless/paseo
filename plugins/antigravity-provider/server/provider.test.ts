@@ -13,6 +13,7 @@ import {
   type ProviderLaunch,
   type ProviderPersistence,
 } from "@getpaseo/plugin/server/provider";
+import { parseMcpWait } from "./internal/mcp-wait.js";
 import { signalPlan } from "./internal/signals.js";
 import { createAntigravityProvider } from "./provider.js";
 
@@ -214,6 +215,12 @@ it("streams complete text snapshots, prefixes the system prompt only once and pr
     h.cwd,
     "--disable-slash-commands",
     "--dangerously-skip-permissions",
+    "--log-file",
+    expect.stringMatching(
+      new RegExp(
+        `^${escapeRegExp(path.join(h.cwd, ".gemini", "antigravity-cli", "log", "cli-"))}\\d{8}_\\d{6}-paseo-[\\da-f]{8}\\.log$`,
+      ),
+    ),
   ]);
   expect(records.find((entry) => entry.args.includes("--input-format")).env).toBe(
     "session-overlay",
@@ -221,6 +228,81 @@ it("streams complete text snapshots, prefixes the system prompt only once and pr
   expect(
     records.filter((entry) => entry.input).map((entry) => entry.input.message.content),
   ).toEqual(["SYSTEM PREFIX\n\nHELLO", "HELLO AGAIN"]);
+});
+
+it("tells the user once per turn when agy holds it for MCP servers that are still connecting", async () => {
+  const h = await harness();
+  await h.open();
+  const clientMessageId = await h.prompt("MCP_WAIT");
+  const isMcpWait = (event: ProviderEvent) =>
+    event.type === "session.notice" && event.notice.id.endsWith(":mcp-wait");
+  const notice = await h.wait(isMcpWait);
+  expect(notice).toMatchObject({
+    notice: {
+      severity: "warning",
+      title: "Antigravity is waiting for MCP servers to connect",
+      description: expect.stringContaining(
+        "data-agent-kit-plugin_dak-kc, gemini-api_gemini-api-docs still connecting after 30s.",
+      ),
+    },
+  });
+  await writeFile(path.join(h.cwd, "release-mcp"), "ok");
+  const result = await h.completed(clientMessageId);
+  expect(result).toMatchObject({ type: "session.turn", state: "completed" });
+  if (result.type !== "session.turn") throw new Error("Expected a turn event");
+  expect(notice).toMatchObject({ notice: { id: `${result.turnId}:mcp-wait` } });
+  expect(h.events.filter(isMcpWait)).toHaveLength(1);
+});
+
+it("reports the MCP wait again when a steer respawns agy", async () => {
+  const h = await harness();
+  await h.open();
+  const clientMessageId = await h.prompt("MCP_WAIT");
+  const isMcpWait = (event: ProviderEvent) =>
+    event.type === "session.notice" && event.notice.id.includes(":mcp-wait");
+  await h.wait(isMcpWait);
+  await h.steer("MCP_WAIT again");
+  await expect
+    .poll(() => h.events.filter(isMcpWait).length, { timeout: 5000, interval: 10 })
+    .toBe(2);
+  await writeFile(path.join(h.cwd, "release-mcp"), "ok");
+  const result = await h.completed(clientMessageId);
+  if (result.type !== "session.turn") throw new Error("Expected a turn event");
+  expect(
+    h.events.filter(isMcpWait).map((event) => event.type === "session.notice" && event.notice.id),
+  ).toEqual([`${result.turnId}:mcp-wait`, `${result.turnId}:mcp-wait:1`]);
+});
+
+it("keeps an MCP wait logged before the turn out of that turn", async () => {
+  const h = await harness({ AGY_TEST_STARTUP_MCP_WAIT: "rea" });
+  await h.open();
+  const clientMessageId = await h.prompt("MCP_WAIT");
+  const notice = await h.wait(
+    (event) => event.type === "session.notice" && event.notice.id.endsWith(":mcp-wait"),
+  );
+  if (notice.type !== "session.notice") throw new Error("Expected a notice");
+  expect(notice.notice.description).toContain("gemini-api_gemini-api-docs");
+  expect(notice.notice.description).not.toMatch(/^rea\b/);
+  await writeFile(path.join(h.cwd, "release-mcp"), "ok");
+  await h.completed(clientMessageId);
+});
+
+it("parses agy MCP wait log lines and ignores other log output", () => {
+  expect(
+    parseMcpWait(
+      "I1102 15:22:32.185175    2758 mcp_manager.go:990] MCP: 1 server(s) still connecting after 30s: gemini-api_gemini-api-docs",
+    ),
+  ).toEqual({ elapsed: "30s", servers: ["gemini-api_gemini-api-docs"] });
+  expect(
+    parseMcpWait(
+      "I1102 10:24:12.190571    2449 mcp_manager.go:990] MCP: 2 server(s) still connecting after 1m30s: rea, data-agent-kit-plugin_dak-spanner\r",
+    ),
+  ).toEqual({ elapsed: "1m30s", servers: ["rea", "data-agent-kit-plugin_dak-spanner"] });
+  expect(
+    parseMcpWait(
+      "I1102 15:22:00.946797       1 http_helpers.go:359] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+    ),
+  ).toBeNull();
 });
 
 it("maps tools and emits one denial notice for a SUCCESS result", async () => {
@@ -1556,3 +1638,7 @@ it("launches an Antigravity command shim for probes and conversation startup", a
     sessionId: "s",
   });
 });
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

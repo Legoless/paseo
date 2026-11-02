@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import type {
   ProviderLaunch,
   ProviderSessionConfig,
   ProviderTimelineItem,
 } from "@getpaseo/plugin/server/provider";
+import { agyCliHome } from "./home.js";
 import { toolItem } from "./timeline.js";
 import type { Step } from "./wire.js";
 
@@ -43,11 +43,8 @@ function resolveTranscriptDirectory(
   config: ProviderSessionConfig,
   launch: ProviderLaunch,
 ): string {
-  const home = config.env.HOME || launch.env?.HOME || process.env.HOME || os.homedir();
   return path.join(
-    home,
-    ".gemini",
-    "antigravity-cli",
+    agyCliHome(config, launch),
     "brain",
     conversationId,
     ".system_generated",
