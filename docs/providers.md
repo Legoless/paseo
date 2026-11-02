@@ -627,13 +627,15 @@ Tests use `isProviderAvailable(provider)` to skip when the binary or credentials
 
 **Models and modes are discovered dynamically.** ACP providers report available models and modes at runtime via the protocol. The static definitions in `provider-manifest.ts` are used for UI scaffolding (icons, color tiers) but the runtime values from the agent process are the source of truth.
 
+**A probe can report less than the provider knows.** Grok answers `session/new` from its built-in catalog until its downloaded one is in: newer models go missing and the rest can be named by their ids. A refresh that drops models without adding any, or names a model by its id, keeps the published catalog and probes again after 10 s, 30 s and 90 s before the smaller one stands. A settings refresh takes the provider's answer as-is.
+
 **Antigravity repeats an error it already retried.** `agy` retries a transient API failure itself (`API error (attempt 1): INTERNAL (code 500)…`), then reports that error with a non-success status on the result of the turn and of every later turn in the same process, even turns that finished. The decoder treats such a result that carries a final response as completed.
 
 **Antigravity exits on interrupt.** On SIGINT `agy` aborts the turn, reports it as an `ERROR` result with the error `interrupted`, and exits. The session detaches the process before signalling it, and the next turn resumes the conversation in a new process once the old one has exited. A prompt written to the exiting process is lost, and that result fails the new turn. A background command holds an `agy` turn open until it finishes, even after the model has replied, so a message sent meanwhile takes this path. The command itself survives the interrupt.
 
-**`AgentProvider` is always `string`.** The type alias is `type AgentProvider = string`. Provider IDs are validated against the manifest at runtime, not at the type level.
-
 **Antigravity holds a turn while MCP servers connect.** `agy` does not start a turn until its MCP servers connect or time out, which takes up to five minutes for a plugin server with eager tools. It writes nothing to stdout or stderr meanwhile. The wait shows only in its log, as `MCP: N server(s) still connecting after 30s: <names>` every 30 s. Each driver passes `--log-file` (a root flag, so it goes before any subcommand) with its own file next to agy's `cli-<time>.log` files, tails that file, and posts a notice naming the servers, once per `agy` process in a turn. A steer respawns `agy`, which connects its MCP servers again. A turn that reuses a running process ignores waits already in its log. Without the notice the app shows "No response — the turn may be stuck".
+
+**`AgentProvider` is always `string`.** The type alias is `type AgentProvider = string`. Provider IDs are validated against the manifest at runtime, not at the type level.
 
 **Auth patterns vary.** Some providers need API keys in env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`), some use OAuth tokens (`CLAUDE_CODE_OAUTH_TOKEN`), some use auth files (`~/.codex/auth.json`), and some handle auth entirely in their CLI binary (Copilot). Your `isAvailable()` method should check whatever is needed.
 

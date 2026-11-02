@@ -54,6 +54,9 @@ import { PluginAgentClientRegistry } from "./plugin-provider.js";
 
 const DEFAULT_REFRESH_TIMEOUT_MS = 120_000;
 const CATALOG_STALE_TIME_MS = 5 * 60 * 1000;
+// Re-probes for a catalog that came back with less than the published one. After the last one
+// the smaller catalog stands: a provider can drop a model for real.
+const REGRESSED_CATALOG_RETRY_DELAYS_MS = [10_000, 30_000, 90_000];
 const MAX_REFRESH_TIMEOUT_MS = 2_147_483_647;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_MS = 120_000;
 const PROVIDER_REFRESH_DEADLINE_ENV = "PASEO_PROVIDER_REFRESH_TIMEOUT_MS";
@@ -215,6 +218,11 @@ interface ProviderCatalog {
   result?: ProviderSnapshotRecord;
   stale?: boolean;
   load?: Promise<void>;
+  /** Probes in a row that reported less than the published catalog. */
+  regressedProbes?: number;
+  regressedRetry?: NodeJS.Timeout;
+  /** A settings change can rightly shrink the catalog, so its refresh is taken as-is. */
+  acceptNextCatalog?: boolean;
 }
 
 interface RegistryGeneration {
@@ -313,7 +321,10 @@ export class ProviderSnapshotManager {
     for (const catalogs of this.catalogs.values()) {
       for (const provider of providersToRefresh) {
         const catalog = catalogs.get(provider);
-        if (catalog) catalogs.set(provider, { result: catalog.result, stale: true });
+        if (catalog) {
+          clearTimeout(catalog.regressedRetry);
+          catalogs.set(provider, { result: catalog.result, stale: true, acceptNextCatalog: true });
+        }
       }
     }
     // Refresh each known target: provider keys coalesce reads, while target-scoped
@@ -713,6 +724,9 @@ export class ProviderSnapshotManager {
 
   destroy(): void {
     this.destroyed = true;
+    for (const catalogs of this.catalogs.values()) {
+      for (const catalog of catalogs.values()) clearTimeout(catalog.regressedRetry);
+    }
     for (const state of this.generation.providerStates.values()) state.discoveryLimit.clearQueue();
     this.catalogs.clear();
     this.targets.clear();
@@ -1006,6 +1020,21 @@ export class ProviderSnapshotManager {
           initial,
           client,
           previous: current.result?.entry,
+          catalog: current,
+          scheduleRetry: (delayMs) => {
+            clearTimeout(current.regressedRetry);
+            current.regressedRetry = setTimeout(() => {
+              current.regressedRetry = undefined;
+              if (this.destroyed || this.catalogs.get(key)?.get(provider) !== current) return;
+              void this.loadProviders({
+                snapshotCwd,
+                catalogScope: options.catalogScope,
+                providers: [provider],
+                force: true,
+              });
+            }, delayMs);
+            current.regressedRetry.unref?.();
+          },
           publish: (entry) => {
             if (!isCurrent()) return false;
             current.result = identifyEntry(structuredClone(entry));
@@ -1031,6 +1060,8 @@ export class ProviderSnapshotManager {
     initial: ProviderSnapshotEntry;
     client: AgentClient;
     previous?: ProviderSnapshotEntry;
+    catalog?: ProviderCatalog;
+    scheduleRetry?: (delayMs: number) => void;
     publish: (entry: ProviderSnapshotEntry) => boolean;
   }): Promise<void> {
     const {
@@ -1040,6 +1071,8 @@ export class ProviderSnapshotManager {
       initial: base,
       client,
       previous,
+      catalog: catalogState,
+      scheduleRetry,
       publish: setEntry,
     } = options;
 
@@ -1082,7 +1115,13 @@ export class ProviderSnapshotManager {
       // an empty one and leave the provider showing only "Default".
       const catalogModels =
         catalog.models.length === 0 && previous?.models?.length ? previous.models : catalog.models;
-      const models = normalizeAgentModelCatalog(catalogModels);
+      const models = this.holdRegressedCatalog({
+        provider,
+        previous: previous?.models,
+        models: normalizeAgentModelCatalog(catalogModels),
+        catalog: catalogState,
+        scheduleRetry,
+      });
       if (models.length !== catalog.models.length && catalog.models.length > 0) {
         this.logger.warn(
           { provider, discardedRows: catalog.models.length - models.length },
@@ -1120,6 +1159,42 @@ export class ProviderSnapshotManager {
         );
       }
     }
+  }
+
+  // A probe can also come back with part of what the provider already reported. Grok answers
+  // session/new from its built-in catalog while its downloaded one is not in yet: newer models go
+  // missing and the rest can be named by their ids. Keep the published catalog and probe again, so
+  // the names settle without waiting out the stale time.
+  private holdRegressedCatalog(input: {
+    provider: AgentProvider;
+    previous: AgentModelDefinition[] | undefined;
+    models: AgentModelDefinition[];
+    catalog: ProviderCatalog | undefined;
+    scheduleRetry: ((delayMs: number) => void) | undefined;
+  }): AgentModelDefinition[] {
+    const { provider, previous, models, catalog, scheduleRetry } = input;
+    const attempt = catalog?.regressedProbes ?? 0;
+    const acceptCatalog = catalog?.acceptNextCatalog === true;
+    if (catalog) catalog.acceptNextCatalog = false;
+    const retryDelayMs = REGRESSED_CATALOG_RETRY_DELAYS_MS[attempt];
+    if (
+      acceptCatalog ||
+      !catalog ||
+      !scheduleRetry ||
+      !previous?.length ||
+      retryDelayMs === undefined ||
+      !isRegressedCatalog(previous, models)
+    ) {
+      if (catalog) catalog.regressedProbes = 0;
+      return models;
+    }
+    catalog.regressedProbes = attempt + 1;
+    this.logger.info(
+      { provider, attempt: attempt + 1, models: models.map((model) => model.id) },
+      "Provider catalog came back smaller than the published one; probing again",
+    );
+    scheduleRetry(retryDelayMs);
+    return previous;
   }
 
   private publishTargets(cwds: Iterable<string>): void {
@@ -1244,6 +1319,27 @@ function identifyEntry(entry: ProviderSnapshotEntry): ProviderSnapshotRecord {
     .update(JSON.stringify(["paseo.provider-result/1", content]))
     .digest("base64url");
   return { entry, contentHash };
+}
+
+// Less than the published catalog: models it listed are gone and none took their place, or a
+// named model is now named by its id. A catalog that swaps models is a real change.
+function isRegressedCatalog(
+  previous: readonly AgentModelDefinition[],
+  next: readonly AgentModelDefinition[],
+): boolean {
+  const nextById = new Map(next.map((model) => [model.id, model]));
+  const previousIds = new Set(previous.map((model) => model.id));
+  const lostName = previous.some((model) => {
+    const current = nextById.get(model.id);
+    return (
+      current !== undefined &&
+      current.label.trim() === current.id &&
+      model.label.trim() !== model.id
+    );
+  });
+  const lostModel = previous.some((model) => !nextById.has(model.id));
+  const gainedModel = next.some((model) => !previousIds.has(model.id));
+  return lostName || (lostModel && !gainedModel);
 }
 
 /**

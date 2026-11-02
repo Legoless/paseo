@@ -92,6 +92,10 @@ function createExtraClient(
   } satisfies AgentClient;
 }
 
+function callCount(mock: ReturnType<typeof vi.fn>): () => number {
+  return () => mock.mock.calls.length;
+}
+
 async function withEnv(key: string, value: string, run: () => Promise<void>): Promise<void> {
   const previous = process.env[key];
   process.env[key] = value;
@@ -715,6 +719,118 @@ describe("ProviderSnapshotManager public surface", () => {
     } finally {
       manager.destroy();
     }
+  });
+
+  describe("a probe that reports less than the published catalog", () => {
+    const cwd = "/tmp/project";
+    const full: AgentModelDefinition[] = [
+      { provider: "codex", id: "grok-4.7", label: "Grok 4.7" },
+      { provider: "codex", id: "grok-4.6", label: "Grok 4.6" },
+    ];
+    // Grok answers session/new from its built-in catalog while its download is not in yet.
+    const builtIn: AgentModelDefinition[] = [
+      { provider: "codex", id: "grok-4.6", label: "Grok 4.6" },
+    ];
+    const unnamed: AgentModelDefinition[] = [
+      { provider: "codex", id: "grok-4.7", label: "grok-4.7" },
+      { provider: "codex", id: "grok-4.6", label: "Grok 4.6" },
+    ];
+
+    function createManager(fetchCatalog: ReturnType<typeof vi.fn>) {
+      return new ProviderSnapshotManager({
+        logger: createTestLogger(),
+        providerOverrides: {
+          claude: { enabled: false },
+          copilot: { enabled: false },
+          opencode: { enabled: false },
+          pi: { enabled: false },
+        },
+        extraClients: {
+          codex: createExtraClient("codex", { isAvailable: async () => true, fetchCatalog }),
+        },
+      });
+    }
+    const labels = (models: AgentModelDefinition[] | undefined) =>
+      (models ?? []).map((model) => `${model.id}=${model.label}`);
+
+    test.each([
+      ["drops models without adding any", builtIn],
+      ["names a model by its id", unnamed],
+    ])("%s: keeps the published catalog and probes again", async (_case, degraded) => {
+      vi.useFakeTimers();
+      const fetchCatalog = vi
+        .fn()
+        .mockResolvedValueOnce({ models: full, modes: [] })
+        .mockResolvedValueOnce({ models: degraded, modes: [] })
+        .mockResolvedValue({ models: full, modes: [] });
+      const manager = createManager(fetchCatalog);
+      try {
+        await manager.getProvider({ cwd, provider: "codex", wait: true });
+        await manager.refreshSnapshotForCwd({ cwd, providers: ["codex"] });
+
+        const held = await manager.getProvider({ cwd, provider: "codex", wait: false });
+        expect(labels(held.models)).toEqual(["grok-4.7=Grok 4.7", "grok-4.6=Grok 4.6"]);
+        expect(fetchCatalog).toHaveBeenCalledTimes(2);
+
+        await vi.advanceTimersByTimeAsync(10_000);
+        await expect.poll(callCount(fetchCatalog)).toBe(3);
+        await manager.getProvider({ cwd, provider: "codex", wait: true });
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(fetchCatalog).toHaveBeenCalledTimes(3);
+        const settled = await manager.getProvider({ cwd, provider: "codex", wait: false });
+        expect(labels(settled.models)).toEqual(["grok-4.7=Grok 4.7", "grok-4.6=Grok 4.6"]);
+      } finally {
+        manager.destroy();
+        vi.useRealTimers();
+      }
+    });
+
+    test("accepts the smaller catalog once the re-probes keep reporting it", async () => {
+      vi.useFakeTimers();
+      const fetchCatalog = vi
+        .fn()
+        .mockResolvedValueOnce({ models: full, modes: [] })
+        .mockResolvedValue({ models: builtIn, modes: [] });
+      const manager = createManager(fetchCatalog);
+      try {
+        await manager.getProvider({ cwd, provider: "codex", wait: true });
+        await manager.refreshSnapshotForCwd({ cwd, providers: ["codex"] });
+        for (const [delayMs, probes] of [
+          [10_000, 3],
+          [30_000, 4],
+          [90_000, 5],
+        ] as const) {
+          await vi.advanceTimersByTimeAsync(delayMs);
+          await expect.poll(callCount(fetchCatalog)).toBe(probes);
+          await manager.getProvider({ cwd, provider: "codex", wait: true });
+        }
+
+        const accepted = await manager.getProvider({ cwd, provider: "codex", wait: false });
+        expect(labels(accepted.models)).toEqual(["grok-4.6=Grok 4.6"]);
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(fetchCatalog).toHaveBeenCalledTimes(5);
+      } finally {
+        manager.destroy();
+        vi.useRealTimers();
+      }
+    });
+
+    test("a settings refresh takes the provider's smaller catalog as-is", async () => {
+      const fetchCatalog = vi
+        .fn()
+        .mockResolvedValueOnce({ models: full, modes: [] })
+        .mockResolvedValue({ models: builtIn, modes: [] });
+      const manager = createManager(fetchCatalog);
+      try {
+        await manager.getProvider({ cwd, provider: "codex", wait: true });
+        await manager.refreshSettingsSnapshot({ providers: ["codex"] });
+
+        const entry = await manager.getProvider({ cwd, provider: "codex", wait: true });
+        expect(labels(entry.models)).toEqual(["grok-4.6=Grok 4.6"]);
+      } finally {
+        manager.destroy();
+      }
+    });
   });
 
   test("resetting a warm snapshot to loading keeps the provider selectable", async () => {
