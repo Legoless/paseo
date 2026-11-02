@@ -1227,7 +1227,11 @@ export function detectAgentFromOutput(chunk: string): KnownAgentName | null {
   // ("OpenAI Codex") while the live chrome is still Cursor.
   if (isCursorAgentScreen(lines)) return "cursor";
 
-  if (/\bclaude code\s+v?\d/i.test(stripped) || /✳\s*claude\b/i.test(stripped)) return "claude";
+  // Claude Code 2.1.3xx places its version with a column jump (`Claude Code\x1b[26Gv2.1.316`),
+  // so the stripped banner has no space before the `v`.
+  if (/\bclaude code(?:\s+v?|v)\d/i.test(stripped) || /✳\s*claude\b/i.test(stripped)) {
+    return "claude";
+  }
   if (/\bopenai codex\b/i.test(stripped) || /\bcodex\s+v\d/i.test(stripped)) return "codex";
   // The welcome banner is not reprinted when a session resumes. The footer
   // (`Grok 4.7 (xhigh)`) stays on the screen.

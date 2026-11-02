@@ -1897,6 +1897,65 @@ describe("terminal pty activity scanning", () => {
     expect(changes).toEqual([]);
   });
 
+  // The child sets only a title: no banner, so output detection cannot stand in for it.
+  const TITLE_ONLY_AGENT =
+    'process.stdout.write("$ "); process.stdin.setRawMode(true); process.stdin.on("data", () => process.stdout.write("\\x1b]0;✳ Claude Code\\x07"));';
+
+  it.each([
+    ["renamed", {}],
+    ["restored with a saved name", { title: "User terminal", restore: { seed: "old-output\r\n" } }],
+  ] as const)("recognizes an agent from its program title in a %s tab", async (kind, options) => {
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: ["-e", TITLE_ONLY_AGENT],
+        ...options,
+      }),
+    );
+    await waitForState(session, (state) => getLines(state).includes("$"));
+    if (kind === "renamed") session.setTitle("User terminal");
+    session.setActivity("working", undefined, "claude-session");
+    expect(session.getActivity()).toBeNull();
+
+    session.send({ type: "input", data: "t" });
+
+    await vi.waitFor(
+      () => {
+        session.setActivity("working", undefined, "claude-session");
+        expect(session.getActivity()).toMatchObject({ state: "working" });
+      },
+      { timeout: 4000 },
+    );
+    expect(session.getTitle()).toBe("User terminal");
+  });
+
+  it("keeps a detected agent when the user names the tab like a shell", async () => {
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        command: process.execPath,
+        args: ["-e", TITLE_ONLY_AGENT],
+      }),
+    );
+    await waitForState(session, (state) => getLines(state).includes("$"));
+    session.send({ type: "input", data: "t" });
+    await vi.waitFor(
+      () => {
+        session.setActivity("working", undefined, "claude-session");
+        expect(session.getActivity()).toMatchObject({ state: "working" });
+      },
+      { timeout: 4000 },
+    );
+
+    session.setTitle("zsh");
+
+    expect(session.getActivity()).toMatchObject({ state: "working" });
+    expect(session.getTitle()).toBe("zsh");
+  });
+
   it("settles a late Codex working hook without another PTY repaint", async () => {
     const session = trackSession(
       await createTerminal({

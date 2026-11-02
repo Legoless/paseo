@@ -1301,12 +1301,24 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     env: terminalEnv,
   });
 
-  function emitTitleChange(nextTitle: string | undefined): void {
+  // The scanner reads the titles programs set (`claude …` from the shell's preexec,
+  // `✳ Claude Code`), in a renamed tab too: some CLIs identify themselves only there. A name
+  // the user types changes only what the tab shows; `zsh` or `~/app` would otherwise read as
+  // the shell taking the pane back.
+  let scannerTitle: string | undefined;
+  function reportScannerTitle(nextTitle: string | undefined): void {
+    if (scannerTitle === nextTitle) {
+      return;
+    }
+    scannerTitle = nextTitle;
+    activityScanner.handleTitleChange(nextTitle);
+  }
+
+  function showTitle(nextTitle: string | undefined): void {
     if (title === nextTitle) {
       return;
     }
     title = nextTitle;
-    activityScanner.handleTitleChange(title);
     for (const listener of Array.from(titleChangeListeners)) {
       try {
         listener(title);
@@ -1343,18 +1355,19 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     }
 
     titleMode = "manual";
-    disposeTitleChangeSubscription();
     clearPendingTitleChange();
-    emitTitleChange(manualTitle);
+    showTitle(manualTitle);
   }
 
   const initialManualTitle = presetTitle?.trim() || undefined;
   const processTitle = command ? [command, ...args].join(" ") : null;
-  let initialTitle = initialManualTitle;
-  if (!initialTitle && processTitle) {
-    initialTitle = humanizeProcessTitle(processTitle) ?? normalizeProcessTitle(processTitle);
+  if (initialManualTitle) {
+    showTitle(initialManualTitle);
+  } else if (processTitle) {
+    const initialTitle = humanizeProcessTitle(processTitle) ?? normalizeProcessTitle(processTitle);
+    reportScannerTitle(initialTitle);
+    showTitle(initialTitle);
   }
-  emitTitleChange(initialTitle);
 
   // Respond to DA1 queries (CSI c or CSI 0 c) — apps like nvim query terminal capabilities
   terminal.parser.registerCsiHandler({ final: "c" }, (params) => {
@@ -1397,22 +1410,22 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     });
   }
 
-  if (titleMode === "auto") {
-    titleChangeSubscription = terminal.onTitleChange((nextTitle) => {
-      if (disposed || killed) {
-        return;
-      }
-      pendingTitle = nextTitle.trim().length > 0 ? nextTitle : undefined;
-      if (titleDebounceTimer) {
-        clearTimeout(titleDebounceTimer);
-      }
-      titleDebounceTimer = setTimeout(() => {
-        titleDebounceTimer = null;
-        emitTitleChange(pendingTitle);
-        pendingTitle = undefined;
-      }, TERMINAL_TITLE_DEBOUNCE_MS);
-    });
-  }
+  titleChangeSubscription = terminal.onTitleChange((nextTitle) => {
+    if (disposed || killed) {
+      return;
+    }
+    pendingTitle = nextTitle.trim().length > 0 ? nextTitle : undefined;
+    if (titleDebounceTimer) {
+      clearTimeout(titleDebounceTimer);
+    }
+    titleDebounceTimer = setTimeout(() => {
+      titleDebounceTimer = null;
+      const programTitle = pendingTitle;
+      pendingTitle = undefined;
+      reportScannerTitle(programTitle);
+      if (titleMode === "auto") showTitle(programTitle);
+    }, TERMINAL_TITLE_DEBOUNCE_MS);
+  });
 
   function updateShellCwd(nextCwd: string): void {
     if (hasReportedShellCwd && shellCwd === nextCwd) return;

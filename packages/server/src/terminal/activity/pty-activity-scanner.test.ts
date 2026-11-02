@@ -119,6 +119,14 @@ describe("detectAgentFromTitle", () => {
 describe("detectAgentFromOutput", () => {
   it("detects startup banners from output chunks", () => {
     expect(detectAgentFromOutput("Claude Code v2.1.278")).toBe("claude");
+    // Claude Code 2.1.316's startup paint: bare \r plus cursor-down for line breaks, and a
+    // column jump instead of the space before the version.
+    expect(
+      detectAgentFromOutput(
+        "\x1b]0;✳ Claude Code\x07\x1b[?1049h\x1b[2J\x1b[H\r\x1b[1B\x1b[38;5;147m ▐\x1b[48;5;16m▛███▛█\x1b[49m▄\x1b[14G\x1b[39m\x1b[1mClaude Code\x1b[26G\x1b[22m\x1b[38;5;246mv2.1.316\r\x1b[1B▝▜██████▘\x1b[14GOpus 5.5 with xhigh effort · Claude Ultra",
+      ),
+    ).toBe("claude");
+    expect(detectAgentFromOutput("Claude Codebase review")).toBeNull();
     expect(detectAgentFromOutput("\x1b[32m✳ Claude\x1b[0m is ready")).toBe("claude");
     expect(detectAgentFromOutput("OpenAI Codex v0.155.1")).toBe("codex");
     expect(detectAgentFromOutput("Welcome to Grok Build")).toBe("grok");
