@@ -753,6 +753,8 @@ discovery. For custom models, specify `thinkingOptions` when the gateway support
 longer invents effort levels from a familiar-looking model name. The `models` and `additionalModels`
 settings above still control replacement and additions.
 
+Paseo's effort selector does not inherit `effortLevel` from Claude's settings.json. Select an effort in Paseo to choose a specific value.
+
 ### Gotcha: `extends: "claude"` with third-party endpoints
 
 When a custom provider extends `"claude"` but points `ANTHROPIC_BASE_URL` at a non-Anthropic API (Z.AI, Alibaba/Qwen, proxies), the Claude Agent SDK may try to use Anthropic-only server-side tools like `WebSearch`. Third-party APIs don't support these tools, causing errors.
