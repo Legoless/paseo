@@ -46,15 +46,31 @@ const TYPOGRAPHIC_APOSTROPHE = /[\u2018\u2019\u201a\u201b\u2032\u02bc]/g;
 // Phrases the CLIs print when the account itself cannot continue. Kept specific
 // so a source file that merely mentions "spend limit" does not light the pane.
 const SPEND_LIMIT_NOTICE =
-  /you(?:'ve| have) hit your (?:(?:monthly|weekly|daily|session) )?(?:spend |usage )?limit\b|spend limit (?:has been )?reached|usage limit (?:has been )?reached|\bout of (?:credits|quota|extra usage)\b|\byou(?:'re| are) out of usage\b|\b(?:quota|rate limit) (?:exceeded|exhausted|reached)\b|\binsufficient quota\b|\bcredit balance is too low\b|\bexhausted your (?:(?:daily|weekly|monthly|session) )?(?:capacity|quota|credits)\b|\bsubscription limit\b/;
+  /you(?:'ve| have) hit your (?:(?:monthly|weekly|daily|session) )?(?:spend |usage )?limit\b|spend limit (?:has been )?reached|usage limit (?:has been )?reached|\bout of (?:credits|quota|extra usage)\b|\byou(?:'re| are) out of usage\b|\b(?:quota|rate limit) (?:exceeded|exhausted|reached)\b|\binsufficient quota\b|\bcredit balance is too low\b|\bexhausted your (?:(?:daily|weekly|monthly|session) )?(?:capacity|quota|credits)\b|\bsubscription limit\b/i;
 const SOURCE_ERROR_EXPRESSION = /\bthrow\s+new\s+[\w$]*error\s*\(/i;
+const SPEND_LIMIT_LEAD_IN = /\byou(?:'re|'ve| are| have)?(?: (?:run|ran|now|currently))?\s*$/i;
+
+// Replies talk about quota too (`│ agy │ Out of quota until 17:10 │`, "while agy waits out its
+// quota"). A CLI's own notice opens its line: only a label (`API`, `[System Error]`, `Error:`) or
+// "You are" comes before the phrase. A table row, a lower-case word in front of the phrase, or a
+// line that starts in lower case (a wrapped sentence) is someone writing about it.
+function isSpendLimitNoticeLine(line: string): boolean {
+  const normalized = line.replace(TYPOGRAPHIC_APOSTROPHE, "'");
+  const match = SPEND_LIMIT_NOTICE.exec(normalized);
+  if (!match || SOURCE_ERROR_EXPRESSION.test(normalized)) return false;
+  if ((normalized.match(/[│┃|]/g)?.length ?? 0) >= 3) return false;
+  const lead = normalized.slice(0, match.index);
+  const label = lead
+    .replace(SPEND_LIMIT_LEAD_IN, "")
+    .replace(/\([^)]*\)|\[[^\]]*\]/g, " ")
+    .replace(/\b[\w-]*error\b/gi, " ");
+  if (/(?:^|[\s("'`[])[a-z]/.test(label)) return false;
+  return /^[A-Z]/.test(match[0]) || /[\p{L}\p{N}]/u.test(lead);
+}
 
 export function isSpendLimitScreen(lines: string[], agent?: KnownAgentName): boolean {
   if (lines.length === 0) return false;
-  return screenWithoutEditableComposer(lines.map(stripAnsi), agent).some((line) => {
-    const normalized = line.toLowerCase().replace(TYPOGRAPHIC_APOSTROPHE, "'");
-    return !SOURCE_ERROR_EXPRESSION.test(normalized) && SPEND_LIMIT_NOTICE.test(normalized);
-  });
+  return screenWithoutEditableComposer(lines.map(stripAnsi), agent).some(isSpendLimitNoticeLine);
 }
 
 const HORIZONTAL_RULE = /^[─━═]{3,}/;

@@ -209,6 +209,46 @@ describe("isSpendLimitScreen", () => {
     expect(isSpendLimitScreen(screen)).toBe(false);
   });
 
+  it("ignores a reply that talks about another CLI's quota", () => {
+    const reply = [
+      "  │ Muse                  │ #64                            │",
+      "  │ agy                   │ Out of quota until about 17:10 │",
+      "  └───────────────────────┴────────────────────────────────┘",
+      "  TL;DR: Cursor is finishing #15 while agy waits out its quota.",
+      "✻ Baked for 4m 41s · done 3:34 PM · 4 shells still running",
+      "───────────────────────────────────────────────────── ultracode ─",
+      "❯",
+      "─────────────────────────────────────────────────────────────────",
+      "  ⏵⏵ bypass permissions on · 4 shells · ← 2 agents",
+    ];
+    expect(isSpendLimitScreen(reply, "claude")).toBe(false);
+    expect(isSpendLimitScreen(["| agy | Out of quota |"])).toBe(false);
+    expect(isSpendLimitScreen(["│ Out of credits │ Cursor │"])).toBe(false);
+    expect(isSpendLimitScreen(["agy is out of quota until 17:10"])).toBe(false);
+    expect(isSpendLimitScreen(["- agy: quota exceeded, moving on"])).toBe(false);
+    expect(isSpendLimitScreen(["  Cursor reports its usage limit reached"])).toBe(false);
+    // A sentence wrapped by the terminal continues in lower case.
+    expect(isSpendLimitScreen(["  out of quota at 5pm, so I moved the issue"])).toBe(false);
+    expect(
+      isSpendLimitScreen([
+        '  expect(isSpendLimitScreen(["You are out of quota. Stop."])).toBe(true);',
+      ]),
+    ).toBe(false);
+  });
+
+  it("detects notices behind a label or inside a notice box", () => {
+    expect(isSpendLimitScreen(["│ You've hit your usage limit │"])).toBe(true);
+    expect(isSpendLimitScreen(["  ⎿  API Error: Rate limit reached"])).toBe(true);
+    expect(isSpendLimitScreen(["error: quota exceeded"])).toBe(true);
+    expect(isSpendLimitScreen(["✕ [API Error: You have exhausted your daily quota.]"])).toBe(true);
+    expect(isSpendLimitScreen(["You have run out of credits"])).toBe(true);
+    expect(
+      isSpendLimitScreen([
+        "API error (attempt 1): RESOURCE_EXHAUSTED (code 429): Individual quota reached.",
+      ]),
+    ).toBe(true);
+  });
+
   it("recognizes Cursor's account usage notice without matching source errors", () => {
     expect(isSpendLimitScreen(["You're out of usage. Switch to Auto."])).toBe(true);
     expect(isSpendLimitScreen(["You’re out of usage. Switch to Auto."])).toBe(true);
