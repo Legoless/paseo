@@ -262,6 +262,81 @@ describe("ProviderSnapshotManager public surface", () => {
     }
   });
 
+  test("retries a failed catalog probe once so a transient timeout does not stick", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-08T00:00:00Z"));
+    const cwd = "/tmp/retry";
+    const models: AgentModelDefinition[] = [{ provider: "codex", id: "gpt-5.4", label: "GPT-5.4" }];
+    const fetchCatalog = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("ACP session/new timed out after 20000ms"))
+      .mockResolvedValueOnce({ models, modes: [] });
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: {
+        claude: { enabled: false },
+        copilot: { enabled: false },
+        opencode: { enabled: false },
+        pi: { enabled: false },
+      },
+      extraClients: {
+        codex: createExtraClient("codex", { isAvailable: async () => true, fetchCatalog }),
+      },
+    });
+    try {
+      const failed = await manager.getProvider({ cwd, provider: "codex", wait: true });
+      expect(failed).toMatchObject({
+        status: "error",
+        error: "ACP session/new timed out after 20000ms",
+      });
+      expect(fetchCatalog).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect.poll(callCount(fetchCatalog)).toBe(2);
+
+      const recovered = await manager.getProvider({ cwd, provider: "codex", wait: false });
+      expect(recovered).toMatchObject({ status: "ready", models });
+      expect(recovered.error).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(fetchCatalog).toHaveBeenCalledTimes(2);
+    } finally {
+      manager.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  test("does not retry a failed catalog probe more than once", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-08T00:00:00Z"));
+    const cwd = "/tmp/retry-once";
+    const fetchCatalog = vi.fn().mockRejectedValue(new Error("Provider is offline"));
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: {
+        claude: { enabled: false },
+        copilot: { enabled: false },
+        opencode: { enabled: false },
+        pi: { enabled: false },
+      },
+      extraClients: {
+        codex: createExtraClient("codex", { isAvailable: async () => true, fetchCatalog }),
+      },
+    });
+    try {
+      await manager.getProvider({ cwd, provider: "codex", wait: true });
+      expect(fetchCatalog).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect.poll(callCount(fetchCatalog)).toBe(2);
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(fetchCatalog).toHaveBeenCalledTimes(2);
+    } finally {
+      manager.destroy();
+      vi.useRealTimers();
+    }
+  });
+
   test("settings refresh updates every cached workspace catalog with its own scope", async () => {
     let revision = 1;
     const setModelCatalog = vi.fn();

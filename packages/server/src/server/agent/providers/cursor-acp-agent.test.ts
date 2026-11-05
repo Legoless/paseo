@@ -249,6 +249,24 @@ describe("CursorACPAgentClient model discovery", () => {
   });
 });
 
+function reasoningEffortConfigOption(
+  currentValue: "low" | "medium" | "high" | "xhigh",
+): SessionConfigOption {
+  return {
+    id: "reasoning_effort",
+    name: "Reasoning effort",
+    category: "thought_level" as const,
+    type: "select" as const,
+    currentValue,
+    options: [
+      { value: "low", name: "Low" },
+      { value: "medium", name: "Medium" },
+      { value: "high", name: "High" },
+      { value: "xhigh", name: "Extra High" },
+    ],
+  };
+}
+
 describe("Cursor thought-level writes", () => {
   test.each([
     ["true", "thinking"],
@@ -259,6 +277,12 @@ describe("Cursor thought-level writes", () => {
     ["xhigh", "effort"],
   ] as const)("maps %s to Cursor config %s", (thinkingOptionId, configId) => {
     expect(resolveCursorThoughtLevelConfigId(thinkingOptionId)).toBe(configId);
+  });
+
+  test("prefers the thought-level option the live session advertises", () => {
+    expect(resolveCursorThoughtLevelConfigId("xhigh", [reasoningEffortConfigOption("high")])).toBe(
+      "reasoning_effort",
+    );
   });
 
   test("rejects unknown thinking ids instead of writing session/new's reasoning option", () => {
@@ -334,6 +358,43 @@ describe("Cursor thought-level writes", () => {
     expect(setSessionConfigOption).toHaveBeenCalledWith({
       sessionId: "session-1",
       configId: "effort",
+      value: "xhigh",
+    });
+    await expect(session.getRuntimeInfo()).resolves.toMatchObject({ thinkingOptionId: "xhigh" });
+  });
+
+  test("writes Extra High to the reasoning_effort option the live session advertises", async () => {
+    const session = new ACPAgentSession(
+      {
+        provider: "cursor",
+        cwd: "/tmp/cursor",
+      },
+      {
+        provider: "cursor",
+        logger: createTestLogger(),
+        defaultCommand: ["cursor-agent", "acp"],
+        defaultModes: [],
+        capabilities: DEFAULT_ACP_CAPABILITIES,
+        thinkingOptionWriter: writeCursorThinkingOption,
+      },
+    );
+    const setSessionConfigOption = vi.fn(async () => ({
+      configOptions: [reasoningEffortConfigOption("xhigh")],
+    }));
+    const internals = asInternals<{
+      sessionId: string;
+      connection: { setSessionConfigOption: typeof setSessionConfigOption };
+      configOptions: SessionConfigOption[];
+    }>(session);
+    internals.sessionId = "session-1";
+    internals.connection = { setSessionConfigOption };
+    internals.configOptions = [reasoningEffortConfigOption("high")];
+
+    await session.setThinkingOption("xhigh");
+
+    expect(setSessionConfigOption).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      configId: "reasoning_effort",
       value: "xhigh",
     });
     await expect(session.getRuntimeInfo()).resolves.toMatchObject({ thinkingOptionId: "xhigh" });

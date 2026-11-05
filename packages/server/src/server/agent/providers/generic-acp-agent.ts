@@ -12,6 +12,7 @@ import {
   type ACPConfigFeatureOption,
   DEFAULT_ACP_CAPABILITIES,
   type ACPExtensionCommandsParser,
+  type ACPThinkingOptionWriteContext,
 } from "./acp-agent.js";
 import {
   buildBinaryDiagnosticRows,
@@ -40,6 +41,7 @@ interface GenericACPAgentClientOptions {
     connection: ClientSideConnection,
     sessionId: string,
     thinkingOptionId: string,
+    context: ACPThinkingOptionWriteContext,
   ) => Promise<void>;
   now?: () => number;
 }

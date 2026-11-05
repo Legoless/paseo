@@ -659,6 +659,7 @@ interface ACPAgentClientOptions {
     connection: ClientSideConnection,
     sessionId: string,
     thinkingOptionId: string,
+    context: ACPThinkingOptionWriteContext,
   ) => Promise<void>;
   capabilities?: AgentCapabilityFlags;
   extensionCommandsParser?: ACPExtensionCommandsParser;
@@ -693,6 +694,7 @@ interface ACPAgentSessionOptions {
     connection: ClientSideConnection,
     sessionId: string,
     thinkingOptionId: string,
+    context: ACPThinkingOptionWriteContext,
   ) => Promise<void>;
   capabilities: AgentCapabilityFlags;
   extensionCommandsParser?: ACPExtensionCommandsParser;
@@ -900,6 +902,11 @@ export interface ACPProviderModeWriteResult {
 
 export interface ACPBeforeModeWriteResult {
   configOptions?: SessionConfigOption[];
+}
+
+export interface ACPThinkingOptionWriteContext {
+  /** The session config options the provider last reported. */
+  configOptions: SessionConfigOption[];
 }
 
 export function mapACPUsage(usage: Usage | null | undefined): AgentUsage | undefined {
@@ -1129,6 +1136,7 @@ export class ACPAgentClient implements AgentClient {
     connection: ClientSideConnection,
     sessionId: string,
     thinkingOptionId: string,
+    context: ACPThinkingOptionWriteContext,
   ) => Promise<void>;
   private readonly waitForInitialCommands: boolean;
   private readonly initialCommandsWaitTimeoutMs: number;
@@ -1924,6 +1932,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     connection: ClientSideConnection,
     sessionId: string,
     thinkingOptionId: string,
+    context: ACPThinkingOptionWriteContext,
   ) => Promise<void>;
   private readonly agentId?: string;
   private readonly launchEnv?: Record<string, string>;
@@ -2642,7 +2651,11 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     const thinkingOptionWriter = this.thinkingOptionWriter;
     if (thinkingOptionWriter) {
       const { connection, sessionId } = this;
-      await this.runACPRequest(() => thinkingOptionWriter(connection, sessionId, thinkingOptionId));
+      await this.runACPRequest(() =>
+        thinkingOptionWriter(connection, sessionId, thinkingOptionId, {
+          configOptions: this.configOptions,
+        }),
+      );
       this.thinkingOptionId = thinkingOptionId;
       this.pushEvent({
         type: "thinking_option_changed",

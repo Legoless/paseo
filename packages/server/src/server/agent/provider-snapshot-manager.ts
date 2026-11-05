@@ -57,6 +57,10 @@ const CATALOG_STALE_TIME_MS = 5 * 60 * 1000;
 // Re-probes for a catalog that came back with less than the published one. After the last one
 // the smaller catalog stands: a provider can drop a model for real.
 const REGRESSED_CATALOG_RETRY_DELAYS_MS = [10_000, 30_000, 90_000];
+// A probe can time out under load (Cursor's session/new takes seconds and a cold daemon runs
+// several ACP probes at once). One retry keeps a transient timeout from leaving the provider
+// stuck in an error state that rejects agent creation until something else refreshes it.
+const FAILED_CATALOG_RETRY_DELAY_MS = 2_000;
 const MAX_REFRESH_TIMEOUT_MS = 2_147_483_647;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_MS = 120_000;
 const PROVIDER_REFRESH_DEADLINE_ENV = "PASEO_PROVIDER_REFRESH_TIMEOUT_MS";
@@ -220,7 +224,10 @@ interface ProviderCatalog {
   load?: Promise<void>;
   /** Probes in a row that reported less than the published catalog. */
   regressedProbes?: number;
-  regressedRetry?: NodeJS.Timeout;
+  /** Failed probes in a row; one retry keeps a transient timeout from sticking. */
+  failedProbes?: number;
+  /** Pending re-probe for a regressed or failed catalog. */
+  retryTimer?: NodeJS.Timeout;
   /** A settings change can rightly shrink the catalog, so its refresh is taken as-is. */
   acceptNextCatalog?: boolean;
 }
@@ -322,7 +329,7 @@ export class ProviderSnapshotManager {
       for (const provider of providersToRefresh) {
         const catalog = catalogs.get(provider);
         if (catalog) {
-          clearTimeout(catalog.regressedRetry);
+          clearTimeout(catalog.retryTimer);
           catalogs.set(provider, { result: catalog.result, stale: true, acceptNextCatalog: true });
         }
       }
@@ -725,7 +732,7 @@ export class ProviderSnapshotManager {
   destroy(): void {
     this.destroyed = true;
     for (const catalogs of this.catalogs.values()) {
-      for (const catalog of catalogs.values()) clearTimeout(catalog.regressedRetry);
+      for (const catalog of catalogs.values()) clearTimeout(catalog.retryTimer);
     }
     for (const state of this.generation.providerStates.values()) state.discoveryLimit.clearQueue();
     this.catalogs.clear();
@@ -1022,9 +1029,9 @@ export class ProviderSnapshotManager {
           previous: current.result?.entry,
           catalog: current,
           scheduleRetry: (delayMs) => {
-            clearTimeout(current.regressedRetry);
-            current.regressedRetry = setTimeout(() => {
-              current.regressedRetry = undefined;
+            clearTimeout(current.retryTimer);
+            current.retryTimer = setTimeout(() => {
+              current.retryTimer = undefined;
               if (this.destroyed || this.catalogs.get(key)?.get(provider) !== current) return;
               void this.loadProviders({
                 snapshotCwd,
@@ -1033,7 +1040,7 @@ export class ProviderSnapshotManager {
                 force: true,
               });
             }, delayMs);
-            current.regressedRetry.unref?.();
+            current.retryTimer.unref?.();
           },
           publish: (entry) => {
             if (!isCurrent()) return false;
@@ -1094,6 +1101,11 @@ export class ProviderSnapshotManager {
           return await definition.fetchCatalog(catalogOptions, client, context);
         },
       });
+      if (catalogState) {
+        catalogState.failedProbes = 0;
+        clearTimeout(catalogState.retryTimer);
+        catalogState.retryTimer = undefined;
+      }
       if (!catalog) {
         // A transient availability answer — a `which` that lost a race, a PATH blip during a
         // refresh storm — must not discard a catalog we already discovered.
@@ -1157,6 +1169,19 @@ export class ProviderSnapshotManager {
           { err: error, provider, target: catalogOptions },
           "Failed to refresh provider snapshot",
         );
+      }
+      if (catalogState && scheduleRetry && (catalogState.failedProbes ?? 0) === 0) {
+        catalogState.failedProbes = 1;
+        this.logger.warn(
+          {
+            err: error,
+            provider,
+            target: catalogOptions,
+            retryDelayMs: FAILED_CATALOG_RETRY_DELAY_MS,
+          },
+          "Provider catalog refresh failed; probing again",
+        );
+        scheduleRetry(FAILED_CATALOG_RETRY_DELAY_MS);
       }
     }
   }

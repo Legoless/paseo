@@ -1,4 +1,4 @@
-import type { ClientSideConnection } from "@agentclientprotocol/sdk";
+import type { ClientSideConnection, SessionConfigOption } from "@agentclientprotocol/sdk";
 import { zSessionConfigOption } from "@agentclientprotocol/sdk/dist/schema/zod.gen.js";
 import type { Logger } from "pino";
 import { z } from "zod";
@@ -16,6 +16,7 @@ import {
   findSelectConfigOption,
   type ACPCatalogModelResolverContext,
   type ACPConfigFeatureOption,
+  type ACPThinkingOptionWriteContext,
 } from "./acp-agent.js";
 import { GenericACPAgentClient } from "./generic-acp-agent.js";
 
@@ -53,10 +54,26 @@ const CursorModelCatalogSchema = z.object({
 
 const CURSOR_BOOLEAN_THINKING_IDS = new Set(["true", "false"]);
 const CURSOR_EFFORT_THINKING_IDS = new Set(["low", "medium", "high", "xhigh"]);
+// Older cursor-agent builds advertised this option but rejected writes to it.
+const CURSOR_READ_ONLY_THOUGHT_LEVEL_IDS = new Set(["reasoning"]);
 
-// session/new still advertises a thought_level option named `reasoning`. Cursor
-// rejects writes to that id; the live model accepts `thinking` or `effort`.
-export function resolveCursorThoughtLevelConfigId(thinkingOptionId: string): string {
+// Cursor's writable thought-level config id has moved over time. Current builds advertise
+// `reasoning_effort` on the live session and accept writes to it; older builds advertised a
+// read-only `reasoning` option while accepting `thinking` (boolean) or `effort` (levels).
+// Prefer the advertised id when it accepts the value, then fall back to the legacy ids.
+export function resolveCursorThoughtLevelConfigId(
+  thinkingOptionId: string,
+  configOptions?: SessionConfigOption[] | null,
+): string {
+  const advertised = findSelectConfigOption({ configOptions, category: "thought_level" });
+  if (advertised && !CURSOR_READ_ONLY_THOUGHT_LEVEL_IDS.has(advertised.id)) {
+    const accepted = deriveSelectorOptions(configOptions, "thought_level").some(
+      (option) => option.id === thinkingOptionId,
+    );
+    if (accepted) {
+      return advertised.id;
+    }
+  }
   if (CURSOR_BOOLEAN_THINKING_IDS.has(thinkingOptionId)) {
     return "thinking";
   }
@@ -70,10 +87,11 @@ export async function writeCursorThinkingOption(
   connection: ClientSideConnection,
   sessionId: string,
   thinkingOptionId: string,
+  context: ACPThinkingOptionWriteContext,
 ): Promise<void> {
   await connection.setSessionConfigOption({
     sessionId,
-    configId: resolveCursorThoughtLevelConfigId(thinkingOptionId),
+    configId: resolveCursorThoughtLevelConfigId(thinkingOptionId, context.configOptions),
     value: thinkingOptionId,
   });
 }
