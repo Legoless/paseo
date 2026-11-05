@@ -2204,21 +2204,30 @@ describe("OpenCode terminal activity", () => {
       [" ■⬝⬝⬝⬝⬝⬝⬝ esc again to interrupt"],
       [" ⬝⬝■⬝⬝⬝⬝⬝", "esc again to", "interrupt 177.9K (17%)", "ctrl+p commands"],
       [" ⬝⬝■⬝⬝⬝⬝⬝ rate limited [retrying in 2s attempt #1] esc interrupt"],
+      // OpenCode 2 at 65 columns: the one-cell spinner runs into a hint that the
+      // renderer middle-truncated to `esc...rupt`.
+      ["   ⬝■■■■■■esc...rupt  ↓ 1 shell · ◎ goal · 334.5K (32%) · $0.28"],
+      // Narrower still: the hint loses `esc` and `rupt`, so only the spinner marks
+      // the live footer.
+      ["   ■■■⬝⬝⬝⬝e...t · 334.5K (32%) · $0.28"],
     ].map((footer) => ({ footer })),
-  )("recognizes wrapped, retry, and animation-disabled busy footers $footer", ({ footer }) => {
-    const screen = [
-      "┃",
-      "┃   queued follow-up",
-      "┃",
-      "┃   Sisyphus -",
-      "┃   Ultraworker · DeepSeek V4.1 Flash",
-      "┃   OpenRouter · max",
-      "╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
-      ...footer,
-    ];
-    expect(isOpenCodeBusyScreen(screen)).toBe(true);
-    expect(isIdleAgentScreen(screen, "┃ queued follow-up", "opencode")).toBe(false);
-  });
+  )(
+    "recognizes wrapped, retry, animation-disabled, and truncated busy footers $footer",
+    ({ footer }) => {
+      const screen = [
+        "┃",
+        "┃   queued follow-up",
+        "┃",
+        "┃   Sisyphus -",
+        "┃   Ultraworker · DeepSeek V4.1 Flash",
+        "┃   OpenRouter · max",
+        "╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+        ...footer,
+      ];
+      expect(isOpenCodeBusyScreen(screen)).toBe(true);
+      expect(isIdleAgentScreen(screen, "┃ queued follow-up", "opencode")).toBe(false);
+    },
+  );
 
   it("recognizes a restored OpenCode screen without a banner", () => {
     const screen = [...composer(), ...busyFooter];
@@ -2322,6 +2331,18 @@ describe("OpenCode terminal activity", () => {
     tracker.set("idle", undefined, "root");
     expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
     paint([...composer(), ...busyFooter], "⬝■⬝⬝⬝⬝⬝⬝");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
+  it("returns to blue from a finished glow when a narrow OpenCode 2 footer repaints", () => {
+    const footer = ["   ⬝■■■■■■esc...rupt  ↓ 1 shell · ◎ goal · 334.5K (32%) · $0.28"];
+    const { scanner, tracker, paint } = terminal();
+    scanner.handleInitialCommand("opencode");
+    scanner.feedInput("\r");
+    paint([...composer(), ...footer]);
+    tracker.set("idle", undefined, "root");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+    paint([...composer(), ...footer], "⬝■■■■■■");
     expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
   });
 

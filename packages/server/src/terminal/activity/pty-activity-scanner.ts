@@ -820,8 +820,16 @@ export function isMuseBusyScreen(lines: string[]): boolean {
 // elapsed assistant headers and "view subagents" belong to the transcript.
 const OPENCODE_COMPOSER_BORDER = /^[┃│]/;
 const OPENCODE_COMPOSER_SHADOW = /^╹▀*$/;
-const OPENCODE_INTERRUPT_HINT = /(?:^|\s)esc\s+(?:again\s+to\s+)?interrupt(?:\s|$)/i;
-const OPENCODE_FOOTER_SPINNER = /^(?:[■⬝·⬥◆⬩⬪\u2800-\u28ff]+|\[⋯\])(?:\s|$)/;
+// Narrow panes middle-truncate the hint into `esc...rupt` (or shorter), keeping the
+// spinner that precedes it.
+const OPENCODE_INTERRUPT_HINT =
+  /\besc(?:\s+(?:again\s+to\s+)?interrupt|\s*(?:\.{2,}|…)\s*rupt)(?:\s|$)/i;
+// OpenCode 2 draws the running footer's spinner from the `mini.work_spinner`
+// setting: block, quadrant, shade, and octant glyphs (Symbols for Legacy
+// Computing), or a bracketed fallback when animations are off. The spinner runs
+// into the interrupt text without a gap, so do not require whitespace after it.
+const OPENCODE_FOOTER_SPINNER =
+  /^(?:[\u2580-\u259f\u25a0-\u25ff\u2800-\u28ff\u2b00-\u2bff\u{1ce00}-\u{1ceff}\u{1fb00}-\u{1fbff}·]+|\[⋯\])/u;
 const OPENCODE_COMMAND_HINT = /\S+\s+commands(?:\s|$)/i;
 
 interface OpenCodeComposer {
@@ -847,7 +855,13 @@ function findOpenCodeComposer(lines: string[]): OpenCodeComposer | null {
   const composerEnd = shadow >= 0 ? end + 1 : end;
   const footer = stripped.slice(composerEnd).filter(Boolean);
   const text = footer.join(" ");
-  if (!OPENCODE_INTERRUPT_HINT.test(text) && !OPENCODE_COMMAND_HINT.test(text)) return null;
+  if (
+    !OPENCODE_INTERRUPT_HINT.test(text) &&
+    !OPENCODE_COMMAND_HINT.test(text) &&
+    !OPENCODE_FOOTER_SPINNER.test(footer[0] ?? "")
+  ) {
+    return null;
+  }
   return { start: end - body.length, end: composerEnd, footer };
 }
 
@@ -864,11 +878,9 @@ function dropOpenCodeComposer(lines: string[]): string[] {
 export function isOpenCodeBusyScreen(lines: string[]): boolean {
   if (isOpenCodeNeedsInputScreen(lines)) return false;
   const footer = openCodeComposerFooter(lines);
-  return (
-    footer !== null &&
-    OPENCODE_FOOTER_SPINNER.test(footer[0] ?? "") &&
-    OPENCODE_INTERRUPT_HINT.test(footer.join(" "))
-  );
+  // The spinner only paints in a running footer. The adjacent hint can be
+  // truncated away entirely on narrow panes, so it cannot gate this.
+  return footer !== null && OPENCODE_FOOTER_SPINNER.test(footer[0] ?? "");
 }
 
 export function isOpenCodeNeedsInputScreen(lines: string[]): boolean {
