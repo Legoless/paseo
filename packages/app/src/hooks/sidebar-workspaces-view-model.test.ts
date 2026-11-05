@@ -998,6 +998,30 @@ function projectWorkspace(id: string, status: WorkspaceDescriptor["status"]): Wo
   });
 }
 
+describe("createSidebarWorkspaceEntry running children", () => {
+  it("keeps a workspace running while its root agent has a running child", () => {
+    const root = agent({
+      id: "root",
+      workspaceId: "ws-1",
+      status: "idle",
+      updatedAt: new Date(2_000),
+    });
+    const base = {
+      serverId: "srv",
+      workspace: projectWorkspace("ws-1", "done"),
+      workspaceAgentActivity: buildWorkspaceAgentActivityIndex(new Map([[root.id, root]])),
+    };
+
+    expect(createSidebarWorkspaceEntry(base).statusBucket).toBe("done");
+    expect(
+      createSidebarWorkspaceEntry({
+        ...base,
+        runningChildAgentIds: new Set(["root"]),
+      }).statusBucket,
+    ).toBe("running");
+  });
+});
+
 describe("deriveProjectStatusBucket", () => {
   it("is done when the project has no workspaces", () => {
     expect(deriveProjectStatusBucket({ workspaces: [], sessions: {} })).toBe("done");

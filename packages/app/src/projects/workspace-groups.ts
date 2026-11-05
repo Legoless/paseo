@@ -112,6 +112,8 @@ export interface SidebarWorkspaceGroupSession {
 export function buildSidebarWorkspaceGroupModel(input: {
   sessions: readonly SidebarWorkspaceGroupSession[];
   layoutsByWorkspace?: Readonly<Record<string, WorkspaceLayout>>;
+  /** Parents with a running child, so a row's dot agrees with its tab. */
+  runningChildAgentIds?: ReadonlySet<string>;
 }): SidebarWorkspaceGroupModel {
   const sectionsByWorkspaceKey = new Map<string, SidebarWorkspaceSection>();
   const memberIconTargets: ProjectIconTarget[] = [];
@@ -125,6 +127,7 @@ export function buildSidebarWorkspaceGroupModel(input: {
         agents: session.agents,
         projects: session.projects,
         layout: input.layoutsByWorkspace?.[workspaceKey],
+        runningChildAgentIds: input.runningChildAgentIds,
       });
       sectionsByWorkspaceKey.set(section.workspaceKey, section);
       memberIconTargets.push(...iconTargets);
@@ -140,6 +143,7 @@ function buildWorkspaceSection(input: {
   agents: ReadonlyMap<string, Agent>;
   projects: ReadonlyMap<string, ProjectDescriptor>;
   layout?: WorkspaceLayout;
+  runningChildAgentIds?: ReadonlySet<string>;
 }): { section: SidebarWorkspaceSection; iconTargets: ProjectIconTarget[] } {
   const workspaceId = input.workspace.id;
   const workspaceKey = `${input.serverId}:${workspaceId}`;
@@ -200,6 +204,7 @@ function buildWorkspaceSection(input: {
         agent,
         matchedMember?.workspaceDirectoryLabel ?? shortenPath(agent.cwd),
         Boolean(matchedMember),
+        input.runningChildAgentIds?.has(agent.id) ?? false,
       ),
     );
   }
@@ -234,6 +239,7 @@ function countTabStatuses(input: {
   workspace: WorkspaceDescriptor;
   agents: ReadonlyMap<string, Agent>;
   layout?: WorkspaceLayout;
+  runningChildAgentIds?: ReadonlySet<string>;
 }): SidebarPaneStatusCounts {
   // Without terminal buckets (an old daemon) the counts would leave out every terminal tab.
   if (!input.layout || !input.workspace.terminalStatusBuckets) {
@@ -250,7 +256,7 @@ function countTabStatuses(input: {
       counted.add(`agent:${target.agentId}`);
       const agent = input.agents.get(target.agentId);
       if (agent && isWorkspaceAgentRow(agent, input.workspace.id)) {
-        bucket = deriveAgentStatusBucket(agent);
+        bucket = deriveAgentStatusBucket(agent, input.runningChildAgentIds?.has(agent.id) ?? false);
       }
     }
     if (isPaneStatusBucket(bucket)) {
@@ -272,6 +278,7 @@ function isWorkspaceAgentRow(agent: Agent, workspaceId: string): boolean {
 export function countAttentionTabs(input: {
   sessions: readonly Pick<SidebarWorkspaceGroupSession, "serverId" | "workspaces" | "agents">[];
   layoutsByWorkspace: Readonly<Record<string, WorkspaceLayout>>;
+  runningChildAgentIds?: ReadonlySet<string>;
 }): number {
   let total = 0;
   for (const session of input.sessions) {
@@ -280,6 +287,7 @@ export function countAttentionTabs(input: {
         workspace,
         agents: session.agents,
         layout: input.layoutsByWorkspace[`${session.serverId}:${workspace.id}`],
+        runningChildAgentIds: input.runningChildAgentIds,
       });
       total += counts.needs_input + counts.failed + counts.attention;
     }
@@ -339,6 +347,7 @@ function createAgentRow(
   agent: Agent,
   cwdLabel: string,
   matchesMemberDirectory: boolean,
+  hasRunningChild: boolean,
 ): SidebarWorkspaceAgentRow {
   return {
     agentId: agent.id,
@@ -347,16 +356,18 @@ function createAgentRow(
     cwdLabel,
     matchesMemberDirectory,
     labels: getAgentWorkspaceLabelNames(agent.labels),
-    statusBucket: deriveAgentStatusBucket(agent),
+    statusBucket: deriveAgentStatusBucket(agent, hasRunningChild),
     lastActivityAt: agent.lastActivityAt,
   };
 }
 
-function deriveAgentStatusBucket(agent: Agent): SidebarStateBucket {
+function deriveAgentStatusBucket(agent: Agent, hasRunningChild: boolean): SidebarStateBucket {
   return deriveSidebarStateBucket({
     status: agent.status,
     pendingPermissionCount: agent.pendingPermissions.length,
-    backgroundWorkCount: agent.backgroundWorkCount,
+    // A running child is the parent's background work: keep the row blue while the fan-out
+    // runs, matching the tab's bucket. See resolveAgentPanelStatusBucket.
+    backgroundWorkCount: Math.max(agent.backgroundWorkCount ?? 0, hasRunningChild ? 1 : 0),
     requiresAttention: agent.requiresAttention,
     attentionReason: agent.attentionReason,
   });

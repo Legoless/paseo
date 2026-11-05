@@ -597,6 +597,48 @@ describe("buildSidebarWorkspaceGroupModel", () => {
     expect(buckets.get("review")).toBe("attention");
   });
 
+  it("shows a parent with a running child as running, matching its tab", () => {
+    const parent = agent({
+      id: "parent",
+      workspaceId: "ws-1",
+      cwd: "/repo/project-a/ws-1",
+      requiresAttention: true,
+      attentionReason: "finished",
+    });
+    const sessions = [session({ workspaces: [TWO_PROJECT_WORKSPACE], agents: [parent] })];
+    const layoutsByWorkspace = layoutsFor("ws-1", agentTabs("parent"));
+    const runningChildAgentIds = new Set(["parent"]);
+
+    const withRunningChild = buildSidebarWorkspaceGroupModel({
+      sessions,
+      layoutsByWorkspace,
+      runningChildAgentIds,
+    });
+    const memberA = withRunningChild.sectionsByWorkspaceKey
+      .get("srv:ws-1")
+      ?.members.find((entry) => entry.projectId === "project-a");
+    expect(memberA?.agents.find((entry) => entry.agentId === "parent")?.statusBucket).toBe(
+      "running",
+    );
+    expect(withRunningChild.sectionsByWorkspaceKey.get("srv:ws-1")?.paneStatusCounts).toMatchObject(
+      {
+        attention: 0,
+        running: 1,
+      },
+    );
+    expect(countAttentionTabs({ sessions, layoutsByWorkspace, runningChildAgentIds })).toBe(0);
+
+    // Without the running child the same parent is the finished/attention case.
+    const withoutRunningChild = buildSidebarWorkspaceGroupModel({ sessions, layoutsByWorkspace });
+    const memberWithoutChild = withoutRunningChild.sectionsByWorkspaceKey
+      .get("srv:ws-1")
+      ?.members.find((entry) => entry.projectId === "project-a");
+    expect(
+      memberWithoutChild?.agents.find((entry) => entry.agentId === "parent")?.statusBucket,
+    ).toBe("attention");
+    expect(countAttentionTabs({ sessions, layoutsByWorkspace })).toBe(1);
+  });
+
   it("counts every open unseen tab, including one behind its pane's front tab", () => {
     const finished = (id: string) =>
       agent({

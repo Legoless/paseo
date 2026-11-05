@@ -161,6 +161,7 @@ export function createSidebarWorkspaceEntry(input: {
   projectViewKey?: string;
   pendingCreateAttempts?: Record<string, PendingCreateAttempt>;
   workspaceAgentActivity?: ReadonlyMap<string, WorkspaceAgentActivity>;
+  runningChildAgentIds?: ReadonlySet<string>;
 }): SidebarWorkspaceEntry {
   const member = input.workspace.members.length === 1 ? input.workspace.members[0] : null;
   const projectViewKey = input.projectViewKey ?? member?.projectId ?? "";
@@ -207,6 +208,7 @@ function deriveEffectiveWorkspaceStatus(input: {
   workspace: WorkspaceDescriptor;
   pendingCreateAttempts?: Record<string, PendingCreateAttempt>;
   workspaceAgentActivity?: ReadonlyMap<string, WorkspaceAgentActivity>;
+  runningChildAgentIds?: ReadonlySet<string>;
 }): EffectiveWorkspaceStatus {
   if (input.workspace.status !== "done") {
     return { status: input.workspace.status, enteredAt: input.workspace.statusEnteredAt };
@@ -222,8 +224,14 @@ function deriveEffectiveWorkspaceStatus(input: {
   }
 
   const rootAgentActivity = input.workspaceAgentActivity?.get(input.workspace.id);
-  if (rootAgentActivity && rootAgentActivity.status !== "done") {
-    return rootAgentActivity;
+  if (rootAgentActivity) {
+    // A child still working keeps the workspace blue, matching the agent tab.
+    if (input.runningChildAgentIds?.has(rootAgentActivity.agentId)) {
+      return { status: "running", enteredAt: rootAgentActivity.enteredAt };
+    }
+    if (rootAgentActivity.status !== "done") {
+      return rootAgentActivity;
+    }
   }
 
   return { status: input.workspace.status, enteredAt: input.workspace.statusEnteredAt };
@@ -265,6 +273,7 @@ export function deriveProjectStatusBucket(input: {
   workspaces: readonly SidebarWorkspacePlacement[];
   sessions: Record<string, ProjectStatusSession | undefined>;
   pendingCreateAttempts?: Record<string, PendingCreateAttempt>;
+  runningChildAgentIds?: ReadonlySet<string>;
 }): SidebarStateBucket {
   const workspaceIdsByServer = new Map<string, string[]>();
   for (const placement of input.workspaces) {
@@ -293,6 +302,7 @@ export function deriveProjectStatusBucket(input: {
           workspace,
           pendingCreateAttempts: input.pendingCreateAttempts,
           workspaceAgentActivity: session.workspaceAgentActivity,
+          runningChildAgentIds: input.runningChildAgentIds,
         }).status,
       );
     }
@@ -429,6 +439,7 @@ export function buildSidebarWorkspaceEntries(input: {
   sessions: SidebarWorkspaceSession[];
   pendingCreateAttempts?: Record<string, PendingCreateAttempt>;
   previousEntries?: ReadonlyMap<string, SidebarWorkspaceEntry>;
+  runningChildAgentIds?: ReadonlySet<string>;
 }): Map<string, SidebarWorkspaceEntry> {
   if (input.placements.length === 0 || input.sessions.length === 0) {
     return new Map();
@@ -453,6 +464,7 @@ export function buildSidebarWorkspaceEntries(input: {
       projectViewKey: placement.projectViewKey,
       pendingCreateAttempts: input.pendingCreateAttempts,
       workspaceAgentActivity: session.workspaceAgentActivity,
+      runningChildAgentIds: input.runningChildAgentIds,
     });
     const previousEntry = input.previousEntries?.get(placement.workspaceKey);
     entries.set(

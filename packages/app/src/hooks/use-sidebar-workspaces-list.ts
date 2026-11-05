@@ -14,6 +14,7 @@ import { getHostRuntimeStore, useHostRegistryLoaded, useHosts } from "@/runtime/
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
 import { useSidebarViewStore } from "@/stores/sidebar-view-store";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
+import { useRunningChildAgentIds } from "@/subagents/use-running-child-agent-ids";
 import {
   buildSidebarWorkspacePlacementModel,
   computeSidebarOrderUpdates,
@@ -282,14 +283,19 @@ export function useSidebarWorkspaceGroupSections(input: {
   const layoutsByWorkspace = useWorkspaceLayoutStore((state) =>
     enabled ? state.layoutByWorkspace : EMPTY_WORKSPACE_LAYOUTS,
   );
+  const runningChildAgentIds = useRunningChildAgentIds(serverIds);
   const previousModelRef = useRef<SidebarWorkspaceGroupModel>(EMPTY_GROUP_MODEL);
   return useMemo(() => {
     if (!enabled || sessions.length === 0) {
       return previousModelRef.current;
     }
-    const next = buildSidebarWorkspaceGroupModel({ sessions, layoutsByWorkspace });
+    const next = buildSidebarWorkspaceGroupModel({
+      sessions,
+      layoutsByWorkspace,
+      runningChildAgentIds,
+    });
     const model = preserveSidebarWorkspaceGroupModelIdentity(previousModelRef.current, next);
     previousModelRef.current = model;
     return model;
-  }, [enabled, layoutsByWorkspace, sessions]);
+  }, [enabled, layoutsByWorkspace, sessions, runningChildAgentIds]);
 }

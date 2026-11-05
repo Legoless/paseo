@@ -4,6 +4,7 @@ import { getDesktopHost } from "@/desktop/host";
 import { countAttentionTabs } from "@/projects/workspace-groups";
 import { useSessionStore } from "@/stores/session-store";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
+import { useRunningChildAgentIds } from "@/subagents/use-running-child-agent-ids";
 import { getIsElectron, isNative } from "@/constants/platform";
 
 type FaviconStatus = "none" | "running" | "attention";
@@ -96,6 +97,7 @@ export function useFaviconStatus() {
   const { agents } = useAggregatedAgents({ demand: !isNative });
   const [colorScheme, setColorScheme] = useState<ColorScheme>(getSystemColorScheme);
   const layoutsByWorkspace = useWorkspaceLayoutStore((state) => state.layoutByWorkspace);
+  const runningChildAgentIds = useRunningChildAgentIds();
   const attentionCount = useSessionStore((state) =>
     countAttentionTabs({
       sessions: Object.entries(state.sessions).map(([serverId, session]) => ({
@@ -104,6 +106,7 @@ export function useFaviconStatus() {
         agents: session.agents,
       })),
       layoutsByWorkspace,
+      runningChildAgentIds,
     }),
   );
   const dockBadgeCount = attentionCount > 0 ? attentionCount : undefined;
