@@ -4154,4 +4154,196 @@ describe("stale dialog and Cursor footer regressions", () => {
     vi.advanceTimersByTime(500);
     expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
   });
+
+  it("settles Antigravity to finished when only IsDaemon tasks remain in the tray and does not relight on passive repaints", () => {
+    const rule = "─".repeat(60);
+    const activeTurnWithDaemon = [
+      "▸ Thought for 3.2s",
+      "Launched Kingdom Rush Godot in the background for playtesting.",
+      rule,
+      "> ",
+      rule,
+      "  ● [10:43:59] ./launch-godot.command running",
+      rule,
+      "esc to cancel                              Gemini 4 Argon · high · 1 task(s) · /tasks",
+    ];
+    const idleWithDaemonInTray = [
+      "▸ Thought for 3.2s",
+      "Launched Kingdom Rush Godot in the background for playtesting.",
+      rule,
+      "> ",
+      rule,
+      "  ● [10:43:59] ./launch-godot.command running",
+      rule,
+      "? for shortcuts                            Gemini 4 Argon · high · 1 task(s) · /tasks",
+    ];
+
+    expect(
+      isAntigravityBusyScreen(activeTurnWithDaemon, {
+        areTrayTasksDaemonOnly: () => true,
+      }),
+    ).toBe(true);
+    expect(
+      isAntigravityBusyScreen(idleWithDaemonInTray, {
+        areTrayTasksDaemonOnly: () => true,
+      }),
+    ).toBe(false);
+    expect(
+      isIdleAgentScreen(idleWithDaemonInTray, "> ", "antigravity", {
+        areTrayTasksDaemonOnly: () => true,
+      }),
+    ).toBe(true);
+
+    const tracker = new TerminalActivityTracker();
+    let screenLines = activeTurnWithDaemon;
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      areAntigravityTrayTasksDaemonOnly: (tray) =>
+        tray.visibleTasks.length === 1 &&
+        tray.visibleTasks[0].startTime === "10:43:59" &&
+        tray.visibleTasks[0].description === "./launch-godot.command" &&
+        tray.taskCount === 1,
+      readLastLines: () => screenLines,
+      readCursorLine: () => "> ",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("agy");
+    scanner.feedOutput(activeTurnWithDaemon.join("\n"));
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    // Turn finishes while ./launch-godot.command remains in the tray.
+    screenLines = idleWithDaemonInTray;
+    scanner.feedOutput(idleWithDaemonInTray.join("\n"));
+    scanner.handleProgramStatusOsc("state=done:app=antigravity");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "finished",
+    });
+
+    // Focusing clears finished attention; passive TUI repaints of the daemon tray must not relight blue.
+    tracker.clearAttention();
+    scanner.feedOutput("● [10:43:59] ./launch-godot.command running");
+    scanner.feedOutput("⠇");
+    vi.advanceTimersByTime(1500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: null });
+
+    // A follow-up user turn lights working and settles back to finished while the daemon stays open.
+    scanner.feedInput("\r");
+    screenLines = activeTurnWithDaemon;
+    scanner.feedOutput("esc to cancel");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    screenLines = idleWithDaemonInTray;
+    scanner.feedOutput("? for shortcuts");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "finished",
+    });
+  });
+
+  it("keeps Antigravity working across OSC 7501 done while a non-daemon background task runs alongside a daemon", () => {
+    const rule = "─".repeat(60);
+    const mixedTray = [
+      "Running the test suite in the background.",
+      rule,
+      "> ",
+      rule,
+      "  ● [10:43:59] ./launch-godot.command running",
+      "  ● [10:45:10] npm test running",
+      rule,
+      "? for shortcuts                            Gemini 4 Argon · high · 2 task(s) · /tasks",
+    ];
+    const daemonOnlyTray = [
+      "All tests passed.",
+      rule,
+      "> ",
+      rule,
+      "  ● [10:43:59] ./launch-godot.command running",
+      rule,
+      "? for shortcuts                            Gemini 4 Argon · high · 1 task(s) · /tasks",
+    ];
+
+    const tracker = new TerminalActivityTracker();
+    let screenLines = mixedTray;
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      areAntigravityTrayTasksDaemonOnly: (tray) =>
+        tray.taskCount === 1 &&
+        tray.visibleTasks.every((task) => task.description === "./launch-godot.command"),
+      readLastLines: () => screenLines,
+      readCursorLine: () => "> ",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("agy");
+    scanner.feedInput("\r");
+    scanner.feedOutput(mixedTray.join("\n"));
+    // agy emits OSC 7501 state=done between turns while waiting for npm test to finish.
+    scanner.handleProgramStatusOsc("state=done:app=antigravity");
+    vi.advanceTimersByTime(3000);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    // Wakeup turn runs and completes, leaving only ./launch-godot.command in the tray.
+    scanner.handleProgramStatusOsc("state=working:app=antigravity");
+    screenLines = daemonOnlyTray;
+    scanner.feedOutput(daemonOnlyTray.join("\n"));
+    scanner.handleProgramStatusOsc("state=done:app=antigravity");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "finished",
+    });
+  });
+
+  it("tracks Antigravity OSC 7501 blocked, working, and quota states", () => {
+    const rule = "─".repeat(60);
+    const tracker = new TerminalActivityTracker();
+    let screenLines = ["Do you trust this folder?", "> Yes, I trust this folder", "  No, exit"];
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screenLines,
+      readCursorLine: () => "> ",
+      stillnessMs: 500,
+    });
+
+    // OSC 7501 app=antigravity identifies the CLI and flags blocked prompts immediately.
+    scanner.handleProgramStatusOsc(
+      "state=blocked:kind=permission:app=antigravity:msg=VHJ1c3QgdGhpcyBmb2xkZXI/",
+    );
+    expect(scanner.getActiveAgent()).toBe("antigravity");
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "needs_input",
+    });
+
+    // Answering starts a turn via OSC 7501 working without requiring Enter.
+    screenLines = [rule, "> ", rule, "esc to cancel · Gemini 4 Argon · high"];
+    scanner.handleProgramStatusOsc("state=working:app=antigravity");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    // A quota stop stays red when OSC 7501 reports error (even if the screen wrapped the banner).
+    screenLines = [
+      "Error: daily quota",
+      "exceeded for model.",
+      rule,
+      "> ",
+      rule,
+      "? for shortcuts · Gemini 4 Argon · high",
+    ];
+    scanner.handleProgramStatusOsc("state=error:app=antigravity:msg=UXVvdGEgZXhjZWVkZWQ=");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "quota",
+    });
+  });
 });

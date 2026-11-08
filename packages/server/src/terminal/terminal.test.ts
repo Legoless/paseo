@@ -2066,6 +2066,123 @@ describe("terminal pty activity scanning", () => {
     expect(activity).toMatchObject({ state: "idle", attentionReason: "quota" });
     expect(deriveTerminalActivityStatusBucket(activity)).toBe("failed");
   });
+
+  it("answers OSC 7501 capability probes and settles Antigravity when only IsDaemon tasks stay in the tray", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "paseo-agy-pty-"));
+    const workspaceDir = join(rootDir, "kingdomrush");
+    const homeDir = join(rootDir, "home");
+    const cliHomeDir = join(homeDir, ".gemini", "antigravity-cli");
+    const conversationId = "a5f25ca9-f00d-4da4-ae48-a477fde38fda";
+    const logsDir = join(cliHomeDir, "brain", conversationId, ".system_generated", "logs");
+    mkdirSync(workspaceDir, { recursive: true });
+    mkdirSync(logsDir, { recursive: true });
+
+    try {
+      const realWorkspace = realpathSync(workspaceDir);
+      writeFileSync(
+        join(cliHomeDir, "history.jsonl"),
+        JSON.stringify({ conversationId, workspace: realWorkspace, timestamp: 1000 }) + "\n",
+        "utf8",
+      );
+      writeFileSync(
+        join(logsDir, "transcript.jsonl"),
+        [
+          JSON.stringify({
+            step_index: 1,
+            type: "PLANNER_RESPONSE",
+            status: "DONE",
+            tool_calls: [
+              {
+                name: "run_command",
+                args: {
+                  CommandLine: '"./launch-godot.command"',
+                  IsDaemon: "true",
+                  WaitMsBeforeAsync: "3000",
+                },
+              },
+            ],
+          }),
+          JSON.stringify({
+            step_index: 2,
+            type: "GENERIC",
+            status: "RUNNING",
+            content: [
+              "Created At: 2026-11-08T10:43:59+01:00",
+              `Tool is running as a background task with task id: ${conversationId}/task-2`,
+              "Task Description: ./launch-godot.command",
+            ].join("\n"),
+          }),
+        ].join("\n") + "\n",
+        "utf8",
+      );
+
+      const scriptPath = join(rootDir, "fake-agy.mjs");
+      writeFileSync(
+        scriptPath,
+        [
+          'const rule = "─".repeat(60);',
+          "process.stdin.setRawMode(true);",
+          "process.stdin.resume();",
+          'let buffer = "";',
+          'process.stdout.write("\\x1b]7501;?\\x07");',
+          'process.stdin.on("data", (chunk) => {',
+          "  buffer += chunk.toString();",
+          '  if (buffer.includes("\\x1b]7501;?1\\x1b\\\\")) {',
+          '    buffer = "";',
+          '    process.stdout.write("osc7501-supported\\r\\n\\x1b]7501;state=blocked:kind=permission:app=antigravity\\x07Trust this folder?\\r\\n> Yes");',
+          '  } else if (buffer.includes("run")) {',
+          '    buffer = "";',
+          '    process.stdout.write("\\x1b]7501;state=working:app=antigravity\\x07\\r\\n" + [',
+          '      "Launched Godot.",',
+          "      rule,",
+          '      "> ",',
+          "      rule,",
+          '      "  ● [10:43:59] ./launch-godot.command running",',
+          "      rule,",
+          '      "? for shortcuts · Gemini 4 Argon · high · 1 task(s) · /tasks",',
+          '    ].join("\\r\\n") + "\\x1b[4A\\r> \\x1b]7501;state=done:app=antigravity\\x07");',
+          "  }",
+          "});",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const session = trackSession(
+        await createTerminal({
+          workspaceId: "ws-test",
+          cwd: realWorkspace,
+          env: { HOME: homeDir },
+          command: process.execPath,
+          args: [scriptPath],
+        }),
+      );
+
+      await waitForState(session, (state) =>
+        getLines(state).join("\n").includes("osc7501-supported"),
+      );
+      await vi.waitFor(
+        () =>
+          expect(session.getActivity()).toMatchObject({
+            state: "idle",
+            attentionReason: "needs_input",
+          }),
+        { timeout: 4000 },
+      );
+
+      session.send({ type: "input", data: "run" });
+      await vi.waitFor(
+        () =>
+          expect(session.getActivity()).toMatchObject({
+            state: "idle",
+            attentionReason: "finished",
+          }),
+        { timeout: 4000 },
+      );
+      expect(deriveTerminalActivityStatusBucket(session.getActivity())).toBe("attention");
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
 });
 
 // The escaping tests above assert the command line we generate. This one runs

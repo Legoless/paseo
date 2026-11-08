@@ -3,6 +3,11 @@ import type {
   TerminalActivityAttentionReason,
   TerminalActivityState,
 } from "@getpaseo/protocol/terminal-activity";
+import {
+  normalizeAntigravityClockTime,
+  type AntigravityTrayTaskSummary,
+  type AntigravityVisibleTrayTask,
+} from "./antigravity-tasks.js";
 
 interface ObservedTerminalActivity {
   state: TerminalActivityState | null;
@@ -18,6 +23,7 @@ export interface PtyActivityScannerOptions {
   getActivity: () => ObservedTerminalActivity;
   getActivityOwnerSessionId?: () => string | null;
   hasHookNeedsInput?: () => boolean;
+  areAntigravityTrayTasksDaemonOnly?: (traySummary: AntigravityTrayTaskSummary) => boolean;
   readLastLines: (limit: number) => string[];
   readCursorLine: () => string;
   initialScreenIsHistory?: boolean;
@@ -351,9 +357,12 @@ export function isIdlePromptLine(line: string, agent: KnownAgentName): boolean {
 }
 
 const ANTIGRAVITY_RUNNING_STATUS = /\[\d{1,2}:\d{2}:\d{2}\].*\brunning$/i;
+const ANTIGRAVITY_RUNNING_TASK_ROW = /\[(\d{1,2}:\d{2}:\d{2})\]\s*(.+?)\s+running$/i;
 const ANTIGRAVITY_RUNNING_SUBAGENT = /^[●○]\s+Agent\(/;
 const ANTIGRAVITY_RUNNING_COMMAND = /^[●○]\s+Running\b/;
 const ANTIGRAVITY_OPEN_WORK = /\b[1-9]\d*\s+(?:task|subagent)\(s\)(?=\s|$)/i;
+const ANTIGRAVITY_OPEN_SUBAGENTS = /\b[1-9]\d*\s+subagent\(s\)(?=\s|$)/i;
+const ANTIGRAVITY_OPEN_TASKS = /\b([1-9]\d*)\s+task\(s\)(?=\s|$)/i;
 const ANTIGRAVITY_ACTIVE_TURN_FOOTER = /^esc to cancel\b.*\s[·•]\s/i;
 const ANTIGRAVITY_COMPOSER_FOOTER =
   /^(?:esc to cancel|\?\s+for shortcuts)\b.*\s[·•]\s|\bGemini\s+\d+(?:\.\d+)?\b.*\s[·•]\s*(?:low|medium|high|xhigh|max)\b/i;
@@ -429,32 +438,94 @@ export function isAntigravityNeedsInputScreen(lines: string[]): boolean {
   return matchesGenericNeedsInput(live, "antigravity");
 }
 
-function isAntigravityBusyLine(line: string): boolean {
+export interface AntigravityBusyScreenOptions {
+  areTrayTasksDaemonOnly?: (traySummary: AntigravityTrayTaskSummary) => boolean;
+}
+
+function isAntigravityForegroundOrSubagentBusyLine(line: string): boolean {
   return (
     ANTIGRAVITY_ACTIVE_TURN_FOOTER.test(line) ||
-    ANTIGRAVITY_RUNNING_STATUS.test(line) ||
     ANTIGRAVITY_RUNNING_SUBAGENT.test(line) ||
-    ANTIGRAVITY_OPEN_WORK.test(line)
+    ANTIGRAVITY_OPEN_SUBAGENTS.test(line)
   );
+}
+
+function parseAntigravityTrayTaskRow(line: string): AntigravityVisibleTrayTask | null {
+  const match = ANTIGRAVITY_RUNNING_TASK_ROW.exec(line);
+  if (!match) {
+    return null;
+  }
+  const rawDescription = match[2].trim();
+  if (rawDescription.endsWith("…")) {
+    return {
+      startTime: normalizeAntigravityClockTime(match[1]),
+      description: rawDescription.slice(0, -1).replace(/\s+/g, " ").trim(),
+      truncated: true,
+    };
+  }
+  if (rawDescription.endsWith("...")) {
+    return {
+      startTime: normalizeAntigravityClockTime(match[1]),
+      description: rawDescription.slice(0, -3).replace(/\s+/g, " ").trim(),
+      truncated: true,
+    };
+  }
+  return {
+    startTime: normalizeAntigravityClockTime(match[1]),
+    description: rawDescription.replace(/\s+/g, " ").trim(),
+    truncated: false,
+  };
+}
+
+function parseAntigravityTrayTasks(lines: readonly string[]): AntigravityTrayTaskSummary | null {
+  const visibleTasks: AntigravityVisibleTrayTask[] = [];
+  let taskCount: number | null = null;
+  for (const line of lines) {
+    const row = parseAntigravityTrayTaskRow(line);
+    if (row !== null) {
+      visibleTasks.push(row);
+    }
+    const countMatch = ANTIGRAVITY_OPEN_TASKS.exec(line);
+    if (countMatch) {
+      taskCount = Number.parseInt(countMatch[1], 10);
+    }
+  }
+  if (visibleTasks.length === 0 && taskCount === null) {
+    return null;
+  }
+  return { visibleTasks, taskCount };
 }
 
 // The agy composer stays on `>` while a turn runs (`esc to cancel` in the footer) and
 // while background tasks or subagents sit in the tray below it (`[HH:MM:SS] … running`,
 // `● Agent(…)`, `N task(s)`, `N subagent(s)`). `run_command` backgrounds commands past
 // its 10s wait and wakes the model on completion, and `[HH:MM:SS]` is the static start
-// timestamp, so keep the screen working across quiet stretches. Scope to the tray when
-// the composer is visible so a reply quoting a count or timestamp does not relight it.
-export function isAntigravityBusyScreen(lines: string[]): boolean {
+// timestamp, so non-daemon tasks keep the screen working across quiet stretches while
+// `IsDaemon: true` tasks let the completed turn settle. Scope to the tray when the
+// composer is visible so a reply quoting a count or timestamp does not relight it.
+export function isAntigravityBusyScreen(
+  lines: string[],
+  options?: AntigravityBusyScreenOptions,
+): boolean {
   if (isAntigravityQuitScreen(lines) || isAntigravityNeedsInputScreen(lines)) return false;
   const live = antigravityLiveRawLines(lines);
   const tray = antigravityTrayLines(live);
-  if (tray !== null) {
-    return tray.some((line) => isAntigravityBusyLine(stripAnsi(line).trim()));
+  const rawScope = tray ?? live.slice(-20);
+  const strippedScope = rawScope.map((rawLine) => stripAnsi(rawLine).trim());
+  if (
+    strippedScope.some((line) => isAntigravityForegroundOrSubagentBusyLine(line)) ||
+    (tray === null && strippedScope.some((line) => ANTIGRAVITY_RUNNING_COMMAND.test(line)))
+  ) {
+    return true;
   }
-  return live.slice(-20).some((rawLine) => {
-    const line = stripAnsi(rawLine).trim();
-    return isAntigravityBusyLine(line) || ANTIGRAVITY_RUNNING_COMMAND.test(line);
-  });
+  const traySummary = parseAntigravityTrayTasks(strippedScope);
+  if (traySummary === null) {
+    return strippedScope.some((line) => ANTIGRAVITY_RUNNING_STATUS.test(line));
+  }
+  if (options?.areTrayTasksDaemonOnly?.(traySummary)) {
+    return false;
+  }
+  return true;
 }
 
 const GEMINI_RUNNING_STATUS = /^[\u2800-\u28FF]\s+.+\(esc to cancel,\s*\d+[hms](?:\s+\d+[hms])*\)$/;
@@ -896,8 +967,12 @@ export function isOpenCodeNeedsInputScreen(lines: string[]): boolean {
 }
 
 // Agents that keep their idle-looking composer up while work still runs.
-function isAgentBusyScreen(lines: string[], agent: KnownAgentName): boolean {
-  if (agent === "antigravity") return isAntigravityBusyScreen(lines);
+function isAgentBusyScreen(
+  lines: string[],
+  agent: KnownAgentName,
+  antigravityOptions?: AntigravityBusyScreenOptions,
+): boolean {
+  if (agent === "antigravity") return isAntigravityBusyScreen(lines, antigravityOptions);
   if (agent === "gemini") return isGeminiBusyScreen(lines);
   if (agent === "codex") return isCodexBusyScreen(lines);
   if (agent === "claude") return isClaudeBusyScreen(lines);
@@ -1005,8 +1080,9 @@ export function isIdleAgentScreen(
   lines: string[],
   cursorLine: string,
   agent: KnownAgentName,
+  antigravityOptions?: AntigravityBusyScreenOptions,
 ): boolean {
-  if (isAgentBusyScreen(lines, agent)) {
+  if (isAgentBusyScreen(lines, agent, antigravityOptions)) {
     return false;
   }
   if (agent === "muse" && isMuseNeedsInputScreen(lines)) {
@@ -1293,6 +1369,55 @@ const CLAUDE_SPINNER_REGEX = /[·✢✳✶✻✽◐◑◒◓]/;
 // as a numbered permission menu answered with "1" and no Enter.
 const CLAUDE_BUSY_TITLE_REGEX = /\][02];[\u25D0\u25D1] /;
 
+type ProgramStatusState = "working" | "blocked" | "done" | "error" | "idle" | "clear";
+
+interface ProgramStatusOsc {
+  state: ProgramStatusState | null;
+  app: string | null;
+  message: string | null;
+}
+
+function isProgramStatusState(value: string): value is ProgramStatusState {
+  return (
+    value === "working" ||
+    value === "blocked" ||
+    value === "done" ||
+    value === "error" ||
+    value === "idle" ||
+    value === "clear"
+  );
+}
+
+function decodeProgramStatusMessage(encoded: string): string | null {
+  if (encoded.length === 0 || !/^[A-Za-z0-9+/]+=*$/.test(encoded)) {
+    return null;
+  }
+  const decoded = Buffer.from(encoded, "base64").toString("utf8").trim();
+  return decoded.length > 0 ? decoded : null;
+}
+
+function parseProgramStatusOsc(rawPayload: string): ProgramStatusOsc {
+  let state: ProgramStatusState | null = null;
+  let app: string | null = null;
+  let message: string | null = null;
+  for (const segment of rawPayload.trim().split(":")) {
+    const separator = segment.indexOf("=");
+    if (separator <= 0) {
+      continue;
+    }
+    const key = segment.slice(0, separator);
+    const value = segment.slice(separator + 1);
+    if (key === "state" && isProgramStatusState(value)) {
+      state = value;
+    } else if (key === "app" && value.length > 0) {
+      app = value.toLowerCase();
+    } else if (key === "msg") {
+      message = decodeProgramStatusMessage(value);
+    }
+  }
+  return { state, app, message };
+}
+
 export class PtyActivityScanner {
   private activeAgent: KnownAgentName | null = null;
   private currentActivity: TerminalActivityState | null = null;
@@ -1316,10 +1441,14 @@ export class PtyActivityScanner {
   private stillnessTimer: NodeJS.Timeout | null = null;
   private lastOutputAt = 0;
   private readonly options: PtyActivityScannerOptions;
+  private readonly antigravityBusyOptions: AntigravityBusyScreenOptions;
   private readonly stillnessMs: number;
 
   constructor(options: PtyActivityScannerOptions) {
     this.options = options;
+    this.antigravityBusyOptions = {
+      areTrayTasksDaemonOnly: options.areAntigravityTrayTasksDaemonOnly,
+    };
     this.canProbeScreenForAgent = !options.initialScreenIsHistory;
     this.stillnessMs = options.stillnessMs ?? 1200;
   }
@@ -1403,6 +1532,75 @@ export class PtyActivityScanner {
     this.initialLaunch = false;
     // Hooks can arrive after the final PTY repaint, when no stillness check remains armed.
     this.scheduleStillnessCheck();
+  }
+
+  handleProgramStatusOsc(rawPayload: string): void {
+    const programStatus = parseProgramStatusOsc(rawPayload);
+    if (programStatus.app === "antigravity" && !this.activeAgent) {
+      if (isAntigravityQuitScreen(this.options.readLastLines(20))) {
+        return;
+      }
+      this.activeAgent = "antigravity";
+      this.agentDetectionOutput = "";
+      this.titleGuess = false;
+      this.titleChecks = 0;
+      this.initialLaunch = true;
+    }
+    if (!this.activeAgent || this.disarmQuitAntigravity()) {
+      return;
+    }
+
+    if (programStatus.state === "working") {
+      if (this.isInsideInterruptWindow()) {
+        return;
+      }
+      this.initialLaunch = false;
+      this.setWorking();
+      return;
+    }
+
+    if (programStatus.state === "blocked") {
+      this.initialLaunch = false;
+      this.unresolvedWorkingStillness = 0;
+      const lines = this.options.readLastLines(25);
+      if (isSpendLimitScreen(lines, this.activeAgent)) {
+        this.currentActivity = "attention";
+        this.options.setActivity("attention", "quota");
+        return;
+      }
+      this.currentActivity = "attention";
+      this.options.setActivity("attention");
+      return;
+    }
+
+    if (
+      programStatus.state === "error" &&
+      programStatus.message !== null &&
+      isSpendLimitNoticeLine(programStatus.message)
+    ) {
+      this.initialLaunch = false;
+      this.currentActivity = "attention";
+      this.unresolvedWorkingStillness = 0;
+      this.options.setActivity("attention", "quota");
+      return;
+    }
+
+    if (
+      programStatus.state === "done" ||
+      programStatus.state === "error" ||
+      programStatus.state === "idle"
+    ) {
+      const observed = this.options.getActivity();
+      const hasOpenTurnOrPrompt =
+        this.currentActivity === "working" ||
+        observed.state === "working" ||
+        this.currentActivity === "attention" ||
+        observed.attentionReason === "needs_input";
+      if (hasOpenTurnOrPrompt) {
+        this.initialLaunch = false;
+        this.scheduleStillnessCheck();
+      }
+    }
   }
 
   handleInterrupt(): void {
@@ -1527,7 +1725,8 @@ export class PtyActivityScanner {
       return false;
     }
     return (
-      this.activeAgent !== "antigravity" || isAntigravityBusyScreen(this.options.readLastLines(20))
+      this.activeAgent !== "antigravity" ||
+      isAntigravityBusyScreen(this.options.readLastLines(20), this.antigravityBusyOptions)
     );
   }
 
@@ -1548,7 +1747,7 @@ export class PtyActivityScanner {
     }
     const lines = this.options.readLastLines(25);
     if (
-      isAgentBusyScreen(lines, this.activeAgent) &&
+      isAgentBusyScreen(lines, this.activeAgent, this.antigravityBusyOptions) &&
       !isSpendLimitScreen(lines, this.activeAgent)
     ) {
       this.initialLaunch = false;
@@ -1648,7 +1847,7 @@ export class PtyActivityScanner {
 
     if (
       !openCodeHookNeedsInput &&
-      isAgentBusyScreen(lines, this.activeAgent) &&
+      isAgentBusyScreen(lines, this.activeAgent, this.antigravityBusyOptions) &&
       !isSpendLimitScreen(lines, this.activeAgent)
     ) {
       this.unresolvedWorkingStillness = 0;
@@ -1678,7 +1877,14 @@ export class PtyActivityScanner {
       return;
     }
 
-    if (isIdleAgentScreen(lines, this.options.readCursorLine(), this.activeAgent)) {
+    if (
+      isIdleAgentScreen(
+        lines,
+        this.options.readCursorLine(),
+        this.activeAgent,
+        this.antigravityBusyOptions,
+      )
+    ) {
       this.unresolvedWorkingStillness = 0;
       if (this.initialLaunch) {
         this.initialLaunch = false;

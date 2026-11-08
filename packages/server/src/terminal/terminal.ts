@@ -24,6 +24,10 @@ import {
 import type { TerminalCell, TerminalState } from "@getpaseo/protocol/messages";
 import { TerminalInputModeTracker } from "@getpaseo/protocol/terminal-input-mode";
 import { TerminalActivityTracker } from "./activity/terminal-activity-tracker.js";
+import {
+  createAntigravityDaemonTaskChecker,
+  resolveAntigravityCliHomeDir,
+} from "./activity/antigravity-tasks.js";
 import { detectAgentFromCommand, PtyActivityScanner } from "./activity/pty-activity-scanner.js";
 import {
   buildTerminalResumeInput,
@@ -228,6 +232,29 @@ function resolveInitialTitleMode(presetTitle: string | undefined): "auto" | "man
 
 function isTerminalActivityInterruptInput(data: string): boolean {
   return data === "\x03" || data === "\x1b";
+}
+
+function resolveTerminalHomeDir(env: Record<string, string>): string | undefined {
+  return env.HOME || env.USERPROFILE || process.env.HOME || process.env.USERPROFILE || undefined;
+}
+
+function registerProgramStatusOscHandler(input: {
+  terminal: TerminalType;
+  ptyProcess: pty.IPty;
+  activityScanner: PtyActivityScanner;
+  isInactive: () => boolean;
+}): { dispose(): void } {
+  return input.terminal.parser.registerOscHandler(7501, (data) => {
+    if (input.isInactive()) {
+      return true;
+    }
+    if (data.trim() === "?") {
+      input.ptyProcess.write("\x1b]7501;?1\x1b\\");
+      return true;
+    }
+    input.activityScanner.handleProgramStatusOsc(data);
+    return true;
+  });
 }
 
 interface BuildTerminalEnvironmentInput {
@@ -1250,12 +1277,19 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     allowProposedApi: true,
   });
 
+  let shellCwd = resolveShellStartCwd(cwd, options.restore);
+  const areAntigravityTrayTasksDaemonOnly = createAntigravityDaemonTaskChecker({
+    getCwd: () => shellCwd,
+    cliHomeDir: resolveAntigravityCliHomeDir(resolveTerminalHomeDir(env)),
+  });
+
   const activityScanner = new PtyActivityScanner({
     setActivity: (state, attentionReason) => activityTracker.set(state, attentionReason),
     clearActivity: () => activityTracker.clear(),
     getActivity: () => activityTracker.getSnapshot(),
     getActivityOwnerSessionId: () => activityTracker.getOwnerSessionId(),
     hasHookNeedsInput: () => activityTracker.hasHookNeedsInput(),
+    areAntigravityTrayTasksDaemonOnly,
     readLastLines: (limit) => extractLastOutputLines(terminal, limit),
     readCursorLine: () => extractCursorLine(terminal),
     // A saved screen belongs to the old process, not the shell or CLI being spawned.
@@ -1267,7 +1301,6 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   // (zsh only, marked by its first prompt), or the agent is the pty's own process.
   let shellReportsCommands = false;
   const commandAgent = detectAgentFromCommand(command);
-  let shellCwd = resolveShellStartCwd(cwd, options.restore);
   let hasReportedShellCwd = false;
   // A running program can print OSC 7 too. Once the shell reports its prompts, reports wait for
   // the next prompt or command end, where the shell's own report replaces anything printed before.
@@ -1493,6 +1526,13 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     return true;
   });
 
+  const disposeProgramStatusSubscription = registerProgramStatusOscHandler({
+    terminal,
+    ptyProcess,
+    activityScanner,
+    isInactive: () => disposed || killed,
+  });
+
   activityTracker.onChange((snapshot, previousSnapshot) => {
     if (disposed || killed) {
       return;
@@ -1563,6 +1603,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     disposeTitleChangeSubscription();
     disposeCommandLifecycleSubscription.dispose();
     disposeShellCwdSubscription.dispose();
+    disposeProgramStatusSubscription.dispose();
     activityTracker.dispose();
     terminal.dispose();
     listeners.clear();
