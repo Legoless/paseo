@@ -636,11 +636,15 @@ export function isClaudeBusyScreen(lines: string[]): boolean {
 // Grok prints "Worked for …" when the turn ends and leaves the ❯ composer up.
 // A dock row above that composer is still this turn only until that marker
 // exists. Its mark is the four-dot ⸬ (a braille spinner is the other running
-// mark) and the row ends with a live elapsed time: `⸬ Run …  1h04m`. After
-// "Worked for", those rows are processes left up for the user. Their clocks
-// keep painting, and that must not keep the pane working. "Thought for" only
-// closes the reasoning block, so a dock row under it is still the turn. An
-// open reasoning block is a spinner frame plus `Thinking` or `Thinking…`.
+// mark) and the row ends with a live elapsed time: `⸬ Run …  1h04m`. Grok
+// 4.7 keeps painting past that clock: `↓159k`, a `[1]` count, and `[stop]`
+// or `[send to bg]` (`Waiting for response... 1.4s … 10m10s ↓159k [stop]`).
+// That tail is this turn, so it stays working even when an older `Worked for`
+// is still in the dock. A clock with no tail, after "Worked for", is a
+// process left up for the user. Its clock keeps painting, and that must not
+// keep the pane working. "Thought for" only closes the reasoning block, so a
+// dock row under it is still the turn. An open reasoning block is a spinner
+// frame plus `Thinking` or `Thinking…`.
 // That frame cycles through `⋅` `:` `⸬` `⁙` and braille, so the mark is
 // whatever single glyph is in front of the word. A `Thinking` line above
 // `Thought for` or `Worked for` is an older block. `◎ waiting` is the turn
@@ -649,8 +653,15 @@ export function isClaudeBusyScreen(lines: string[]): boolean {
 // parked case, and a mix stays working. The window is the lines near the
 // composer, so a braille logo higher in the scrollback does not.
 const GROK_RUNNING_MARK = "(?:[\\u2800-\\u28FF]|⸬)";
+const GROK_ELAPSED = String.raw`(?:\d+h\d+m(?:\d+s)?|\d+m\d+s|\d+(?:\.\d+)?[hms])`;
+// Token meter, background count, and the stop / send-to-background controls
+// share the status row with the clock. The buttons identify the live turn.
+const GROK_LIVE_STATUS_TAIL = String.raw`(?:\s+↓\s*[\d.]+[kKmM])?(?:\s*\[\d+\])?(?:\s*\[(?:stop|send to bg)\])+`;
 const GROK_RUNNING_ROW = new RegExp(
-  `^${GROK_RUNNING_MARK}.*(?:\\d+h\\d+m(?:\\d+s)?|\\d+m\\d+s|\\d+[hms])$`,
+  `^${GROK_RUNNING_MARK}.*${GROK_ELAPSED}(?:${GROK_LIVE_STATUS_TAIL})?$`,
+);
+const GROK_LIVE_STATUS_ROW = new RegExp(
+  `^${GROK_RUNNING_MARK}.*${GROK_ELAPSED}${GROK_LIVE_STATUS_TAIL}$`,
 );
 const GROK_THINKING_ROW = /^(?:[^\s\w]\s+)?Thinking(?:\.{1,3}|…|⋯)?$/;
 const GROK_WORKED_FOR = /^(?:[^\s\w]\s+)?Worked for\b/;
@@ -679,7 +690,8 @@ function grokDock(lines: string[]): string[] {
 export function isGrokBusyScreen(lines: string[]): boolean {
   // `dock` is nearest-to-composer first. The nearest `Worked for` closes this
   // turn. Task rows between it and the composer are parked. A `Thinking` row
-  // there is a new turn. Rows above the marker are an older block.
+  // or a live status row (`↓…k [stop]`) there is a new turn. Rows above the
+  // marker are an older block.
   const dock = grokDock(lines);
   const turnClosedAt = dock.findIndex((line) => GROK_WORKED_FOR.test(line));
   let reasoningClosed = false;
@@ -692,7 +704,7 @@ export function isGrokBusyScreen(lines: string[]): boolean {
       return true;
     }
     if (parkedUnderTurn) {
-      if (GROK_THINKING_ROW.test(line)) return true;
+      if (GROK_THINKING_ROW.test(line) || GROK_LIVE_STATUS_ROW.test(line)) return true;
       continue;
     }
     if (aboveClosedTurn || GROK_WORKED_FOR.test(line)) continue;

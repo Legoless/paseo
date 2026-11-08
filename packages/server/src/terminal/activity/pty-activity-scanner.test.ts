@@ -1840,6 +1840,22 @@ describe("PtyActivityScanner — full lifecycle", () => {
     expect(isGrokBusyScreen(["Worked for 12s", "⸬ Run Start the supervisor  1m04s", "", "❯"])).toBe(
       false,
     );
+    // Grok 4.7 paints the token meter and stop control after the clock.
+    const liveStatus = [
+      "⠋ Waiting for response... 1.4s                                          10m10s ↓159k [stop]",
+      "⸬ Running search_replace 0.6s                                           8m24s ↓189k [stop]",
+      "⠋ Re-run the full Python suite … 59s                                    9m25s ↓170k [1][stop]",
+      "⠋ Waiting for response... 1.4s ↓159k [send to bg]",
+    ];
+    for (const line of liveStatus) {
+      expect(isGrokBusyScreen([line, "", "❯"])).toBe(true);
+      expect(isIdleAgentScreen([line, "", ">"], ">", "grok")).toBe(false);
+      expect(isGrokBusyScreen(["Worked for 4m4s", line, "", "❯"])).toBe(true);
+    }
+    expect(isGrokBusyScreen(["Waiting for response... 1.4s 10m10s ↓159k [stop]", "❯"])).toBe(false);
+    expect(isGrokBusyScreen(["Worked for 4m4s", "⠋ Waiting for response... 1.4s", "", "❯"])).toBe(
+      false,
+    );
 
     const tracker = new TerminalActivityTracker();
     let screenLines = open;
