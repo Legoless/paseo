@@ -123,10 +123,17 @@ export type WorkspaceTabPlacement =
   /** The user is working in the focused pane, whichever one that is. */
   | { mode: "focused" }
   /** Nobody placed this tab — reconciliation and other opens with no user behind them. */
-  | { mode: "ambient" };
+  | { mode: "ambient" }
+  /**
+   * Reconciliation fills an empty pane that still holds only a bare launcher before the
+   * focused pane. Losing terminal tabs leaves their panes empty; rebuilding them should put
+   * each terminal back where it was instead of stacking every one of them in one pane.
+   */
+  | { mode: "launcher" };
 
 export const FOCUSED_PANE_PLACEMENT: WorkspaceTabPlacement = { mode: "focused" };
 export const AMBIENT_PLACEMENT: WorkspaceTabPlacement = { mode: "ambient" };
+export const LAUNCHER_PLACEMENT: WorkspaceTabPlacement = { mode: "launcher" };
 
 export interface WorkspaceTabInsertionPosition {
   afterTabId: string;
@@ -1109,6 +1116,10 @@ export function collectAllPanes(root: SplitNode): SplitPane[] {
   return internalRoot.group.children.flatMap((child) => collectAllPanes(child));
 }
 
+function isBareLauncherTab(tab: WorkspaceTab): boolean {
+  return tab.target.kind === "new_tab" && !tab.target.cwd;
+}
+
 function isEphemeralTab(tab: WorkspaceTab): boolean {
   if (tab.target.kind === "commit_diff") {
     return true;
@@ -1116,7 +1127,7 @@ function isEphemeralTab(tab: WorkspaceTab): boolean {
   // A bare launcher is chrome — restoreEmptyPanesInLayout mints a fresh one for every empty pane,
   // so persisting it only preserves a tab id nobody wants. One carrying a project is a decision
   // the user made in this pane, and dropping it re-points the pane at home on the next launch.
-  return tab.target.kind === "new_tab" && !tab.target.cwd;
+  return isBareLauncherTab(tab);
 }
 
 function stripEphemeralTabsFromNode(
@@ -1475,6 +1486,28 @@ export function removePaneFromTree(root: SplitNode, paneId: string): SplitNode {
   return removePaneByPath(internalRoot, panePath);
 }
 
+function findLauncherPane(
+  node: SplitNodeInternal,
+  supportsTarget: (pane: SplitPane) => boolean,
+): SplitPaneInternal | null {
+  if (node.kind === "pane") {
+    const pane = node.pane;
+    if (pane.hidden === true || !supportsTarget(pane)) {
+      return null;
+    }
+    return pane.tabs.length === 1 && pane.tabs[0] !== undefined && isBareLauncherTab(pane.tabs[0])
+      ? pane
+      : null;
+  }
+  for (const child of node.group.children) {
+    const launcherPane = findLauncherPane(child, supportsTarget);
+    if (launcherPane) {
+      return launcherPane;
+    }
+  }
+  return null;
+}
+
 function resolvePlacementPane(input: {
   layout: { root: SplitNodeInternal; focusedPaneId: string | null };
   target: WorkspaceTabTarget;
@@ -1494,6 +1527,13 @@ function resolvePlacementPane(input: {
     requestedCandidate && supportsTarget(requestedCandidate) ? requestedCandidate : null;
   if (requestedPane) {
     return requestedPane as SplitPaneInternal;
+  }
+
+  if (input.placement.mode === "launcher") {
+    const launcherPane = findLauncherPane(input.layout.root, supportsTarget);
+    if (launcherPane) {
+      return launcherPane;
+    }
   }
 
   const focusedCandidate = findPaneById(input.layout.root, input.layout.focusedPaneId);
@@ -2583,6 +2623,7 @@ function isTerminalTab(
 function openEntityTabWithoutFocusing(input: {
   layout: WorkspaceLayout;
   target: WorkspaceTabTarget;
+  placement?: WorkspaceTabPlacement;
   explorerSidebarPaneId: string | null;
 }): WorkspaceLayout {
   return (
@@ -2590,7 +2631,7 @@ function openEntityTabWithoutFocusing(input: {
       layout: input.layout,
       target: input.target,
       now: Date.now(),
-      placement: AMBIENT_PLACEMENT,
+      placement: input.placement ?? AMBIENT_PLACEMENT,
       explorerSidebarPaneId: input.explorerSidebarPaneId,
       createTabId: () => buildDeterministicWorkspaceTabId(input.target),
       focus: false,
@@ -2661,6 +2702,10 @@ function collapseStaleEntityTabs(input: {
     if (
       isTerminalTab(tab) &&
       snapshot.terminalsHydrated &&
+      // An empty list during a reconnect is not proof that the terminals closed. The daemon may
+      // still be restoring them, and closing every terminal tab there cannot be undone from the
+      // app. Wait for a list that names at least one terminal before pruning.
+      knownTerminalIds.size > 0 &&
       !knownTerminalIds.has(tab.target.terminalId)
     ) {
       nextLayout =
@@ -2725,6 +2770,7 @@ function addMissingEntityTabs(input: {
       nextLayout = openEntityTabWithoutFocusing({
         layout: nextLayout,
         target: { kind: "terminal", terminalId },
+        placement: LAUNCHER_PLACEMENT,
         explorerSidebarPaneId,
       });
       currentTerminalIds.add(terminalId);

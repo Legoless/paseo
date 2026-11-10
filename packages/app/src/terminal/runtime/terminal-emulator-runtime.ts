@@ -161,6 +161,10 @@ const isAppleHandheld =
 
 const DEFAULT_TOUCH_SCROLL_LINE_HEIGHT_PX = 18;
 const FIT_TIMEOUT_DELAYS_MS = [0, 16, 48, 120, 250, 500, 1_000, 2_000];
+// A GPU process crash takes every terminal's WebGL context with it. Chromium relaunches the GPU
+// process by itself, so re-attaching the addon afterwards restores the WebGL renderer instead of
+// leaving the terminal on xterm's DOM renderer for the rest of the session.
+const WEBGL_RECOVERY_DELAYS_MS = [1_000, 5_000, 15_000];
 const OUTPUT_OPERATION_TIMEOUT_MS = 5_000;
 const EMPTY_TERMINAL_OUTPUT = new Uint8Array(0);
 const SYNCHRONIZED_OUTPUT_START = new Uint8Array([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x68]);
@@ -292,12 +296,17 @@ export class TerminalEmulatorRuntime {
   private readonly inputModeTracker = new TerminalInputModeTracker();
   private lastInputModeState: TerminalInputModeState = this.inputModeTracker.getState();
   private themeBackgroundElements: HTMLElement[] = [];
+  /** Retries the WebGL renderer after a lost context. Null while unmounted. */
+  private refreshWebglRenderer: (() => void) | null = null;
 
   private handleVisibilityRestore = (): void => {
     if (typeof document !== "undefined" && document.visibilityState !== "visible") {
       return;
     }
 
+    // Returning to a visible window is the first chance to see the terminals again after the GPU
+    // process recovered. A dead context gets a fresh recovery budget here.
+    this.refreshWebglRenderer?.();
     this.fitAndEmitResize?.({ forceRefresh: true, shouldClaim: false });
     if (typeof window.requestAnimationFrame === "function") {
       window.requestAnimationFrame(() => {
@@ -628,22 +637,73 @@ export class TerminalEmulatorRuntime {
     };
     registerProtocolQuerySuppression();
 
-    let webglAddonRaf: number | null = requestAnimationFrame(() => {
-      webglAddonRaf = null;
+    let webglAddonRaf: number | null = null;
+    let webglRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+    let webglRecoveryAttempt = 0;
+    let webglMounted = true;
+
+    const clearWebglRecovery = (): void => {
+      if (webglRecoveryTimer !== null) {
+        clearTimeout(webglRecoveryTimer);
+        webglRecoveryTimer = null;
+      }
+    };
+
+    const scheduleWebglRecovery = (): void => {
+      if (!webglMounted || webglAddon || webglRecoveryTimer !== null) {
+        return;
+      }
+      const delayMs = WEBGL_RECOVERY_DELAYS_MS[webglRecoveryAttempt];
+      if (delayMs === undefined) {
+        return;
+      }
+      webglRecoveryAttempt += 1;
+      webglRecoveryTimer = setTimeout(() => {
+        webglRecoveryTimer = null;
+        attachWebglRenderer(true);
+      }, delayMs);
+    };
+
+    const attachWebglRenderer = (retryOnFailure: boolean): void => {
+      if (!webglMounted || webglAddon) {
+        return;
+      }
       try {
         disposeWebglRenderer();
-        webglAddon = new WebglAddon();
-        webglAddon.onContextLoss(() => {
+        const nextWebglAddon = new WebglAddon();
+        nextWebglAddon.onContextLoss(() => {
           disposeWebglRenderer();
+          scheduleWebglRecovery();
         });
-        terminal.loadAddon(webglAddon);
+        terminal.loadAddon(nextWebglAddon);
+        webglAddon = nextWebglAddon;
         imageAddon = new ImageAddon();
         terminal.loadAddon(imageAddon);
         registerProtocolQuerySuppression();
         this.fitAndEmitResize?.({ forceRefresh: true, shouldClaim: false });
       } catch {
         disposeWebglRenderer();
+        // A browser without WebGL fails on every attempt; only retry a renderer that had
+        // attached before, so a lost GPU context gets another chance without looping forever.
+        if (retryOnFailure) {
+          scheduleWebglRecovery();
+        }
       }
+    };
+
+    const recoverWebglRenderer = (): void => {
+      if (!webglMounted) {
+        return;
+      }
+      webglRecoveryAttempt = 0;
+      clearWebglRecovery();
+      attachWebglRenderer(true);
+    };
+    this.refreshWebglRenderer = recoverWebglRenderer;
+
+    webglAddonRaf = requestAnimationFrame(() => {
+      webglAddonRaf = null;
+      attachWebglRenderer(false);
     });
 
     const restoreDocumentStyles = this.applyDocumentBoundsStyles({
@@ -813,6 +873,11 @@ export class TerminalEmulatorRuntime {
         fitAddon.dispose();
       },
       disposeWebglAddon: () => {
+        webglMounted = false;
+        clearWebglRecovery();
+        if (this.refreshWebglRenderer === recoverWebglRenderer) {
+          this.refreshWebglRenderer = null;
+        }
         if (webglAddonRaf !== null) {
           cancelAnimationFrame(webglAddonRaf);
           webglAddonRaf = null;
@@ -1041,6 +1106,7 @@ export class TerminalEmulatorRuntime {
     this.findResult = { resultIndex: -1, resultCount: 0 };
     this.fitAddon = null;
     this.fitAndEmitResize = null;
+    this.refreshWebglRenderer = null;
     this.lastSize = null;
     this.themeBackgroundElements = [];
     this.suppressInput = false;

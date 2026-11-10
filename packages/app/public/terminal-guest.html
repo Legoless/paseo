@@ -36568,8 +36568,11 @@ WARNING: This link could potentially be dangerous`)
           });
         var DEFAULT_TOUCH_SCROLL_LINE_HEIGHT_PX = 18;
         var FIT_TIMEOUT_DELAYS_MS = [0, 16, 48, 120, 250, 500, 1e3, 2e3];
+        var WEBGL_RECOVERY_DELAYS_MS = [1e3, 5e3, 15e3];
         var OUTPUT_OPERATION_TIMEOUT_MS = 5e3;
         var EMPTY_TERMINAL_OUTPUT = new Uint8Array(0);
+        var SYNCHRONIZED_OUTPUT_START = new Uint8Array([27, 91, 63, 50, 48, 50, 54, 104]);
+        var SYNCHRONIZED_OUTPUT_END = new Uint8Array([27, 91, 63, 50, 48, 50, 54, 108]);
         var RESET_TERMINAL_OUTPUT = new Uint8Array([27, 99]);
         var terminalOutputEncoder = new TextEncoder();
         function encodeTerminalOutput(text) {
@@ -36579,6 +36582,30 @@ WARNING: This link could potentially be dangerous`)
           const output = new Uint8Array(prefix.length + data.length);
           output.set(prefix, 0);
           output.set(data, prefix.length);
+          return output;
+        }
+        function terminalOutputClearsScreen(data) {
+          for (let index = 0; index + 3 < data.length; index += 1) {
+            if (data[index] !== 27 || data[index + 1] !== 91) {
+              continue;
+            }
+            const kind = data[index + 2];
+            if ((kind === 50 || kind === 51) && data[index + 3] === 74) {
+              return true;
+            }
+          }
+          return false;
+        }
+        function withSynchronizedScreenClear(data) {
+          if (!terminalOutputClearsScreen(data)) {
+            return data;
+          }
+          const output = new Uint8Array(
+            SYNCHRONIZED_OUTPUT_START.length + data.length + SYNCHRONIZED_OUTPUT_END.length,
+          );
+          output.set(SYNCHRONIZED_OUTPUT_START, 0);
+          output.set(data, SYNCHRONIZED_OUTPUT_START.length);
+          output.set(SYNCHRONIZED_OUTPUT_END, SYNCHRONIZED_OUTPUT_START.length + data.length);
           return output;
         }
         function withOverviewRulerBorderHidden(theme) {
@@ -36659,10 +36686,13 @@ WARNING: This link could potentially be dangerous`)
           inputModeTracker = new TerminalInputModeTracker();
           lastInputModeState = this.inputModeTracker.getState();
           themeBackgroundElements = [];
+          /** Retries the WebGL renderer after a lost context. Null while unmounted. */
+          refreshWebglRenderer = null;
           handleVisibilityRestore = () => {
             if (typeof document !== "undefined" && document.visibilityState !== "visible") {
               return;
             }
+            this.refreshWebglRenderer?.();
             this.fitAndEmitResize?.({ forceRefresh: true, shouldClaim: false });
             if (typeof window.requestAnimationFrame === "function") {
               window.requestAnimationFrame(() => {
@@ -36930,22 +36960,66 @@ WARNING: This link could potentially be dangerous`)
               }
             };
             registerProtocolQuerySuppression();
-            let webglAddonRaf = requestAnimationFrame(() => {
-              webglAddonRaf = null;
+            let webglAddonRaf = null;
+            let webglRecoveryTimer = null;
+            let webglRecoveryAttempt = 0;
+            let webglMounted = true;
+            const clearWebglRecovery = () => {
+              if (webglRecoveryTimer !== null) {
+                clearTimeout(webglRecoveryTimer);
+                webglRecoveryTimer = null;
+              }
+            };
+            const scheduleWebglRecovery = () => {
+              if (!webglMounted || webglAddon || webglRecoveryTimer !== null) {
+                return;
+              }
+              const delayMs = WEBGL_RECOVERY_DELAYS_MS[webglRecoveryAttempt];
+              if (delayMs === void 0) {
+                return;
+              }
+              webglRecoveryAttempt += 1;
+              webglRecoveryTimer = setTimeout(() => {
+                webglRecoveryTimer = null;
+                attachWebglRenderer(true);
+              }, delayMs);
+            };
+            const attachWebglRenderer = (retryOnFailure) => {
+              if (!webglMounted || webglAddon) {
+                return;
+              }
               try {
                 disposeWebglRenderer();
-                webglAddon = new bt2();
-                webglAddon.onContextLoss(() => {
+                const nextWebglAddon = new bt2();
+                nextWebglAddon.onContextLoss(() => {
                   disposeWebglRenderer();
+                  scheduleWebglRecovery();
                 });
-                terminal.loadAddon(webglAddon);
+                terminal.loadAddon(nextWebglAddon);
+                webglAddon = nextWebglAddon;
                 imageAddon = new je();
                 terminal.loadAddon(imageAddon);
                 registerProtocolQuerySuppression();
                 this.fitAndEmitResize?.({ forceRefresh: true, shouldClaim: false });
               } catch {
                 disposeWebglRenderer();
+                if (retryOnFailure) {
+                  scheduleWebglRecovery();
+                }
               }
+            };
+            const recoverWebglRenderer = () => {
+              if (!webglMounted) {
+                return;
+              }
+              webglRecoveryAttempt = 0;
+              clearWebglRecovery();
+              attachWebglRenderer(true);
+            };
+            this.refreshWebglRenderer = recoverWebglRenderer;
+            webglAddonRaf = requestAnimationFrame(() => {
+              webglAddonRaf = null;
+              attachWebglRenderer(false);
             });
             const restoreDocumentStyles = this.applyDocumentBoundsStyles({
               root: input.root,
@@ -37090,6 +37164,11 @@ WARNING: This link could potentially be dangerous`)
                 fitAddon.dispose();
               },
               disposeWebglAddon: () => {
+                webglMounted = false;
+                clearWebglRecovery();
+                if (this.refreshWebglRenderer === recoverWebglRenderer) {
+                  this.refreshWebglRenderer = null;
+                }
                 if (webglAddonRaf !== null) {
                   cancelAnimationFrame(webglAddonRaf);
                   webglAddonRaf = null;
@@ -37274,6 +37353,7 @@ WARNING: This link could potentially be dangerous`)
             this.findResult = { resultIndex: -1, resultCount: 0 };
             this.fitAddon = null;
             this.fitAndEmitResize = null;
+            this.refreshWebglRenderer = null;
             this.lastSize = null;
             this.themeBackgroundElements = [];
             this.suppressInput = false;
@@ -37364,7 +37444,7 @@ WARNING: This link could potentially be dangerous`)
             };
             this.pendingWriteCommits.add(commit);
             try {
-              terminal.write(operation.data, commit);
+              terminal.write(withSynchronizedScreenClear(operation.data), commit);
             } catch {
               commit();
             }
@@ -37434,7 +37514,7 @@ WARNING: This link could potentially be dangerous`)
               finalizeOperation(operation);
             }, OUTPUT_OPERATION_TIMEOUT_MS);
             try {
-              terminal.write(data, () => {
+              terminal.write(withSynchronizedScreenClear(data), () => {
                 if (shouldRefitAfterSnapshot) {
                   queueMicrotask(() => {
                     finalizeOperation(operation);

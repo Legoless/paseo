@@ -3,12 +3,40 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TerminalInputModeState } from "@getpaseo/protocol/terminal-input-mode";
 import { encodeTerminalOutput, TerminalEmulatorRuntime } from "./terminal-emulator-runtime";
 
-vi.mock("@xterm/addon-webgl", () => ({
-  WebglAddon: class WebglAddon {
+const webglMock = vi.hoisted(() => {
+  type ContextLossHandler = () => void;
+
+  class MockWebglAddon {
+    static instances: MockWebglAddon[] = [];
+    readonly disposed = vi.fn();
+    private readonly contextLossHandlers: ContextLossHandler[] = [];
+
+    constructor() {
+      MockWebglAddon.instances.push(this);
+    }
+
     activate(): void {}
-    dispose(): void {}
-    onContextLoss(): void {}
-  },
+
+    dispose(): void {
+      this.disposed();
+    }
+
+    onContextLoss(handler: ContextLossHandler = () => {}): void {
+      this.contextLossHandlers.push(handler);
+    }
+
+    loseContext(): void {
+      for (const handler of this.contextLossHandlers) {
+        handler();
+      }
+    }
+  }
+
+  return { MockWebglAddon };
+});
+
+vi.mock("@xterm/addon-webgl", () => ({
+  WebglAddon: webglMock.MockWebglAddon,
 }));
 
 interface TerminalSize {
@@ -772,5 +800,34 @@ describe("terminal emulator runtime in a real browser", () => {
 
     expect(mounted.openedUrls).toEqual(["https://example.com/plain", "https://example.com/osc8"]);
     expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("re-attaches the WebGL renderer after a lost context", async () => {
+    await page.viewport(900, 600);
+    webglMock.MockWebglAddon.instances.length = 0;
+    createTerminalHost({ width: 720, height: 360 });
+
+    await waitFor({ predicate: () => webglMock.MockWebglAddon.instances.length === 1 });
+    const firstAddon = webglMock.MockWebglAddon.instances[0];
+    expect(firstAddon).toBeDefined();
+    firstAddon?.loseContext();
+
+    expect(firstAddon?.disposed).toHaveBeenCalled();
+    await waitFor({ predicate: () => webglMock.MockWebglAddon.instances.length === 2 });
+    expect(webglMock.MockWebglAddon.instances[1]?.disposed).not.toHaveBeenCalled();
+  });
+
+  it("retries the WebGL renderer on the next window focus without waiting for the backoff", async () => {
+    await page.viewport(900, 600);
+    webglMock.MockWebglAddon.instances.length = 0;
+    createTerminalHost({ width: 720, height: 360 });
+
+    await waitFor({ predicate: () => webglMock.MockWebglAddon.instances.length === 1 });
+    webglMock.MockWebglAddon.instances[0]?.loseContext();
+    expect(webglMock.MockWebglAddon.instances).toHaveLength(1);
+
+    window.dispatchEvent(new Event("focus"));
+
+    expect(webglMock.MockWebglAddon.instances).toHaveLength(2);
   });
 });

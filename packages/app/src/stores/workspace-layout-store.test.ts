@@ -5460,6 +5460,9 @@ describe("applyPaneLayout", () => {
       terminalsHydrated: true,
       activeAgentIds: [],
       autoOpenAgentIds: [],
+      // A non-empty list keeps stale-tab pruning on; the standalone list stays empty so no
+      // terminal tab is auto-opened over the launchers.
+      knownTerminalIds: ["live-terminal"],
       standaloneTerminalIds: [],
     });
     const layout = source.getState().layoutByWorkspace[workspaceKey];
