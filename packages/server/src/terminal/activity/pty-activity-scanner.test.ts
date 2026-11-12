@@ -1846,6 +1846,10 @@ describe("PtyActivityScanner — full lifecycle", () => {
       "⸬ Running search_replace 0.6s                                           8m24s ↓189k [stop]",
       "⠋ Re-run the full Python suite … 59s                                    9m25s ↓170k [1][stop]",
       "⠋ Waiting for response... 1.4s ↓159k [send to bg]",
+      // The status row uses the same spinner cycle as Thinking.
+      ": Ask Claude for advice on the unfinished… 1m42s                       8m3s ↓340k [stop]",
+      "⋅ Ask Claude for advice on the unfinished… 1m42s                       8m3s ↓340k [stop]",
+      "⁙ Ask Claude for advice on the unfinished… 1m42s                       8m3s ↓340k [stop]",
     ];
     for (const line of liveStatus) {
       expect(isGrokBusyScreen([line, "", "❯"])).toBe(true);
@@ -2008,6 +2012,50 @@ describe("PtyActivityScanner — full lifecycle", () => {
     screenLines = thinking;
     scanner.feedOutput("⋅");
     expect(tracker.getSnapshot().attentionReason).toBe("quota");
+  });
+
+  it("clears a quota glow when Grok's live status row is still the turn", () => {
+    const tracker = new TerminalActivityTracker();
+    let screenLines = ["You've hit your monthly spend limit", "⋅ Thinking…", "", "❯"];
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: () => screenLines,
+      readCursorLine: () => "❯",
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("grok");
+    scanner.feedInput("\r");
+    scanner.feedOutput("limit");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "quota" });
+
+    // The limit notice has left the screen. The turn is the status row.
+    screenLines = [
+      "Thought for 0.6s",
+      ": Ask Claude for advice on the unfinished… 1m42s                       8m3s ↓340k [stop]",
+      "Tasks 1",
+      ": Run Ask Claude for advice on the unfinished look screens    1m51s",
+      "",
+      "╭",
+      "❯",
+      "Grok 4.7 (xhigh) · always-approve",
+    ];
+    scanner.feedOutput(":");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    // The notice still on screen keeps the pane red.
+    screenLines = [
+      "You've hit your monthly spend limit",
+      ": Ask Claude for advice on the unfinished… 1m42s                       8m3s ↓340k [stop]",
+      "",
+      "❯",
+    ];
+    scanner.feedOutput("limit");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "quota" });
   });
 
   it("keeps Antigravity working while a background task stays running in the tray and finishes when it clears", () => {

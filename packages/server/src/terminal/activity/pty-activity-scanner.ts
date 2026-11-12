@@ -635,8 +635,7 @@ export function isClaudeBusyScreen(lines: string[]): boolean {
 
 // Grok prints "Worked for …" when the turn ends and leaves the ❯ composer up.
 // A dock row above that composer is still this turn only until that marker
-// exists. Its mark is the four-dot ⸬ (a braille spinner is the other running
-// mark) and the row ends with a live elapsed time: `⸬ Run …  1h04m`. Grok
+// exists. The row ends with a live elapsed time: `⸬ Run …  1h04m`. Grok
 // 4.7 keeps painting past that clock: `↓159k`, a `[1]` count, and `[stop]`
 // or `[send to bg]` (`Waiting for response... 1.4s … 10m10s ↓159k [stop]`).
 // That tail is this turn, so it stays working even when an older `Worked for`
@@ -645,14 +644,15 @@ export function isClaudeBusyScreen(lines: string[]): boolean {
 // keep the pane working. "Thought for" only closes the reasoning block, so a
 // dock row under it is still the turn. An open reasoning block is a spinner
 // frame plus `Thinking` or `Thinking…`.
-// That frame cycles through `⋅` `:` `⸬` `⁙` and braille, so the mark is
-// whatever single glyph is in front of the word. A `Thinking` line above
-// `Thought for` or `Worked for` is an older block. `◎ waiting` is the turn
-// paused. `◎ … still running` stays working only when it names a subagent or
-// a loop, because those can wake the model; commands and monitors are the
-// parked case, and a mix stays working. The window is the lines near the
-// composer, so a braille logo higher in the scrollback does not.
-const GROK_RUNNING_MARK = "(?:[\\u2800-\\u28FF]|⸬)";
+// The status row and the Thinking row share one spinner. It cycles through
+// `⋅` `:` `⸬` `⁙` and braille, so the mark is that single glyph plus a space.
+// A `Thinking` line above `Thought for` or `Worked for` is an older block.
+// `◎ waiting` is the turn paused. `◎ … still running` stays working only when
+// it names a subagent or a loop, because those can wake the model; commands
+// and monitors are the parked case, and a mix stays working. The window is
+// the lines near the composer, so a braille logo higher in the scrollback
+// does not.
+const GROK_RUNNING_MARK = "(?:[\\u2800-\\u28FF]|[⋅:⸬⁙])\\s";
 const GROK_ELAPSED = String.raw`(?:\d+h\d+m(?:\d+s)?|\d+m\d+s|\d+(?:\.\d+)?[hms])`;
 // Token meter, background count, and the stop / send-to-background controls
 // share the status row with the clock. The buttons identify the live turn.
@@ -717,6 +717,18 @@ export function isGrokBusyScreen(lines: string[]): boolean {
     if (GROK_THINKING_ROW.test(line)) return true;
   }
   return false;
+}
+
+// A `↓…k [stop]` / `[send to bg]` row is a turn still in flight. A quota glow
+// from a notice that has left the screen yields to it. A Thinking frame does
+// not: the limit often lands while that spinner is still painted.
+function isGrokLiveStatusScreen(lines: string[]): boolean {
+  const dock = grokDock(lines);
+  const turnClosedAt = dock.findIndex((line) => GROK_WORKED_FOR.test(line));
+  return dock.some((line, index) => {
+    if (turnClosedAt >= 0 && index > turnClosedAt) return false;
+    return GROK_LIVE_STATUS_ROW.test(line);
+  });
 }
 
 function isGrokFinishedComposerScreen(lines: string[]): boolean {
@@ -1744,7 +1756,9 @@ export class PtyActivityScanner {
 
   // A continuously animating live status leaves no quiet gap for the stillness
   // check. Antigravity, Claude, Codex, Cursor, Grok, Kimi, Muse, and OpenCode can resume
-  // after an approval without Enter, or start/continue work on their own. Quota stays red.
+  // after an approval without Enter, or start/continue work on their own. Quota stays red
+  // until the notice leaves the screen. Grok's live status row (`↓…k [stop]`) is the turn
+  // still running after that, so it paints blue without waiting for a quiet gap.
   private promoteWorkingAgentScreen(): void {
     if (
       !this.activeAgent ||
@@ -1752,12 +1766,17 @@ export class PtyActivityScanner {
       this.isInsideInterruptWindow() ||
       !PROMOTED_AGENTS.has(this.activeAgent) ||
       (this.currentActivity === "working" && this.options.getActivity().state === "working") ||
-      this.hasOpenCodeHookNeedsInput() ||
-      this.options.getActivity().attentionReason === "quota"
+      this.hasOpenCodeHookNeedsInput()
     ) {
       return;
     }
     const lines = this.options.readLastLines(25);
+    if (
+      this.options.getActivity().attentionReason === "quota" &&
+      !(this.activeAgent === "grok" && isGrokLiveStatusScreen(lines))
+    ) {
+      return;
+    }
     if (
       isAgentBusyScreen(lines, this.activeAgent, this.antigravityBusyOptions) &&
       !isSpendLimitScreen(lines, this.activeAgent)
