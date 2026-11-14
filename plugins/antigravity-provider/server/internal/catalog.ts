@@ -160,7 +160,6 @@ export async function getStatus(launch: ProviderLaunch): Promise<ProviderStatus>
           available: false,
           diagnostic: `Antigravity ${version} is unsupported. Update \`agy\` to 1.1.15 or later.`,
         };
-      await getCatalog(launch);
       const status: ProviderStatus = { available: true };
       statusCache.set(key, { status, expiresAt: Date.now() + STATUS_CACHE_TTL_MS });
       return status;

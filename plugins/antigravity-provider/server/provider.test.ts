@@ -1265,7 +1265,7 @@ describe("discovery", () => {
       { id: "gpt-oss-120b-medium", label: "GPT-OSS 120B (Medium)" },
     ]);
   });
-  it("reports missing, old, unauthenticated and available launches", async () => {
+  it("checks launch availability without waiting for model discovery", async () => {
     expect(await provider.status?.({})).toMatchObject({
       available: false,
       diagnostic: expect.stringContaining("agy not found"),
@@ -1283,8 +1283,21 @@ describe("discovery", () => {
     });
     const unauthenticated = await harness({ AGY_TEST_AUTH: "missing" });
     expect(await provider.status?.({ launch: unauthenticated.launch })).toEqual({
-      available: false,
-      diagnostic: "Antigravity authentication failed. Run `agy` and sign in, then retry.",
+      available: true,
+    });
+    expect(
+      (await unauthenticated.records()).filter((entry) => entry.args?.includes("models")),
+    ).toHaveLength(0);
+    await unauthenticated.request({ type: "catalog", requestId: "unauthenticated-catalog" });
+    expect(
+      unauthenticated.events.find(
+        (event) => "requestId" in event && event.requestId === "unauthenticated-catalog",
+      ),
+    ).toMatchObject({
+      type: "request.failed",
+      error: {
+        message: "Antigravity authentication failed. Run `agy` and sign in, then retry.",
+      },
     });
     const authenticated = await harness();
     expect(await provider.status?.({ launch: authenticated.launch })).toEqual({ available: true });
@@ -1315,7 +1328,7 @@ describe("discovery", () => {
     ).not.toBe(key);
   });
 
-  it("coalesces concurrent status checks and reuses the probed catalog on initial catalog fetch", async () => {
+  it("coalesces concurrent status checks and defers model discovery to catalog fetch", async () => {
     const h = await harness();
     const results = await Promise.all([
       provider.status?.({ launch: h.launch }),
