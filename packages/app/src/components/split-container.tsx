@@ -44,6 +44,7 @@ import { WorkspaceActions } from "@/git/workspace-actions";
 import { WorkspaceCommandsButton } from "@/commands/workspace-commands-button";
 import { useCustomCommandsSupported } from "@/commands/use-custom-commands-supported";
 import { WorkspaceOpenInEditorButton } from "@/workspace/open-in-editor/button";
+import { useWorkspaceFields } from "@/stores/session-store-hooks";
 import {
   resolveExplorerSidebarDockSizes,
   resolveExplorerSidebarWidth,
@@ -229,6 +230,7 @@ function PaneProjectTray({
   }) => Promise<void> | void;
 }) {
   const { t } = useTranslation();
+  const projectId = useWorkspaceFields(serverId, workspaceId, (workspace) => workspace.projectId);
   const visibleActions = usePanelStore((state) => state.paneProjectActions);
   const toggleAction = usePanelStore((state) => state.togglePaneProjectAction);
   const customCommandsSupported = useCustomCommandsSupported(serverId);
@@ -276,7 +278,12 @@ function PaneProjectTray({
       ) : null}
       <View style={styles.paneProjectActions}>
         {visibleActions.editor && cwd ? (
-          <WorkspaceOpenInEditorButton serverId={serverId} cwd={cwd} hideLabels />
+          <WorkspaceOpenInEditorButton
+            serverId={serverId}
+            cwd={cwd}
+            projectId={projectId ?? null}
+            hideLabels
+          />
         ) : null}
         {visibleActions.gitActions && cwd ? (
           <WorkspaceActions serverId={serverId} cwd={cwd} />
