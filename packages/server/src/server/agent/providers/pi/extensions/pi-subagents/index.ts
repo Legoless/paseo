@@ -160,6 +160,51 @@ export const piSubagents: PiExtension = {
         ],
       };
     };
+    const mapSpawnResult = (
+      call: PiExtensionToolCall,
+      task: string,
+      asyncRun: boolean | undefined,
+      detail: {
+        type: "sub_agent";
+        subAgentType: string;
+        description: string;
+        log: string;
+      },
+      base: {
+        type: "upsert";
+        id: string;
+        title: string;
+        description: string;
+        toolCallId: string;
+      },
+    ) => {
+      const details = Details.safeParse(
+        typeof call.result === "object" ? call.result?.details : null,
+      );
+      if (!details.success || details.data.mode === "management")
+        return call.status === "failed"
+          ? { detail, subagents: [{ ...base, status: "failed" as const }] }
+          : { detail };
+      if (details.data.runId) callsByRun.set(details.data.runId, call.callId);
+      if (details.data.results.length === 0 && (details.data.asyncId || asyncRun)) {
+        rememberAsyncRun(details.data, call);
+        return {
+          detail,
+          subagents: [
+            {
+              ...base,
+              status: call.status === "failed" ? ("failed" as const) : ("running" as const),
+            },
+          ],
+        };
+      }
+      if (details.data.results.length === 0 && call.status === "failed")
+        return { detail, subagents: [{ ...base, status: "failed" as const }] };
+      return {
+        detail,
+        ...collectRows(call.callId, details.data.results, task, call.status === "failed"),
+      };
+    };
     const mapSpawn = (call: PiExtensionToolCall) => {
       const args = Args.safeParse(call.args);
       if (!args.success) return undefined;
@@ -181,32 +226,7 @@ export const piSubagents: PiExtension = {
       };
       if (call.status === "running")
         return { detail, subagents: [{ ...base, status: "running" as const }] };
-      const details = Details.safeParse(
-        typeof call.result === "object" ? call.result?.details : null,
-      );
-      if (!details.success || details.data.mode === "management")
-        return call.status === "failed"
-          ? { detail, subagents: [{ ...base, status: "failed" as const }] }
-          : { detail };
-      if (details.data.runId) callsByRun.set(details.data.runId, call.callId);
-      if (details.data.results.length === 0 && (details.data.asyncId || args.data.async)) {
-        rememberAsyncRun(details.data, call);
-        return {
-          detail,
-          subagents: [
-            {
-              ...base,
-              status: call.status === "failed" ? ("failed" as const) : ("running" as const),
-            },
-          ],
-        };
-      }
-      if (details.data.results.length === 0 && call.status === "failed")
-        return { detail, subagents: [{ ...base, status: "failed" as const }] };
-      return {
-        detail,
-        ...collectRows(call.callId, details.data.results, args.data.task, call.status === "failed"),
-      };
+      return mapSpawnResult(call, args.data.task, args.data.async, detail, base);
     };
     return {
       mapToolCall(call) {
