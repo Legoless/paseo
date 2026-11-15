@@ -5814,6 +5814,11 @@ export class CodexAppServerAgentSession implements AgentSession {
     return `codex-turn-${this.nextTurnOrdinal++}`;
   }
 
+  // Unexpected termination is queued so a reconnect or approval waits until that
+  // process's notifications have been applied. Notification handling itself stays
+  // synchronous: this branch's tests and the transport callback do not await it.
+  private pendingNotifications: Promise<void> = Promise.resolve();
+
   private handleNotification(method: string, params: unknown): void {
     const notificationParams = toObjectRecord(params);
     if (method === "serverRequest/resolved" && typeof notificationParams?.requestId === "number") {

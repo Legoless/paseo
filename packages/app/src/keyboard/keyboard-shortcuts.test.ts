@@ -226,14 +226,14 @@ describe("keyboard-shortcuts", () => {
     {
       name: "matches tab relative navigation on macOS desktop via Cmd+Shift+[",
       event: { key: "{", code: "BracketLeft", metaKey: true, shiftKey: true },
-      context: { isMac: true, usesDesktopBindings: true },
+      context: { isMac: true, isDesktop: true },
       action: "workspace.tab.navigate.relative",
       payload: { delta: -1 },
     },
     {
       name: "matches tab relative navigation on macOS desktop via Cmd+Shift+]",
       event: { key: "}", code: "BracketRight", metaKey: true, shiftKey: true },
-      context: { isMac: true, usesDesktopBindings: true },
+      context: { isMac: true, isDesktop: true },
       action: "workspace.tab.navigate.relative",
       payload: { delta: 1 },
     },
@@ -474,7 +474,7 @@ describe("keyboard-shortcuts", () => {
     {
       name: "does not switch tabs with Alt+Shift+] on mac desktop (Cmd+Shift+] only)",
       event: { key: "’", code: "BracketRight", altKey: true, shiftKey: true },
-      context: { isMac: true, usesDesktopBindings: true },
+      context: { isMac: true, isDesktop: true },
     },
     {
       name: "does not match Ctrl+T on mac (Cmd only)",
@@ -1283,7 +1283,7 @@ describe("unassigned shortcuts", () => {
     });
 
     it("advertises Cmd+Shift+brackets for tab navigation on macOS desktop", () => {
-      const desktopMac = { isMac: true, usesDesktopBindings: true };
+      const desktopMac = { isMac: true, isDesktop: true };
 
       expect(getDefaultKeysForAction("workspace-tab-prev", desktopMac)).toEqual([
         ["mod", "shift", "["],

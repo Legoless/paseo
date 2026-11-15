@@ -77,7 +77,8 @@ describe("ACP catalog startup failures", () => {
       { timeout: 10_000 },
     );
     expect(result.stdout).toContain("host stayed alive");
-    expect(result.stderr).toBe("");
+    // Node 26 warns that tsx's module.register() is deprecated. That is the loader, not the host.
+    expect(result.stderr.replace(/\(node:\d+\) \[DEP0205\][\s\S]*/, "").trim()).toBe("");
   });
 
   test("a successful catalog probe still returns its models and closes cleanly", async () => {
