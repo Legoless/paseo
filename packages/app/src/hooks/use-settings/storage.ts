@@ -83,7 +83,6 @@ export interface AppSettings {
   sendBehavior: SendBehavior;
   serviceUrlBehavior: ServiceUrlBehavior;
   terminalScrollbackLines: number;
-  useLegacyTerminalRenderer: boolean;
   useIsolatedTerminalRenderer: boolean;
   uiFontFamily: string; // "" = platform default UI stack
   monoFontFamily: string; // "" = platform default mono stack
@@ -147,7 +146,6 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   sendBehavior: "steer",
   serviceUrlBehavior: "ask",
   terminalScrollbackLines: DEFAULT_TERMINAL_SCROLLBACK_LINES,
-  useLegacyTerminalRenderer: false,
   useIsolatedTerminalRenderer: false,
   uiFontFamily: "",
   monoFontFamily: "",
@@ -229,7 +227,6 @@ const StoredAppSettingsSchema = z
       MIN_TERMINAL_SCROLLBACK_LINES,
       MAX_TERMINAL_SCROLLBACK_LINES,
     ).catch(DEFAULT_TERMINAL_SCROLLBACK_LINES),
-    useLegacyTerminalRenderer: z.boolean().catch(false),
     useIsolatedTerminalRenderer: z.boolean().catch(false),
     uiFontFamily: sanitizedFontFamily().catch(""),
     monoFontFamily: sanitizedFontFamily().catch(""),

@@ -3,7 +3,7 @@
  * `<webview>` element and feeds DOM/bridge events in; this module owns the phase transitions so the
  * crash/hang affordance and the 2.5s bridge/renderer-ready watchdogs stay testable without Electron.
  *
- * The watchdog semantics mirror `terminal-emulator-webview.native.tsx`: the bridge-ready timer arms
+ * The watchdog semantics mirror the guest bridge: the bridge-ready timer arms
  * when the guest document starts loading, and the renderer-ready timer arms once the bridge is up
  * and the mount message has been sent. A missed deadline marks the guest dead rather than silently
  * remounting — recovery is the user's Reload affordance.

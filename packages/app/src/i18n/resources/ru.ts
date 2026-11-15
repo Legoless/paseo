@@ -2359,11 +2359,7 @@ export const ru = {
     },
     diagnostics: {
       title: "Диагностика",
-      legacyTerminalRenderer: {
-        label: "Использовать прежний рендерер терминала",
-        description: "Использовать прежний WebView-терминал после повторного открытия",
-        accessibilityLabel: "Использовать прежний рендерер терминала",
-      },
+
       isolatedTerminalRenderer: {
         label: "Изолировать рендерер терминала",
         description: "Отрисовывать каждый терминал в отдельном процессе (только для компьютера)",

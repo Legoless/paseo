@@ -134,7 +134,7 @@ import {
 } from "@/utils/host-routes";
 import { useLastWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { returnFromSettings, type SettingsView } from "@/navigation/settings-navigation";
-import { getIsElectron, isNative, isWeb } from "@/constants/platform";
+import { getIsElectron, isWeb } from "@/constants/platform";
 
 // ---------------------------------------------------------------------------
 // View model
@@ -372,8 +372,6 @@ function GeneralSection({ settings, handleLanguageChange }: GeneralSectionProps)
 }
 
 interface DiagnosticsSectionProps {
-  useLegacyTerminalRenderer: boolean;
-  onUseLegacyTerminalRendererChange: (value: boolean) => void;
   useIsolatedTerminalRenderer: boolean;
   onUseIsolatedTerminalRendererChange: (value: boolean) => void;
   voiceAudioEngine: ReturnType<typeof useVoiceAudioEngineOptional>;
@@ -383,8 +381,6 @@ interface DiagnosticsSectionProps {
 }
 
 function DiagnosticsSection({
-  useLegacyTerminalRenderer,
-  onUseLegacyTerminalRendererChange,
   useIsolatedTerminalRenderer,
   onUseIsolatedTerminalRendererChange,
   voiceAudioEngine,
@@ -400,26 +396,6 @@ function DiagnosticsSection({
   return (
     <SettingsSection title={t("settings.diagnostics.title")}>
       <View style={settingsStyles.card}>
-        {isNative ? (
-          <View style={settingsStyles.row} testID="legacy-terminal-renderer-row">
-            <View style={settingsStyles.rowContent}>
-              <Text style={settingsStyles.rowTitle}>
-                {t("settings.diagnostics.legacyTerminalRenderer.label")}
-              </Text>
-              <Text style={settingsStyles.rowHint}>
-                {t("settings.diagnostics.legacyTerminalRenderer.description")}
-              </Text>
-            </View>
-            <Switch
-              value={useLegacyTerminalRenderer}
-              onValueChange={onUseLegacyTerminalRendererChange}
-              accessibilityLabel={t(
-                "settings.diagnostics.legacyTerminalRenderer.accessibilityLabel",
-              )}
-              testID="legacy-terminal-renderer-switch"
-            />
-          </View>
-        ) : null}
         {getIsElectron() ? (
           <View style={settingsStyles.row} testID="isolated-terminal-renderer-row">
             <View style={settingsStyles.rowContent}>
@@ -1163,13 +1139,6 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     [updateSettings],
   );
 
-  const handleUseLegacyTerminalRendererChange = useCallback(
-    (useLegacyTerminalRenderer: boolean) => {
-      void updateSettings({ useLegacyTerminalRenderer });
-    },
-    [updateSettings],
-  );
-
   const handleUseIsolatedTerminalRendererChange = useCallback(
     (useIsolatedTerminalRenderer: boolean) => {
       void updateSettings({ useIsolatedTerminalRenderer });
@@ -1400,8 +1369,6 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
         case "diagnostics":
           return (
             <DiagnosticsSection
-              useLegacyTerminalRenderer={settings.useLegacyTerminalRenderer}
-              onUseLegacyTerminalRendererChange={handleUseLegacyTerminalRendererChange}
               useIsolatedTerminalRenderer={settings.useIsolatedTerminalRenderer}
               onUseIsolatedTerminalRendererChange={handleUseIsolatedTerminalRendererChange}
               voiceAudioEngine={voiceAudioEngine}

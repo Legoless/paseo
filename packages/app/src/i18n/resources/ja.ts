@@ -2344,11 +2344,7 @@ export const ja = {
     },
     diagnostics: {
       title: "診断",
-      legacyTerminalRenderer: {
-        label: "以前のターミナルレンダラーを使用",
-        description: "ターミナルを開き直した後、以前の WebView ターミナルを使用します",
-        accessibilityLabel: "以前のターミナルレンダラーを使用",
-      },
+
       isolatedTerminalRenderer: {
         label: "ターミナルレンダラーを分離",
         description: "各ターミナルを個別のプロセスで描画します（デスクトップのみ）",

@@ -2460,11 +2460,7 @@ export const en = {
     },
     diagnostics: {
       title: "Diagnostics",
-      legacyTerminalRenderer: {
-        label: "Use legacy terminal renderer",
-        description: "Use the previous WebView terminal after reopening a terminal",
-        accessibilityLabel: "Use legacy terminal renderer",
-      },
+
       isolatedTerminalRenderer: {
         label: "Isolate terminal renderer",
         description: "Render each terminal in its own process (desktop only)",
