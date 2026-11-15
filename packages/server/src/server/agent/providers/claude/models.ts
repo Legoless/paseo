@@ -113,27 +113,8 @@ export function claudeModelCapability(
   return isRecord(native) && native[capability] === true;
 }
 
-const CLAUDE_SETTINGS_MODEL_THINKING_OPTIONS = [
-  { id: "low", label: "Low" },
-  { id: "medium", label: "Medium" },
-  { id: "high", label: "High" },
-  { id: "max", label: "Max" },
-];
-
 export function resolveConfiguredClaudeModel(model: AgentModelDefinition): AgentModelDefinition {
   return model;
-}
-
-function withSettingsModelThinkingOptions(model: AgentModelDefinition): AgentModelDefinition {
-  if (model.thinkingOptions !== undefined) return model;
-  return {
-    ...model,
-    thinkingOptions: CLAUDE_SETTINGS_MODEL_THINKING_OPTIONS.map((option) => ({
-      id: option.id,
-      label: option.label,
-    })),
-    providerDefaultThinkingOptionId: "high",
-  };
 }
 
 export async function discoverClaudeModels(input: {
@@ -296,7 +277,7 @@ export async function getClaudeModelsWithSettings(
     settingsUltracode: settings?.ultracode === true,
   });
   for (const model of claudeSettingsModels(settings)) {
-    if (!findClaudeModel(models, model.id)) models.push(withSettingsModelThinkingOptions(model));
+    if (!findClaudeModel(models, model.id)) models.push(model);
   }
   return models;
 }

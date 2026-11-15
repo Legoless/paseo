@@ -4383,23 +4383,22 @@ class ClaudeAgentSession implements AgentSession {
     });
     // An API error arrives as a synthetic assistant frame with `error` set. When it ends the turn,
     // the result fails the turn with its text, so the frame is not shown as a reply.
-    const assistantTimelineEvents =
-      readClaudeParentToolUseId(message) || (message.type === "assistant" && message.error)
-        ? []
-        : this.timelineAssembler
-            .consume({
-              message,
-              runId: turnId,
-              messageIdHint,
-            })
-            .map(
-              (item) =>
-                ({
-                  type: "timeline",
-                  item,
-                  provider: "claude",
-                }) satisfies AgentStreamEvent,
-            );
+    const assistantTimelineEvents = readClaudeParentToolUseId(message)
+      ? []
+      : this.timelineAssembler
+          .consume({
+            message,
+            runId: turnId,
+            messageIdHint,
+          })
+          .map(
+            (item) =>
+              ({
+                type: "timeline",
+                item,
+                provider: "claude",
+              }) satisfies AgentStreamEvent,
+          );
 
     if (!readClaudeParentToolUseId(message)) {
       if (message.type === "assistant" && message.error) {

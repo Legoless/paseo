@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { CanUseTool, PermissionMode, Query } from "@anthropic-ai/claude-agent-sdk";
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
 import type { AgentPermissionRequest, AgentStreamEvent } from "../../agent-sdk-types.js";
-import { ClaudeAgentClient } from "./agent.js";
+import { TestClaudeAgentClient } from "./test-utils/catalog.js";
 
 // The injected SDK adapter supplies requests through Claude's permission callback.
 async function createPlanApproval(mode: PermissionMode) {
@@ -14,7 +14,7 @@ async function createPlanApproval(mode: PermissionMode) {
     },
     close() {},
   });
-  const client = new ClaudeAgentClient({
+  const client = new TestClaudeAgentClient({
     logger: createTestLogger(),
     resolveBinary: async () => "/test/claude",
     queryFactory: ({ options }) => {
@@ -97,7 +97,7 @@ test("bypass allows execution without publishing permission events and follows l
     async setPermissionMode(_mode: PermissionMode) {},
     close() {},
   });
-  const client = new ClaudeAgentClient({
+  const client = new TestClaudeAgentClient({
     logger: createTestLogger(),
     resolveBinary: async () => "/test/claude",
     queryFactory: ({ options }) => {

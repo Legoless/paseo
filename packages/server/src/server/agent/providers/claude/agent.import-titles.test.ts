@@ -5,8 +5,8 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
-import { ClaudeAgentClient } from "./agent.js";
 import { claudeProjectDirSync } from "./project-dir.js";
+import { TestClaudeAgentClient } from "./test-utils/catalog.js";
 
 const SESSION_CWD = "/tmp/paseo-claude-renamed-import";
 
@@ -49,7 +49,7 @@ async function writeSession({ sessionId, records }: WriteSessionInput): Promise<
 // Importing replays the transcript from disk, so this drives the real resume
 // path without starting Claude Code.
 async function importSession(sessionId: string) {
-  const client = new ClaudeAgentClient({
+  const client = new TestClaudeAgentClient({
     logger: createTestLogger(),
     resolveBinary: async () => "/test/claude/bin",
   });
@@ -94,7 +94,7 @@ describe("importing a renamed Claude session", () => {
           .map((record) => JSON.stringify(record))
           .join("\n") + "\n",
       );
-      const client = new ClaudeAgentClient({
+      const client = new TestClaudeAgentClient({
         logger: createTestLogger(),
         runtimeSettings:
           source === "provider" ? { env: { CLAUDE_CONFIG_DIR: providerConfigDir } } : undefined,

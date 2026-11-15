@@ -651,7 +651,7 @@ lines.on("line", (line) => {
         type: "timeline.item",
         item: expect.objectContaining({
           type: "assistant_message",
-          id: JSON.stringify(["agent_message_chunk", "assistant-1"]),
+          id: "assistant-1",
           messageId: "assistant-1",
           text: "ACP says hi",
         }),

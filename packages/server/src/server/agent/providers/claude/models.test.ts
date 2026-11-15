@@ -290,13 +290,7 @@ describe("Claude catalog discovery", () => {
       "custom-model",
       "another-model",
     ]);
-    expect(first.models[1]?.thinkingOptions?.map((option) => option.id)).toEqual([
-      "low",
-      "medium",
-      "high",
-      "max",
-    ]);
-    expect(first.models[1]?.providerDefaultThinkingOptionId).toBe("high");
+    expect(first.models[1]?.thinkingOptions).toBeUndefined();
     mock.supportedModels.mockResolvedValue([
       { ...futureModel, supportsFastMode: false, supportedEffortLevels: ["low"] },
     ]);
@@ -312,12 +306,7 @@ describe("Claude catalog discovery", () => {
     });
     const models = await getClaudeModelsWithSettings(createTestLogger(), configDir, [futureModel]);
     expect(models.map((model) => model.id)).toEqual([futureModel.value, "private-fable-model"]);
-    expect(models[1]?.thinkingOptions?.map((option) => option.id)).toEqual([
-      "low",
-      "medium",
-      "high",
-      "max",
-    ]);
+    expect(models[1]?.thinkingOptions).toBeUndefined();
   });
 
   it("recognizes a configured canonical alias without adding a capability-less duplicate", async () => {

@@ -124,7 +124,7 @@ test("re-probes a v1 runtime on a forced refresh after OpenCode is updated to v2
     env: { XDG_STATE_HOME: root },
   });
   const controlLabel = async () =>
-    (await client.listControls({ provider: "opencode", cwd: root })).controls[0]?.label;
+    (await client.listFeatures({ provider: "opencode", cwd: root }))[0]?.label;
   try {
     await writeFile(script, 'console.log("1.14.46")');
     expect(await controlLabel()).toBe("Auto Accept");
@@ -167,7 +167,7 @@ async function createCountingVersionBinary(prefix: string) {
       ),
     probeCount: async () => (await readFile(probes, "utf8")).length,
     controlLabel: async () =>
-      (await client.listControls({ provider: "opencode", cwd: root })).controls[0]?.label,
+      (await client.listFeatures({ provider: "opencode", cwd: root }))[0]?.label,
     dispose: async () => {
       await client.shutdown();
       await rm(root, { recursive: true, force: true });

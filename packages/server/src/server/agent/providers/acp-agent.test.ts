@@ -1852,7 +1852,10 @@ describe("ACPAgentSession Zed parity", () => {
       configId: "allow_all",
       value: "on",
     });
-    expect(setSessionMode).not.toHaveBeenCalled();
+    expect(setSessionMode).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      modeId: "https://agentclientprotocol.com/protocol/session-modes#agent",
+    });
     await expect(session.getCurrentMode()).resolves.toBe(COPILOT_ALLOW_ALL_MODE_ID);
     expect(events.some((event) => event.type === "permission_requested")).toBe(false);
   });
@@ -1883,7 +1886,10 @@ describe("ACPAgentSession Zed parity", () => {
       configId: "allow_all",
       value: "on",
     });
-    expect(setSessionMode).not.toHaveBeenCalled();
+    expect(setSessionMode).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      modeId: "https://agentclientprotocol.com/protocol/session-modes#agent",
+    });
     await expect(session.getCurrentMode()).resolves.toBe(COPILOT_ALLOW_ALL_MODE_ID);
   });
 

@@ -5293,34 +5293,6 @@ export class CodexAppServerAgentSession implements AgentSession {
     }
   }
 
-  async canStopRuntime(): Promise<boolean> {
-    if (
-      !this.client ||
-      this.client.hasPendingRequests() ||
-      !this.currentThreadId ||
-      this.activeForegroundTurnId ||
-      this.currentTurnId ||
-      this.pendingForegroundStart ||
-      this.pendingPermissionHandlers.size ||
-      this.getPendingPermissions().length ||
-      this.pendingSubAgentNotificationsByThreadId.size
-    )
-      return false;
-    // Older app servers reject this request. A failed or malformed probe must retain
-    // the process: command completion alone does not mean its terminal has exited.
-    const loaded = z
-      .object({ data: z.array(z.string()) })
-      .parse(await this.client.request("thread/loaded/list", {}, 10_000));
-    const threadIds = new Set([this.currentThreadId, ...loaded.data]);
-    for (const threadId of threadIds) {
-      const response = z
-        .object({ data: z.array(z.unknown()), nextCursor: z.string().nullable() })
-        .parse(await this.client.request("thread/backgroundTerminals/list", { threadId }, 10_000));
-      if (response.data.length > 0 || response.nextCursor !== null) return false;
-    }
-    return !this.client.hasPendingRequests();
-  }
-
   // Remember which turn started a command, so an interrupt ends that turn's commands and
   // no other turn's. Only the root thread's: a subagent's commands live on its own thread.
   // A command that starts after its turn's interrupt was accepted is ended as soon as it
