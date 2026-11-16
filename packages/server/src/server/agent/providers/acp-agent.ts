@@ -611,6 +611,26 @@ export interface ACPPromptResponseContext {
 
 export type ACPPromptResponseValidator = (context: ACPPromptResponseContext) => Promise<void>;
 
+export type ACPCommandsTransformer = (commands: AgentSlashCommand[]) => AgentSlashCommand[];
+
+export type ACPPromptBlocksTransformer = (
+  blocks: ContentBlock[],
+  prompt: AgentPromptInput,
+) => ContentBlock[];
+
+export interface ACPOutOfBandExecutionContext {
+  provider: string;
+  sessionId: string | null;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  emit: (event: AgentStreamEvent) => void;
+  reopenSession: (betweenCloseAndResume?: () => Promise<void>) => Promise<void>;
+}
+
+export type ACPOutOfBandPromptHandler = (
+  prompt: AgentPromptInput,
+) => { run(ctx: ACPOutOfBandExecutionContext): Promise<void> } | null;
+
 export interface ACPNativeTurnProbeContext {
   sessionId: string;
   cwd: string;
@@ -631,7 +651,7 @@ export interface ACPNativeSessionMonitorContext {
 }
 
 export interface ACPNativeSessionMonitor {
-  syncBeforeForegroundTurnEnd?(): Promise<void>;
+  syncBeforeForegroundTurnEnd?(options?: { immediateZero?: boolean }): Promise<void>;
   hasActiveAutonomousTurn?(): boolean;
   onRuntimeExited?(exit: {
     code: number | null;
@@ -676,6 +696,9 @@ interface ACPAgentClientOptions {
   ) => Promise<void>;
   capabilities?: AgentCapabilityFlags;
   extensionCommandsParser?: ACPExtensionCommandsParser;
+  commandsTransformer?: ACPCommandsTransformer;
+  promptBlocksTransformer?: ACPPromptBlocksTransformer;
+  outOfBandPromptHandler?: ACPOutOfBandPromptHandler;
   waitForInitialCommands?: boolean;
   initialCommandsWaitTimeoutMs?: number;
   terminateProcess?: ProcessTerminator;
@@ -711,6 +734,9 @@ interface ACPAgentSessionOptions {
   ) => Promise<void>;
   capabilities: AgentCapabilityFlags;
   extensionCommandsParser?: ACPExtensionCommandsParser;
+  commandsTransformer?: ACPCommandsTransformer;
+  promptBlocksTransformer?: ACPPromptBlocksTransformer;
+  outOfBandPromptHandler?: ACPOutOfBandPromptHandler;
   handle?: AgentPersistenceHandle;
   resumePurpose?: AgentResumePurpose;
   configuredModelIds?: readonly string[];
@@ -1248,6 +1274,9 @@ export class ACPAgentClient implements AgentClient {
   private readonly waitForInitialCommands: boolean;
   private readonly initialCommandsWaitTimeoutMs: number;
   private readonly extensionCommandsParser?: ACPExtensionCommandsParser;
+  private readonly commandsTransformer?: ACPCommandsTransformer;
+  private readonly promptBlocksTransformer?: ACPPromptBlocksTransformer;
+  private readonly outOfBandPromptHandler?: ACPOutOfBandPromptHandler;
   private readonly importPromptCache = new Map<string, ACPImportPromptCacheEntry>();
   private readonly now: () => number;
   protected readonly terminateProcess: ProcessTerminator;
@@ -1281,6 +1310,9 @@ export class ACPAgentClient implements AgentClient {
     this.waitForInitialCommands = options.waitForInitialCommands ?? false;
     this.initialCommandsWaitTimeoutMs = options.initialCommandsWaitTimeoutMs ?? 1500;
     this.extensionCommandsParser = options.extensionCommandsParser;
+    this.commandsTransformer = options.commandsTransformer;
+    this.promptBlocksTransformer = options.promptBlocksTransformer;
+    this.outOfBandPromptHandler = options.outOfBandPromptHandler;
     this.now = options.now ?? Date.now;
   }
 
@@ -1322,6 +1354,9 @@ export class ACPAgentClient implements AgentClient {
         agentId: launchContext?.agentId,
         launchEnv: launchContext?.env,
         extensionCommandsParser: this.extensionCommandsParser,
+        commandsTransformer: this.commandsTransformer,
+        promptBlocksTransformer: this.promptBlocksTransformer,
+        outOfBandPromptHandler: this.outOfBandPromptHandler,
         waitForInitialCommands: this.waitForInitialCommands,
         initialCommandsWaitTimeoutMs: this.initialCommandsWaitTimeoutMs,
       },
@@ -1384,6 +1419,9 @@ export class ACPAgentClient implements AgentClient {
       agentId: launchContext?.agentId,
       launchEnv: launchContext?.env,
       extensionCommandsParser: this.extensionCommandsParser,
+      commandsTransformer: this.commandsTransformer,
+      promptBlocksTransformer: this.promptBlocksTransformer,
+      outOfBandPromptHandler: this.outOfBandPromptHandler,
       waitForInitialCommands: this.waitForInitialCommands,
       initialCommandsWaitTimeoutMs: this.initialCommandsWaitTimeoutMs,
     });
@@ -2076,6 +2114,10 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   private waitForInitialCommands: boolean;
   private initialCommandsWaitTimeoutMs: number;
   private readonly extensionCommandsParser?: ACPExtensionCommandsParser;
+  private readonly commandsTransformer?: ACPCommandsTransformer;
+  private readonly promptBlocksTransformer?: ACPPromptBlocksTransformer;
+  private readonly outOfBandPromptHandler?: ACPOutOfBandPromptHandler;
+  private reopenChain: Promise<void> = Promise.resolve();
   private currentTurnUsage: AgentUsage | undefined;
   private activeForegroundTurnId: string | null = null;
   private fallbackAssistantMessageId: string | null = null;
@@ -2125,6 +2167,9 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     this.waitForInitialCommands = options.waitForInitialCommands ?? false;
     this.initialCommandsWaitTimeoutMs = options.initialCommandsWaitTimeoutMs ?? 1500;
     this.extensionCommandsParser = options.extensionCommandsParser;
+    this.commandsTransformer = options.commandsTransformer;
+    this.promptBlocksTransformer = options.promptBlocksTransformer;
+    this.outOfBandPromptHandler = options.outOfBandPromptHandler;
   }
 
   get id(): string | null {
@@ -2343,11 +2388,15 @@ export class ACPAgentSession implements AgentSession, ACPClient {
 
     const sessionId = this.sessionId;
     const startedAt = Date.now();
+    const initialBlocks = toACPContentBlocks(prompt);
+    const wireBlocks = this.promptBlocksTransformer
+      ? this.promptBlocksTransformer(initialBlocks, prompt)
+      : initialBlocks;
     void this.connection
       .prompt({
         sessionId: this.sessionId,
         messageId,
-        prompt: toACPContentBlocks(prompt),
+        prompt: wireBlocks,
       })
       .then(async (response) => {
         if (this.closed || this.activeForegroundTurnId !== turnId) return;
@@ -2487,18 +2536,22 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     }
   }
 
+  private transformCommands(commands: AgentSlashCommand[]): AgentSlashCommand[] {
+    return this.commandsTransformer ? this.commandsTransformer(commands) : commands;
+  }
+
   async listCommands(): Promise<AgentSlashCommand[]> {
     if (this.cachedCommands.length > 0) {
-      return this.cachedCommands;
+      return this.transformCommands(this.cachedCommands);
     }
     if (!this.waitForInitialCommands || this.closed) {
-      return this.cachedCommands;
+      return this.transformCommands(this.cachedCommands);
     }
 
     this.ensureCommandsReadyDeferred();
     await this.waitForCommandsReady();
     this.settleCommandsReady();
-    return this.cachedCommands;
+    return this.transformCommands(this.cachedCommands);
   }
 
   async setMode(modeId: string): Promise<void> {
@@ -2937,6 +2990,116 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     };
   }
 
+  tryHandleOutOfBand(
+    prompt: AgentPromptInput,
+  ): { run(ctx: { emit: (event: AgentStreamEvent) => void }): Promise<void> } | null {
+    const handler = this.outOfBandPromptHandler?.(prompt);
+    if (!handler) {
+      return null;
+    }
+    return {
+      run: async ({ emit }) => {
+        await handler.run({
+          provider: this.provider,
+          sessionId: this.sessionId,
+          cwd: this.config.cwd,
+          env: createProviderEnv({
+            runtimeSettings: this.runtimeSettings,
+            overlays: [this.launchEnv],
+          }),
+          emit,
+          reopenSession: (betweenCloseAndResume) =>
+            this.reopenSessionInPlace(betweenCloseAndResume),
+        });
+      },
+    };
+  }
+
+  private reopenSessionInPlace(betweenCloseAndResume?: () => Promise<void>): Promise<void> {
+    const next = this.reopenChain.then(() =>
+      this.performReopenSessionInPlace(betweenCloseAndResume),
+    );
+    this.reopenChain = next.catch(() => {});
+    return next;
+  }
+
+  private async performReopenSessionInPlace(
+    betweenCloseAndResume?: () => Promise<void>,
+  ): Promise<void> {
+    if (this.closed || !this.connection || !this.sessionId) {
+      throw new Error(`${this.provider} session is not initialized`);
+    }
+    const sessionId = this.sessionId;
+    const desired = {
+      mode: this.currentMode,
+      model: this.currentModel,
+      thinking: this.thinkingOptionId,
+    };
+
+    this.cancelPendingPermissions();
+    await this.runACPRequest(() => this.connection!.unstable_closeSession({ sessionId }));
+    await this.nativeSessionMonitor?.syncBeforeForegroundTurnEnd?.({ immediateZero: true });
+    if (betweenCloseAndResume) {
+      await betweenCloseAndResume();
+      await this.nativeSessionMonitor?.syncBeforeForegroundTurnEnd?.({ immediateZero: true });
+    }
+    if (this.closed || !this.connection) {
+      return;
+    }
+
+    await this.resumeSessionOnConnection(sessionId);
+    await this.restoreSessionSelections(desired);
+  }
+
+  private async resumeSessionOnConnection(sessionId: string): Promise<void> {
+    if (this.agentCapabilities?.sessionCapabilities?.resume) {
+      const response = await this.runACPRequest(() =>
+        this.connection!.unstable_resumeSession({
+          sessionId,
+          cwd: this.config.cwd,
+          mcpServers: this.acpMcpServers(),
+        }),
+      );
+      this.applySessionState(response);
+      return;
+    }
+    if (!this.agentCapabilities?.loadSession) {
+      throw new Error(`${this.provider} does not support ACP session resume`);
+    }
+    const preservedHistoryCount = this.persistedHistory.length;
+    this.replayingHistory = true;
+    try {
+      const response = await this.runACPRequest(() =>
+        this.connection!.loadSession({
+          sessionId,
+          cwd: this.config.cwd,
+          mcpServers: this.acpMcpServers(),
+        }),
+      );
+      this.flushPendingUserMessage();
+      this.applySessionState(response);
+    } finally {
+      this.replayingHistory = false;
+      this.persistedHistory.length = preservedHistoryCount;
+    }
+  }
+
+  private async restoreSessionSelections(desired: {
+    mode: string | null;
+    model: string | null;
+    thinking: string | null;
+  }): Promise<void> {
+    if (desired.mode && desired.mode !== this.currentMode) {
+      await this.setMode(desired.mode);
+    }
+    if (desired.model && desired.model !== this.currentModel) {
+      await this.setModel(desired.model);
+    }
+    if (desired.thinking && desired.thinking !== this.thinkingOptionId) {
+      await this.setThinkingOption(desired.thinking);
+    }
+  }
+
   async interrupt(): Promise<void> {
     if (!this.connection || !this.sessionId) {
       return;
@@ -2944,7 +3107,19 @@ export class ACPAgentSession implements AgentSession, ACPClient {
 
     this.cancelPendingPermissions();
 
-    if (this.activeForegroundTurnId || this.nativeSessionMonitor?.hasActiveAutonomousTurn?.()) {
+    if (this.activeForegroundTurnId) {
+      await this.connection.cancel({ sessionId: this.sessionId });
+      return;
+    }
+
+    if (this.nativeSessionMonitor?.hasActiveAutonomousTurn?.()) {
+      if (
+        this.agentCapabilities?.sessionCapabilities?.close &&
+        (this.agentCapabilities.sessionCapabilities.resume || this.agentCapabilities.loadSession)
+      ) {
+        await this.reopenSessionInPlace();
+        return;
+      }
       await this.connection.cancel({ sessionId: this.sessionId });
     }
   }
@@ -3192,7 +3367,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     }
 
     if (commands.length > 0) {
-      this.cachedCommands = commands;
+      this.cachedCommands = this.transformCommands(commands);
     }
     this.settleCommandsReady();
   }
@@ -3614,12 +3789,14 @@ export class ACPAgentSession implements AgentSession, ACPClient {
         this.handleUsageUpdate(update);
         return pendingUserEvents;
       case "available_commands_update":
-        this.cachedCommands = update.availableCommands.map((command) => ({
-          name: command.name,
-          description: command.description,
-          argumentHint: command.input?.hint ?? "",
-          kind: "command",
-        }));
+        this.cachedCommands = this.transformCommands(
+          update.availableCommands.map((command) => ({
+            name: command.name,
+            description: command.description,
+            argumentHint: command.input?.hint ?? "",
+            kind: "command",
+          })),
+        );
         this.settleCommandsReady();
         return pendingUserEvents;
       default:

@@ -3,6 +3,7 @@ import {
   ndJsonStream,
   PROTOCOL_VERSION,
   type Agent,
+  type ContentBlock,
   type SessionConfigOption,
 } from "@agentclientprotocol/sdk";
 import { type ChildProcessWithoutNullStreams } from "node:child_process";
@@ -1406,6 +1407,474 @@ describe("KimiACPAgentClient background work and autonomous turns", () => {
         ]),
       );
     } finally {
+      await session.close();
+    }
+  });
+
+  test("advertises /goal and rewrites /goal create, replace, and resume prompts past Kimi ACP slash rejection while preserving timeline input", async () => {
+    const home = await mkdtemp(join(tmpdir(), "paseo-kimi-goal-home-"));
+    tempHomes.push(home);
+    const dataHome = join(home, ".kimi-code");
+    const cwd = "/Users/test/Monet Core/";
+    const sessionId = "session_goal_1";
+    const journalPath = join(
+      dataHome,
+      "sessions",
+      "wd_monet-core_4fc67357f555",
+      sessionId,
+      "agents/main/wire.jsonl",
+    );
+    await mkdir(dirname(journalPath), { recursive: true });
+
+    const wirePrompts: ContentBlock[][] = [];
+    const builtinCommands = [
+      { name: "compact", description: "Compact the conversation context" },
+      { name: "help", description: "Show available ACP commands" },
+    ];
+    const builtinCommandNames = new Set(builtinCommands.map((cmd) => cmd.name));
+    const firstWirePromptText = (index: number): string => {
+      const block = wirePrompts[index]?.[0];
+      return block?.type === "text" ? block.text : "";
+    };
+    const emitAvailableCommands = (connection: AgentSideConnection): void => {
+      setTimeout(() => {
+        void connection.sessionUpdate({
+          sessionId,
+          update: {
+            sessionUpdate: "available_commands_update",
+            availableCommands: builtinCommands,
+          },
+        });
+      }, 0);
+    };
+
+    vi.spyOn(providerLaunchConfig, "resolveProviderLaunch").mockResolvedValue({
+      command: "kimi",
+      args: [],
+    });
+    vi.spyOn(providerLaunchConfig, "checkProviderLaunchAvailable").mockResolvedValue({
+      available: true,
+      resolvedPath: "/usr/local/bin/kimi",
+    });
+
+    vi.spyOn(spawnUtils, "spawnProcess").mockImplementation(() => {
+      const { child, clientToAgent, agentToClient } = createMockKimiChild();
+      const stream = ndJsonStream(Writable.toWeb(agentToClient), Readable.toWeb(clientToAgent));
+      let connection!: AgentSideConnection;
+      connection = new AgentSideConnection(
+        (): Agent => ({
+          initialize: async () => ({
+            protocolVersion: PROTOCOL_VERSION,
+            agentCapabilities: {
+              loadSession: true,
+              sessionCapabilities: { close: {}, resume: {} },
+            },
+          }),
+          authenticate: async () => ({}),
+          newSession: async () => {
+            emitAvailableCommands(connection);
+            return { sessionId, configOptions: [] };
+          },
+          loadSession: async () => ({ configOptions: [] }),
+          unstable_closeSession: async () => ({}),
+          unstable_resumeSession: async () => ({ configOptions: [] }),
+          setSessionMode: async () => ({}),
+          setSessionConfigOption: async () => ({ configOptions: [] }),
+          prompt: async (params) => {
+            wirePrompts.push(params.prompt);
+            const firstBlock = params.prompt[0];
+            const leadingText = firstBlock?.type === "text" ? firstBlock.text : undefined;
+            if (leadingText?.startsWith("/")) {
+              const name = leadingText.slice(1).trim().split(/\s+/)[0] ?? "";
+              if (!builtinCommandNames.has(name)) {
+                await connection.sessionUpdate({
+                  sessionId: params.sessionId,
+                  update: {
+                    sessionUpdate: "agent_message_chunk",
+                    content: {
+                      type: "text",
+                      text: `Unknown ACP command: /${name}. Use /help to see available commands.`,
+                    },
+                  },
+                });
+                return { stopReason: "end_turn" };
+              }
+            }
+
+            const now = Date.now();
+            await appendFile(
+              journalPath,
+              stringifyJournalRows([
+                { type: "agent.turn.started", turnId: wirePrompts.length, time: now },
+                {
+                  type: "turn.ended",
+                  agentId: "main",
+                  turnId: wirePrompts.length,
+                  reason: "completed",
+                  time: now + 1,
+                },
+              ]),
+            );
+            await connection.sessionUpdate({
+              sessionId: params.sessionId,
+              update: {
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text: "Goal started." },
+              },
+            });
+            return { stopReason: "end_turn" };
+          },
+          cancel: async () => {},
+        }),
+        stream,
+      );
+      return child as unknown as ChildProcessWithoutNullStreams;
+    });
+
+    const client = new KimiACPAgentClient({
+      logger: createTestLogger(),
+      command: ["kimi", "acp"],
+      env: { HOME: home, KIMI_CODE_HOME: dataHome },
+      providerId: "kimi",
+      label: "Kimi Code CLI",
+    });
+
+    const session = await client.createSession({ provider: "acp", cwd });
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    try {
+      const commands = await session.listCommands!();
+      expect(commands).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "compact" }),
+          expect.objectContaining({
+            name: "goal",
+            kind: "command",
+            description: "Start or manage an autonomous goal",
+          }),
+        ]),
+      );
+
+      const firstRun = await session.run("/goal FIx all parity gaps", {
+        clientMessageId: "msg-goal-1",
+      });
+      expect(firstRun.finalText).toBe("Goal started.");
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "timeline",
+            item: expect.objectContaining({
+              type: "user_message",
+              text: "/goal FIx all parity gaps",
+              clientMessageId: "msg-goal-1",
+            }),
+          }),
+        ]),
+      );
+      expect(wirePrompts[0]).toEqual([
+        {
+          type: "text",
+          text: expect.stringContaining("CreateGoal"),
+        },
+      ]);
+      expect(firstWirePromptText(0)).not.toMatch(/^\s*\//);
+      expect(firstWirePromptText(0)).toContain("FIx all parity gaps");
+      expect(firstWirePromptText(0)).not.toContain("`replace: true`");
+
+      await session.run([
+        { type: "text", text: "/goal replace -- status header alignment" },
+        { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+      ]);
+      expect(wirePrompts[1]).toEqual([
+        {
+          type: "text",
+          text: expect.stringContaining("`replace: true`"),
+        },
+        { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+      ]);
+      expect(firstWirePromptText(1)).toContain("status header alignment");
+
+      await session.run("/goal resume");
+      expect(firstWirePromptText(2)).toContain("UpdateGoal");
+      expect(firstWirePromptText(2)).toContain('"active"');
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("handles /goal status, pause, cancel, validation errors, and autonomous interrupt out-of-band while preserving session mode", async () => {
+    const home = await mkdtemp(join(tmpdir(), "paseo-kimi-goal-oob-"));
+    tempHomes.push(home);
+    const dataHome = join(home, ".kimi-code");
+    const cwd = "/Users/test/Monet Core/";
+    const sessionId = "session_goal_oob";
+    const journalPath = join(
+      dataHome,
+      "sessions",
+      "wd_monet-core_4fc67357f555",
+      sessionId,
+      "agents/main/wire.jsonl",
+    );
+    await mkdir(dirname(journalPath), { recursive: true });
+
+    const closeCalls: string[] = [];
+    const resumeCalls: string[] = [];
+    const setModeCalls: string[] = [];
+    let currentServerMode = "default";
+    let closeHook: (() => Promise<void>) | null = null;
+
+    const modeOptions = () => ({
+      currentModeId: currentServerMode,
+      availableModes: [
+        { id: "default", name: "Default" },
+        { id: "yolo", name: "YOLO" },
+      ],
+    });
+
+    vi.spyOn(providerLaunchConfig, "resolveProviderLaunch").mockResolvedValue({
+      command: "kimi",
+      args: [],
+    });
+    vi.spyOn(providerLaunchConfig, "checkProviderLaunchAvailable").mockResolvedValue({
+      available: true,
+      resolvedPath: "/usr/local/bin/kimi",
+    });
+
+    vi.spyOn(spawnUtils, "spawnProcess").mockImplementation(() => {
+      const { child, clientToAgent, agentToClient } = createMockKimiChild();
+      const stream = ndJsonStream(Writable.toWeb(agentToClient), Readable.toWeb(clientToAgent));
+      const connection = new AgentSideConnection(
+        (): Agent => ({
+          initialize: async () => ({
+            protocolVersion: PROTOCOL_VERSION,
+            agentCapabilities: {
+              loadSession: true,
+              sessionCapabilities: { close: {}, resume: {} },
+            },
+          }),
+          authenticate: async () => ({}),
+          newSession: async () => ({
+            sessionId,
+            configOptions: [],
+            modes: modeOptions(),
+          }),
+          loadSession: async () => ({
+            configOptions: [],
+            modes: modeOptions(),
+          }),
+          unstable_closeSession: async (params) => {
+            closeCalls.push(params.sessionId);
+            await closeHook?.();
+            // Like Kimi 2.5's AcpSession: reopening resets the ACP mode state to default.
+            currentServerMode = "default";
+            return {};
+          },
+          unstable_resumeSession: async (params) => {
+            resumeCalls.push(params.sessionId);
+            return {
+              configOptions: [],
+              modes: modeOptions(),
+            };
+          },
+          setSessionMode: async (params) => {
+            currentServerMode = params.modeId;
+            setModeCalls.push(params.modeId);
+            return {};
+          },
+          setSessionConfigOption: async () => ({ configOptions: [] }),
+          prompt: async () => ({ stopReason: "end_turn" }),
+          cancel: async () => {},
+        }),
+        stream,
+      );
+      void connection;
+      return child as unknown as ChildProcessWithoutNullStreams;
+    });
+
+    const client = new KimiACPAgentClient({
+      logger: createTestLogger(),
+      command: ["kimi", "acp"],
+      env: { HOME: home, KIMI_CODE_HOME: dataHome },
+      providerId: "kimi",
+      label: "Kimi Code CLI",
+      journalPollIntervalMs: 15,
+      backgroundZeroSettleMs: 25,
+    });
+
+    const session = await client.createSession({ provider: "acp", cwd, modeId: "yolo" });
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    const runOutOfBand = async (input: string): Promise<string[]> => {
+      const handler = session.tryHandleOutOfBand?.(input);
+      expect(handler).not.toBeNull();
+      const emitted: string[] = [];
+      await handler!.run({
+        emit: (event) => {
+          if (event.type === "timeline" && event.item.type === "assistant_message") {
+            emitted.push(event.item.text);
+          }
+        },
+      });
+      return emitted;
+    };
+
+    try {
+      expect(session.tryHandleOutOfBand?.("/goal FIx all parity gaps")).toBeNull();
+      expect(session.tryHandleOutOfBand?.("/goal resume")).toBeNull();
+
+      expect(await runOutOfBand("/goal")).toEqual([
+        "No goal set. Start one with `/goal <objective>`.",
+      ]);
+      expect(await runOutOfBand("/goal pause")).toEqual(["No goal to pause."]);
+      expect(await runOutOfBand("/goal cancel")).toEqual(["No goal to cancel."]);
+      expect(await runOutOfBand("/goal replace")).toEqual([
+        "Provide a goal objective, e.g. `/goal Fix all parity gaps`.",
+      ]);
+      expect(await runOutOfBand(`/goal ${"x".repeat(4_001)}`)).toEqual([
+        "Goal objective is too long (max 4000 characters). Put long content in a file and reference the file path.",
+      ]);
+
+      const now = Date.now();
+      await appendFile(
+        journalPath,
+        stringifyJournalRows([
+          {
+            type: "goal.create",
+            agentId: "main",
+            goalId: "goal-live",
+            objective: "Fix all parity gaps",
+            completionCriterion: "All parity checks exit 0",
+            wallClockResumedAt: now - 5_000,
+            time: now - 5_000,
+          },
+          {
+            type: "goal.update",
+            agentId: "main",
+            turnsUsed: 2,
+            tokensUsed: 1_500,
+            budgetLimits: { turnBudget: 10 },
+            time: now - 1_000,
+          },
+        ]),
+      );
+
+      await vi.waitFor(() => {
+        expect(lastBackgroundWorkCount(events)).toBe(1);
+      });
+
+      const statusMessages = await runOutOfBand("/goal status");
+      expect(statusMessages).toHaveLength(1);
+      expect(statusMessages[0]).toContain("Goal (active): Fix all parity gaps");
+      expect(statusMessages[0]).toContain("Completion criterion: All parity checks exit 0");
+      expect(statusMessages[0]).toContain("2 turns");
+      expect(statusMessages[0]).toContain("1500 tokens");
+      expect(statusMessages[0]).toContain("10 turns");
+
+      // Simulate Kimi's GoalEffects.closing pausing the active goal when session/close runs.
+      closeHook = async () => {
+        await appendFile(
+          journalPath,
+          stringifyJournalRows([
+            {
+              type: "goal.update",
+              agentId: "main",
+              status: "paused",
+              reason: "Paused after agent closed",
+              wallClockMs: 5_200,
+              time: Date.now(),
+            },
+          ]),
+        );
+      };
+
+      expect(await runOutOfBand("/goal pause")).toEqual([
+        "Goal paused. Use `/goal resume` to continue.",
+      ]);
+      expect(closeCalls).toEqual([sessionId]);
+      expect(resumeCalls).toEqual([sessionId]);
+      expect(await session.getCurrentMode()).toBe("yolo");
+      expect(setModeCalls).toEqual(["yolo", "yolo"]);
+      expect(lastBackgroundWorkCount(events)).toBe(0);
+
+      const pausedStatus = await runOutOfBand("/goal status");
+      expect(pausedStatus[0]).toContain("Goal (paused): Fix all parity gaps");
+
+      closeHook = null;
+      expect(await runOutOfBand("/goal cancel")).toEqual(["Goal cancelled."]);
+      expect(closeCalls).toEqual([sessionId, sessionId]);
+      expect(resumeCalls).toEqual([sessionId, sessionId]);
+      expect(await runOutOfBand("/goal status")).toEqual([
+        "No goal set. Start one with `/goal <objective>`.",
+      ]);
+
+      // Start an autonomous goal continuation turn and verify interrupt() stops it via reopen.
+      const autoAt = Date.now();
+      closeHook = async () => {
+        await appendFile(
+          journalPath,
+          stringifyJournalRows([
+            {
+              type: "turn.ended",
+              agentId: "main",
+              turnId: 9,
+              reason: "cancelled",
+              time: Date.now(),
+            },
+            {
+              type: "goal.update",
+              agentId: "main",
+              status: "paused",
+              reason: "Paused after agent closed",
+              time: Date.now() + 1,
+            },
+          ]),
+        );
+      };
+      await appendFile(
+        journalPath,
+        stringifyJournalRows([
+          {
+            type: "goal.create",
+            agentId: "main",
+            goalId: "goal-auto",
+            objective: "Keep iterating",
+            time: autoAt,
+          },
+          { type: "agent.turn.started", turnId: 9, time: autoAt + 1 },
+          {
+            type: "context.append_loop_event",
+            agentId: "main",
+            event: {
+              type: "tool.call",
+              turnId: "9",
+              toolCallId: "tool_goal_9",
+              name: "Shell",
+              args: { command: "npm test" },
+            },
+            time: autoAt + 2,
+          },
+        ]),
+      );
+
+      await vi.waitFor(() => {
+        expect(hasRunningToolCall(events, "tool_goal_9")).toBe(true);
+      });
+
+      await session.interrupt();
+      expect(closeCalls).toHaveLength(3);
+      expect(resumeCalls).toHaveLength(3);
+      expect(lastBackgroundWorkCount(events)).toBe(0);
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "turn_canceled",
+          }),
+        ]),
+      );
+    } finally {
+      closeHook = null;
       await session.close();
     }
   });

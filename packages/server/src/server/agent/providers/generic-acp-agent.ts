@@ -5,8 +5,11 @@ import { checkProviderLaunchAvailable, resolveProviderLaunch } from "../provider
 import {
   ACPAgentClient,
   type ACPCatalogModelResolver,
+  type ACPCommandsTransformer,
   type ACPNativeSessionMonitorFactory,
   type ACPNativeTurnProbe,
+  type ACPOutOfBandPromptHandler,
+  type ACPPromptBlocksTransformer,
   type ACPPromptResponseValidator,
   type ACPClientCapabilityMeta,
   type ACPConfigFeatureOption,
@@ -33,6 +36,9 @@ interface GenericACPAgentClientOptions {
   clientCapabilityMeta?: ACPClientCapabilityMeta;
   configFeatureOptions?: ACPConfigFeatureOption[];
   extensionCommandsParser?: ACPExtensionCommandsParser;
+  commandsTransformer?: ACPCommandsTransformer;
+  promptBlocksTransformer?: ACPPromptBlocksTransformer;
+  outOfBandPromptHandler?: ACPOutOfBandPromptHandler;
   catalogModelResolver?: ACPCatalogModelResolver;
   promptResponseValidator?: ACPPromptResponseValidator;
   nativeTurnProbe?: ACPNativeTurnProbe;
@@ -68,6 +74,9 @@ export class GenericACPAgentClient extends ACPAgentClient {
       clientCapabilityMeta: options.clientCapabilityMeta,
       configFeatureOptions: options.configFeatureOptions,
       extensionCommandsParser: options.extensionCommandsParser,
+      commandsTransformer: options.commandsTransformer,
+      promptBlocksTransformer: options.promptBlocksTransformer,
+      outOfBandPromptHandler: options.outOfBandPromptHandler,
       catalogModelResolver: options.catalogModelResolver,
       promptResponseValidator: options.promptResponseValidator,
       nativeTurnProbe: options.nativeTurnProbe,

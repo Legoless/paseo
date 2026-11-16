@@ -478,7 +478,19 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
     revertConversation: inner.revertConversation?.bind(inner),
     revertFiles: inner.revertFiles?.bind(inner),
     revertBoth: inner.revertBoth?.bind(inner),
-    tryHandleOutOfBand: inner.tryHandleOutOfBand?.bind(inner),
+    tryHandleOutOfBand: inner.tryHandleOutOfBand
+      ? (prompt) => {
+          const handler = inner.tryHandleOutOfBand?.(prompt);
+          if (!handler) return null;
+          return {
+            run: async (ctx) => {
+              await handler.run({
+                emit: (event) => ctx.emit(mapStreamEvent(provider, event)),
+              });
+            },
+          };
+        }
+      : undefined,
   } satisfies ForwardedAgentSession;
 }
 

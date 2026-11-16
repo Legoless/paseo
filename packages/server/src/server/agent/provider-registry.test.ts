@@ -7,7 +7,9 @@ import type {
   AgentFeature,
   AgentModelDefinition,
   AgentMode,
+  AgentSession,
   AgentSessionConfig,
+  AgentStreamEvent,
   ProviderCatalog,
 } from "./agent-sdk-types.js";
 
@@ -498,6 +500,7 @@ import {
   AGENT_PROVIDER_DEFINITIONS,
   buildProviderRegistry,
   createAllClients,
+  wrapSessionProvider,
 } from "./provider-registry.js";
 import { FakeOmp } from "./providers/omp/test-utils/fake-omp.js";
 
@@ -1774,5 +1777,60 @@ describe("fetchCatalog", () => {
     expect(injectedClient.fetchCatalog).toHaveBeenCalledTimes(1);
     expect(catalog.models.map((model) => model.id)).toEqual(["catalog-model"]);
     expect(catalog.modes.map((mode) => mode.id)).toEqual(["ask"]);
+  });
+
+  test("wrapSessionProvider maps tryHandleOutOfBand stream events to the derived provider id", async () => {
+    const innerSession = {
+      provider: "acp",
+      id: "session-1",
+      capabilities: {
+        supportsStreaming: true,
+        supportsSessionPersistence: true,
+        supportsDynamicModes: true,
+        supportsMcpServers: true,
+        supportsReasoningStream: true,
+        supportsToolInvocations: true,
+      },
+      run: vi.fn(),
+      startTurn: vi.fn(),
+      subscribe: vi.fn(() => () => {}),
+      async *streamHistory() {},
+      getRuntimeInfo: vi.fn(async () => ({ provider: "acp", sessionId: "session-1" })),
+      getAvailableModes: vi.fn(async () => []),
+      getCurrentMode: vi.fn(async () => null),
+      setMode: vi.fn(async () => {}),
+      getPendingPermissions: vi.fn(() => []),
+      respondToPermission: vi.fn(async () => {}),
+      describePersistence: vi.fn(() => null),
+      interrupt: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+      tryHandleOutOfBand: (prompt) =>
+        prompt === "/goal status"
+          ? {
+              run: async ({ emit }) => {
+                emit({
+                  type: "timeline",
+                  provider: "acp",
+                  item: { type: "assistant_message", text: "No goal set." },
+                });
+              },
+            }
+          : null,
+    } satisfies AgentSession;
+
+    const wrapped = wrapSessionProvider("kimi", innerSession);
+    expect(wrapped.tryHandleOutOfBand?.("/goal build")).toBeNull();
+
+    const handler = wrapped.tryHandleOutOfBand?.("/goal status");
+    expect(handler).not.toBeNull();
+    const events: AgentStreamEvent[] = [];
+    await handler!.run({ emit: (event) => events.push(event) });
+    expect(events).toEqual([
+      {
+        type: "timeline",
+        provider: "kimi",
+        item: { type: "assistant_message", text: "No goal set." },
+      },
+    ]);
   });
 });

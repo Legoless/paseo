@@ -99,7 +99,12 @@ sessions also follow `agents/main/wire.jsonl` because `kimi acp` resolves `sessi
 detached tasks, subagents, or `/goal` loops keep running and drops subsequent autonomous wakeup turns
 from stdout; the shim reports those background items through `background_work_changed` and streams
 post-prompt autonomous turns from the journal, seeding resumed sessions at EOF so orphaned tasks from
-an earlier process do not stick.
+an earlier process do not stick. Kimi 2.5 omits `/goal` from `kimi acp`'s built-in slash table and
+rejects unknown leading slash commands before starting a turn, while keeping `GoalFeature` (`CreateGoal`,
+`UpdateGoal`, `SetGoalBudget`, `GetGoal`) active in the engine. The shim advertises `/goal`, rewrites
+create/replace/resume invocations into host goal-intake prompts, and runs `status`, `pause`, `cancel`,
+and autonomous-turn interrupts out of band against `agents/main/wire.jsonl` and `session/close` +
+`session/resume` (`session/cancel` is a no-op once the initial prompt driver has settled).
 
 ### Direct
 

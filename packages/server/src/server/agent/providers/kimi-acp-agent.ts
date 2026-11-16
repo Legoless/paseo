@@ -1,7 +1,8 @@
+import type { ContentBlock } from "@agentclientprotocol/sdk";
 import { createHash, randomUUID } from "node:crypto";
-import { open } from "node:fs/promises";
+import { appendFile, mkdir, open } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { setTimeout } from "node:timers/promises";
 import type { Logger } from "pino";
@@ -9,6 +10,9 @@ import { z } from "zod";
 
 import type {
   AgentModelDefinition,
+  AgentPromptInput,
+  AgentSlashCommand,
+  AgentStreamEvent,
   ToolCallDetail,
   ToolCallTimelineItem,
 } from "../agent-sdk-types.js";
@@ -16,6 +20,7 @@ import {
   type ACPCatalogModelResolverContext,
   type ACPNativeSessionMonitor,
   type ACPNativeSessionMonitorContext,
+  type ACPOutOfBandExecutionContext,
   type ACPPromptResponseContext,
   deriveSelectorOptions,
   findSelectConfigOption,
@@ -67,6 +72,481 @@ const KIMI_JOURNAL_TAIL_MAX_BYTES = 2 * 1024 * 1024;
 const KIMI_SESSION_MONITOR_POLL_MS = 200;
 const KIMI_BACKGROUND_ZERO_SETTLE_MS = 500;
 const KIMI_SESSION_ID = /^[A-Za-z0-9_-]+$/;
+const KIMI_MAX_GOAL_OBJECTIVE_LENGTH = 4_000;
+const KIMI_GOAL_CONTROL_SUBCOMMANDS = new Set(["pause", "resume", "cancel", "clear"]);
+
+const KIMI_GOAL_COMMAND: AgentSlashCommand = {
+  name: "goal",
+  description: "Start or manage an autonomous goal",
+  argumentHint: "[status|pause|resume|cancel|replace] | <objective>",
+  kind: "command",
+};
+
+type KimiGoalSlashCommand =
+  | { kind: "status" }
+  | { kind: "pause" }
+  | { kind: "resume" }
+  | { kind: "cancel" }
+  | { kind: "create"; objective: string; replace: boolean }
+  | { kind: "error"; message: string };
+
+function extractTypedKimiPromptText(prompt: AgentPromptInput): {
+  text: string;
+  hasAttachments: boolean;
+} | null {
+  if (typeof prompt === "string") {
+    return { text: prompt, hasAttachments: false };
+  }
+  const first = prompt[0];
+  if (!first || first.type !== "text" || "mimeType" in first) {
+    return null;
+  }
+  return { text: first.text, hasAttachments: prompt.length > 1 };
+}
+
+function stripLeadingToken(text: string, expected: string): string | null {
+  const trimmed = text.trimStart();
+  if (trimmed === expected) {
+    return "";
+  }
+  if (trimmed.startsWith(expected) && /\s/.test(trimmed[expected.length] ?? "")) {
+    return trimmed.slice(expected.length).trimStart();
+  }
+  return null;
+}
+
+export function parseKimiGoalSlashCommand(prompt: AgentPromptInput): KimiGoalSlashCommand | null {
+  const extracted = extractTypedKimiPromptText(prompt);
+  if (!extracted) {
+    return null;
+  }
+  const match = /^\s*\/goal(?=$|\s)([\s\S]*)$/i.exec(extracted.text);
+  if (!match) {
+    return null;
+  }
+  const rawArgs = (match[1] ?? "").trim();
+  if (!extracted.hasAttachments) {
+    if (rawArgs.length === 0 || rawArgs === "status") {
+      return { kind: "status" };
+    }
+    const tokens = rawArgs.split(/\s+/);
+    const first = tokens[0]?.toLowerCase();
+    if (first && KIMI_GOAL_CONTROL_SUBCOMMANDS.has(first) && tokens.length === 1) {
+      if (first === "pause") return { kind: "pause" };
+      if (first === "resume") return { kind: "resume" };
+      return { kind: "cancel" };
+    }
+  }
+
+  let remainder = rawArgs;
+  let replace = false;
+  const afterReplace = stripLeadingToken(remainder, "replace");
+  if (afterReplace !== null) {
+    replace = true;
+    remainder = afterReplace;
+  }
+  const afterDashDash = stripLeadingToken(remainder, "--");
+  if (afterDashDash !== null) {
+    remainder = afterDashDash;
+  }
+
+  const objective = remainder.trim();
+  if (objective.length === 0) {
+    return {
+      kind: "error",
+      message: "Provide a goal objective, e.g. `/goal Fix all parity gaps`.",
+    };
+  }
+  if (objective.length > KIMI_MAX_GOAL_OBJECTIVE_LENGTH) {
+    return {
+      kind: "error",
+      message: `Goal objective is too long (max ${KIMI_MAX_GOAL_OBJECTIVE_LENGTH} characters). Put long content in a file and reference the file path.`,
+    };
+  }
+  return { kind: "create", objective, replace };
+}
+
+function formatKimiGoalCreatePrompt(objective: string, replace: boolean): string {
+  const replaceInstruction = replace
+    ? "Pass `replace: true` to `CreateGoal` so it replaces any existing goal."
+    : "Pass `replace: false`; if `CreateGoal` reports that a goal already exists, tell the user to run `/goal replace <objective>` or `/goal status` and stop.";
+  return [
+    "Host goal-intake prompt: the user explicitly invoked `/goal` to start autonomous goal mode now.",
+    `Call \`CreateGoal\` immediately with the exact \`objective\` below. ${replaceInstruction}`,
+    "Do not ask for confirmation or a narrower completion criterion before calling `CreateGoal` — start the goal as written.",
+    "If the objective states an explicit hard budget (turns, tokens, or duration), also call `SetGoalBudget`.",
+    "Once the goal is created, begin working toward the objective immediately in this turn.",
+    "",
+    "Objective:",
+    objective,
+  ].join("\n");
+}
+
+function formatKimiGoalResumePrompt(): string {
+  return [
+    "Host goal-resume prompt: the user explicitly invoked `/goal resume`.",
+    'Call `UpdateGoal` with `status: "active"` now to resume the current goal, then continue working toward its objective in this turn.',
+    "If there is no current goal to resume, tell the user that no goal is set and stop.",
+  ].join("\n");
+}
+
+export function transformKimiSlashCommands(commands: AgentSlashCommand[]): AgentSlashCommand[] {
+  if (commands.some((command) => command.name === KIMI_GOAL_COMMAND.name)) {
+    return commands;
+  }
+  return [...commands, KIMI_GOAL_COMMAND];
+}
+
+export function transformKimiPromptBlocks(
+  blocks: ContentBlock[],
+  prompt: AgentPromptInput,
+): ContentBlock[] {
+  const parsed = parseKimiGoalSlashCommand(prompt);
+  if (!parsed || blocks.length === 0 || blocks[0]?.type !== "text") {
+    return blocks;
+  }
+  if (parsed.kind === "create") {
+    return [
+      { type: "text", text: formatKimiGoalCreatePrompt(parsed.objective, parsed.replace) },
+      ...blocks.slice(1),
+    ];
+  }
+  if (parsed.kind === "resume") {
+    return [{ type: "text", text: formatKimiGoalResumePrompt() }, ...blocks.slice(1)];
+  }
+  return blocks;
+}
+
+interface KimiGoalBudgetLimits {
+  tokenBudget?: number;
+  turnBudget?: number;
+  wallClockBudgetMs?: number;
+}
+
+interface KimiGoalSnapshot {
+  goalId: string;
+  objective: string;
+  completionCriterion?: string;
+  status: "active" | "paused" | "blocked" | "complete";
+  terminalReason?: string;
+  turnsUsed: number;
+  tokensUsed: number;
+  wallClockMs: number;
+  wallClockResumedAt?: number;
+  budgetLimits: KimiGoalBudgetLimits;
+}
+
+function parseKimiGoalBudgetLimits(raw: unknown): KimiGoalBudgetLimits | undefined {
+  if (!isObjectRecord(raw)) return undefined;
+  const limits: KimiGoalBudgetLimits = {};
+  if (typeof raw.tokenBudget === "number" && Number.isFinite(raw.tokenBudget)) {
+    limits.tokenBudget = raw.tokenBudget;
+  }
+  if (typeof raw.turnBudget === "number" && Number.isFinite(raw.turnBudget)) {
+    limits.turnBudget = raw.turnBudget;
+  }
+  if (typeof raw.wallClockBudgetMs === "number" && Number.isFinite(raw.wallClockBudgetMs)) {
+    limits.wallClockBudgetMs = raw.wallClockBudgetMs;
+  }
+  return limits;
+}
+
+type KimiGoalStatus = KimiGoalSnapshot["status"];
+
+function isKimiGoalStatus(value: unknown): value is KimiGoalStatus {
+  return value === "active" || value === "paused" || value === "blocked" || value === "complete";
+}
+
+function readFiniteNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function resolveGoalTerminalReason(
+  current: KimiGoalSnapshot,
+  nextStatus: KimiGoalStatus,
+  reason: unknown,
+): string | undefined {
+  if (nextStatus === current.status) {
+    return current.terminalReason;
+  }
+  if (nextStatus === "active") {
+    return undefined;
+  }
+  return typeof reason === "string" ? reason : undefined;
+}
+
+function resolveGoalResumedAt(
+  current: KimiGoalSnapshot,
+  nextStatus: KimiGoalStatus,
+  wallClockResumedAt: unknown,
+): number | undefined {
+  if (nextStatus !== "active") {
+    return undefined;
+  }
+  if (typeof wallClockResumedAt === "number" && Number.isFinite(wallClockResumedAt)) {
+    return wallClockResumedAt;
+  }
+  return current.wallClockResumedAt;
+}
+
+function createKimiGoalSnapshotFromRecord(
+  record: Record<string, unknown>,
+  fallback: KimiGoalSnapshot | null,
+): KimiGoalSnapshot | null {
+  if (typeof record.goalId !== "string" || typeof record.objective !== "string") {
+    return fallback;
+  }
+  return {
+    goalId: record.goalId,
+    objective: record.objective,
+    completionCriterion:
+      typeof record.completionCriterion === "string" ? record.completionCriterion : undefined,
+    status: isKimiGoalStatus(record.status) ? record.status : "active",
+    turnsUsed: 0,
+    tokensUsed: 0,
+    wallClockMs: 0,
+    wallClockResumedAt:
+      typeof record.wallClockResumedAt === "number" ? record.wallClockResumedAt : undefined,
+    budgetLimits: parseKimiGoalBudgetLimits(record.budgetLimits) ?? {},
+  };
+}
+
+function updateKimiGoalSnapshotFromRecord(
+  current: KimiGoalSnapshot,
+  record: Record<string, unknown>,
+): KimiGoalSnapshot {
+  const nextStatus = isKimiGoalStatus(record.status) ? record.status : current.status;
+  return {
+    ...current,
+    objective: typeof record.objective === "string" ? record.objective : current.objective,
+    status: nextStatus,
+    terminalReason: resolveGoalTerminalReason(current, nextStatus, record.reason),
+    turnsUsed: readFiniteNumber(record.turnsUsed, current.turnsUsed),
+    tokensUsed: readFiniteNumber(record.tokensUsed, current.tokensUsed),
+    wallClockMs: readFiniteNumber(record.wallClockMs, current.wallClockMs),
+    wallClockResumedAt: resolveGoalResumedAt(current, nextStatus, record.wallClockResumedAt),
+    budgetLimits: parseKimiGoalBudgetLimits(record.budgetLimits) ?? current.budgetLimits,
+  };
+}
+
+function applyKimiGoalStateLine(
+  current: KimiGoalSnapshot | null,
+  line: string,
+): KimiGoalSnapshot | null {
+  const record = parseMainKimiJournalRecord(line);
+  if (!record) {
+    return current;
+  }
+  if (
+    record.type === "goal.clear" ||
+    record.type === "session.forked" ||
+    record.type === "forked"
+  ) {
+    return null;
+  }
+  if (record.type === "goal.create") {
+    return createKimiGoalSnapshotFromRecord(record, current);
+  }
+  if (record.type === "goal.update" && current !== null) {
+    return updateKimiGoalSnapshotFromRecord(current, record);
+  }
+  return current;
+}
+
+async function readKimiGoalSnapshot(
+  location: KimiJournalLocation,
+): Promise<KimiGoalSnapshot | null> {
+  if (!KIMI_SESSION_ID.test(location.sessionId)) {
+    return null;
+  }
+  const journalPath = resolveKimiJournalPath(location);
+  try {
+    const file = await open(journalPath, "r");
+    try {
+      const buffer = Buffer.alloc(KIMI_JOURNAL_TAIL_INITIAL_BYTES);
+      const decoder = new StringDecoder("utf8");
+      let offset = 0;
+      let remainder = "";
+      let state: KimiGoalSnapshot | null = null;
+      while (true) {
+        const { bytesRead } = await file.read(buffer, 0, buffer.length, offset);
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+        remainder += decoder.write(buffer.subarray(0, bytesRead));
+        let newlineIdx = remainder.indexOf("\n");
+        while (newlineIdx >= 0) {
+          state = applyKimiGoalStateLine(state, remainder.slice(0, newlineIdx));
+          remainder = remainder.slice(newlineIdx + 1);
+          newlineIdx = remainder.indexOf("\n");
+        }
+      }
+      remainder += decoder.end();
+      if (remainder.trim().length > 0) {
+        state = applyKimiGoalStateLine(state, remainder);
+      }
+      return state;
+    } finally {
+      await file.close();
+    }
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function formatKimiElapsedDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1_000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return `${minutes}m${seconds.toString().padStart(2, "0")}s`;
+  return `${Math.floor(minutes / 60)}h${(minutes % 60).toString().padStart(2, "0")}m`;
+}
+
+function formatKimiGoalStatusMessage(snapshot: KimiGoalSnapshot | null): string {
+  if (!snapshot) {
+    return "No goal set. Start one with `/goal <objective>`.";
+  }
+  const liveElapsedMs =
+    snapshot.status === "active" && snapshot.wallClockResumedAt !== undefined
+      ? snapshot.wallClockMs + Math.max(0, Date.now() - snapshot.wallClockResumedAt)
+      : snapshot.wallClockMs;
+  const lines = [`Goal (${snapshot.status}): ${snapshot.objective}`];
+  if (snapshot.completionCriterion) {
+    lines.push(`Completion criterion: ${snapshot.completionCriterion}`);
+  }
+  if (snapshot.terminalReason) {
+    lines.push(`Reason: ${snapshot.terminalReason}`);
+  }
+  lines.push(
+    `Progress: ${snapshot.turnsUsed} turns, ${snapshot.tokensUsed} tokens, ${formatKimiElapsedDuration(liveElapsedMs)}`,
+  );
+  const budgets: string[] = [];
+  if (snapshot.budgetLimits.turnBudget !== undefined) {
+    budgets.push(`${snapshot.budgetLimits.turnBudget} turns`);
+  }
+  if (snapshot.budgetLimits.tokenBudget !== undefined) {
+    budgets.push(`${snapshot.budgetLimits.tokenBudget} tokens`);
+  }
+  if (snapshot.budgetLimits.wallClockBudgetMs !== undefined) {
+    budgets.push(formatKimiElapsedDuration(snapshot.budgetLimits.wallClockBudgetMs));
+  }
+  if (budgets.length > 0) {
+    lines.push(`Budgets: ${budgets.join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+function emitKimiOutOfBandMessage(
+  provider: string,
+  emit: (event: AgentStreamEvent) => void,
+  text: string,
+): void {
+  emit({
+    type: "timeline",
+    provider,
+    item: { type: "assistant_message", text },
+  });
+}
+
+async function appendKimiJournalRecord(
+  journalPath: string,
+  record: Record<string, unknown>,
+): Promise<void> {
+  await mkdir(dirname(journalPath), { recursive: true });
+  await appendFile(journalPath, `${JSON.stringify(record)}\n`, "utf8");
+}
+
+export function handleKimiOutOfBandPrompt(
+  prompt: AgentPromptInput,
+): { run(ctx: ACPOutOfBandExecutionContext): Promise<void> } | null {
+  const parsed = parseKimiGoalSlashCommand(prompt);
+  if (!parsed || parsed.kind === "create" || parsed.kind === "resume") {
+    return null;
+  }
+  return {
+    run: async (ctx) => {
+      if (parsed.kind === "error") {
+        emitKimiOutOfBandMessage(ctx.provider, ctx.emit, parsed.message);
+        return;
+      }
+      if (!ctx.sessionId || !KIMI_SESSION_ID.test(ctx.sessionId)) {
+        emitKimiOutOfBandMessage(
+          ctx.provider,
+          ctx.emit,
+          "No goal set. Start one with `/goal <objective>`.",
+        );
+        return;
+      }
+      const location: KimiJournalLocation = {
+        sessionId: ctx.sessionId,
+        cwd: ctx.cwd,
+        env: ctx.env,
+      };
+      const snapshot = await readKimiGoalSnapshot(location);
+      if (parsed.kind === "status") {
+        emitKimiOutOfBandMessage(ctx.provider, ctx.emit, formatKimiGoalStatusMessage(snapshot));
+        return;
+      }
+      const journalPath = resolveKimiJournalPath(location);
+      if (parsed.kind === "pause") {
+        if (!snapshot) {
+          emitKimiOutOfBandMessage(ctx.provider, ctx.emit, "No goal to pause.");
+          return;
+        }
+        if (snapshot.status === "paused") {
+          emitKimiOutOfBandMessage(
+            ctx.provider,
+            ctx.emit,
+            "Goal is already paused. Use `/goal resume` to continue.",
+          );
+          return;
+        }
+        if (snapshot.status !== "active") {
+          emitKimiOutOfBandMessage(
+            ctx.provider,
+            ctx.emit,
+            `Cannot pause a goal in status "${snapshot.status}".`,
+          );
+          return;
+        }
+        await ctx.reopenSession(async () => {
+          const afterClose = await readKimiGoalSnapshot(location);
+          if (afterClose?.status === "active") {
+            await appendKimiJournalRecord(journalPath, {
+              type: "goal.update",
+              agentId: "main",
+              status: "paused",
+              reason: "Paused by user",
+              actor: "user",
+              time: Date.now(),
+            });
+          }
+        });
+        emitKimiOutOfBandMessage(
+          ctx.provider,
+          ctx.emit,
+          "Goal paused. Use `/goal resume` to continue.",
+        );
+        return;
+      }
+      if (!snapshot) {
+        emitKimiOutOfBandMessage(ctx.provider, ctx.emit, "No goal to cancel.");
+        return;
+      }
+      await ctx.reopenSession(async () => {
+        await appendKimiJournalRecord(journalPath, {
+          type: "goal.clear",
+          agentId: "main",
+          time: Date.now(),
+        });
+      });
+      emitKimiOutOfBandMessage(ctx.provider, ctx.emit, "Goal cancelled.");
+    },
+  };
+}
 
 // Step and tool activity is appended as loop events. A long turn's start record
 // scrolls out of the tail, so the last boundary in the tail decides ownership.
@@ -1005,8 +1485,8 @@ export async function createKimiNativeSessionMonitor(
   pollTimer.unref?.();
 
   return {
-    async syncBeforeForegroundTurnEnd(): Promise<void> {
-      await enqueueSync(false);
+    async syncBeforeForegroundTurnEnd(syncOptions?: { immediateZero?: boolean }): Promise<void> {
+      await enqueueSync(syncOptions?.immediateZero ?? false);
     },
     hasActiveAutonomousTurn(): boolean {
       return autonomousTurn !== null;
@@ -1139,6 +1619,9 @@ export class KimiACPAgentClient extends GenericACPAgentClient {
       env: options.env,
       providerId: options.providerId,
       label: options.label,
+      commandsTransformer: transformKimiSlashCommands,
+      promptBlocksTransformer: transformKimiPromptBlocks,
+      outOfBandPromptHandler: handleKimiOutOfBandPrompt,
       catalogModelResolver: resolveKimiCatalogModels,
       promptResponseValidator: validateKimiPromptResponse,
       nativeTurnProbe: kimiNativeTurnStillOpen,
