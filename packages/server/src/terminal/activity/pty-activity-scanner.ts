@@ -541,17 +541,52 @@ export function isGeminiBusyScreen(lines: string[]): boolean {
   return status !== undefined && GEMINI_RUNNING_STATUS.test(status);
 }
 
-// Codex keeps its composer up while a turn runs, with a status line directly above it:
-// "• Working (12s • esc to interrupt)". The header can change and a narrow pane truncates
-// the hint, so match either. Only that line counts, so a reply or diff quoting it does not.
+// Codex keeps its composer up while a turn runs, with a status block directly above it:
+// "• Working (12s • esc to interrupt)" above optional `└ Tip: …` sublines. The header can
+// change and a narrow pane wraps or truncates the hint, so match either. Only that block
+// counts, so a reply or diff quoting it does not.
 const CODEX_RUNNING_STATUS =
-  /\(\d+[hms] [^)]*esc to interrupt\)(?:\s*·.*)?$|^• .+ \(\d+[hms](?:\s+\d+[hms])*$|^• Working \(\d/;
+  /\(\d+[hms] [^)]*esc to interrupt(?:\s+and\s+send\s+immediately)?\)(?:\s*[·•].*)?$|^• .+ \(\d+[hms](?:\s+\d+[hms])*$|^• Working \(\d/;
+const CODEX_SUBLINE = /^\s*[└⎿](?:\s|$)/;
+const CODEX_INDENTED_CONTINUATION = /^\s{2,}(?![•└⎿›»])\S/;
+
+function isCodexStatusTail(rawLines: string[]): boolean {
+  if (rawLines.length === 0) return false;
+  const lastLine = rawLines[rawLines.length - 1];
+  const last = lastLine.trim();
+  if (CODEX_RUNNING_STATUS.test(last)) {
+    return true;
+  }
+  if (rawLines.length >= 2 && CODEX_INDENTED_CONTINUATION.test(lastLine)) {
+    const joined = `${rawLines[rawLines.length - 2].trim()} ${last}`;
+    return CODEX_RUNNING_STATUS.test(joined);
+  }
+  return false;
+}
 
 export function isCodexBusyScreen(lines: string[]): boolean {
-  const stripped = lines.map((line) => stripAnsi(line).trim());
-  const composer = stripped.findLastIndex((line) => CODEX_COMPOSER.test(line));
-  const status = stripped.slice(0, Math.max(composer, 0)).findLast((line) => line.length > 0);
-  return status !== undefined && CODEX_RUNNING_STATUS.test(status);
+  const stripped = lines.map((line) => stripAnsi(line).replace(/\s+$/, ""));
+  const composer = stripped.findLastIndex((line) => CODEX_COMPOSER.test(line.trim()));
+  if (composer < 0 || isNeedsInputScreen(lines, "codex")) return false;
+  const rawAboveComposer = stripped.slice(0, composer).filter((line) => line.trim().length > 0);
+  if (isCodexStatusTail(rawAboveComposer)) return true;
+
+  for (let pass = 0; pass < 2; pass += 1) {
+    let cursor = rawAboveComposer.length - 1;
+    while (cursor >= 0 && CODEX_INDENTED_CONTINUATION.test(rawAboveComposer[cursor])) {
+      cursor -= 1;
+    }
+    if (
+      cursor < 0 ||
+      !CODEX_SUBLINE.test(rawAboveComposer[cursor]) ||
+      INTERRUPTED_TURN_NOTICE.test(rawAboveComposer[cursor].trim())
+    ) {
+      break;
+    }
+    rawAboveComposer.length = cursor;
+    if (isCodexStatusTail(rawAboveComposer)) return true;
+  }
+  return false;
 }
 
 // Claude keeps its ruled `❯` composer on the cursor line while a turn runs (showing an

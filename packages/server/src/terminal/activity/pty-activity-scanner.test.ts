@@ -3184,6 +3184,53 @@ describe("Claude and Codex composer activity", () => {
     ).toBe(false);
   });
 
+  it("keeps Codex working across stillness when a tip subline sits under its status row", () => {
+    const composerLine = "› Ask Codex to do anything";
+    const busyWithTip = [
+      "• Completed `/root/reading_platform`",
+      "",
+      "• Working (2m 21s • esc to interrupt)",
+      "  └ Tip: Use /agents to open the agent command center.",
+      "",
+      composerLine,
+      "  GPT-6-Astra ultra Fast · Context 80% left · weekly 90% left ·",
+      "  5.34M in · 32.7K out · Main [default]",
+      "  ← for agents · ? for shortcuts       ⚠ 1 warning · f2 to view",
+    ];
+    expect(isCodexBusyScreen(busyWithTip)).toBe(true);
+    expect(isIdleAgentScreen(busyWithTip, composerLine, "codex")).toBe(false);
+
+    const wrappedTip = [
+      "• Planning the fix (1m 02s • esc to interrupt and send immediately)",
+      "  └ Tip: Use /agents to open the agent",
+      "    command center.",
+      composerLine,
+    ];
+    expect(isCodexBusyScreen(wrappedTip)).toBe(true);
+
+    expect(
+      isCodexBusyScreen([
+        "• Working (12s • esc to interrupt)",
+        "  └ Interrupted · What should Codex do instead?",
+        composerLine,
+      ]),
+    ).toBe(false);
+
+    const { tracker, scanner, paint } = terminal("codex");
+    scanner.feedInput("\r");
+    paint(busyWithTip, composerLine, "2m 21s");
+    vi.advanceTimersByTime(1500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    paint(["─ Worked for 2m 30s ─", composerLine], composerLine, "Worked for");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: "finished" });
+
+    // A turn that continues painting with a tip subline re-promotes a finished glow to working.
+    paint(busyWithTip, composerLine, "2m 31s");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+  });
+
   it.each<ComposerAgent>(["claude", "codex"])(
     "finishes at a %s draft containing quota wording and keeps a real banner red",
     (agent) => {
