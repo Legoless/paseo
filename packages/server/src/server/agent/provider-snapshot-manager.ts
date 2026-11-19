@@ -57,10 +57,10 @@ const CATALOG_STALE_TIME_MS = 5 * 60 * 1000;
 // Re-probes for a catalog that came back with less than the published one. After the last one
 // the smaller catalog stands: a provider can drop a model for real.
 const REGRESSED_CATALOG_RETRY_DELAYS_MS = [10_000, 30_000, 90_000];
-// A probe can time out under load (Cursor's session/new takes seconds and a cold daemon runs
-// several ACP probes at once). One retry keeps a transient timeout from leaving the provider
-// stuck in an error state that rejects agent creation until something else refreshes it.
-const FAILED_CATALOG_RETRY_DELAY_MS = 2_000;
+// A probe can time out under load (Cursor's session/new takes seconds, Antigravity's `agy models`
+// is network-bound, and a cold daemon runs several ACP probes at once). Back off across minutes so
+// a transient stall does not leave the provider stuck in an error state until a manual refresh.
+const FAILED_CATALOG_RETRY_DELAYS_MS = [2_000, 15_000, 60_000, 300_000];
 const MAX_REFRESH_TIMEOUT_MS = 2_147_483_647;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_MS = 120_000;
 const PROVIDER_REFRESH_DEADLINE_ENV = "PASEO_PROVIDER_REFRESH_TIMEOUT_MS";
@@ -224,7 +224,7 @@ interface ProviderCatalog {
   load?: Promise<void>;
   /** Probes in a row that reported less than the published catalog. */
   regressedProbes?: number;
-  /** Failed probes in a row; one retry keeps a transient timeout from sticking. */
+  /** Failed probes in a row; indexes the backoff schedule for transient failures. */
   failedProbes?: number;
   /** Pending re-probe for a regressed or failed catalog. */
   retryTimer?: NodeJS.Timeout;
@@ -576,11 +576,14 @@ export class ProviderSnapshotManager {
   async resolveCreateConfig(
     input: ResolveProviderCreateConfigOptions,
   ): Promise<ResolvedProviderCreateConfig> {
-    const entry = await this.getReadyProvider({
-      cwd: input.cwd,
-      provider: input.provider,
-      wait: true,
-    });
+    const entry = await this.getReadyProvider(
+      {
+        cwd: input.cwd,
+        provider: input.provider,
+        wait: true,
+      },
+      { allowCatalogError: true },
+    );
     const definition = this.requireProvider(input.provider);
     const parent = input.parent ? this.resolveParent(input.parent) : null;
     return definition.resolveCreateConfig({
@@ -589,7 +592,10 @@ export class ProviderSnapshotManager {
       featureValues: input.featureValues,
       parent,
       unattended: input.unattended || parent?.isUnattended === true,
-      availableModes: entry.modes ?? [],
+      // An `error` entry means the catalog probe failed, not that the provider
+      // cannot start. Passing `undefined` lets an explicit mode through unvalidated
+      // and the provider session reports the real failure.
+      availableModes: entry.status === "ready" ? (entry.modes ?? []) : undefined,
     });
   }
 
@@ -800,6 +806,7 @@ export class ProviderSnapshotManager {
 
   private async getReadyProvider(
     input: ProviderSnapshotProviderOptions,
+    options: { allowCatalogError?: boolean } = {},
   ): Promise<ProviderSnapshotEntry> {
     const entry = await this.getProvider(input);
     if (!entry.enabled) {
@@ -809,6 +816,9 @@ export class ProviderSnapshotManager {
       return entry;
     }
     if (entry.status === "error") {
+      if (options.allowCatalogError) {
+        return entry;
+      }
       throw new Error(entry.error ?? `Failed to load provider '${entry.provider}'`);
     }
     throw new Error(`Provider '${entry.provider}' is not available`);
@@ -1170,18 +1180,21 @@ export class ProviderSnapshotManager {
           "Failed to refresh provider snapshot",
         );
       }
-      if (catalogState && scheduleRetry && (catalogState.failedProbes ?? 0) === 0) {
-        catalogState.failedProbes = 1;
+      const failedProbes = catalogState?.failedProbes ?? 0;
+      const retryDelayMs = FAILED_CATALOG_RETRY_DELAYS_MS[failedProbes];
+      if (catalogState && scheduleRetry && retryDelayMs !== undefined) {
+        catalogState.failedProbes = failedProbes + 1;
         this.logger.warn(
           {
             err: error,
             provider,
             target: catalogOptions,
-            retryDelayMs: FAILED_CATALOG_RETRY_DELAY_MS,
+            attempt: failedProbes + 1,
+            retryDelayMs,
           },
           "Provider catalog refresh failed; probing again",
         );
-        scheduleRetry(FAILED_CATALOG_RETRY_DELAY_MS);
+        scheduleRetry(retryDelayMs);
       }
     }
   }

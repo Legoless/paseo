@@ -262,13 +262,14 @@ describe("ProviderSnapshotManager public surface", () => {
     }
   });
 
-  test("retries a failed catalog probe once so a transient timeout does not stick", async () => {
+  test("retries a failed catalog probe until a transient timeout passes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-08T00:00:00Z"));
     const cwd = "/tmp/retry";
     const models: AgentModelDefinition[] = [{ provider: "codex", id: "gpt-5.4", label: "GPT-5.4" }];
     const fetchCatalog = vi
       .fn()
+      .mockRejectedValueOnce(new Error("ACP session/new timed out after 20000ms"))
       .mockRejectedValueOnce(new Error("ACP session/new timed out after 20000ms"))
       .mockResolvedValueOnce({ models, modes: [] });
     const manager = new ProviderSnapshotManager({
@@ -294,21 +295,24 @@ describe("ProviderSnapshotManager public surface", () => {
       await vi.advanceTimersByTimeAsync(2_000);
       await expect.poll(callCount(fetchCatalog)).toBe(2);
 
+      await vi.advanceTimersByTimeAsync(15_000);
+      await expect.poll(callCount(fetchCatalog)).toBe(3);
+
       const recovered = await manager.getProvider({ cwd, provider: "codex", wait: false });
       expect(recovered).toMatchObject({ status: "ready", models });
       expect(recovered.error).toBeUndefined();
-      await vi.advanceTimersByTimeAsync(120_000);
-      expect(fetchCatalog).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(fetchCatalog).toHaveBeenCalledTimes(3);
     } finally {
       manager.destroy();
       vi.useRealTimers();
     }
   });
 
-  test("does not retry a failed catalog probe more than once", async () => {
+  test("retries a failed catalog probe on a backoff schedule, then stops", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-08T00:00:00Z"));
-    const cwd = "/tmp/retry-once";
+    const cwd = "/tmp/retry-schedule";
     const fetchCatalog = vi.fn().mockRejectedValue(new Error("Provider is offline"));
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),
@@ -329,8 +333,17 @@ describe("ProviderSnapshotManager public surface", () => {
       await vi.advanceTimersByTimeAsync(2_000);
       await expect.poll(callCount(fetchCatalog)).toBe(2);
 
-      await vi.advanceTimersByTimeAsync(120_000);
-      expect(fetchCatalog).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await expect.poll(callCount(fetchCatalog)).toBe(3);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await expect.poll(callCount(fetchCatalog)).toBe(4);
+
+      await vi.advanceTimersByTimeAsync(300_000);
+      await expect.poll(callCount(fetchCatalog)).toBe(5);
+
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(fetchCatalog).toHaveBeenCalledTimes(5);
     } finally {
       manager.destroy();
       vi.useRealTimers();
@@ -1981,6 +1994,111 @@ describe("ProviderSnapshotManager public surface", () => {
       expect(resolved).toEqual({ modeId: "base", featureValues: { auto_accept: true } });
     } finally {
       manager.destroy();
+    }
+  });
+
+  test("resolveCreateConfig proceeds when a catalog probe fails", async () => {
+    const resolverInputs: ResolveAgentCreateConfigInput[] = [];
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: {
+        claude: { enabled: false },
+        copilot: { enabled: false },
+        opencode: { enabled: false },
+        pi: { enabled: false },
+      },
+      extraClients: {
+        codex: createExtraClient("codex", {
+          async isAvailable() {
+            return true;
+          },
+          async fetchCatalog() {
+            throw new Error("ACP session/new timed out after 20000ms");
+          },
+          resolveCreateConfig(input) {
+            resolverInputs.push(input);
+            return { modeId: input.requestedMode, featureValues: input.featureValues };
+          },
+        }),
+      },
+    });
+    try {
+      const resolved = await manager.resolveCreateConfig({
+        cwd: "/tmp/project",
+        provider: "codex",
+        requestedMode: "agent",
+        featureValues: { fast_mode: true },
+        parent: null,
+        unattended: false,
+      });
+
+      expect(resolved).toEqual({ modeId: "agent", featureValues: { fast_mode: true } });
+      expect(resolverInputs).toEqual([
+        {
+          provider: "codex",
+          requestedMode: "agent",
+          featureValues: { fast_mode: true },
+          parent: null,
+          unattended: false,
+          availableModes: undefined,
+        },
+      ]);
+    } finally {
+      manager.destroy();
+    }
+  });
+
+  test("resolveCreateConfig still rejects disabled and unavailable providers", async () => {
+    const disabled = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: {
+        codex: { enabled: false },
+        claude: { enabled: false },
+        copilot: { enabled: false },
+        opencode: { enabled: false },
+        pi: { enabled: false },
+      },
+    });
+    const unavailable = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: {
+        claude: { enabled: false },
+        copilot: { enabled: false },
+        opencode: { enabled: false },
+        pi: { enabled: false },
+      },
+      extraClients: {
+        codex: createExtraClient("codex", {
+          async isAvailable() {
+            return false;
+          },
+        }),
+      },
+    });
+    try {
+      await expect(
+        disabled.resolveCreateConfig({
+          cwd: "/tmp/project",
+          provider: "codex",
+          requestedMode: undefined,
+          featureValues: undefined,
+          parent: null,
+          unattended: false,
+        }),
+      ).rejects.toThrow("Provider 'codex' is disabled");
+      await expect(
+        unavailable.resolveCreateConfig({
+          cwd: "/tmp/project",
+          provider: "codex",
+          requestedMode: undefined,
+          featureValues: undefined,
+          parent: null,
+          unattended: false,
+        }),
+      ).rejects.toThrow("Provider 'codex' is not available");
+    } finally {
+      disabled.destroy();
+      unavailable.destroy();
     }
   });
 });
