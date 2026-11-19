@@ -4457,4 +4457,144 @@ describe("stale dialog and Cursor footer regressions", () => {
       attentionReason: "quota",
     });
   });
+
+  it("keeps Antigravity question modals orange even with wrapped choices and esc to cancel in the footer", () => {
+    const rule = "─".repeat(58);
+    const questionModal = [
+      "  Mac, and stopped all 8 VMs (verified TERMINATED). It",
+      "  ended waiting for your approval, a Tailscale auth key",
+      "  (or choice of Windows VM 3), and quick CLI/gh logins to",
+      "  move the agent itself onto Linux D (tmux) + Sal before",
+      "  verifying the unproven merged stack (#145, #158, #221,",
+      "  #222, #295) and starting #217 and #150.",
+      rule,
+      "> Lets first clean it all up here.",
+      "",
+      '○ Thought for 37.9s ("on this machine").)',
+      '● Ran 2 commands (echo "=== git st...) (ctrl+o to expand)',
+      "",
+      "? Which cleanup tasks do you want to run first?",
+      "",
+      "Question",
+      rule,
+      "Question 1/1: Which cleanup tasks do you want to run first?",
+      "",
+      "  1. [x] (Recommended) Local Mac disk cleanup: trim old lane",
+      "logs/captures/binaries in ~/.cache/godotnext-delegate (~11",
+      "GB, keeping reusable scripts), remove",
+      "~/Projects/legoless/GodotNext-work (258 MB), and clear",
+      "ignored build/cache files in this repo",
+      "> 2. [ ] Local M5 Max Metal builds & runs here on this Mac",
+      "to verify and close the ~47 open issues already on master",
+      "  3. [ ] Cloud VM cleanup: delete the unused stopped GCE",
+      "VMs/disks (6 of 8, or 7 of 8 if using Sal only) to cut",
+      "~$220–250/mo in disk storage while keeping template",
+      "snapshots",
+      "  4. [ ] Finish unproven Stack 2 backlog on master (#145,",
+      "#158, #221, #222, #295 GPU checks, #222 review, and",
+      "follow-up issues) before starting #217/#150",
+      "  5. Write-in...",
+      "",
+      "  ↑/↓ Navigate · space Toggle · enter Submit · esc Skip",
+      rule,
+      "esc to cancel                 auto · Gemini 4 Neon · xhigh",
+    ];
+    const selectedLine = "> 2. [ ] Local M5 Max Metal builds & runs here on this Mac";
+
+    expect(detectAgentFromOutput(questionModal.join("\n"))).toBe("antigravity");
+    expect(isAntigravityNeedsInputScreen(questionModal)).toBe(true);
+    expect(isAntigravityNeedsInputScreen(questionModal.slice(-20))).toBe(true);
+    expect(isAntigravityNeedsInputScreen(questionModal.slice(-10))).toBe(true);
+    expect(isAntigravityBusyScreen(questionModal)).toBe(false);
+    expect(isAntigravityBusyScreen(questionModal.slice(-20))).toBe(false);
+    expect(isIdleAgentScreen(questionModal, selectedLine, "antigravity")).toBe(false);
+
+    const writeInModal = [
+      "Question",
+      rule,
+      "> run only the local cache cleanup first",
+      "",
+      "  enter Submit · esc Back",
+      rule,
+      "esc to cancel                 auto · Gemini 4 Neon · xhigh",
+    ];
+    expect(isAntigravityNeedsInputScreen(writeInModal)).toBe(true);
+    expect(isAntigravityBusyScreen(writeInModal)).toBe(false);
+    expect(
+      isIdleAgentScreen(writeInModal, "> run only the local cache cleanup first", "antigravity"),
+    ).toBe(false);
+
+    const tracker = new TerminalActivityTracker();
+    let screenLines = [
+      rule,
+      "> Lets first clean it all up here.",
+      '○ Thought for 37.9s ("on this machine").)',
+      rule,
+      "> ",
+      rule,
+      "esc to cancel                 auto · Gemini 4 Neon · xhigh",
+    ];
+    let cursorLine = "> ";
+    const scanner = new PtyActivityScanner({
+      setActivity: (state, attentionReason) => tracker.set(state, attentionReason),
+      clearActivity: () => tracker.clear(),
+      getActivity: () => tracker.getSnapshot(),
+      readLastLines: (limit) => screenLines.slice(-limit),
+      readCursorLine: () => cursorLine,
+      stillnessMs: 500,
+    });
+
+    scanner.handleInitialCommand("agy");
+    scanner.feedInput("\r");
+    scanner.feedOutput("Thought for 37.9s");
+    expect(tracker.getSnapshot()).toMatchObject({ state: "working", attentionReason: null });
+
+    // OSC 7501 blocked arrives before the headless buffer receives the next modal paint chunk.
+    scanner.handleProgramStatusOsc("state=blocked:kind=question:app=antigravity");
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "needs_input",
+    });
+    scanner.feedOutput(questionModal.slice(-12).join("\n"));
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "needs_input",
+    });
+
+    // Navigating options with ↓/space repaints the modal with `esc to cancel` in the footer.
+    screenLines = questionModal;
+    cursorLine = selectedLine;
+    scanner.feedOutput(selectedLine);
+    vi.advanceTimersByTime(1500);
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "needs_input",
+    });
+
+    // Pressing Enter inside a multi-step/write-in modal stays orange until OSC 7501 reports working.
+    scanner.feedInput("\r");
+    screenLines = writeInModal;
+    cursorLine = "> run only the local cache cleanup first";
+    scanner.feedOutput("enter Submit · esc Back");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({
+      state: "idle",
+      attentionReason: "needs_input",
+    });
+
+    // Cancelling with Esc clears needs_input once the interrupted composer settles.
+    tracker.interrupt();
+    scanner.handleInterrupt();
+    screenLines = [
+      "  └ Interrupted · What should Antigravity CLI do instead?",
+      rule,
+      "> ",
+      rule,
+      "? for shortcuts               auto · Gemini 4 Neon · xhigh",
+    ];
+    cursorLine = "> ";
+    scanner.feedOutput("? for shortcuts");
+    vi.advanceTimersByTime(500);
+    expect(tracker.getSnapshot()).toMatchObject({ state: "idle", attentionReason: null });
+  });
 });
