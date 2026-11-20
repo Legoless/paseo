@@ -127,3 +127,20 @@ export function settleFocusClaim(
     requestedKey: null,
   };
 }
+
+export function shouldRefocusTerminalForExplicitRequest(input: {
+  previousRevision: number;
+  nextRevision: number;
+  isMobile: boolean;
+  isWorkspaceFocused: boolean;
+  isPaneFocused: boolean;
+  terminalId: string;
+}): boolean {
+  if (input.nextRevision <= 0 || input.nextRevision === input.previousRevision) {
+    return false;
+  }
+  if (input.isMobile || !input.isWorkspaceFocused || !input.isPaneFocused) {
+    return false;
+  }
+  return input.terminalId.length > 0;
+}

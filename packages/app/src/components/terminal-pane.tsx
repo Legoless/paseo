@@ -51,6 +51,7 @@ import {
   reconcileFocusClaim,
   resolveTerminalResizeClaim,
   settleFocusClaim,
+  shouldRefocusTerminalForExplicitRequest,
 } from "./terminal-pane-focus-claim";
 import {
   TerminalStreamController,
@@ -99,6 +100,7 @@ interface TerminalPaneProps {
   terminalId: string;
   isWorkspaceFocused: boolean;
   isPaneFocused: boolean;
+  focusRequestRevision?: number;
   onOpenFileExplorer: () => void;
   onOpenWorkspaceFile: (request: WorkspaceFileOpenRequest) => void;
 }
@@ -229,6 +231,56 @@ function KeyboardToggleButton({
   );
 }
 
+function useExplicitTerminalFocusRequest(input: {
+  focusRequestRevision: number;
+  isMobile: boolean;
+  isWorkspaceFocused: boolean;
+  isPaneFocused: boolean;
+  scopeKey: string;
+  terminalId: string;
+  lastAutoFocusKeyRef: { current: string | null };
+  requestTerminalFocus: () => void;
+}): void {
+  const {
+    focusRequestRevision,
+    isMobile,
+    isWorkspaceFocused,
+    isPaneFocused,
+    scopeKey,
+    terminalId,
+    lastAutoFocusKeyRef,
+    requestTerminalFocus,
+  } = input;
+  const lastHandledRevisionRef = useRef(focusRequestRevision);
+  useEffect(() => {
+    const previousRevision = lastHandledRevisionRef.current;
+    lastHandledRevisionRef.current = focusRequestRevision;
+    if (
+      !shouldRefocusTerminalForExplicitRequest({
+        previousRevision,
+        nextRevision: focusRequestRevision,
+        isMobile,
+        isWorkspaceFocused,
+        isPaneFocused,
+        terminalId,
+      })
+    ) {
+      return;
+    }
+    lastAutoFocusKeyRef.current = `${scopeKey}:${terminalId}`;
+    requestTerminalFocus();
+  }, [
+    focusRequestRevision,
+    isMobile,
+    isPaneFocused,
+    isWorkspaceFocused,
+    lastAutoFocusKeyRef,
+    requestTerminalFocus,
+    scopeKey,
+    terminalId,
+  ]);
+}
+
 export function TerminalPane({
   serverId,
   cwd,
@@ -236,6 +288,7 @@ export function TerminalPane({
   terminalId,
   isWorkspaceFocused,
   isPaneFocused,
+  focusRequestRevision = 0,
   onOpenFileExplorer,
   onOpenWorkspaceFile,
 }: TerminalPaneProps) {
@@ -426,6 +479,17 @@ export function TerminalPane({
       requestTerminalFocus();
     }
   }, [isMobile, isPaneFocused, isWorkspaceFocused, requestTerminalFocus, scopeKey, terminalId]);
+
+  useExplicitTerminalFocusRequest({
+    focusRequestRevision,
+    isMobile,
+    isWorkspaceFocused,
+    isPaneFocused,
+    scopeKey,
+    terminalId,
+    lastAutoFocusKeyRef,
+    requestTerminalFocus,
+  });
 
   useEffect(() => {
     const canRequest = canRequestFocusClaim({

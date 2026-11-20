@@ -436,6 +436,10 @@ export const useDraftStore = create<DraftStore>()(
               ...state.textReplacementRequestByDraftKey,
               [draftKey]: (state.textReplacementRequestByDraftKey[draftKey] ?? 0) + 1,
             },
+            attachmentFocusRequestByDraftKey: {
+              ...state.attachmentFocusRequestByDraftKey,
+              [draftKey]: (state.attachmentFocusRequestByDraftKey[draftKey] ?? 0) + 1,
+            },
           };
         });
         scheduleAttachmentGc();

@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
-import { useCallback, useMemo, type ComponentProps, type ReactElement } from "react";
+import { useCallback, useMemo, useRef, type ComponentProps, type ReactElement } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Folder, Globe, SquareSlash } from "lucide-react-native";
@@ -30,6 +30,7 @@ import {
 import {
   buildCommandBindings,
   findCommandComboConflicts,
+  releaseCommandTriggerFocus,
   shortcutKeysForCommandBinding,
 } from "@/commands/custom-commands-model";
 import { runCustomCommand } from "@/commands/run-custom-command";
@@ -38,6 +39,7 @@ import { useCustomCommandsSupported } from "@/commands/use-custom-commands-suppo
 import { applyShortcutOverrides, type ParsedShortcutBinding } from "@/keyboard/keyboard-shortcuts";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import { getIsElectronRuntime } from "@/constants/layout";
+import { isWeb } from "@/constants/platform";
 import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 import type { Theme } from "@/styles/theme";
 
@@ -300,6 +302,24 @@ export function WorkspaceCommandsButton({
   );
 }
 
+function scheduleTriggerBlurIfStillFocused(targetRef: { current: View | null }): void {
+  if (!isWeb || typeof document === "undefined" || typeof HTMLElement === "undefined") {
+    return;
+  }
+  releaseCommandTriggerFocus<HTMLElement>({
+    getTarget: () => (targetRef.current instanceof HTMLElement ? targetRef.current : null),
+    getActiveElement: () =>
+      document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    blur: (element) => element.blur(),
+    scheduleNextFrame:
+      typeof requestAnimationFrame === "function"
+        ? (callback) => {
+            requestAnimationFrame(callback);
+          }
+        : undefined,
+  });
+}
+
 function CommandsControl({
   presentation,
   hideLabels,
@@ -343,6 +363,19 @@ function CommandsControl({
   commandsTitle: string;
   manageLabel: string;
 }): ReactElement {
+  const primaryButtonRef = useRef<View>(null);
+  const menuTriggerRef = useRef<View>(null);
+  const handlePrimaryPress = useCallback(() => {
+    scheduleTriggerBlurIfStillFocused(primaryButtonRef);
+    runTopCommand();
+  }, [runTopCommand]);
+  const handleCommandSelect = useCallback(
+    (command: CustomCommand) => {
+      scheduleTriggerBlurIfStillFocused(menuTriggerRef);
+      handleSelect(command);
+    },
+    [handleSelect],
+  );
   const hasContent = Boolean(
     projectCommands.length || globalCommands.length || projectError || globalErrors.length,
   );
@@ -355,7 +388,7 @@ function CommandsControl({
         globalErrors={globalErrors}
         bindingByCommandId={bindingByCommandId}
         conflicts={conflicts}
-        onSelect={handleSelect}
+        onSelect={handleCommandSelect}
       />
       {hasContent ? <DropdownMenuSeparator /> : null}
       <DropdownMenuItem onSelect={openSettings} testID="workspace-commands-settings">
@@ -371,6 +404,7 @@ function CommandsControl({
       <View style={presentation === "ghost" ? styles.ghostButtonFrame : styles.splitButton}>
         <DropdownMenu onOpenChange={handleMenuOpenChange}>
           <DropdownMenuTrigger
+            ref={menuTriggerRef}
             testID="workspace-commands-button"
             style={triggerStyle}
             accessibilityRole="button"
@@ -393,9 +427,10 @@ function CommandsControl({
   return (
     <View style={styles.splitButton}>
       <Pressable
+        ref={primaryButtonRef}
         testID="workspace-commands-button"
         style={primaryStyle}
-        onPress={runTopCommand}
+        onPress={handlePrimaryPress}
         accessibilityRole="button"
         accessibilityLabel={topCommand.title}
       >
@@ -410,6 +445,7 @@ function CommandsControl({
       </Pressable>
       <DropdownMenu onOpenChange={handleMenuOpenChange}>
         <DropdownMenuTrigger
+          ref={menuTriggerRef}
           testID="workspace-commands-caret"
           style={caretStyle}
           accessibilityRole="button"

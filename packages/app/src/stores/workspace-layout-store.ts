@@ -126,6 +126,11 @@ export interface SheetTab {
   parentTabId: string | null;
 }
 
+export interface WorkspaceTabFocusRequest {
+  tabId: string;
+  revision: number;
+}
+
 interface WorkspaceLayoutStore {
   /** Published once by the app shell; callers never pass a form factor to open a tab. */
   layoutMode: WorkspaceLayoutMode;
@@ -142,6 +147,8 @@ interface WorkspaceLayoutStore {
   pinnedAgentIdsByWorkspace: Record<string, Set<string>>;
   hiddenAgentIdsByWorkspace: Record<string, Set<string>>;
   focusRestorationByWorkspace: Record<string, WorkspaceFocusRestorationState>;
+  /** Monotonic per-workspace focus requests so `focusTab` reclaims surface focus on the active tab. */
+  tabFocusRequestByWorkspace: Record<string, WorkspaceTabFocusRequest>;
   explorerSidebarPaneIdByWorkspace: Record<string, string | null>;
   /** workspaceKey → tabId → true. Absent = Explorer is closed for that tab. */
   explorerSidebarOpenByTab: Record<string, Record<string, boolean>>;
@@ -1000,6 +1007,40 @@ function createExplorerSidebarPane(
   return targetPaneId ? splitPaneEmpty(workspaceKey, { targetPaneId, position: "right" }) : null;
 }
 
+function nextTabFocusRequestPatch(
+  current: Record<string, WorkspaceTabFocusRequest>,
+  workspaceKey: string,
+  tabId: string,
+  skip: boolean,
+): Partial<Pick<WorkspaceLayoutStore, "tabFocusRequestByWorkspace">> {
+  if (skip) {
+    return {};
+  }
+  const nextRevision = (current[workspaceKey]?.revision ?? 0) + 1;
+  return {
+    tabFocusRequestByWorkspace: {
+      ...current,
+      [workspaceKey]: { tabId, revision: nextRevision },
+    },
+  };
+}
+
+function buildRefocusedActiveTabPatch(
+  state: WorkspaceLayoutStore,
+  workspaceKey: string,
+  tabId: string,
+  tabPane: SplitPane | null,
+): WorkspaceLayoutStore | Partial<WorkspaceLayoutStore> {
+  if (!tabPane || tabPane.hidden === true) {
+    return state;
+  }
+  return {
+    ...withoutFocusRestoration(state, workspaceKey),
+    ...nextTabFocusRequestPatch(state.tabFocusRequestByWorkspace, workspaceKey, tabId, false),
+    ...dismissSheets(state, workspaceKey),
+  };
+}
+
 export function createWorkspaceLayoutStore(
   ids: WorkspaceLayoutIdSource = defaultWorkspaceLayoutIds,
 ) {
@@ -1033,6 +1074,7 @@ export function createWorkspaceLayoutStore(
         pinnedAgentIdsByWorkspace: {},
         hiddenAgentIdsByWorkspace: {},
         focusRestorationByWorkspace: {},
+        tabFocusRequestByWorkspace: {},
         explorerSidebarPaneIdByWorkspace: {},
         /** workspaceKey → tabId → true. Absent = Explorer is closed for that tab. */
         explorerSidebarOpenByTab: {},
@@ -1513,7 +1555,12 @@ export function createWorkspaceLayoutStore(
               nextLayout = focusTabInLayout({ layout, tabId: normalizedTabId });
             }
             if (!nextLayout) {
-              return state;
+              return buildRefocusedActiveTabPatch(
+                state,
+                normalizedWorkspaceKey,
+                normalizedTabId,
+                tabPane,
+              );
             }
 
             const activeTabId = explorerReveal
@@ -1521,6 +1568,12 @@ export function createWorkspaceLayoutStore(
               : null;
             return {
               ...withoutFocusRestoration(state, normalizedWorkspaceKey),
+              ...nextTabFocusRequestPatch(
+                state.tabFocusRequestByWorkspace,
+                normalizedWorkspaceKey,
+                normalizedTabId,
+                explorerReveal,
+              ),
               ...(activeTabId
                 ? {
                     explorerSidebarOpenByTab: {
@@ -2338,6 +2391,8 @@ export function createWorkspaceLayoutStore(
               state.hiddenAgentIdsByWorkspace;
             const { [normalizedWorkspaceKey]: _restoration, ...focusRestorationByWorkspace } =
               state.focusRestorationByWorkspace;
+            const { [normalizedWorkspaceKey]: _tabFocusRequest, ...tabFocusRequestByWorkspace } =
+              state.tabFocusRequestByWorkspace;
             const {
               [normalizedWorkspaceKey]: _explorerSidebarPane,
               ...explorerSidebarPaneIdByWorkspace
@@ -2355,6 +2410,7 @@ export function createWorkspaceLayoutStore(
               pinnedAgentIdsByWorkspace,
               hiddenAgentIdsByWorkspace,
               focusRestorationByWorkspace,
+              tabFocusRequestByWorkspace,
               explorerSidebarPaneIdByWorkspace,
               explorerSidebarOpenByTab,
               sidePaneIdByWorkspace,

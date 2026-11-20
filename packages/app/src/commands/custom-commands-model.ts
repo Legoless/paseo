@@ -198,3 +198,28 @@ export function shortcutKeysForCommandBinding(
   }
   return chordStringToShortcutKeys(binding.combo);
 }
+
+export interface CommandTriggerFocusPort<TElement = unknown> {
+  getTarget: () => TElement | null;
+  getActiveElement: () => TElement | null;
+  blur: (element: TElement) => void;
+  scheduleNextFrame?: (callback: () => void) => void;
+}
+
+/**
+ * Releases DOM focus from a command button or menu trigger when it still owns focus,
+ * both immediately and after any synchronous/layout menu-close focus restore. Never
+ * blurs if focus has already moved to the target terminal or composer.
+ */
+export function releaseCommandTriggerFocus<TElement>(
+  port: CommandTriggerFocusPort<TElement>,
+): void {
+  const blurIfStillActive = () => {
+    const target = port.getTarget();
+    if (target !== null && port.getActiveElement() === target) {
+      port.blur(target);
+    }
+  };
+  blurIfStillActive();
+  port.scheduleNextFrame?.(blurIfStillActive);
+}

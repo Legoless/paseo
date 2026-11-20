@@ -18,6 +18,8 @@ import {
 import { usePanelStore } from "@/stores/panel-store";
 import { useSessionStore } from "@/stores/session-store";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
+import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
+import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import { useCheckoutStatusQuery } from "@/git/use-status-query";
 
 type ListTerminalsPayload = ListTerminalsResponse["payload"];
@@ -90,10 +92,28 @@ function useTerminalPanelDescriptor(
   };
 }
 
+function selectTabFocusRequestRevision(
+  tabFocusRequestByWorkspace: ReturnType<
+    typeof useWorkspaceLayoutStore.getState
+  >["tabFocusRequestByWorkspace"],
+  workspaceKey: string | null,
+  tabId: string,
+): number {
+  if (!workspaceKey) {
+    return 0;
+  }
+  const request = tabFocusRequestByWorkspace[workspaceKey];
+  return request?.tabId === tabId ? request.revision : 0;
+}
+
 function TerminalPanel() {
-  const { serverId, workspaceId, target, openFileInWorkspace } = usePaneContext();
+  const { serverId, workspaceId, tabId, target, openFileInWorkspace } = usePaneContext();
   const { isWorkspaceFocused, isPaneFocused } = usePaneFocus();
   invariant(target.kind === "terminal", "TerminalPanel requires terminal target");
+  const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId });
+  const focusRequestRevision = useWorkspaceLayoutStore((state) =>
+    selectTabFocusRequestRevision(state.tabFocusRequestByWorkspace, workspaceKey, tabId),
+  );
   const workspaceFields = useWorkspaceFields(serverId, workspaceId, (w) => ({
     workspaceDirectory: w.members.length === 1 ? w.members[0]!.workspaceDirectory : null,
     members: w.members,
@@ -146,6 +166,7 @@ function TerminalPanel() {
       terminalId={target.terminalId}
       isWorkspaceFocused={isWorkspaceFocused}
       isPaneFocused={isPaneFocused}
+      focusRequestRevision={focusRequestRevision}
       onOpenFileExplorer={handleOpenFileExplorer}
       onOpenWorkspaceFile={openFileInWorkspace}
     />

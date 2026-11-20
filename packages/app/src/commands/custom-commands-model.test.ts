@@ -6,6 +6,7 @@ import {
   buildCommandBindings,
   findCommandComboConflicts,
   isCommandComboTaken,
+  releaseCommandTriggerFocus,
   shortcutKeysForCommandBinding,
 } from "./custom-commands-model";
 
@@ -168,5 +169,62 @@ describe("shortcutKeysForCommandBinding", () => {
   it("renders the effective combo", () => {
     const [binding] = buildCommandBindings([command({ id: "x", shortcut: "Cmd+Shift+R" })]);
     expect(binding && shortcutKeysForCommandBinding(binding)).toEqual([["mod", "shift", "R"]]);
+  });
+});
+
+describe("releaseCommandTriggerFocus", () => {
+  it("blurs the command trigger immediately and after menu teardown if focus lands back on it", () => {
+    const button = { id: "workspace-commands-button" };
+    let activeElement: { id: string } | null = button;
+    const blurred: Array<{ id: string }> = [];
+    const scheduled: Array<() => void> = [];
+
+    releaseCommandTriggerFocus({
+      getTarget: () => button,
+      getActiveElement: () => activeElement,
+      blur: (element) => {
+        blurred.push(element);
+        activeElement = null;
+      },
+      scheduleNextFrame: (callback) => scheduled.push(callback),
+    });
+
+    expect(blurred).toEqual([button]);
+    expect(activeElement).toBeNull();
+
+    // Simulate overlay teardown restoring focus back to the trigger before next frame.
+    activeElement = button;
+    for (const callback of scheduled) {
+      callback();
+    }
+
+    expect(blurred).toEqual([button, button]);
+    expect(activeElement).toBeNull();
+  });
+
+  it("leaves focus untouched once the terminal or composer owns focus", () => {
+    const button = { id: "workspace-commands-button" };
+    const terminalWebview = { id: "terminal-webview" };
+    let activeElement: { id: string } | null = button;
+    const blurred: Array<{ id: string }> = [];
+    const scheduled: Array<() => void> = [];
+
+    releaseCommandTriggerFocus({
+      getTarget: () => button,
+      getActiveElement: () => activeElement,
+      blur: (element) => {
+        blurred.push(element);
+        activeElement = null;
+      },
+      scheduleNextFrame: (callback) => scheduled.push(callback),
+    });
+
+    activeElement = terminalWebview;
+    for (const callback of scheduled) {
+      callback();
+    }
+
+    expect(blurred).toEqual([button]);
+    expect(activeElement).toBe(terminalWebview);
   });
 });

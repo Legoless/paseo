@@ -831,8 +831,8 @@ export function IsolatedTerminalEmulator({
   useEffect(() => {
     if (focusRequestToken <= 0) return;
     sendToWebView({ type: "resize", streamKey, forceClaim: true });
-    sendToWebView({ type: "focus", streamKey });
     webviewRef.current?.focus?.();
+    sendToWebView({ type: "focus", streamKey, forceRefocus: true });
   }, [focusRequestToken, sendToWebView, streamKey]);
 
   useEffect(() => {

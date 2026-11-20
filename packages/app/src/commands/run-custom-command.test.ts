@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
-import type { WorkspaceLayout } from "@/stores/workspace-layout-store";
+import { useWorkspaceLayoutStore, type WorkspaceLayout } from "@/stores/workspace-layout-store";
 import type { WorkspaceTab } from "@/workspace-tabs/model";
 import { useDraftStore } from "@/stores/draft-store";
 import { useWorkspaceDraftSubmissionStore } from "@/stores/workspace-draft-submission-store";
-import { resolveCommandTabTarget, runCustomCommand } from "./run-custom-command";
+import {
+  resolveCommandTabTarget,
+  runCustomCommand,
+  TERMINAL_COMMAND_SUBMIT_DELAY_MS,
+} from "./run-custom-command";
 
 function layoutFocusedOn(target: WorkspaceTab["target"]): WorkspaceLayout {
   return {
@@ -133,6 +137,9 @@ describe("runCustomCommand", () => {
     const fakeClient = { sendAgentMessage } as unknown as DaemonClient;
     const onError = vi.fn();
 
+    const draftKey = "agent:server-1:agent-1";
+    const focusBefore = useDraftStore.getState().attachmentFocusRequestByDraftKey[draftKey] ?? 0;
+
     await runCustomCommand({
       serverId: "server-1",
       workspaceId: "workspace-1",
@@ -144,8 +151,9 @@ describe("runCustomCommand", () => {
 
     expect(onError).not.toHaveBeenCalled();
     expect(sendAgentMessage).not.toHaveBeenCalled();
-    expect(useDraftStore.getState().getDraftInput("agent:server-1:agent-1")?.text).toBe(
-      "Draft text",
+    expect(useDraftStore.getState().getDraftInput(draftKey)?.text).toBe("Draft text");
+    expect(useDraftStore.getState().attachmentFocusRequestByDraftKey[draftKey]).toBe(
+      focusBefore + 1,
     );
   });
 
@@ -203,7 +211,61 @@ describe("runCustomCommand", () => {
     expect(useWorkspaceDraftSubmissionStore.getState().pendingByDraftId["draft-2"]).toBeUndefined();
   });
 
-  it("sends input to terminal with carriage return when submit is true", async () => {
+  it("sends terminal text first and carriage return in a separate delayed write when submit is true", async () => {
+    vi.useFakeTimers();
+    try {
+      const sendTerminalInput = vi.fn();
+      const fakeClient = { sendTerminalInput } as unknown as DaemonClient;
+      const onError = vi.fn();
+      const workspaceKey = "server-1:workspace-1";
+      const tabId = useWorkspaceLayoutStore.getState().openTab({
+        workspaceKey,
+        target: { kind: "terminal", terminalId: "term-1" },
+        intent: "reveal",
+      })!;
+      const revisionBefore =
+        useWorkspaceLayoutStore.getState().tabFocusRequestByWorkspace[workspaceKey]?.revision ?? 0;
+
+      const pending = runCustomCommand({
+        serverId: "server-1",
+        workspaceId: "workspace-1",
+        command: {
+          id: "resume",
+          title: "Resume",
+          text: "Can you find last session and give me next steps.",
+          submit: true,
+          target: "agent",
+        },
+        client: fakeClient,
+        paneTab: { tabId, target: { kind: "terminal", terminalId: "term-1" } },
+        onError,
+      });
+
+      expect(onError).not.toHaveBeenCalled();
+      expect(sendTerminalInput).toHaveBeenCalledTimes(1);
+      expect(sendTerminalInput).toHaveBeenNthCalledWith(1, "term-1", {
+        type: "input",
+        data: "Can you find last session and give me next steps.",
+      });
+      expect(useWorkspaceLayoutStore.getState().tabFocusRequestByWorkspace[workspaceKey]).toEqual({
+        tabId,
+        revision: revisionBefore + 1,
+      });
+
+      await vi.advanceTimersByTimeAsync(TERMINAL_COMMAND_SUBMIT_DELAY_MS);
+      await pending;
+
+      expect(sendTerminalInput).toHaveBeenCalledTimes(2);
+      expect(sendTerminalInput).toHaveBeenNthCalledWith(2, "term-1", {
+        type: "input",
+        data: "\r",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sends immediate carriage return when terminal command text is empty and submit is true", async () => {
     const sendTerminalInput = vi.fn();
     const fakeClient = { sendTerminalInput } as unknown as DaemonClient;
     const onError = vi.fn();
@@ -211,16 +273,17 @@ describe("runCustomCommand", () => {
     await runCustomCommand({
       serverId: "server-1",
       workspaceId: "workspace-1",
-      command: { id: "test", title: "Test", text: "npm test", submit: true, target: "terminal" },
+      command: { id: "enter", title: "Enter", text: "", submit: true, target: "terminal" },
       client: fakeClient,
       paneTab: { tabId: "tab-1", target: { kind: "terminal", terminalId: "term-1" } },
       onError,
     });
 
     expect(onError).not.toHaveBeenCalled();
+    expect(sendTerminalInput).toHaveBeenCalledTimes(1);
     expect(sendTerminalInput).toHaveBeenCalledWith("term-1", {
       type: "input",
-      data: "npm test\r",
+      data: "\r",
     });
   });
 
@@ -239,6 +302,7 @@ describe("runCustomCommand", () => {
     });
 
     expect(onError).not.toHaveBeenCalled();
+    expect(sendTerminalInput).toHaveBeenCalledTimes(1);
     expect(sendTerminalInput).toHaveBeenCalledWith("term-1", {
       type: "input",
       data: "npm test",

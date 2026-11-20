@@ -5,6 +5,7 @@ import {
   reconcileFocusClaim,
   resolveTerminalResizeClaim,
   settleFocusClaim,
+  shouldRefocusTerminalForExplicitRequest,
   type FocusClaimState,
 } from "./terminal-pane-focus-claim";
 
@@ -248,5 +249,51 @@ describe("terminal pane focus claim", () => {
 
     expect(refocused.shouldRequest).toBe(true);
     expect(changed.shouldRequest).toBe(true);
+  });
+
+  it("refocuses an already-focused desktop terminal when an explicit tab focus request arrives", () => {
+    expect(
+      shouldRefocusTerminalForExplicitRequest({
+        previousRevision: 1,
+        nextRevision: 2,
+        isMobile: false,
+        isWorkspaceFocused: true,
+        isPaneFocused: true,
+        terminalId: "term-1",
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldRefocusTerminalForExplicitRequest({
+        previousRevision: 2,
+        nextRevision: 2,
+        isMobile: false,
+        isWorkspaceFocused: true,
+        isPaneFocused: true,
+        terminalId: "term-1",
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldRefocusTerminalForExplicitRequest({
+        previousRevision: 0,
+        nextRevision: 1,
+        isMobile: true,
+        isWorkspaceFocused: true,
+        isPaneFocused: true,
+        terminalId: "term-1",
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldRefocusTerminalForExplicitRequest({
+        previousRevision: 0,
+        nextRevision: 1,
+        isMobile: false,
+        isWorkspaceFocused: true,
+        isPaneFocused: false,
+        terminalId: "term-1",
+      }),
+    ).toBe(false);
   });
 });

@@ -152,6 +152,38 @@ async function dispatchAgentCommandMessage(input: {
   });
 }
 
+export const TERMINAL_COMMAND_SUBMIT_DELAY_MS = 50;
+
+async function dispatchTerminalCommandInput(input: {
+  client: DaemonClient;
+  terminalId: string;
+  text: string;
+  submit: boolean;
+  onFocusTab: () => void;
+}): Promise<void> {
+  const { client, terminalId, text, submit, onFocusTab } = input;
+  if (text.length > 0) {
+    client.sendTerminalInput(terminalId, {
+      type: "input",
+      data: text,
+    });
+  }
+  onFocusTab();
+  if (!submit) {
+    return;
+  }
+  if (text.length > 0) {
+    // Raw-mode TUIs such as Claude Code treat a multi-character stdin read as pasted
+    // text and turn a trailing \r in the same chunk into a newline. Let the daemon
+    // flush the text write and the foreground process drain it before sending Enter.
+    await new Promise<void>((resolve) => setTimeout(resolve, TERMINAL_COMMAND_SUBMIT_DELAY_MS));
+  }
+  client.sendTerminalInput(terminalId, {
+    type: "input",
+    data: "\r",
+  });
+}
+
 export async function runCustomCommand(input: RunCustomCommandInput): Promise<void> {
   const { serverId, workspaceId, command, client, onError } = input;
   const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId });
@@ -174,11 +206,13 @@ export async function runCustomCommand(input: RunCustomCommandInput): Promise<vo
       onError(i18n.t("common.errors.daemonClientUnavailable"));
       return;
     }
-    client.sendTerminalInput(target.terminalId, {
-      type: "input",
-      data: command.text + (command.submit ? "\r" : ""),
+    await dispatchTerminalCommandInput({
+      client,
+      terminalId: target.terminalId,
+      text: command.text,
+      submit: command.submit,
+      onFocusTab: () => layoutStore.focusTab(workspaceKey, target.tabId),
     });
-    layoutStore.focusTab(workspaceKey, target.tabId);
     return;
   }
 

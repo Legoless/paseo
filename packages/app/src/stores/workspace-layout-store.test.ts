@@ -6416,3 +6416,30 @@ describe("compact workspace sheet", () => {
     expect(received).toEqual([[], ["child"], []]);
   });
 });
+
+describe("tabFocusRequestByWorkspace", () => {
+  it("increments tabFocusRequestByWorkspace on repeated focusTab calls for an already-focused tab", () => {
+    const store = createWorkspaceLayoutStore();
+    const targetWorkspaceKey = "server-1:focus-repeat-ws";
+    const terminalTabId = store.getState().openTab({
+      workspaceKey: targetWorkspaceKey,
+      target: { kind: "terminal", terminalId: "term-1" },
+      intent: "reveal",
+    })!;
+
+    store.getState().focusTab(targetWorkspaceKey, terminalTabId);
+    expect(store.getState().tabFocusRequestByWorkspace[targetWorkspaceKey]).toEqual({
+      tabId: terminalTabId,
+      revision: 1,
+    });
+
+    store.getState().focusTab(targetWorkspaceKey, terminalTabId);
+    expect(store.getState().tabFocusRequestByWorkspace[targetWorkspaceKey]).toEqual({
+      tabId: terminalTabId,
+      revision: 2,
+    });
+
+    store.getState().purgeWorkspace(targetWorkspaceKey);
+    expect(store.getState().tabFocusRequestByWorkspace[targetWorkspaceKey]).toBeUndefined();
+  });
+});
