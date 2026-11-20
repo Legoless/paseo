@@ -12,7 +12,7 @@ import type {
   ProviderUsage,
 } from "@getpaseo/plugin/server/provider";
 import { startDriver, selection, type Driver } from "./process.js";
-import { nativeModel, validateSelection } from "./catalog.js";
+import { hasEffortSuffix, isEffortId, nativeModel, validateSelection } from "./catalog.js";
 import type { McpWait } from "./mcp-wait.js";
 import { PromptFiles } from "./prompt.js";
 import { toolItem } from "./timeline.js";
@@ -266,17 +266,27 @@ export class Session {
           ? undefined
           : (changes.thinkingOption ?? this.config.thinkingOption),
     };
-    if (changes.model !== undefined && changes.thinkingOption === undefined) {
-      const model = catalog.models.find((entry) => entry.id === config.model);
-      const supportsEffort = model?.thinkingOptions?.some(
-        (option) => option.id === config.thinkingOption,
-      );
-      if (!supportsEffort) config.thinkingOption = undefined;
+    if (
+      changes.model !== undefined &&
+      changes.thinkingOption === undefined &&
+      !supportsConfiguredEffort(config, catalog)
+    ) {
+      config.thinkingOption = undefined;
     }
     if (changes.settings && Object.keys(changes.settings).length > 0)
       throw new AntigravityError("Antigravity has no configurable settings");
     validateSelection(config, catalog);
     this.config = config;
+    this.publishConfig();
+  }
+
+  refreshCatalog(): void {
+    if (this.state.type === "closed") return;
+    const catalog = this.options.catalog();
+    if (catalog.models.length === 0) return;
+    if (this.options.persistence && this.state.type === "dormant") {
+      this.config = normalizeResumedConfig(this.config, catalog);
+    }
     this.publishConfig();
   }
 
@@ -378,12 +388,7 @@ export class Session {
             "INVALID_RESUME",
           );
         this.conversationId = init.conversation_id;
-        const native = this.options.catalog().models.find((model) => model.id === init.init.model);
-        if (!this.config.model && native) {
-          this.config = { ...this.config, model: native.id };
-          driver.selection = selection(this.config);
-          this.publishConfig();
-        }
+        this.adoptInitModel(init.init.model, driver);
         if (this.config.persist)
           this.emit({
             type: "session.persistence",
@@ -399,6 +404,18 @@ export class Session {
         throw error;
       }
     }
+  }
+
+  private adoptInitModel(initModel: string | null | undefined, driver: Driver): void {
+    if (this.config.model || !initModel) return;
+    const catalog = this.options.catalog();
+    const discovered =
+      catalog.models.find((model) => model.id === initModel)?.id ??
+      (catalog.models.length === 0 ? initModel : undefined);
+    if (!discovered) return;
+    this.config = { ...this.config, model: discovered };
+    driver.selection = selection(this.config);
+    this.publishConfig();
   }
 
   private canSteerTurn(turn: Turn): boolean {
@@ -723,18 +740,40 @@ function isTransientStartupError(error: unknown): boolean {
   );
 }
 
+function supportsConfiguredEffort(
+  config: { model?: string; thinkingOption?: string },
+  catalog: ProviderCatalog,
+): boolean {
+  if (!config.model || !config.thinkingOption) return false;
+  if (catalog.models.length === 0) {
+    return hasEffortSuffix(config.model) && isEffortId(config.thinkingOption);
+  }
+  const model = catalog.models.find((entry) => entry.id === config.model);
+  return Boolean(model?.thinkingOptions?.some((option) => option.id === config.thinkingOption));
+}
+
 function normalizeResumedConfig(
   config: ProviderSessionConfig,
   catalog: ProviderCatalog,
 ): ProviderSessionConfig {
-  const model =
-    config.model && catalog.models.some((entry) => entry.id === config.model)
-      ? config.model
-      : undefined;
   const mode =
     config.mode && catalog.modes.some((entry) => entry.id === config.mode)
       ? config.mode
       : (catalog.defaultMode ?? "full-access");
+  if (catalog.models.length === 0) {
+    return {
+      ...config,
+      mode,
+      thinkingOption:
+        config.thinkingOption && isEffortId(config.thinkingOption)
+          ? config.thinkingOption
+          : undefined,
+    };
+  }
+  const model =
+    config.model && catalog.models.some((entry) => entry.id === config.model)
+      ? config.model
+      : undefined;
   const selected = catalog.models.find((entry) => entry.id === model);
   const thinkingOption = selected?.thinkingOptions?.some(
     (option) => option.id === config.thinkingOption,

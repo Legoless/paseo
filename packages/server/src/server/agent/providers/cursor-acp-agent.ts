@@ -165,7 +165,7 @@ export class CursorACPAgentClient extends GenericACPAgentClient {
     });
   }
 
-  async getCatalogCacheKey(_options: FetchCatalogOptions): Promise<string> {
+  override async getCatalogCacheKey(_options: FetchCatalogOptions): Promise<string> {
     // cursor/list_available_models is host-wide. A per-cwd probe stampede is what
     // times out initialize and session/new when several workspaces hydrate at once.
     return "host";

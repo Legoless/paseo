@@ -9,9 +9,17 @@ import {
   type ProviderLaunch,
   type ProviderRegistration,
 } from "@getpaseo/plugin/server/provider";
-import { getCatalog, getStatus, launchCacheKey } from "./internal/catalog.js";
+import {
+  fallbackCatalog,
+  getCatalog,
+  getStatus,
+  isTransientProbeError,
+  launchCacheKey,
+} from "./internal/catalog.js";
 import { Session } from "./internal/session.js";
 import { AntigravityError } from "./internal/wire.js";
+
+const SESSION_OPEN_CATALOG_WAIT_MS = 5_000;
 
 const capabilities = [
   "prompt.message",
@@ -21,7 +29,10 @@ const capabilities = [
   "session.persistence",
 ] as const;
 
-export function createAntigravityProvider(): ProviderRegistration {
+export function createAntigravityProvider(options?: {
+  openCatalogTimeoutMs?: number;
+  probeTimeoutMs?: number;
+}): ProviderRegistration {
   return {
     id: "antigravity",
     label: "Antigravity",
@@ -34,7 +45,7 @@ export function createAntigravityProvider(): ProviderRegistration {
           available: false,
           diagnostic: "agy not found on PATH. Install Antigravity, then run `agy` and sign in.",
         };
-      return getStatus(launch);
+      return getStatus(launch, { timeoutMs: options?.probeTimeoutMs });
     },
     async getCatalogCacheKey({ launch }) {
       if (!launch) return undefined;
@@ -46,7 +57,7 @@ export function createAntigravityProvider(): ProviderRegistration {
       if (!request.launch)
         throw new AntigravityError("The daemon must supply the Antigravity launch");
       const negotiated = negotiateProviderCapabilities(request.capabilities, capabilities);
-      return createConnection(request.launch, negotiated);
+      return createConnection(request.launch, negotiated, options);
     },
   };
 }
@@ -54,7 +65,9 @@ export function createAntigravityProvider(): ProviderRegistration {
 function createConnection(
   launch: ProviderLaunch,
   negotiated: readonly string[],
+  options?: { openCatalogTimeoutMs?: number; probeTimeoutMs?: number },
 ): ProviderConnection {
+  const openCatalogTimeoutMs = options?.openCatalogTimeoutMs ?? SESSION_OPEN_CATALOG_WAIT_MS;
   const sessions = new Map<string, Session>();
   const listeners = new Set<(event: ProviderEvent) => void>();
   const queues = new Map<string, Promise<void>>();
@@ -67,24 +80,45 @@ function createConnection(
     for (const listener of listeners) listener(event);
   }
   function catalog(): ProviderCatalog {
-    if (discovered === null)
-      throw new AntigravityError("Antigravity catalog has not been discovered");
-    return discovered;
+    return discovered ?? fallbackCatalog();
+  }
+  function startCatalogDiscovery(cwd?: string, refresh = false): Promise<ProviderCatalog> {
+    if (!refresh && discovering) return discovering;
+    const pending = getCatalog(launch, cwd, {
+      refresh,
+      timeoutMs: options?.probeTimeoutMs,
+    })
+      .then((resolved) => {
+        discovered = resolved;
+        if (!closed) {
+          for (const opened of sessions.values()) opened.refreshCatalog();
+        }
+        return resolved;
+      })
+      .finally(() => {
+        if (discovering === pending) discovering = null;
+      });
+    discovering = pending;
+    return pending;
   }
   async function ensureCatalog(cwd?: string): Promise<ProviderCatalog> {
     if (discovered !== null) return discovered;
-    discovering ??= getCatalog(launch, cwd).then(
-      (next) => {
-        discovered = next;
-        discovering = null;
-        return next;
-      },
-      (error) => {
-        discovering = null;
-        throw error;
-      },
-    );
-    return discovering;
+    const pending = startCatalogDiscovery(cwd);
+    void pending.catch(() => undefined);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), openCatalogTimeoutMs);
+      timer.unref?.();
+    });
+    try {
+      const resolved = await Promise.race([pending, timedOut]);
+      return resolved ?? fallbackCatalog();
+    } catch (error) {
+      if (isTransientProbeError(error)) return fallbackCatalog();
+      throw error;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
   function session(id: string): Session {
     const found = sessions.get(id);
@@ -94,7 +128,7 @@ function createConnection(
   async function dispatch(input: ProviderInput): Promise<void> {
     switch (input.type) {
       case "catalog":
-        discovered = await getCatalog(launch, input.cwd, { refresh: discovered !== null });
+        await startCatalogDiscovery(input.cwd, discovered !== null);
         emit({
           type: "catalog",
           requestId: input.requestId,

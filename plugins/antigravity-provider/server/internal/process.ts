@@ -212,6 +212,7 @@ interface ProbeOptions {
   launch: ProviderLaunch;
   args: string[];
   cwd?: string;
+  timeoutMs?: number;
 }
 export function probe(options: ProbeOptions): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -229,7 +230,7 @@ export function probe(options: ProbeOptions): Promise<string> {
         reject(new AntigravityError("Antigravity discovery timed out", "PROBE_TIMEOUT"));
         return undefined;
       }, reject);
-    }, 30_000);
+    }, options.timeoutMs ?? 30_000);
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
     });

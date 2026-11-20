@@ -1,6 +1,7 @@
 import type { ClientSideConnection } from "@agentclientprotocol/sdk";
 import type { Logger } from "pino";
 
+import type { FetchCatalogOptions } from "../agent-sdk-types.js";
 import { checkProviderLaunchAvailable, resolveProviderLaunch } from "../provider-launch-config.js";
 import {
   ACPAgentClient,
@@ -32,6 +33,7 @@ interface GenericACPAgentClientOptions {
   label?: string;
   waitForInitialCommands?: boolean;
   initialCommandsWaitTimeoutMs?: number;
+  probePhaseTimeoutMs?: number;
   diagnosticPhaseTimeoutMs?: number;
   clientCapabilityMeta?: ACPClientCapabilityMeta;
   configFeatureOptions?: ACPConfigFeatureOption[];
@@ -52,6 +54,8 @@ interface GenericACPAgentClientOptions {
   now?: () => number;
 }
 
+const HOST_SCOPED_ACP_PROVIDER_IDS = new Set(["cursor", "grok", "kimi"]);
+
 export class GenericACPAgentClient extends ACPAgentClient {
   private readonly command: [string, ...string[]];
   private readonly providerId?: string;
@@ -71,6 +75,7 @@ export class GenericACPAgentClient extends ACPAgentClient {
       // session/new, so the first listCommands() waits for that batch.
       waitForInitialCommands: options.waitForInitialCommands ?? true,
       initialCommandsWaitTimeoutMs: options.initialCommandsWaitTimeoutMs,
+      probePhaseTimeoutMs: options.probePhaseTimeoutMs,
       clientCapabilityMeta: options.clientCapabilityMeta,
       configFeatureOptions: options.configFeatureOptions,
       extensionCommandsParser: options.extensionCommandsParser,
@@ -102,6 +107,13 @@ export class GenericACPAgentClient extends ACPAgentClient {
     const launch = await this.resolveConfiguredLaunch();
     const availability = await checkProviderLaunchAvailable(launch);
     return availability.available;
+  }
+
+  async getCatalogCacheKey(_options: FetchCatalogOptions): Promise<string | undefined> {
+    if (this.providerId && HOST_SCOPED_ACP_PROVIDER_IDS.has(this.providerId)) {
+      return "host";
+    }
+    return undefined;
   }
 
   async getDiagnostic(): Promise<{ diagnostic: string }> {

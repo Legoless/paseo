@@ -16,6 +16,12 @@ function fixture(name, stream = "stdout") {
     .map((line) => JSON.parse(line).data);
 }
 if (args.includes("--version")) {
+  if (process.env.HOME) {
+    const holdVersion = path.join(process.env.HOME, "hold-version");
+    while (existsSync(holdVersion)) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
   process.stdout.write(`${process.env.AGY_TEST_VERSION || "1.2.13"}\n`);
   process.exit(0);
 }
@@ -23,6 +29,12 @@ if (args.includes("models")) {
   if (process.env.AGY_TEST_AUTH === "missing") {
     process.stderr.write(fixture("models-unauthenticated", "stderr").join("\n"));
     process.exit(1);
+  }
+  if (process.env.HOME) {
+    const holdModels = path.join(process.env.HOME, "hold-models");
+    while (existsSync(holdModels)) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
   }
   if (process.env.HOME && existsSync(path.join(process.env.HOME, "fail-models"))) {
     process.stderr.write("Service temporarily unavailable (503)\n");

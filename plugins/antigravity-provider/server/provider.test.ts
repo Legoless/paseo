@@ -40,7 +40,7 @@ afterEach(async () => {
   );
 });
 
-async function harness(env: Record<string, string> = {}) {
+async function harness(env: Record<string, string> = {}, providerInstance = provider) {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "antigravity-test-"));
   temporary.push(cwd);
   const log = path.join(cwd, "argv.ndjson");
@@ -49,7 +49,7 @@ async function harness(env: Record<string, string> = {}) {
     args: [fake, "--launch-prefix"],
     env: { HOME: cwd, AGY_TEST_LOG: log, ...env },
   };
-  const connection = await provider.connect({
+  const connection = await providerInstance.connect({
     versions: [1],
     capabilities: PROVIDER_CAPABILITIES,
     launch,
@@ -1147,7 +1147,6 @@ describe("discovery", () => {
     const h = await harness({ AGY_TEST_VERSION: version });
     expect(await provider.status?.({ launch: h.launch })).toEqual({ available: true });
   });
-
   it("groups effort variants under one selectable model with model-specific thinking options", async () => {
     const h = await harness();
     await h.request({ type: "catalog", requestId: "catalog" });
@@ -1357,6 +1356,107 @@ describe("discovery", () => {
       requestId: "refresh-catalog-fallback",
     });
     expect(await provider.status?.({ launch: h.launch })).toEqual({ available: true });
+  });
+
+  it("opens and runs a session when cold model discovery fails transiently, then publishes models on recovery", async () => {
+    const h = await harness();
+    await writeFile(path.join(h.cwd, "fail-models"), "1");
+    await h.request({ type: "catalog", requestId: "cold-catalog-503" });
+    expect(
+      h.events.find((event) => "requestId" in event && event.requestId === "cold-catalog-503"),
+    ).toMatchObject({
+      type: "request.failed",
+      error: { code: "PROBE_ERROR" },
+    });
+
+    await h.open(undefined, "s", { model: "gemini-3.8-flash-high", thinkingOption: "low" });
+    expect(
+      h.events.some((event) => event.type === "session.ready" && event.sessionId === "s"),
+    ).toBe(true);
+    expect(h.config()).toMatchObject({
+      model: "gemini-3.8-flash-high",
+      mode: "full-access",
+      thinkingOption: "low",
+      models: [],
+    });
+    expect(await h.completed(await h.prompt("HELLO"))).toMatchObject({
+      type: "session.turn",
+      state: "completed",
+    });
+    const driverLaunch = (await h.records()).find((entry) =>
+      entry.args?.includes("--input-format"),
+    );
+    expect(driverLaunch?.args).toContain("--model");
+    expect(driverLaunch?.args[driverLaunch.args.indexOf("--model") + 1]).toBe(
+      "gemini-3.8-flash-low",
+    );
+
+    await rm(path.join(h.cwd, "fail-models"));
+    await h.request({ type: "catalog", requestId: "recovered-catalog" });
+    expect(h.config().models).toHaveLength(11);
+    expect(h.config().thinkingOptions.map((option) => option.id)).toEqual([
+      "high",
+      "medium",
+      "low",
+    ]);
+  });
+
+  it("opens without blocking on a hung model probe, keeps status available on cold probe timeout, and publishes models when discovery finishes", async () => {
+    const fastTimeoutProvider = createAntigravityProvider({
+      openCatalogTimeoutMs: 50,
+      probeTimeoutMs: 80,
+    });
+    const statusHarness = await harness({}, fastTimeoutProvider);
+    await writeFile(path.join(statusHarness.cwd, "hold-version"), "1");
+    expect(await fastTimeoutProvider.status?.({ launch: statusHarness.launch })).toEqual({
+      available: true,
+    });
+    await rm(path.join(statusHarness.cwd, "hold-version"));
+
+    const hungDiscoveryProvider = createAntigravityProvider({
+      openCatalogTimeoutMs: 50,
+      probeTimeoutMs: 5_000,
+    });
+    const h = await harness(
+      { AGY_TEST_INIT_MODEL: "gemini-3.8-flash-high" },
+      hungDiscoveryProvider,
+    );
+    await writeFile(path.join(h.cwd, "hold-models"), "1");
+    await h.open();
+    expect(
+      h.events.some((event) => event.type === "session.ready" && event.sessionId === "s"),
+    ).toBe(true);
+    expect(h.config()).toMatchObject({
+      model: "gemini-3.8-flash-high",
+      mode: "full-access",
+      models: [],
+    });
+    expect(await h.completed(await h.prompt("HELLO"))).toMatchObject({
+      type: "session.turn",
+      state: "completed",
+    });
+
+    await rm(path.join(h.cwd, "hold-models"));
+    await expect.poll(() => h.config().models.length, { timeout: 5_000, interval: 10 }).toBe(11);
+    expect(h.config().thinkingOption).toBe("high");
+    expect(h.config().thinkingOptions.map((option) => option.id)).toEqual([
+      "high",
+      "medium",
+      "low",
+    ]);
+  });
+
+  it("still fails session.open immediately when Antigravity is unauthenticated", async () => {
+    const h = await harness({ AGY_TEST_AUTH: "missing" });
+    await h.open();
+    expect(
+      h.events.find((event) => "requestId" in event && event.requestId === "open-0"),
+    ).toMatchObject({
+      type: "request.failed",
+      error: {
+        message: "Antigravity authentication failed. Run `agy` and sign in, then retry.",
+      },
+    });
   });
 
   it("opens and closes non-persistent draft sessions without spawning a driver", async () => {

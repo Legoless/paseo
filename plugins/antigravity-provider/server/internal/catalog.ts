@@ -22,10 +22,37 @@ const modes: readonly ProviderMode[] = [
 
 const STATUS_CACHE_TTL_MS = 60_000;
 const CATALOG_CACHE_TTL_MS = 60_000;
+const EFFORT_ID_PATTERN = /^(low|medium|high|xhigh|max)$/i;
+const MODEL_EFFORT_SUFFIX_PATTERN = /^(.*)-(low|medium|high|xhigh|max)$/i;
 const inflightCatalogs = new Map<string, Promise<ProviderCatalog>>();
 const catalogCache = new Map<string, { catalog: ProviderCatalog; expiresAt: number }>();
 const inflightStatuses = new Map<string, Promise<ProviderStatus>>();
 const statusCache = new Map<string, { status: ProviderStatus; expiresAt: number }>();
+
+export function isEffortId(value: string): boolean {
+  return EFFORT_ID_PATTERN.test(value);
+}
+
+export function hasEffortSuffix(modelId: string): boolean {
+  return MODEL_EFFORT_SUFFIX_PATTERN.test(modelId);
+}
+
+export function fallbackCatalog(): ProviderCatalog {
+  return {
+    models: [],
+    modes,
+    thinkingOptions: [],
+    defaultMode: "full-access",
+  };
+}
+
+export function isTransientProbeError(error: unknown): boolean {
+  return (
+    error instanceof AntigravityError &&
+    (error.code === "PROBE_TIMEOUT" ||
+      (error.code === "PROBE_ERROR" && !/authentication failed/i.test(error.message)))
+  );
+}
 
 export function launchCacheKey(launch: ProviderLaunch): string {
   const env = Object.entries(launch.env).sort(([left], [right]) => left.localeCompare(right));
@@ -76,13 +103,23 @@ export function nativeModel(
   const model = catalog.models.find((entry) => entry.id === config.model);
   const option = model?.thinkingOptions?.find((entry) => entry.id === config.thinkingOption);
   const modelId = option?.metadata?.modelId;
-  return typeof modelId === "string" ? modelId : config.model;
+  if (typeof modelId === "string") return modelId;
+  if (
+    catalog.models.length === 0 &&
+    config.model &&
+    config.thinkingOption &&
+    isEffortId(config.thinkingOption)
+  ) {
+    const match = MODEL_EFFORT_SUFFIX_PATTERN.exec(config.model);
+    if (match) return `${match[1]}-${config.thinkingOption.toLowerCase()}`;
+  }
+  return config.model;
 }
 
 export async function getCatalog(
   launch: ProviderLaunch,
   cwd?: string,
-  options?: { refresh?: boolean },
+  options?: { refresh?: boolean; timeoutMs?: number },
 ): Promise<ProviderCatalog> {
   const key = launchCacheKey(launch);
   if (!options?.refresh) {
@@ -95,7 +132,7 @@ export async function getCatalog(
   if (existing) return existing;
   const pending = (async () => {
     try {
-      const output = await probe({ launch, args: ["models"], cwd });
+      const output = await probe({ launch, args: ["models"], cwd, timeoutMs: options?.timeoutMs });
       const models: ProviderModel[] = [];
       for (const line of output.trim().split(/\r?\n/)) {
         const [id, label, ...extra] = line.split("\t");
@@ -115,12 +152,7 @@ export async function getCatalog(
       return catalog;
     } catch (error) {
       const cached = catalogCache.get(key);
-      if (
-        cached &&
-        error instanceof AntigravityError &&
-        (error.code === "PROBE_TIMEOUT" ||
-          (error.code === "PROBE_ERROR" && !/authentication failed/i.test(error.message)))
-      ) {
+      if (cached && isTransientProbeError(error)) {
         catalogCache.set(key, {
           catalog: cached.catalog,
           expiresAt: Date.now() + CATALOG_CACHE_TTL_MS,
@@ -136,7 +168,10 @@ export async function getCatalog(
   return pending;
 }
 
-export async function getStatus(launch: ProviderLaunch): Promise<ProviderStatus> {
+export async function getStatus(
+  launch: ProviderLaunch,
+  options?: { timeoutMs?: number },
+): Promise<ProviderStatus> {
   const key = launchCacheKey(launch);
   const cached = statusCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
@@ -146,7 +181,9 @@ export async function getStatus(launch: ProviderLaunch): Promise<ProviderStatus>
   if (existing) return existing;
   const pending = (async (): Promise<ProviderStatus> => {
     try {
-      const version = (await probe({ launch, args: ["--version"] })).trim();
+      const version = (
+        await probe({ launch, args: ["--version"], timeoutMs: options?.timeoutMs })
+      ).trim();
       const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
       if (!match)
         return {
@@ -165,14 +202,13 @@ export async function getStatus(launch: ProviderLaunch): Promise<ProviderStatus>
       return status;
     } catch (error) {
       if (!(error instanceof AntigravityError)) throw error;
-      if (
-        (cached?.status.available || catalogCache.has(key)) &&
-        (error.code === "PROBE_TIMEOUT" ||
-          (error.code === "PROBE_ERROR" && !/authentication failed/i.test(error.message)))
-      ) {
+      if ((cached?.status.available || catalogCache.has(key)) && isTransientProbeError(error)) {
         const status: ProviderStatus = { available: true };
         statusCache.set(key, { status, expiresAt: Date.now() + STATUS_CACHE_TTL_MS });
         return status;
+      }
+      if (error.code === "PROBE_TIMEOUT") {
+        return { available: true };
       }
       return { available: false, diagnostic: error.message };
     }
@@ -187,10 +223,22 @@ export function validateSelection(
   config: { model?: string; mode?: string; thinkingOption?: string },
   catalog: ProviderCatalog,
 ): void {
-  if (config.model && !catalog.models.some((model) => model.id === config.model))
+  if (
+    catalog.models.length > 0 &&
+    config.model &&
+    !catalog.models.some((model) => model.id === config.model)
+  )
     throw new AntigravityError(`Unknown Antigravity model: ${config.model}`, "INVALID_MODEL");
   if (config.mode && !catalog.modes.some((mode) => mode.id === config.mode))
     throw new AntigravityError(`Unknown Antigravity mode: ${config.mode}`, "INVALID_MODE");
+  if (catalog.models.length === 0) {
+    if (config.thinkingOption && !isEffortId(config.thinkingOption))
+      throw new AntigravityError(
+        `Unsupported Antigravity effort for ${config.model ?? "the default model"}: ${config.thinkingOption}`,
+        "INVALID_THINKING_OPTION",
+      );
+    return;
+  }
   const model = catalog.models.find((entry) => entry.id === config.model);
   if (
     config.thinkingOption &&

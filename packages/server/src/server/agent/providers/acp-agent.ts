@@ -396,6 +396,35 @@ function formatDurationMs(startedAt: number): string {
   return `${Math.max(0, Date.now() - startedAt)}ms`;
 }
 
+function awaitACPProbePhase<T>(options: {
+  promise: Promise<T>;
+  timeoutMs: number;
+  timeoutMessage: string;
+  processError?: Promise<never>;
+  subscribeActivity?: (reset: () => void) => () => void;
+}): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let unsubscribe: (() => void) | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    const arm = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        reject(new Error(options.timeoutMessage));
+      }, options.timeoutMs);
+    };
+    arm();
+    unsubscribe = options.subscribeActivity?.(arm);
+  });
+  return Promise.race([
+    options.promise,
+    timeoutPromise,
+    ...(options.processError ? [options.processError] : []),
+  ]).finally(() => {
+    unsubscribe?.();
+    if (timer) clearTimeout(timer);
+  });
+}
+
 function pushACPStderrRow(rows: DiagnosticEntry[], stderrChunks: string[]): void {
   const stderr = stderrChunks.join("").trim();
   if (!stderr) {
@@ -460,7 +489,7 @@ const PROBE_ENV: Record<string, string> = { NO_BROWSER: "true" };
 // refresh deadline alone is not enough: the ACP SDK never rejects in-flight requests when the
 // child dies, so an initialize or session/new against a CLI that exited mid-handshake stays
 // pending until something else gives up.
-const ACP_PROBE_PHASE_TIMEOUT_MS = 20_000;
+const ACP_PROBE_PHASE_TIMEOUT_MS = 45_000;
 const ACP_DIAGNOSTIC_PHASE_TIMEOUT_MS = 20_000;
 const ACP_PROBE_CLOSE_TIMEOUT_MS = 2_000;
 // Archive and delete await close(). The ACP SDK does not reject a pending
@@ -701,6 +730,7 @@ interface ACPAgentClientOptions {
   outOfBandPromptHandler?: ACPOutOfBandPromptHandler;
   waitForInitialCommands?: boolean;
   initialCommandsWaitTimeoutMs?: number;
+  probePhaseTimeoutMs?: number;
   terminateProcess?: ProcessTerminator;
   now?: () => number;
 }
@@ -752,6 +782,7 @@ export interface SpawnedACPProcess {
   connection: ClientSideConnection;
   initialize: InitializeResponse;
   stderrChunks?: string[];
+  processError?: Promise<never>;
 }
 
 type UninitializedACPProcess = Omit<SpawnedACPProcess, "initialize"> & {
@@ -1273,6 +1304,7 @@ export class ACPAgentClient implements AgentClient {
   ) => Promise<void>;
   private readonly waitForInitialCommands: boolean;
   private readonly initialCommandsWaitTimeoutMs: number;
+  private readonly probePhaseTimeoutMs: number;
   private readonly extensionCommandsParser?: ACPExtensionCommandsParser;
   private readonly commandsTransformer?: ACPCommandsTransformer;
   private readonly promptBlocksTransformer?: ACPPromptBlocksTransformer;
@@ -1309,6 +1341,7 @@ export class ACPAgentClient implements AgentClient {
     this.thinkingOptionWriter = options.thinkingOptionWriter;
     this.waitForInitialCommands = options.waitForInitialCommands ?? false;
     this.initialCommandsWaitTimeoutMs = options.initialCommandsWaitTimeoutMs ?? 1500;
+    this.probePhaseTimeoutMs = options.probePhaseTimeoutMs ?? ACP_PROBE_PHASE_TIMEOUT_MS;
     this.extensionCommandsParser = options.extensionCommandsParser;
     this.commandsTransformer = options.commandsTransformer;
     this.promptBlocksTransformer = options.promptBlocksTransformer;
@@ -1464,13 +1497,25 @@ export class ACPAgentClient implements AgentClient {
     const handleAbort = () => void closeProbe().catch(() => undefined);
     context?.signal.addEventListener("abort", handleAbort, { once: true });
 
+    const activityListeners = new Set<() => void>();
+    const notifyProbeActivity = () => {
+      for (const listener of activityListeners) listener();
+    };
+    const subscribeProbeActivity = (listener: () => void) => {
+      activityListeners.add(listener);
+      return () => {
+        activityListeners.delete(listener);
+      };
+    };
+
     try {
       const initializedProbe = await runProviderRefreshActivity(context, "initialize", () =>
         raceProviderRefreshAbort(
           context?.signal,
           this.spawnProcess(PROBE_ENV, {
-            initializeTimeoutMs: ACP_PROBE_PHASE_TIMEOUT_MS,
+            initializeTimeoutMs: this.probePhaseTimeoutMs,
             providerOptions: options.providerOptions,
+            client: this.buildProbeClient(undefined, notifyProbeActivity),
             onSpawned: (spawned) => {
               probe = spawned;
               if (context?.signal.aborted) void closeProbe().catch(() => undefined);
@@ -1488,15 +1533,13 @@ export class ACPAgentClient implements AgentClient {
       const response = await runProviderRefreshActivity(context, "session/new", () =>
         raceProviderRefreshAbort(
           context?.signal,
-          // ponytail: a bound, not a cure — spawnTransport still races only the child's
-          // "error" event, never "exit", so a CLI that dies mid-handshake burns this timeout
-          // instead of failing immediately. Rejecting the transport's pending requests on
-          // child exit (the way JsonlRpcProcess.failAll does) is the deeper fix.
-          withTimeout(
-            probeSessionPromise!,
-            ACP_PROBE_PHASE_TIMEOUT_MS,
-            `ACP session/new timed out after ${ACP_PROBE_PHASE_TIMEOUT_MS}ms`,
-          ),
+          awaitACPProbePhase({
+            promise: probeSessionPromise!,
+            timeoutMs: this.probePhaseTimeoutMs,
+            timeoutMessage: `ACP session/new timed out after ${this.probePhaseTimeoutMs}ms`,
+            processError: initializedProbe.processError,
+            subscribeActivity: subscribeProbeActivity,
+          }),
         ),
       );
       probeSessionId = response.sessionId;
@@ -1510,19 +1553,22 @@ export class ACPAgentClient implements AgentClient {
         ? await runProviderRefreshActivity(context, "catalog.resolve", () =>
             raceProviderRefreshAbort(
               context?.signal,
-              this.catalogModelResolver?.({
-                connection: initializedProbe.connection,
-                sessionId: response.sessionId,
-                models: derivedModels,
-                configOptions: transformed.configOptions,
-                runRequest: (request) => this.runACPRequest(request),
-                transformConfigOptions: (configOptions) =>
-                  this.configOptionsTransformer
-                    ? this.configOptionsTransformer(configOptions)
-                    : configOptions,
-                logger: this.logger,
-                provider: this.provider,
-              }) ?? Promise.resolve(derivedModels),
+              Promise.race([
+                this.catalogModelResolver?.({
+                  connection: initializedProbe.connection,
+                  sessionId: response.sessionId,
+                  models: derivedModels,
+                  configOptions: transformed.configOptions,
+                  runRequest: (request) => this.runACPRequest(request),
+                  transformConfigOptions: (configOptions) =>
+                    this.configOptionsTransformer
+                      ? this.configOptionsTransformer(configOptions)
+                      : configOptions,
+                  logger: this.logger,
+                  provider: this.provider,
+                }) ?? Promise.resolve(derivedModels),
+                ...(initializedProbe.processError ? [initializedProbe.processError] : []),
+              ]),
             ),
           )
         : derivedModels;
@@ -1738,6 +1784,7 @@ export class ACPAgentClient implements AgentClient {
       child: transport.child,
       connection: transport.connection,
       stderrChunks: transport.stderrChunks,
+      processError: transport.processError,
     };
     options?.onSpawned?.(probe);
     try {
@@ -1779,6 +1826,7 @@ export class ACPAgentClient implements AgentClient {
     });
 
     const processErrorPromise = rejectOnProcessFailure(child, stderrChunks);
+    processErrorPromise.catch(() => undefined);
     const spawnReadyPromise = new Promise<void>((resolve) => {
       child.once("spawn", () => {
         resolve();
@@ -1839,13 +1887,19 @@ export class ACPAgentClient implements AgentClient {
 
   protected buildProbeClient(
     onSessionUpdate?: (params: SessionNotification) => void | Promise<void>,
+    onActivity?: () => void,
   ): ACPClient {
     return {
       async requestPermission(): Promise<RequestPermissionResponse> {
+        onActivity?.();
         return { outcome: { outcome: "cancelled" } };
       },
       async sessionUpdate(params): Promise<void> {
+        onActivity?.();
         await onSessionUpdate?.(params);
+      },
+      async extNotification(): Promise<void> {
+        onActivity?.();
       },
       async readTextFile(params: ReadTextFileRequest) {
         const content = await fs.readFile(params.path, "utf8");
@@ -1942,16 +1996,17 @@ export class ACPAgentClient implements AgentClient {
 
       const sessionStartedAt = Date.now();
       try {
-        const response = await withTimeout(
-          this.runACPRequest(() =>
+        const response = await awaitACPProbePhase({
+          promise: this.runACPRequest(() =>
             activeTransport.connection.newSession({
               cwd,
               mcpServers: [],
             }),
           ),
-          phaseTimeoutMs,
-          `ACP session/new timed out after ${phaseTimeoutMs}ms`,
-        );
+          timeoutMs: phaseTimeoutMs,
+          timeoutMessage: `ACP session/new timed out after ${phaseTimeoutMs}ms`,
+          processError: activeTransport.processError,
+        });
         probeSessionId = response.sessionId;
         const transformed = this.transformSessionResponse(response);
         const models = deriveModelDefinitionsFromACP(

@@ -13,6 +13,7 @@ import type {
   AgentPromptInput,
   AgentSlashCommand,
   AgentStreamEvent,
+  FetchCatalogOptions,
   ToolCallDetail,
   ToolCallTimelineItem,
 } from "../agent-sdk-types.js";
@@ -1631,5 +1632,9 @@ export class KimiACPAgentClient extends GenericACPAgentClient {
           backgroundZeroSettleMs: options.backgroundZeroSettleMs,
         }),
     });
+  }
+
+  override async getCatalogCacheKey(_options: FetchCatalogOptions): Promise<string> {
+    return "host";
   }
 }
