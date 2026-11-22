@@ -1483,6 +1483,37 @@ it("removes a killed worker terminal from terminalExit without duplicate snapsho
   ]);
 });
 
+it("emits workspace contribution events for both workspaces when moving an active worker terminal", () => {
+  const worker = new FakeTerminalWorker();
+  manager = createWorkerTerminalManager({
+    requestTimeoutMs: 50,
+    forkWorker: () => worker,
+  });
+
+  worker.emitWorkerMessage({
+    type: "terminalCreated",
+    terminal: {
+      id: "terminal-a",
+      name: "Shell",
+      cwd: "/workspace",
+      workspaceId: "ws-from",
+      activity: { state: "idle", attentionReason: "finished", changedAt: 1000 },
+    },
+    state: createTerminalState(),
+  });
+
+  const contributions: TerminalWorkspaceContributionChangedEvent[] = [];
+  manager.subscribeTerminalWorkspaceContributionChanged((event) => {
+    contributions.push(event);
+  });
+
+  expect(manager.setTerminalWorkspaceId("terminal-a", "ws-to")).toBe(true);
+  expect(contributions).toEqual([
+    { terminalId: "terminal-a", cwd: "/workspace", workspaceId: "ws-from" },
+    { terminalId: "terminal-a", cwd: "/workspace", workspaceId: "ws-to" },
+  ]);
+});
+
 it("does not resurrect a terminal that exited before its create response was handled", async () => {
   const worker = new FakeTerminalWorker();
   manager = createWorkerTerminalManager({

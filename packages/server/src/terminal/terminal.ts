@@ -1954,7 +1954,12 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   }
 
   function clearActivityAttention(): boolean {
-    return activityTracker.clearAttention();
+    const previousReason = activityTracker.getSnapshot().attentionReason;
+    const cleared = activityTracker.clearAttention();
+    if (cleared) {
+      activityScanner.handleAttentionCleared(previousReason);
+    }
+    return cleared;
   }
 
   function getExitInfo(): TerminalExitInfo | null {

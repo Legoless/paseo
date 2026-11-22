@@ -4825,8 +4825,21 @@ class ClaudeAgentSession implements AgentSession {
     }
     if (message.subtype === "background_tasks_changed") {
       // Level signal with REPLACE semantics, also sent after the turn's result. Ambient tasks
-      // (monitors, housekeeping) are not activity per the CLI; SDK typings omit `ambient`.
-      const count = message.tasks.filter((task) => toObjectRecord(task)?.ambient !== true).length;
+      // (monitors, housekeeping) and background shells (e.g. a dev server left up for the user)
+      // do not keep an idle agent working; background subagents and workflows still do.
+      const count = message.tasks.filter((task) => {
+        const record = toObjectRecord(task);
+        if (!record || record.ambient === true) return false;
+        const taskType =
+          typeof record.task_type === "string" ? record.task_type.toLowerCase() : undefined;
+        return (
+          taskType !== "local_bash" &&
+          taskType !== "shell" &&
+          taskType !== "bash" &&
+          taskType !== "monitor" &&
+          taskType !== "monitor_ws"
+        );
+      }).length;
       this.appendBackgroundWorkEvent(count, events);
       return;
     }

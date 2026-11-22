@@ -110,19 +110,56 @@ describe("runHooksCommand", () => {
     expect(send.calls).toEqual([]);
   });
 
-  it("keeps a Claude turn running while a background task runs", async () => {
-    const running = await runHook(
+  it("keeps a Claude turn running only for waking background tasks, not parked shells or monitors", async () => {
+    const subagent = await runHook(
+      claudeProvider.id,
+      "Stop",
+      inputFrom(JSON.stringify({ background_tasks: [{ type: "subagent", status: "running" }] })),
+    );
+    const workflow = await runHook(
+      claudeProvider.id,
+      "Stop",
+      inputFrom(JSON.stringify({ background_tasks: [{ type: "workflow", status: "running" }] })),
+    );
+    const mixed = await runHook(
+      claudeProvider.id,
+      "Stop",
+      inputFrom(
+        JSON.stringify({
+          background_tasks: [
+            { type: "shell", status: "running" },
+            { type: "subagent", status: "running" },
+          ],
+        }),
+      ),
+    );
+    const shell = await runHook(
       claudeProvider.id,
       "Stop",
       inputFrom(JSON.stringify({ background_tasks: [{ type: "shell", status: "running" }] })),
     );
+    const localBash = await runHook(
+      claudeProvider.id,
+      "Stop",
+      inputFrom(JSON.stringify({ background_tasks: [{ type: "local_bash", status: "running" }] })),
+    );
+    const monitor = await runHook(
+      claudeProvider.id,
+      "Stop",
+      inputFrom(JSON.stringify({ background_tasks: [{ type: "monitor", status: "running" }] })),
+    );
     const finished = await runHook(
       claudeProvider.id,
       "Stop",
-      inputFrom(JSON.stringify({ background_tasks: [{ type: "shell", status: "completed" }] })),
+      inputFrom(JSON.stringify({ background_tasks: [{ type: "subagent", status: "completed" }] })),
     );
 
-    expectPostedState(running, "running");
+    expectPostedState(subagent, "running");
+    expectPostedState(workflow, "running");
+    expectPostedState(mixed, "running");
+    expectPostedState(shell, "idle");
+    expectPostedState(localBash, "idle");
+    expectPostedState(monitor, "idle");
     expectPostedState(finished, "idle");
   });
 

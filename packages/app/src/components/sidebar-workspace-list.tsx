@@ -633,6 +633,7 @@ function WorkspaceRowWithMenu({
     useWorkspaceReadState({
       serverId: workspace.serverId,
       workspaceId: workspace.workspaceId,
+      paneStatusCounts,
     });
   const handleMarkAsRead = useCallback(() => {
     void clearAttention().catch((error) => {

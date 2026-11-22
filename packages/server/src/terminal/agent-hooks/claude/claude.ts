@@ -13,6 +13,24 @@ const NEEDS_INPUT_NOTIFICATIONS = new Set<unknown>([
 
 const QUOTA_ERRORS = new Set<unknown>(["rate_limit", "billing_error"]);
 
+// Background shells (e.g. a dev server left running for the user's check) and
+// monitors do not keep a finished turn working; subagents and workflows still do.
+const PARKED_BACKGROUND_TASK_TYPES = new Set<unknown>([
+  "shell",
+  "local_bash",
+  "bash",
+  "monitor",
+  "monitor_ws",
+]);
+
+function isWakingBackgroundTask(task: unknown): boolean {
+  if (!isRecord(task) || task.status !== "running" || task.ambient === true) {
+    return false;
+  }
+  const type = typeof task.type === "string" ? task.type.toLowerCase() : task.type;
+  return !PARKED_BACKGROUND_TASK_TYPES.has(type);
+}
+
 // No SessionEnd: the shell's command-finished already clears activity when Claude
 // exits, and posting idle there turned /exit into a finished turn.
 export const claudeAgentHookProvider: AgentHookProvider<ClaudeSettings> = {
@@ -36,10 +54,9 @@ export const claudeAgentHookProvider: AgentHookProvider<ClaudeSettings> = {
       case "UserPromptSubmit":
         return "running";
       case "Stop": {
-        // The turn ended but a background task still runs; Claude resumes when it finishes.
+        // The turn ended; stay working only while a subagent/workflow still runs.
         const tasks = (await readPayload(input)).background_tasks;
-        const busy =
-          Array.isArray(tasks) && tasks.some((t) => isRecord(t) && t.status === "running");
+        const busy = Array.isArray(tasks) && tasks.some(isWakingBackgroundTask);
         return busy ? "running" : "idle";
       }
       case "StopFailure":

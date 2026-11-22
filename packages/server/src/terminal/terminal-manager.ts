@@ -440,7 +440,27 @@ export function createTerminalManager(
         return false;
       }
 
+      const previousWorkspaceId = session.workspaceId;
       session.workspaceId = workspaceId;
+      if (
+        previousWorkspaceId !== workspaceId &&
+        deriveTerminalActivityStatusBucket(session.getActivity()) !== null
+      ) {
+        if (previousWorkspaceId) {
+          emitTerminalWorkspaceContributionChanged({
+            terminalId: session.id,
+            cwd: session.cwd,
+            workspaceId: previousWorkspaceId,
+          });
+        }
+        if (workspaceId) {
+          emitTerminalWorkspaceContributionChanged({
+            terminalId: session.id,
+            cwd: session.cwd,
+            workspaceId,
+          });
+        }
+      }
       emitTerminalsChanged({ cwd: session.cwd });
       return true;
     },

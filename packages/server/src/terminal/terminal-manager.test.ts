@@ -747,3 +747,24 @@ it("does not emit workspace contribution event when an idle terminal is removed"
 
   unsubscribe();
 });
+
+it("emits workspace contribution events for both workspaces when moving an active terminal", async () => {
+  manager = createTerminalManager();
+  const cwd = realpathSync(tmpdir());
+  const events: TerminalWorkspaceContributionChangedEvent[] = [];
+  const unsubscribe = manager.subscribeTerminalWorkspaceContributionChanged((event) => {
+    events.push(event);
+  });
+
+  const session = await createKnownAgentTerminal({ cwd, workspaceId: "ws-from" });
+  await manager.setTerminalActivity(session.id, "attention", "quota");
+  events.length = 0;
+
+  expect(manager.setTerminalWorkspaceId(session.id, "ws-to")).toBe(true);
+  expect(events).toEqual([
+    { terminalId: session.id, cwd, workspaceId: "ws-from" },
+    { terminalId: session.id, cwd, workspaceId: "ws-to" },
+  ]);
+
+  unsubscribe();
+});

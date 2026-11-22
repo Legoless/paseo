@@ -626,13 +626,17 @@ export function isCodexBusyScreen(lines: string[]): boolean {
 
 // Claude keeps its ruled `❯` composer on the cursor line while a turn runs (showing an
 // animated `[·✢✳✶✻✽] Verb… (elapsed · …)` spinner above optional `⎿  Tip: …` and right-
-// aligned `◎ /goal active` / `✘ …` rows) and after a turn whose background work still runs
-// (`✻ Baked for 6s · … · 1 shell still running` or `✻ Waiting for 1 background agent to
-// finish`). Only the status block immediately above the composer counts, so an older turn
-// or a reply quoting status prose does not. `running Stop hooks` is excluded so a Stop
-// hook's finish stays idle while slower Stop hooks finish.
-const CLAUDE_BACKGROUND_STATUS =
-  /^✻ (?:.+ · \d+ [^·]+ still running|Waiting for \d+ .+ to finish)$/;
+// aligned `◎ /goal active` / `✘ …` rows) and after a turn whose waking background work
+// still runs (`✻ Waiting for 1 background agent to finish`, or `✻ Baked for 6s · … · 1
+// background agent still running`). Parked shells (e.g. a dev server waiting for the user's
+// check) and monitors do not keep a finished turn working. Only the status block immediately
+// above the composer counts, so an older turn or a reply quoting status prose does not.
+// `running Stop hooks` is excluded so a Stop hook's finish stays idle while slower Stop
+// hooks finish.
+const CLAUDE_WAITING_STATUS = /^✻ Waiting for \d+ .+ to finish$/;
+const CLAUDE_STILL_RUNNING_STATUS = /^✻ .+ · .+\bstill running$/;
+const CLAUDE_WAKES_ON_EXIT =
+  /\b\d+\s+(?:(?:background|remote|dynamic|local)\s+)?(?:agents?|subagents?|workflows?|teammates?|loops?|tasks?)\b/i;
 const CLAUDE_RUNNING_STATUS =
   /^[·✢✳✶✻✽◐◑◒◓]\s+(?!.*\brunning Stop hooks\b)[^()\n]+?(?:…|\.\.\.)(?:\s*\([^)]*\)?)?$/i;
 const CLAUDE_COMPOSER_NOTICE = /^(?:✘\s+|◎\s+\/goal active\b)/i;
@@ -640,6 +644,19 @@ const CLAUDE_SUBLINE = /^\s*⎿(?:\s|$)/;
 const CLAUDE_INDENTED_CONTINUATION = /^\s{2,}(?![·✢✳✶✻✽◐◑◒◓⏺●⎿])\S/;
 const CLAUDE_MODE_FOOTER =
   /^(?:[⏵▸⏸]+\s+)?(?:bypass permissions|accept edits|plan mode|auto mode|manual mode)\s+on\b/i;
+
+function isClaudeBackgroundStatus(line: string): boolean {
+  if (CLAUDE_WAITING_STATUS.test(line)) {
+    return true;
+  }
+  if (!CLAUDE_STILL_RUNNING_STATUS.test(line)) {
+    return false;
+  }
+  return line
+    .split(" · ")
+    .slice(1)
+    .some((part) => CLAUDE_WAKES_ON_EXIT.test(part));
+}
 
 function claudeComposerStart(lines: string[]): number {
   for (let index = lines.length - 1; index > 0; index -= 1) {
@@ -656,12 +673,12 @@ function claudeComposerStart(lines: string[]): number {
 function isClaudeStatusTail(rawLines: string[]): boolean {
   if (rawLines.length === 0) return false;
   const last = rawLines.at(-1)!.trim();
-  if (CLAUDE_BACKGROUND_STATUS.test(last) || CLAUDE_RUNNING_STATUS.test(last)) {
+  if (isClaudeBackgroundStatus(last) || CLAUDE_RUNNING_STATUS.test(last)) {
     return true;
   }
   if (rawLines.length >= 2 && CLAUDE_INDENTED_CONTINUATION.test(rawLines.at(-1)!)) {
     const joined = `${rawLines.at(-2)!.trim()} ${last}`;
-    return CLAUDE_BACKGROUND_STATUS.test(joined) || CLAUDE_RUNNING_STATUS.test(joined);
+    return isClaudeBackgroundStatus(joined) || CLAUDE_RUNNING_STATUS.test(joined);
   }
   return false;
 }
@@ -1525,6 +1542,9 @@ export class PtyActivityScanner {
   private initialLaunch = false;
   private expectsCommandTitle = false;
   private programStatusBlocked = false;
+  // Focusing or marking a quota terminal read clears its red badge even while the
+  // notice stays in the viewport; suppress re-flagging until a new turn or notice.
+  private quotaAcknowledged = false;
   private unresolvedWorkingStillness = 0;
   // Spinner frames the agent drew before it handled an interrupt must not restart the turn.
   // A bounded window, so a turn the agent starts on its own later still lights.
@@ -1608,6 +1628,7 @@ export class PtyActivityScanner {
     this.initialLaunch = false;
     this.expectsCommandTitle = false;
     this.programStatusBlocked = false;
+    this.quotaAcknowledged = false;
     this.lookedAtScreen = false;
     this.canProbeScreenForAgent = false;
     this.agentDetectionOutput = "";
@@ -1618,11 +1639,21 @@ export class PtyActivityScanner {
     this.options.clearActivity();
   }
 
+  handleAttentionCleared(clearedReason?: TerminalActivityAttentionReason | null): void {
+    if (clearedReason === "quota") {
+      this.quotaAcknowledged = true;
+    }
+    if (this.currentActivity === "attention") {
+      this.currentActivity = "idle";
+    }
+  }
+
   feedInput(input: string): void {
     this.interruptedAt = null;
     if (!this.activeAgent || this.disarmQuitAntigravity()) return;
 
     if (input === "\r" || input === "\n") {
+      this.quotaAcknowledged = false;
       if (this.programStatusBlocked) {
         this.scheduleStillnessCheck();
         return;
@@ -1633,9 +1664,19 @@ export class PtyActivityScanner {
   }
 
   handleHookActivityChange(): void {
-    if (!this.activeAgent || this.options.getActivity().state !== "working") {
+    const observed = this.options.getActivity();
+    if (!this.activeAgent) {
       return;
     }
+    if (observed.attentionReason === "quota") {
+      this.quotaAcknowledged = false;
+      this.currentActivity = "attention";
+      return;
+    }
+    if (observed.state !== "working") {
+      return;
+    }
+    this.quotaAcknowledged = false;
     this.initialLaunch = false;
     // Hooks can arrive after the final PTY repaint, when no stillness check remains armed.
     this.scheduleStillnessCheck();
@@ -1693,6 +1734,7 @@ export class PtyActivityScanner {
       const lines = this.options.readLastLines(25);
       if (isSpendLimitScreen(lines, this.activeAgent)) {
         this.programStatusBlocked = false;
+        this.quotaAcknowledged = false;
         this.currentActivity = "attention";
         this.options.setActivity("attention", "quota");
         return;
@@ -1709,6 +1751,7 @@ export class PtyActivityScanner {
       isSpendLimitNoticeLine(programStatus.message)
     ) {
       this.programStatusBlocked = false;
+      this.quotaAcknowledged = false;
       this.initialLaunch = false;
       this.currentActivity = "attention";
       this.unresolvedWorkingStillness = 0;
@@ -1907,6 +1950,7 @@ export class PtyActivityScanner {
   }
 
   private setWorking(): void {
+    this.quotaAcknowledged = false;
     // Hooks write the tracker directly, so the scanner's own "working" can be stale.
     if (this.currentActivity === "working" && this.options.getActivity().state === "working") {
       return;
@@ -1995,6 +2039,19 @@ export class PtyActivityScanner {
     }
   }
 
+  private handleStillnessSpendLimit(): void {
+    this.programStatusBlocked = false;
+    this.unresolvedWorkingStillness = 0;
+    if (this.quotaAcknowledged) {
+      if (this.currentActivity === "working" || this.currentActivity === "attention") {
+        this.currentActivity = "idle";
+      }
+      return;
+    }
+    this.currentActivity = "attention";
+    this.options.setActivity("attention", "quota");
+  }
+
   private onStillness(): void {
     if (!this.activeAgent) return;
 
@@ -2029,12 +2086,10 @@ export class PtyActivityScanner {
     }
 
     if (isSpendLimitScreen(lines, this.activeAgent)) {
-      this.programStatusBlocked = false;
-      this.currentActivity = "attention";
-      this.unresolvedWorkingStillness = 0;
-      this.options.setActivity("attention", "quota");
+      this.handleStillnessSpendLimit();
       return;
     }
+    this.quotaAcknowledged = false;
 
     // OpenCode's parent composer goes idle while background sessions keep
     // running. Its plugin aggregates their status under the root session id;
@@ -2086,5 +2141,6 @@ export class PtyActivityScanner {
     this.currentActivity = null;
     this.expectsCommandTitle = false;
     this.programStatusBlocked = false;
+    this.quotaAcknowledged = false;
   }
 }

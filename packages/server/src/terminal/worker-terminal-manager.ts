@@ -829,10 +829,30 @@ export function createWorkerTerminalManager(
       if (!record) {
         return false;
       }
+      const previousWorkspaceId = record.info.workspaceId;
       // The parent-side mirror is where live ownership is read. The worker only keeps a copy for
       // the terminal's saved record.
       record.info = { ...record.info, workspaceId };
       sendBestEffortRequest({ type: "setWorkspaceId", terminalId: id, workspaceId });
+      if (
+        previousWorkspaceId !== workspaceId &&
+        deriveTerminalActivityStatusBucket(record.activity) !== null
+      ) {
+        if (previousWorkspaceId) {
+          emitTerminalWorkspaceContributionChanged({
+            terminalId: record.info.id,
+            cwd: record.info.cwd,
+            workspaceId: previousWorkspaceId,
+          });
+        }
+        if (workspaceId) {
+          emitTerminalWorkspaceContributionChanged({
+            terminalId: record.info.id,
+            cwd: record.info.cwd,
+            workspaceId,
+          });
+        }
+      }
       emitTerminalsChanged({
         cwd: record.info.cwd,
         terminals: listTerminalItemsForCwd(record.info.cwd),

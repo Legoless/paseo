@@ -118,10 +118,16 @@ const RUNNING_WORKFLOW_TURN_EVENTS = [
   COMPLETED_TURN_EVENTS[2],
 ];
 
+const LOCAL_AGENT_BACKGROUND_TASK = {
+  task_id: "a1",
+  task_type: "local_agent",
+  description: "Audit modules",
+};
+
 const LOCAL_BASH_BACKGROUND_TASK = {
   task_id: "b1",
   task_type: "local_bash",
-  description: "Re-render all steps",
+  description: "Dev server",
 };
 
 function backgroundTasksChanged(tasks: unknown[]) {
@@ -216,7 +222,7 @@ describe("Claude runtime exit", () => {
     }
   });
 
-  test("reports live background work after the turn ends and clears it when the set empties", async () => {
+  test("reports live background subagents and ignores parked shells and monitors", async () => {
     let emptyBackgroundSet: ((event: unknown) => void) | undefined;
     const queryFactory = vi.fn(() =>
       createQueryMock(
@@ -224,6 +230,7 @@ describe("Claude runtime exit", () => {
           COMPLETED_TURN_EVENTS[0],
           COMPLETED_TURN_EVENTS[1],
           backgroundTasksChanged([
+            LOCAL_AGENT_BACKGROUND_TASK,
             LOCAL_BASH_BACKGROUND_TASK,
             { task_id: "m1", task_type: "monitor_ws", description: "watch", ambient: true },
           ]),
@@ -246,11 +253,11 @@ describe("Claude runtime exit", () => {
     session.subscribe((event) => events.push(event));
 
     try {
-      await session.run("start a background shell");
+      await session.run("start background work");
       expect(backgroundWorkCounts(events)).toEqual([1]);
 
-      // The CLI reports the empty set after the turn's result, with no turn active.
-      emptyBackgroundSet?.(backgroundTasksChanged([]));
+      // Leaving only the parked background shell settles backgroundWorkCount to 0.
+      emptyBackgroundSet?.(backgroundTasksChanged([LOCAL_BASH_BACKGROUND_TASK]));
 
       await vi.waitFor(() => expect(backgroundWorkCounts(events)).toEqual([1, 0]));
       // Nothing would close a turn opened by the post-result report, so it must not open one.
@@ -267,7 +274,7 @@ describe("Claude runtime exit", () => {
       return createQueryMock([
         COMPLETED_TURN_EVENTS[0],
         COMPLETED_TURN_EVENTS[1],
-        backgroundTasksChanged([LOCAL_BASH_BACKGROUND_TASK]),
+        backgroundTasksChanged([LOCAL_AGENT_BACKGROUND_TASK]),
         COMPLETED_TURN_EVENTS[2],
       ]);
     });

@@ -8000,6 +8000,27 @@ export class Session {
     }
   }
 
+  private async clearWorkspaceTerminalAttention(workspaceId: string): Promise<void> {
+    if (
+      typeof this.terminalManager?.listDirectories !== "function" ||
+      typeof this.terminalManager?.clearTerminalAttention !== "function"
+    ) {
+      return;
+    }
+    const terminalContributions = await this.listTerminalActivityContributions();
+    const clearableTerminalIds = new Set<string>();
+    for (const contribution of terminalContributions) {
+      if (contribution.workspaceId !== workspaceId) continue;
+      const reason = contribution.activity?.attentionReason;
+      if (reason === "finished" || reason === "quota") {
+        clearableTerminalIds.add(contribution.terminalId);
+      }
+    }
+    for (const terminalId of clearableTerminalIds) {
+      await this.terminalManager.clearTerminalAttention(terminalId);
+    }
+  }
+
   private async handleWorkspaceClearAttentionRequest(
     request: Extract<SessionInboundMessage, { type: "workspace.clear_attention.request" }>,
   ): Promise<void> {
@@ -8092,6 +8113,8 @@ export class Session {
           });
           clearedAgentIds.push(agentId);
         }
+
+        await this.clearWorkspaceTerminalAttention(workspace.workspaceId);
 
         await this.emitWorkspaceUpdateForWorkspaceId(workspace.workspaceId);
         results.push({

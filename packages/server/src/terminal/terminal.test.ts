@@ -2065,6 +2065,14 @@ describe("terminal pty activity scanning", () => {
 
     expect(activity).toMatchObject({ state: "idle", attentionReason: "quota" });
     expect(deriveTerminalActivityStatusBucket(activity)).toBe("failed");
+
+    // Clearing attention on focus must stay cleared across passive redraws while the
+    // quota banner remains visible in the viewport.
+    expect(session.clearActivityAttention()).toBe(true);
+    expect(deriveTerminalActivityStatusBucket(session.getActivity())).toBeNull();
+    session.send({ type: "input", data: " " });
+    await new Promise((resolve) => setTimeout(resolve, 1600));
+    expect(deriveTerminalActivityStatusBucket(session.getActivity())).toBeNull();
   });
 
   it("answers OSC 7501 capability probes and settles Antigravity when only IsDaemon tasks stay in the tray", async () => {

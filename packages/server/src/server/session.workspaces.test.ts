@@ -2160,6 +2160,79 @@ test("workspace clear attention clears stored-only agents and responds", async (
   }
 });
 
+test("workspace clear attention clears finished and quota terminals owned by the workspace", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const clearedTerminalIds: string[] = [];
+  const workspace = createPersistedWorkspaceRecord({
+    workspaceId: "ws-1",
+    projectId: "proj-1",
+    cwd: REPO_CWD,
+    kind: "directory",
+    displayName: "repo",
+    createdAt: "2026-03-30T15:00:00.000Z",
+    updatedAt: "2026-03-30T15:00:00.000Z",
+  });
+  const project = createPersistedProjectRecord({
+    projectId: "proj-1",
+    rootPath: REPO_CWD,
+    kind: "non_git",
+    displayName: "repo",
+    createdAt: "2026-03-30T15:00:00.000Z",
+    updatedAt: "2026-03-30T15:00:00.000Z",
+  });
+  const makeTerminalStub = (
+    id: string,
+    workspaceId: string,
+    attentionReason: "finished" | "quota" | "needs_input" | null,
+  ) => ({
+    id,
+    cwd: REPO_CWD,
+    workspaceId,
+    getActivity: () =>
+      attentionReason
+        ? { state: "idle" as const, attentionReason, changedAt: 1_000 }
+        : { state: "working" as const, attentionReason: null, changedAt: 1_000 },
+  });
+  const terminals = [
+    makeTerminalStub("term-finished", "ws-1", "finished"),
+    makeTerminalStub("term-quota", "ws-1", "quota"),
+    makeTerminalStub("term-input", "ws-1", "needs_input"),
+    makeTerminalStub("term-running", "ws-1", null),
+    makeTerminalStub("term-other-ws", "ws-2", "finished"),
+  ];
+  const session = createSessionForWorkspaceTests({
+    onMessage: (message) => emitted.push(message),
+    terminalManager: asTerminalManager({
+      listDirectories: () => [REPO_CWD],
+      getTerminals: async () => terminals as never,
+      clearTerminalAttention: async (terminalId: string) => {
+        clearedTerminalIds.push(terminalId);
+        return true;
+      },
+    }),
+  });
+  session.workspaceRegistry.list = async () => [workspace];
+  session.workspaceRegistry.get = async (id: string) =>
+    id === workspace.workspaceId ? workspace : null;
+  session.projectRegistry.list = async () => [project];
+  session.projectRegistry.get = async (id: string) => (id === project.projectId ? project : null);
+  session.listAgentPayloads = async () => [];
+
+  await session.handleMessage({
+    type: "workspace.clear_attention.request",
+    workspaceId: workspace.workspaceId,
+    requestId: "req-term-clear",
+  });
+
+  expect(clearedTerminalIds).toEqual(["term-finished", "term-quota"]);
+  expect(findByType(emitted, "workspace.clear_attention.response").payload).toMatchObject({
+    requestId: "req-term-clear",
+    workspaceId: workspace.workspaceId,
+    success: true,
+    error: null,
+  });
+});
+
 test("workspace clear attention responds with an error instead of timing out", async () => {
   const emitted: SessionOutboundMessage[] = [];
   const session = createSessionForWorkspaceTests({ onMessage: (message) => emitted.push(message) });
