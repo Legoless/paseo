@@ -11,6 +11,7 @@ export type TerminalStreamControllerClient = Pick<
 export interface TerminalStreamControllerSize {
   rows: number;
   cols: number;
+  intent?: "claim" | "update";
 }
 
 export interface TerminalStreamControllerStatus {
@@ -74,12 +75,15 @@ export class TerminalStreamController {
     this.options.onStatusChange?.({ terminalId: nextTerminalId, isAttaching: true, error: null });
     let subscription: ReturnType<DaemonClient["observeTerminal"]>;
     try {
-      const preferredSize = restore?.size ?? this.options.getPreferredSize();
+      const preferredSize = restore?.size
+        ? { rows: restore.size.rows, cols: restore.size.cols, intent: "claim" as const }
+        : this.options.getPreferredSize();
       if (preferredSize)
         this.options.client.sendTerminalInput(nextTerminalId, {
           type: "resize",
-          ...preferredSize,
-          intent: "claim",
+          rows: preferredSize.rows,
+          cols: preferredSize.cols,
+          intent: preferredSize.intent ?? "claim",
         });
       subscription = this.options.client.observeTerminal(
         nextTerminalId,

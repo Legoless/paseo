@@ -14,11 +14,12 @@ export function applyTerminalSize(
   request: TerminalSizeRequest,
 ): boolean {
   const intent = resolveTerminalSizeIntent(request.intent);
-  if (intent === "update" && terminalSizeOwners.get(terminal)?.deref() !== owner) {
+  const currentOwner = terminalSizeOwners.get(terminal)?.deref();
+  if (intent === "update" && currentOwner !== undefined && currentOwner !== owner) {
     return false;
   }
 
-  if (intent === "claim") {
+  if (intent === "claim" || currentOwner === undefined) {
     terminalSizeOwners.set(terminal, new WeakRef(owner));
   }
 
@@ -26,6 +27,15 @@ export function applyTerminalSize(
   if (currentSize.rows !== request.rows || currentSize.cols !== request.cols) {
     terminal.send({ type: "resize", rows: request.rows, cols: request.cols });
   }
+  return true;
+}
+
+export function releaseTerminalSizeOwner(terminal: TerminalSession, owner: object): boolean {
+  const currentOwner = terminalSizeOwners.get(terminal)?.deref();
+  if (currentOwner !== owner) {
+    return false;
+  }
+  terminalSizeOwners.delete(terminal);
   return true;
 }
 

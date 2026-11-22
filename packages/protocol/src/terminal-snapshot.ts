@@ -26,6 +26,91 @@ const DEFAULT_STYLE: TerminalStyle = {
   strikethrough: false,
 };
 
+// Private OSC carrying the daemon's snapshot grid dimensions ahead of Restore ANSI
+// payloads so clients replay at the snapshot's exact width before refitting to the pane.
+// Older clients ignore unknown OSC codes silently; older daemons omit the prefix.
+const TERMINAL_RESTORE_SIZE_OSC_CODE = 7502;
+const TERMINAL_RESTORE_SIZE_OSC_PREFIX = [0x1b, 0x5d, 0x37, 0x35, 0x30, 0x32, 0x3b] as const;
+const MAX_TERMINAL_RESTORE_SIZE_HEADER_BYTES = 32;
+const MAX_TERMINAL_RESTORE_DIMENSION = 10_000;
+
+export interface ParsedTerminalRestorePayload {
+  data: Uint8Array;
+  cols?: number;
+  rows?: number;
+}
+
+export function encodeTerminalRestoreAnsi(state: TerminalState): string {
+  return `\u001b]${TERMINAL_RESTORE_SIZE_OSC_CODE};${state.cols};${state.rows}\u0007${renderTerminalSnapshotToAnsi(state)}`;
+}
+
+export function parseTerminalRestoreSizeHeader(data: Uint8Array): ParsedTerminalRestorePayload {
+  const prefixLength = TERMINAL_RESTORE_SIZE_OSC_PREFIX.length;
+  if (data.length <= prefixLength + 3) {
+    return { data };
+  }
+  for (let index = 0; index < prefixLength; index += 1) {
+    if (data[index] !== TERMINAL_RESTORE_SIZE_OSC_PREFIX[index]) {
+      return { data };
+    }
+  }
+
+  const scanLimit = Math.min(data.length, MAX_TERMINAL_RESTORE_SIZE_HEADER_BYTES);
+  let separatorIndex = -1;
+  let terminatorIndex = -1;
+  for (let index = prefixLength; index < scanLimit; index += 1) {
+    const byte = data[index];
+    if (byte === 0x3b) {
+      if (separatorIndex !== -1) {
+        return { data };
+      }
+      separatorIndex = index;
+      continue;
+    }
+    if (byte === 0x07) {
+      terminatorIndex = index;
+      break;
+    }
+    if (byte < 0x30 || byte > 0x39) {
+      return { data };
+    }
+  }
+
+  if (separatorIndex === -1 || terminatorIndex === -1) {
+    return { data };
+  }
+
+  const cols = parsePositiveAsciiInt(data, prefixLength, separatorIndex);
+  const rows = parsePositiveAsciiInt(data, separatorIndex + 1, terminatorIndex);
+  if (cols === null || rows === null) {
+    return { data };
+  }
+
+  return {
+    data: data.subarray(terminatorIndex + 1),
+    cols,
+    rows,
+  };
+}
+
+function parsePositiveAsciiInt(data: Uint8Array, start: number, end: number): number | null {
+  if (end <= start) {
+    return null;
+  }
+  let value = 0;
+  for (let index = start; index < end; index += 1) {
+    const digit = data[index] - 0x30;
+    if (digit < 0 || digit > 9) {
+      return null;
+    }
+    value = value * 10 + digit;
+    if (value > MAX_TERMINAL_RESTORE_DIMENSION) {
+      return null;
+    }
+  }
+  return value > 0 ? value : null;
+}
+
 export function renderTerminalSnapshotToAnsi(state: TerminalState): string {
   const rows = [...state.scrollback, ...state.grid];
   const wrapFlags = [...(state.scrollbackWrapped ?? []), ...(state.gridWrapped ?? [])];

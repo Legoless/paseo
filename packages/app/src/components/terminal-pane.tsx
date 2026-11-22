@@ -48,6 +48,7 @@ import { getWorkspaceTerminalSession } from "@/terminal/runtime/workspace-termin
 import {
   EMPTY_FOCUS_CLAIM_STATE,
   canRequestFocusClaim,
+  canRequestOwnedSizeUpdate,
   reconcileFocusClaim,
   resolveTerminalResizeClaim,
   settleFocusClaim,
@@ -491,6 +492,25 @@ export function TerminalPane({
     requestTerminalFocus,
   });
 
+  const previousSizeConnectionRef = useRef({
+    client,
+    streamResetNonce,
+  });
+  useEffect(() => {
+    const previous = previousSizeConnectionRef.current;
+    if (
+      !client ||
+      !isConnected ||
+      !isWorkspaceFocused ||
+      previous.client !== client ||
+      previous.streamResetNonce !== streamResetNonce
+    ) {
+      paneFocusResizeClaimRef.current = EMPTY_FOCUS_CLAIM_STATE;
+      lastSentTerminalSizeRef.current = null;
+    }
+    previousSizeConnectionRef.current = { client, streamResetNonce };
+  }, [client, isConnected, isWorkspaceFocused, streamResetNonce]);
+
   useEffect(() => {
     const canRequest = canRequestFocusClaim({
       isWorkspaceFocused: isTerminalPresented,
@@ -519,6 +539,7 @@ export function TerminalPane({
     rendererReadyStreamKey,
     requestTerminalReflow,
     scopeKey,
+    streamResetNonce,
     terminalId,
     terminalStreamKey,
   ]);
@@ -603,19 +624,25 @@ export function TerminalPane({
   }, []);
 
   const getPreferredStreamSize = useStableEvent(() => {
-    if (
-      !canRequestFocusClaim({
-        isWorkspaceFocused: terminalPresentedRef.current,
-        isPaneFocused,
-        isAppActivelyVisible,
-        isClientReady: client !== null,
-        isConnected,
-        isRendererReady: rendererReadyStreamKey === terminalStreamKey,
-      })
-    ) {
+    const size = measuredTerminalSizeRef.current;
+    if (!size) {
       return null;
     }
-    return measuredTerminalSizeRef.current;
+    const readiness = {
+      isWorkspaceFocused: terminalPresentedRef.current,
+      isPaneFocused,
+      isAppActivelyVisible,
+      isClientReady: client !== null,
+      isConnected,
+      isRendererReady: rendererReadyStreamKey === terminalStreamKey,
+    };
+    if (canRequestFocusClaim(readiness)) {
+      return { ...size, intent: "claim" as const };
+    }
+    if (supportsTerminalSizeOwnership && canRequestOwnedSizeUpdate(readiness)) {
+      return { ...size, intent: "update" as const };
+    }
+    return null;
   });
 
   const handleStreamOutput = useStableEvent(

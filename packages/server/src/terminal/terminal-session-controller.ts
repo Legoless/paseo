@@ -37,7 +37,7 @@ import {
 } from "./terminal-restore.js";
 import type { TerminalSession } from "./terminal.js";
 import type { TerminalManager, TerminalsChangedEvent } from "./terminal-manager.js";
-import { applyTerminalSize } from "./terminal-size-ownership.js";
+import { applyTerminalSize, releaseTerminalSizeOwner } from "./terminal-size-ownership.js";
 import type { TerminalActivity } from "@getpaseo/protocol/terminal-activity";
 import { terminalSubscriptionKey } from "@getpaseo/protocol/terminal-subscription-key";
 
@@ -1195,6 +1195,19 @@ export class TerminalSessionController {
     stream.snapshotOutput = undefined;
     stream.bufferedOutputs.length = 0;
     stream.unsubscribe();
+    let ownerStillAttached = false;
+    for (const active of this.activeStreams.values()) {
+      if (active.terminalId === stream.terminalId && active.owner.source === stream.owner.source) {
+        ownerStillAttached = true;
+        break;
+      }
+    }
+    if (!ownerStillAttached) {
+      const terminal = this.terminalManager?.getTerminal(stream.terminalId);
+      if (terminal) {
+        releaseTerminalSizeOwner(terminal, stream.owner.source);
+      }
+    }
   }
 }
 

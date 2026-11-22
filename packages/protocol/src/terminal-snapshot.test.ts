@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { renderTerminalSnapshotToAnsi } from "./terminal-snapshot";
+import {
+  encodeTerminalRestoreAnsi,
+  parseTerminalRestoreSizeHeader,
+  renderTerminalSnapshotToAnsi,
+} from "./terminal-snapshot";
 import type { TerminalState } from "./messages";
 
 function cells(text: string): TerminalState["grid"][number] {
@@ -75,5 +79,44 @@ describe("renderTerminalSnapshotToAnsi wide chars", () => {
     };
 
     expect(renderTerminalSnapshotToAnsi(state)).toContain("통 합 !");
+  });
+});
+
+describe("terminal restore size header", () => {
+  it("encodes and parses snapshot dimensions ahead of restore ANSI", () => {
+    const state: TerminalState = {
+      rows: 40,
+      cols: 68,
+      scrollback: [],
+      scrollbackWrapped: [],
+      grid: [cells("hello")],
+      gridWrapped: [false],
+      cursor: { row: 0, col: 5 },
+    };
+
+    const encoded = new TextEncoder().encode(encodeTerminalRestoreAnsi(state));
+    const parsed = parseTerminalRestoreSizeHeader(encoded);
+
+    expect(parsed.cols).toBe(68);
+    expect(parsed.rows).toBe(40);
+    expect(new TextDecoder().decode(parsed.data)).toBe(renderTerminalSnapshotToAnsi(state));
+  });
+
+  it("leaves payloads without a valid size header untouched", () => {
+    const encoder = new TextEncoder();
+    for (const raw of [
+      "plain output",
+      "\u001b]7502;0;40\u0007bad-zero",
+      "\u001b]7502;68\u0007missing-rows",
+      "\u001b]7502;68;40;1\u0007extra-part",
+      "\u001b]7502;abc;40\u0007non-numeric",
+      "\u001b]7502;68;40unterminated",
+    ]) {
+      const bytes = encoder.encode(raw);
+      const parsed = parseTerminalRestoreSizeHeader(bytes);
+      expect(parsed.cols).toBeUndefined();
+      expect(parsed.rows).toBeUndefined();
+      expect(parsed.data).toBe(bytes);
+    }
   });
 });

@@ -785,12 +785,47 @@ function extractScrollback(
   return scrollback;
 }
 
+function isLineCellOccupied(
+  line: NonNullable<ReturnType<TerminalType["buffer"]["active"]["getLine"]>>,
+  col: number,
+): boolean {
+  const cell = line.getCell(col);
+  if (!cell) {
+    return false;
+  }
+  // Wide-char continuation cells have code === 0 and width === 0, whereas erased/unwritten
+  // cells have code === 0 and width === 1. Explicitly written spaces have code === 32.
+  return cell.getCode() !== 0 || cell.getWidth() === 0;
+}
+
 // xterm marks a line `isWrapped` when it is a continuation of the PREVIOUS line.
 // The snapshot carries the inverse, tmux-style flag — "this row continues onto the
 // next row" — so the client can rejoin and reflow logical lines. So row y's flag is
-// whether line y+1 is a wrapped continuation.
+// whether line y+1 is a wrapped continuation AND row y still reaches the wrap margin.
 function lineContinuesToNext(terminal: TerminalType, absoluteRow: number): boolean {
-  return terminal.buffer.active.getLine(absoluteRow + 1)?.isWrapped === true;
+  const buffer = terminal.buffer.active;
+  const nextLine = buffer.getLine(absoluteRow + 1);
+  if (nextLine?.isWrapped !== true || terminal.cols <= 0) {
+    return false;
+  }
+  const line = buffer.getLine(absoluteRow);
+  if (!line) {
+    return false;
+  }
+  // Overwriting a previously wrapped row with shorter text + EL (CSI K) clears its tail
+  // without resetting nextLine.isWrapped. Only treat row y as continuing when it still
+  // reaches the wrap boundary; otherwise snapshot replay pads the erased tail with spaces
+  // and joins row y+1 onto row y.
+  if (isLineCellOccupied(line, terminal.cols - 1)) {
+    return true;
+  }
+  // A 2-column glyph written at the final column wraps early onto the next row, leaving
+  // the last column unoccupied while the column before it is occupied.
+  return (
+    terminal.cols >= 2 &&
+    nextLine.getCell(0)?.getWidth() === 2 &&
+    isLineCellOccupied(line, terminal.cols - 2)
+  );
 }
 
 function extractGridWrapped(terminal: TerminalType): boolean[] {

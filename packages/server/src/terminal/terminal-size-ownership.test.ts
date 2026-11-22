@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { TerminalSession } from "./terminal.js";
-import { applyTerminalSize } from "./terminal-size-ownership.js";
+import { applyTerminalSize, releaseTerminalSizeOwner } from "./terminal-size-ownership.js";
 
 function createTerminal(): { terminal: TerminalSession; appliedSizes: string[] } {
   const appliedSizes: string[] = [];
@@ -54,6 +54,33 @@ describe("terminal size ownership", () => {
     applyTerminalSize(terminal, ownerB, { rows: 30, cols: 100, intent: "claim" });
     applyTerminalSize(terminal, ownerA, { rows: 31, cols: 101, intent: "update" });
     applyTerminalSize(terminal, ownerB, { rows: 32, cols: 102, intent: "update" });
+
+    expect(appliedSizes).toEqual(["100x30", "102x32"]);
+  });
+
+  test("lets an update acquire an unowned terminal and releases ownership on detach", () => {
+    const { terminal, appliedSizes } = createTerminal();
+    const ownerA = {};
+    const ownerB = {};
+
+    expect(applyTerminalSize(terminal, ownerA, { rows: 30, cols: 100, intent: "update" })).toBe(
+      true,
+    );
+    expect(applyTerminalSize(terminal, ownerB, { rows: 31, cols: 101, intent: "update" })).toBe(
+      false,
+    );
+    expect(releaseTerminalSizeOwner(terminal, ownerB)).toBe(false);
+    expect(applyTerminalSize(terminal, ownerB, { rows: 31, cols: 101, intent: "update" })).toBe(
+      false,
+    );
+
+    expect(releaseTerminalSizeOwner(terminal, ownerA)).toBe(true);
+    expect(applyTerminalSize(terminal, ownerB, { rows: 32, cols: 102, intent: "update" })).toBe(
+      true,
+    );
+    expect(applyTerminalSize(terminal, ownerA, { rows: 33, cols: 103, intent: "update" })).toBe(
+      false,
+    );
 
     expect(appliedSizes).toEqual(["100x30", "102x32"]);
   });

@@ -4,7 +4,7 @@ import {
   encodeTerminalSnapshotPayload,
   encodeTerminalStreamFrame,
 } from "@getpaseo/protocol/binary-frames/index";
-import { renderTerminalSnapshotToAnsi } from "@getpaseo/protocol/terminal-snapshot";
+import { encodeTerminalRestoreAnsi } from "@getpaseo/protocol/terminal-snapshot";
 import type { TerminalStateSnapshot, TerminalStateSnapshotOptions } from "./terminal.js";
 
 export const MAX_TERMINAL_OUTPUT_FRAME_BYTES = 256 * 1024;
@@ -70,7 +70,7 @@ export function encodeTerminalRestoreFrame(input: {
   return encodeTerminalStreamFrame({
     opcode: TerminalStreamOpcode.Restore,
     slot: input.slot,
-    payload: renderTerminalSnapshotToAnsi(input.snapshot.state),
+    payload: encodeTerminalRestoreAnsi(input.snapshot.state),
   });
 }
 

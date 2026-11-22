@@ -275,6 +275,29 @@ describe("terminal-stream-controller", () => {
     expect(harness.outputs).toEqual([]);
   });
 
+  it("forwards an update-intent attach resize for an unfocused visible pane", async () => {
+    const client = new FakeTerminalStreamClient();
+    client.nextSubscribeResults.push({ terminalId: "term-1", error: null });
+    const controller = new TerminalStreamController({
+      client,
+      getPreferredSize: () => ({ rows: 40, cols: 70, intent: "update" }),
+      getRestoreOptions: () => ({
+        mode: "visible-snapshot",
+        scrollbackLines: 200,
+      }),
+      onOutput: () => {},
+      onSnapshot: () => {},
+    });
+
+    controller.setTerminal({ terminalId: "term-1" });
+    await flushAsyncWork();
+    controller.dispose();
+
+    expect(client.resizeCalls).toEqual([
+      { terminalId: "term-1", rows: 40, cols: 70, intent: "update" },
+    ]);
+  });
+
   it("unsubscribes when switching terminals and on dispose", async () => {
     const harness = createHarness();
     harness.client.nextSubscribeResults.push({ terminalId: "term-1", error: null });

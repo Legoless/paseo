@@ -568,6 +568,70 @@ describe("createTerminal", () => {
     expect(withoutFlags.scrollbackWrapped).toBeUndefined();
   });
 
+  it("ignores stale xterm isWrapped flags after CSI K erases the end of a wrapped row", async () => {
+    const script = [
+      // Write a line that wraps across rows 0 and 1 at 20 cols.
+      'process.stdout.write("A".repeat(25));',
+      // Overwrite row 0 with shorter text and erase to end-of-line (CSI K). xterm keeps
+      // row 1's isWrapped flag true even though row 0 no longer reaches the wrap margin.
+      'process.stdout.write("\\x1b[1;1Hshort\\x1b[K\\x1b[2;1Hnext-row");',
+      "setInterval(() => {}, 100000);",
+    ].join("");
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        cols: 20,
+        rows: 5,
+        command: process.execPath,
+        args: ["-e", script],
+      }),
+    );
+
+    const state = await waitForState(
+      session,
+      (current) => getRowText(current, 0) === "short" && getRowText(current, 1) === "next-row",
+    );
+    const withFlags = session.getState({ includeWrapFlags: true });
+    expect(withFlags.gridWrapped?.slice(0, 2)).toEqual([false, false]);
+
+    const restored = new xterm.Terminal({ cols: 24, rows: 5, allowProposedApi: true });
+    try {
+      await new Promise<void>((resolve) =>
+        restored.write(renderTerminalSnapshotToAnsi(withFlags), resolve),
+      );
+      expect(restored.buffer.active.getLine(0)?.translateToString(true)).toBe("short");
+      expect(restored.buffer.active.getLine(1)?.translateToString(true)).toBe("next-row");
+    } finally {
+      restored.dispose();
+    }
+    expect(state.cols).toBe(20);
+  });
+
+  it("preserves wrap flags for trailing spaces at the wrap margin and early-wrapped wide chars", async () => {
+    // Row 0->1: explicit space at col 9 wraps to "tail".
+    // Row 2->3: 9 ASCII chars + 2-column CJK char wraps early from col 9 onto row 3 col 0.
+    const script = [
+      'process.stdout.write("123456789 tail\\r\\n");',
+      'process.stdout.write("123456789통합");',
+      "setInterval(() => {}, 100000);",
+    ].join("");
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        cols: 10,
+        rows: 6,
+        command: process.execPath,
+        args: ["-e", script],
+      }),
+    );
+
+    await waitForState(session, (current) => rowHasChar(current.grid[3], "합"));
+    const withFlags = session.getState({ includeWrapFlags: true });
+    expect(withFlags.gridWrapped?.slice(0, 4)).toEqual([true, false, true, false]);
+  });
+
   it("restores CJK text without injected spaces when a snapshot round-trips through the client", async () => {
     // Each Hangul syllable is a wide char: xterm stores it as a 2-cell pair
     // whose second cell has no chars. Capturing that continuation as " " made

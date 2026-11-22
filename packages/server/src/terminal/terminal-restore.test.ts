@@ -5,6 +5,7 @@ import {
   decodeTerminalStreamFrame,
 } from "@getpaseo/protocol/binary-frames/index";
 import type { TerminalCell, TerminalState } from "@getpaseo/protocol/messages";
+import { parseTerminalRestoreSizeHeader } from "@getpaseo/protocol/terminal-snapshot";
 import {
   encodeTerminalRestoreFrame,
   resolveRestoreAfterOutputOverflow,
@@ -70,6 +71,9 @@ describe("terminal restore policy", () => {
 
     expect(frame?.opcode).toBe(TerminalStreamOpcode.Restore);
     expect(frame?.slot).toBe(4);
-    expect(new TextDecoder().decode(frame?.payload ?? new Uint8Array())).toContain("restored");
+    const parsed = parseTerminalRestoreSizeHeader(frame?.payload ?? new Uint8Array());
+    expect(parsed.cols).toBe(80);
+    expect(parsed.rows).toBe(1);
+    expect(new TextDecoder().decode(parsed.data)).toContain("restored");
   });
 });

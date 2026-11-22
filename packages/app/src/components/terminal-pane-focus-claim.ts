@@ -61,7 +61,7 @@ export function resolveTerminalResizeClaim(input: {
   };
 }
 
-function canRequestOwnedSizeUpdate(input: FocusClaimReadiness): boolean {
+export function canRequestOwnedSizeUpdate(input: FocusClaimReadiness): boolean {
   return (
     input.isWorkspaceFocused &&
     input.isAppActivelyVisible &&

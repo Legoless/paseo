@@ -24,7 +24,7 @@ import {
   resolveMacTerminalEditingShortcut,
   shouldInterceptDomTerminalKey,
 } from "@/utils/terminal-keys";
-import { renderTerminalSnapshotToAnsi } from "./terminal-snapshot";
+import { parseTerminalRestoreSizeHeader, renderTerminalSnapshotToAnsi } from "./terminal-snapshot";
 import {
   createTerminalLocalFileLinkProvider,
   type TerminalLocalFileLinkSource,
@@ -186,33 +186,230 @@ function prependTerminalOutput(
   return output;
 }
 
+type SynchronizedClearParserState =
+  | "ground"
+  | "escape"
+  | "escapeIntermediate"
+  | "csi"
+  | "osc"
+  | "oscEsc"
+  | "stString"
+  | "stStringEsc";
+
 // Cursor's renderer emits ESC [ 2 J / ESC [ 3 J and then the new frame. xterm can
 // paint the clear when a large write yields mid-parse. Holding the frame in
-// synchronized-output mode paints the clear and the redraw together.
-function terminalOutputClearsScreen(data: TerminalOutputData): boolean {
-  for (let index = 0; index + 3 < data.length; index += 1) {
-    if (data[index] !== 0x1b || data[index + 1] !== 0x5b) {
-      continue;
+// synchronized-output mode paints the clear and the redraw together, but only when
+// the write starts and ends at a clean VT/UTF-8 boundary and the application is not
+// already managing DEC 2026 itself — otherwise wrapping would abort a split escape
+// sequence or prematurely close the application's synchronized frame.
+class SynchronizedScreenClearTracker {
+  private state: SynchronizedClearParserState = "ground";
+  private utf8Remaining = 0;
+  private appSyncActive = false;
+  private csiBytes: number[] = [];
+  private csiOverflow = false;
+
+  reset(): void {
+    this.state = "ground";
+    this.utf8Remaining = 0;
+    this.appSyncActive = false;
+    this.csiBytes.length = 0;
+    this.csiOverflow = false;
+  }
+
+  wrap(data: TerminalOutputData): TerminalOutputData {
+    const startedClean = this.state === "ground" && this.utf8Remaining === 0 && !this.appSyncActive;
+    let sawScreenClear = false;
+    let sawSyncToggle = false;
+
+    for (let index = 0; index < data.length; index += 1) {
+      const signal = this.feedByte(data[index]);
+      if (signal === "clear") {
+        sawScreenClear = true;
+      } else if (signal === "sync") {
+        sawSyncToggle = true;
+      }
     }
-    const kind = data[index + 2];
-    if ((kind === 0x32 || kind === 0x33) && data[index + 3] === 0x4a) {
+
+    const endedClean = this.state === "ground" && this.utf8Remaining === 0 && !this.appSyncActive;
+    if (!sawScreenClear || !startedClean || !endedClean || sawSyncToggle) {
+      return data;
+    }
+
+    const output = new Uint8Array(
+      SYNCHRONIZED_OUTPUT_START.length + data.length + SYNCHRONIZED_OUTPUT_END.length,
+    );
+    output.set(SYNCHRONIZED_OUTPUT_START, 0);
+    output.set(data, SYNCHRONIZED_OUTPUT_START.length);
+    output.set(SYNCHRONIZED_OUTPUT_END, SYNCHRONIZED_OUTPUT_START.length + data.length);
+    return output;
+  }
+
+  private feedByte(byte: number): "clear" | "sync" | null {
+    if (this.state === "ground") {
+      this.feedGroundByte(byte);
+      return null;
+    }
+    if (byte === 0x18 || byte === 0x1a) {
+      this.resetParserToGround();
+      return null;
+    }
+    if (this.feedControlStringByte(byte)) {
+      return null;
+    }
+    if (byte === 0x1b) {
+      this.state = "escape";
+      this.csiBytes.length = 0;
+      this.csiOverflow = false;
+      return null;
+    }
+    if (this.state === "escape") {
+      return this.feedEscapeByte(byte);
+    }
+    if (this.state === "escapeIntermediate") {
+      if (byte >= 0x30 && byte <= 0x7e) {
+        this.state = "ground";
+      }
+      return null;
+    }
+    return this.feedCsiByte(byte);
+  }
+
+  private resetParserToGround(): void {
+    this.state = "ground";
+    this.csiBytes.length = 0;
+    this.csiOverflow = false;
+  }
+
+  private feedGroundByte(byte: number): void {
+    if (this.utf8Remaining > 0) {
+      if ((byte & 0xc0) === 0x80) {
+        this.utf8Remaining -= 1;
+        return;
+      }
+      this.utf8Remaining = 0;
+    }
+    if (byte === 0x1b) {
+      this.state = "escape";
+      return;
+    }
+    if (byte < 0x80) {
+      return;
+    }
+    if ((byte & 0xe0) === 0xc0) {
+      this.utf8Remaining = 1;
+    } else if ((byte & 0xf0) === 0xe0) {
+      this.utf8Remaining = 2;
+    } else if ((byte & 0xf8) === 0xf0) {
+      this.utf8Remaining = 3;
+    }
+  }
+
+  private feedControlStringByte(byte: number): boolean {
+    if (this.state === "osc") {
+      if (byte === 0x07) {
+        this.state = "ground";
+      } else if (byte === 0x1b) {
+        this.state = "oscEsc";
+      }
       return true;
     }
+    if (this.state === "oscEsc") {
+      if (byte === 0x5c) {
+        this.state = "ground";
+      } else {
+        this.state = "escape";
+        this.feedEscapeByte(byte);
+      }
+      return true;
+    }
+    if (this.state === "stString") {
+      if (byte === 0x1b) {
+        this.state = "stStringEsc";
+      }
+      return true;
+    }
+    if (this.state === "stStringEsc") {
+      if (byte === 0x5c) {
+        this.state = "ground";
+      } else if (byte !== 0x1b) {
+        this.state = "stString";
+      }
+      return true;
+    }
+    return false;
   }
-  return false;
-}
 
-function withSynchronizedScreenClear(data: TerminalOutputData): TerminalOutputData {
-  if (!terminalOutputClearsScreen(data)) {
-    return data;
+  private feedCsiByte(byte: number): "clear" | "sync" | null {
+    if (byte < 0x20) {
+      return null;
+    }
+    if (byte >= 0x20 && byte <= 0x3f) {
+      if (this.csiBytes.length < 64) {
+        this.csiBytes.push(byte);
+      } else {
+        this.csiOverflow = true;
+      }
+      return null;
+    }
+    const signal = byte >= 0x40 && byte <= 0x7e ? this.classifyCsi(byte) : null;
+    this.resetParserToGround();
+    return signal;
   }
-  const output = new Uint8Array(
-    SYNCHRONIZED_OUTPUT_START.length + data.length + SYNCHRONIZED_OUTPUT_END.length,
-  );
-  output.set(SYNCHRONIZED_OUTPUT_START, 0);
-  output.set(data, SYNCHRONIZED_OUTPUT_START.length);
-  output.set(SYNCHRONIZED_OUTPUT_END, SYNCHRONIZED_OUTPUT_START.length + data.length);
-  return output;
+
+  private feedEscapeByte(byte: number): null {
+    if (byte === 0x5b) {
+      this.state = "csi";
+      this.csiBytes.length = 0;
+      this.csiOverflow = false;
+      return null;
+    }
+    if (byte === 0x5d) {
+      this.state = "osc";
+      return null;
+    }
+    if (byte === 0x50 || byte === 0x58 || byte === 0x5e || byte === 0x5f) {
+      this.state = "stString";
+      return null;
+    }
+    if (byte >= 0x20 && byte <= 0x2f) {
+      this.state = "escapeIntermediate";
+      return null;
+    }
+    if (byte >= 0x30 && byte <= 0x7e) {
+      if (byte === 0x63) {
+        this.appSyncActive = false;
+      }
+      this.state = "ground";
+      return null;
+    }
+    return null;
+  }
+
+  private classifyCsi(finalByte: number): "clear" | "sync" | null {
+    if (this.csiOverflow) {
+      return null;
+    }
+    if (
+      finalByte === 0x4a &&
+      this.csiBytes.length === 1 &&
+      (this.csiBytes[0] === 0x32 || this.csiBytes[0] === 0x33)
+    ) {
+      return "clear";
+    }
+    if (
+      (finalByte === 0x68 || finalByte === 0x6c) &&
+      this.csiBytes.length >= 5 &&
+      this.csiBytes[0] === 0x3f
+    ) {
+      const params = String.fromCharCode(...this.csiBytes.slice(1)).split(";");
+      if (params.includes("2026")) {
+        this.appSyncActive = finalByte === 0x68;
+        return "sync";
+      }
+    }
+    return null;
+  }
 }
 
 function withOverviewRulerBorderHidden(theme: ITheme): ITheme {
@@ -294,6 +491,7 @@ export class TerminalEmulatorRuntime {
   private readonly inputModeDecoder = new TextDecoder();
   private suppressInput = false;
   private readonly inputModeTracker = new TerminalInputModeTracker();
+  private readonly synchronizedScreenClearTracker = new SynchronizedScreenClearTracker();
   private lastInputModeState: TerminalInputModeState = this.inputModeTracker.getState();
   private themeBackgroundElements: HTMLElement[] = [];
   /** Retries the WebGL renderer after a lost context. Null while unmounted. */
@@ -966,11 +1164,12 @@ export class TerminalEmulatorRuntime {
     cols?: number;
     onCommitted?: () => void;
   }): void {
+    const parsed = parseTerminalRestoreSizeHeader(input.data);
     this.outputOperations.push({
       type: "snapshot",
-      data: prependTerminalOutput(RESET_TERMINAL_OUTPUT, input.data),
-      rows: input.rows,
-      cols: input.cols,
+      data: prependTerminalOutput(RESET_TERMINAL_OUTPUT, parsed.data),
+      rows: input.rows ?? parsed.rows,
+      cols: input.cols ?? parsed.cols,
       suppressInput: true,
       ...(input.onCommitted ? { onCommitted: input.onCommitted } : {}),
     });
@@ -1114,6 +1313,7 @@ export class TerminalEmulatorRuntime {
     this.suppressInput = false;
     this.inputModeDecoder.decode();
     this.inputModeTracker.reset();
+    this.synchronizedScreenClearTracker.reset();
     this.emitInputModeChange();
   }
 
@@ -1215,7 +1415,7 @@ export class TerminalEmulatorRuntime {
     };
     this.pendingWriteCommits.add(commit);
     try {
-      terminal.write(withSynchronizedScreenClear(operation.data), commit);
+      terminal.write(this.synchronizedScreenClearTracker.wrap(operation.data), commit);
     } catch {
       commit();
     }
@@ -1243,7 +1443,7 @@ export class TerminalEmulatorRuntime {
         // Replay at the saved grid size, then return to the current pane before
         // committing or draining live output. The pane itself did not resize,
         // so its ResizeObserver will not correct a stale snapshot size.
-        this.fitAndEmitResize?.({ shouldClaim: false });
+        this.fitAndEmitResize?.({ forceRefresh: true, shouldClaim: false });
       }
       expectedOperation.onCommitted?.();
       if (expectedOperation.type === "snapshot" && this.needsTextureAtlasReset) {
@@ -1265,6 +1465,7 @@ export class TerminalEmulatorRuntime {
     if (operation.type === "clear") {
       this.inputModeDecoder.decode();
       this.inputModeTracker.reset();
+      this.synchronizedScreenClearTracker.reset();
       this.emitInputModeChange();
       terminal.reset();
       finalizeOperation(operation);
@@ -1274,6 +1475,7 @@ export class TerminalEmulatorRuntime {
     if (operation.type === "snapshot") {
       this.inputModeDecoder.decode();
       this.inputModeTracker.reset();
+      this.synchronizedScreenClearTracker.reset();
       this.emitInputModeChange();
       try {
         if (
@@ -1290,6 +1492,8 @@ export class TerminalEmulatorRuntime {
     }
 
     const data = operation.data;
+    const writeData =
+      operation.type === "write" ? this.synchronizedScreenClearTracker.wrap(data) : data;
     if (operation.type === "write") {
       const text = this.inputModeDecoder.decode(data, { stream: true });
       const result = this.inputModeTracker.feed(text);
@@ -1302,7 +1506,7 @@ export class TerminalEmulatorRuntime {
     }, OUTPUT_OPERATION_TIMEOUT_MS);
 
     try {
-      terminal.write(withSynchronizedScreenClear(data), () => {
+      terminal.write(writeData, () => {
         if (shouldRefitAfterSnapshot) {
           // A refit resizes xterm, which flushes its write buffer. Let the parser
           // finish this callback before refitting or submitting queued live output.

@@ -2,6 +2,7 @@ import { page } from "@vitest/browser/context";
 import { afterEach, describe, expect, it } from "vitest";
 import type { TerminalState } from "@getpaseo/protocol/messages";
 import { encodeTerminalOutput, TerminalEmulatorRuntime } from "./terminal-emulator-runtime";
+import { encodeTerminalRestoreAnsi } from "./terminal-snapshot";
 
 // Regression: "streaming pino log, resized the Paseo terminal, old logs stayed
 // narrow and new logs drew on top of the old ones."
@@ -102,6 +103,12 @@ function someRowContains(term: InspectableTerminal, text: string): boolean {
 function renderSnapshotCommitted(runtime: TerminalEmulatorRuntime, state: TerminalState) {
   return new Promise<void>((resolve) => {
     runtime.renderSnapshot({ state, onCommitted: resolve });
+  });
+}
+
+function restoreOutputCommitted(runtime: TerminalEmulatorRuntime, data: Uint8Array) {
+  return new Promise<void>((resolve) => {
+    runtime.restoreOutput({ data, onCommitted: resolve });
   });
 }
 
@@ -285,5 +292,51 @@ describe("terminal resize reflow repro (Paseo terminal)", () => {
     // Snapshot-restored content reflows too, instead of staying frozen at the
     // snapshot width — the reported bug.
     expect(snapshotRowLen).toBeGreaterThan(narrowCols + 20);
+  });
+
+  it("replays server-encoded Restore payloads at their snapshot width before refitting to the pane", async () => {
+    await page.viewport(900, 600);
+    const m = mount(720, 360);
+    await waitFor(() => m.terminal.cols > 40);
+    await new Promise((resolve) => setTimeout(resolve, 2_600));
+    const paneSize = { cols: m.terminal.cols, rows: m.terminal.rows };
+    const snapshotCols = paneSize.cols - 2;
+    m.sizes.length = 0;
+
+    // Build a 2-col narrower Restore payload containing a wrapped paragraph followed by a
+    // distinct short line — reproducing a 68-col restore arriving into a 70-col pane.
+    const wrappedLine = "1234567890"
+      .repeat(Math.ceil((snapshotCols + 15) / 10))
+      .slice(0, snapshotCols + 15);
+    const shortLine = "terminal_hosts.rs).";
+    const nextLine = "4. Next bullet starts cleanly on its own row.";
+    const state: TerminalState = {
+      rows: paneSize.rows,
+      cols: snapshotCols,
+      scrollback: [],
+      scrollbackWrapped: [],
+      grid: [
+        Array.from(wrappedLine.slice(0, snapshotCols), (char) => ({ char })),
+        Array.from(wrappedLine.slice(snapshotCols), (char) => ({ char })),
+        Array.from(shortLine, (char) => ({ char })),
+        Array.from(nextLine, (char) => ({ char })),
+      ],
+      gridWrapped: [true, false, false, false],
+      cursor: { row: 4, col: 0 },
+    };
+
+    await restoreOutputCommitted(m.runtime, encodeTerminalOutput(encodeTerminalRestoreAnsi(state)));
+
+    expect({ cols: m.terminal.cols, rows: m.terminal.rows }).toEqual(paneSize);
+    expect(m.sizes).toEqual([]);
+    const nonEmptyRows = dumpRows(m.terminal)
+      .map((row) => row.text)
+      .filter((text) => text.length > 0);
+    expect(nonEmptyRows).toEqual([
+      wrappedLine.slice(0, paneSize.cols),
+      wrappedLine.slice(paneSize.cols),
+      shortLine,
+      nextLine,
+    ]);
   });
 });

@@ -138,4 +138,81 @@ describe("terminal session controller size ownership", () => {
     await ownership.close();
     expect(appliedSizes).toEqual(["100x30", "101x31", "103x33", "105x35"]);
   });
+
+  test("releases size ownership when the owning stream disconnects so a reconnected update applies", async () => {
+    const { terminalManager, appliedSizes } = createFixture();
+    const controllerA = createController(terminalManager);
+    const controllerB = createController(terminalManager);
+    const sourceA = {};
+    const sourceB = {};
+    const ownershipA = new SessionDelivery(() => {});
+    const ownershipB = new SessionDelivery(() => {});
+
+    await ownershipA.request(
+      sourceA,
+      {
+        type: "subscribe_terminal_request",
+        terminalId: "terminal-1",
+        requestId: "sub-a",
+        restore: { mode: "live" },
+      },
+      async () => {
+        await controllerA.dispatch(
+          {
+            type: "subscribe_terminal_request",
+            terminalId: "terminal-1",
+            requestId: "sub-a",
+            restore: { mode: "live" },
+          },
+          ownershipA,
+        );
+      },
+    );
+    controllerA.handleBinaryFrame(resizeFrame({ rows: 40, cols: 68, intent: "claim" }), sourceA);
+
+    // While sourceA is connected, another client's passive update is ignored.
+    await ownershipB.request(
+      sourceB,
+      {
+        type: "terminal_input",
+        terminalId: "terminal-1",
+        message: { type: "resize", rows: 40, cols: 70, intent: "update" },
+      },
+      async () => {
+        await controllerB.dispatch(
+          {
+            type: "terminal_input",
+            terminalId: "terminal-1",
+            message: { type: "resize", rows: 40, cols: 70, intent: "update" },
+          },
+          ownershipB,
+        );
+      },
+    );
+    expect(appliedSizes).toEqual(["68x40"]);
+
+    // Once sourceA disconnects, a reconnected unfocused pane's update can sync the PTY size.
+    await ownershipA.close();
+    await ownershipB.request(
+      sourceB,
+      {
+        type: "terminal_input",
+        terminalId: "terminal-1",
+        message: { type: "resize", rows: 40, cols: 70, intent: "update" },
+      },
+      async () => {
+        await controllerB.dispatch(
+          {
+            type: "terminal_input",
+            terminalId: "terminal-1",
+            message: { type: "resize", rows: 40, cols: 70, intent: "update" },
+          },
+          ownershipB,
+        );
+      },
+    );
+
+    await ownershipB.close();
+    expect(appliedSizes).toEqual(["68x40", "70x40"]);
+  });
 });

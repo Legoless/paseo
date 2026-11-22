@@ -310,6 +310,73 @@ describe("terminal-emulator-runtime", () => {
     expect(writeTexts).toEqual(["\x1b[?2026h\x1b[2J\x1b[Hhello\x1b[?2026l"]);
   });
 
+  it("does not inject synchronized output around split escape sequences or app-managed DEC 2026 frames", () => {
+    const { runtime, writeTexts } = createRuntimeWithTerminal();
+
+    // Split CSI across chunk boundaries must never be interrupted with ESC[?2026l / ESC[?2026h.
+    runtime.write({ data: terminalOutput("\x1b[2J\x1b[38;2;") });
+    runtime.write({ data: terminalOutput("255;0;0m\x1b[2Jcolored") });
+
+    // App-managed DEC 2026 frame spanning multiple chunks must not be closed early.
+    runtime.write({ data: terminalOutput("\x1b[?2026h\x1b[2Jframe-start") });
+    runtime.write({ data: terminalOutput("\x1b[2Jframe-middle") });
+    runtime.write({ data: terminalOutput("frame-end\x1b[?2026l") });
+
+    // Split multibyte UTF-8 across chunk boundary must not be wrapped either.
+    const boxChar = encodeTerminalOutput("─");
+    const splitUtf8First = new Uint8Array([0x1b, 0x5b, 0x32, 0x4a, boxChar[0], boxChar[1]]);
+    const splitUtf8Second = new Uint8Array([boxChar[2], 0x1b, 0x5b, 0x32, 0x4a, 0x6f, 0x6b]);
+    runtime.write({ data: splitUtf8First });
+    runtime.write({ data: splitUtf8Second });
+
+    // Once back at a clean boundary outside DEC 2026, a plain clear+redraw still wraps.
+    runtime.write({ data: terminalOutput("\x1b[2J\x1b[Hclean") });
+
+    expect(writeTexts).toEqual([
+      "\x1b[2J\x1b[38;2;",
+      "255;0;0m\x1b[2Jcolored",
+      "\x1b[?2026h\x1b[2Jframe-start",
+      "\x1b[2Jframe-middle",
+      "frame-end\x1b[?2026l",
+      decodeTerminalOutput(splitUtf8First),
+      decodeTerminalOutput(splitUtf8Second),
+      "\x1b[?2026h\x1b[2J\x1b[Hclean\x1b[?2026l",
+    ]);
+  });
+
+  it("does not wrap restore snapshots in synchronized output even if the payload contains ESC[2J", () => {
+    const { runtime, writeTexts } = createRuntimeWithTerminal();
+
+    runtime.restoreOutput({ data: terminalOutput("\x1b[2Jrestored") });
+
+    expect(writeTexts).toEqual(["\u001bc\x1b[2Jrestored"]);
+  });
+
+  it("parses embedded restore size headers, resizes for replay, and refits with forceRefresh", async () => {
+    const { runtime, terminal, writeTexts, writeCallbacks } = createRuntimeWithTerminal();
+    const resizeCalls: Array<{ cols: number; rows: number }> = [];
+    const fitAndEmitResize = vi.fn();
+    terminal.cols = 70;
+    terminal.rows = 40;
+    terminal.resize = (cols, rows) => {
+      resizeCalls.push({ cols, rows });
+      terminal.cols = cols;
+      terminal.rows = rows;
+    };
+    (runtime as unknown as RuntimeFitProbe).fitAndEmitResize = fitAndEmitResize;
+
+    runtime.restoreOutput({ data: terminalOutput("\u001b]7502;68;40\u0007restored body") });
+
+    expect(resizeCalls).toEqual([{ cols: 68, rows: 40 }]);
+    expect(writeTexts).toEqual(["\u001bcrestored body"]);
+    expect(fitAndEmitResize).not.toHaveBeenCalled();
+
+    writeCallbacks[0]?.();
+    await Promise.resolve();
+
+    expect(fitAndEmitResize).toHaveBeenCalledWith({ forceRefresh: true, shouldClaim: false });
+  });
+
   it("falls back to timeout commit for a barrier op when the gate sentinel never fires", () => {
     vi.useFakeTimers();
     const { runtime, terminal } = createRuntimeWithTerminal();
