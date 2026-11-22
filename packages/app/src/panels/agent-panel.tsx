@@ -58,7 +58,10 @@ import {
 } from "@/hooks/use-agent-screen-state-machine";
 import { useArchiveAgent } from "@/hooks/use-archive-agent";
 import { useContainerWidthBelow } from "@/hooks/use-container-width";
-import { reconcileMissingAgentStateWithPresentAgent } from "@/panels/agent-panel-load-state";
+import {
+  reconcileMissingAgentStateWithPresentAgent,
+  resolveMissingAgentLookupAction,
+} from "@/panels/agent-panel-load-state";
 import { TimelineSyncStatus } from "@/timeline/sync-status";
 import {
   timelineSyncDismissalKey,
@@ -1085,37 +1088,19 @@ function ChatAgentContent({
   }, [agentId, serverId]);
 
   useEffect(() => {
-    if (!agentId) {
+    const action = resolveMissingAgentLookupAction({
+      hasAgentId: Boolean(agentId),
+      isArchived: Boolean(agentState.archivedAt),
+      hasPresentAgent: Boolean(agentState.id),
+      canFetch: Boolean(client && viewedTimelineSync && isPaneVisible && isConnected && hasSession),
+      visibilityCatchUpStatus,
+      missingAgentStateKind: missingAgentState.kind,
+    });
+    if (action === "reconcile_present") {
+      setMissingAgentState(reconcileMissingAgentStateWithPresentAgent);
       return;
     }
-    if (agentState.archivedAt) {
-      return;
-    }
-    if (agentState.id && hasAppliedAuthoritativeHistory) {
-      if (
-        missingAgentState.kind === "resolving" ||
-        missingAgentState.kind === "not_found" ||
-        missingAgentState.kind === "error"
-      ) {
-        setMissingAgentState(reconcileMissingAgentStateWithPresentAgent);
-      }
-      return;
-    }
-    if (
-      !client ||
-      !viewedTimelineSync ||
-      !isPaneVisible ||
-      !isConnected ||
-      !hasSession ||
-      (visibilityCatchUpStatus !== "ready" && visibilityCatchUpStatus !== "session_missing")
-    ) {
-      return;
-    }
-    if (
-      missingAgentState.kind === "resolving" ||
-      missingAgentState.kind === "not_found" ||
-      missingAgentState.kind === "error"
-    ) {
+    if (action !== "fetch" || !agentId || !client) {
       return;
     }
 
@@ -1164,7 +1149,6 @@ function ChatAgentContent({
   }, [
     agentState.id,
     agentState.archivedAt,
-    hasAppliedAuthoritativeHistory,
     agentId,
     client,
     hasSession,

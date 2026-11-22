@@ -3,6 +3,7 @@ import type { AgentScreenMissingState } from "@/hooks/use-agent-screen-state-mac
 import {
   clearHistorySyncErrorAfterSuccessfulSync,
   reconcileMissingAgentStateWithPresentAgent,
+  resolveMissingAgentLookupAction,
 } from "./agent-panel-load-state";
 
 describe("reconcileMissingAgentStateWithPresentAgent", () => {
@@ -42,5 +43,89 @@ describe("clearHistorySyncErrorAfterSuccessfulSync", () => {
     const state: AgentScreenMissingState = { kind: "resolving" };
 
     expect(clearHistorySyncErrorAfterSuccessfulSync(state)).toBe(state);
+  });
+});
+
+describe("resolveMissingAgentLookupAction", () => {
+  it("does not refetch when the agent record is already present on an uncached missing session", () => {
+    expect(
+      resolveMissingAgentLookupAction({
+        hasAgentId: true,
+        isArchived: false,
+        hasPresentAgent: true,
+        canFetch: true,
+        visibilityCatchUpStatus: "session_missing",
+        missingAgentStateKind: "idle",
+      }),
+    ).toBe("noop");
+  });
+
+  it("reconciles non-idle lookup state once the agent record is present", () => {
+    expect(
+      resolveMissingAgentLookupAction({
+        hasAgentId: true,
+        isArchived: false,
+        hasPresentAgent: true,
+        canFetch: true,
+        visibilityCatchUpStatus: "session_missing",
+        missingAgentStateKind: "resolving",
+      }),
+    ).toBe("reconcile_present");
+  });
+
+  it("fetches missing agent metadata when session_missing or ready arrives before the agent record", () => {
+    expect(
+      resolveMissingAgentLookupAction({
+        hasAgentId: true,
+        isArchived: false,
+        hasPresentAgent: false,
+        canFetch: true,
+        visibilityCatchUpStatus: "session_missing",
+        missingAgentStateKind: "idle",
+      }),
+    ).toBe("fetch");
+    expect(
+      resolveMissingAgentLookupAction({
+        hasAgentId: true,
+        isArchived: false,
+        hasPresentAgent: false,
+        canFetch: true,
+        visibilityCatchUpStatus: "ready",
+        missingAgentStateKind: "idle",
+      }),
+    ).toBe("fetch");
+  });
+
+  it("waits while catch-up is pending, errored, archived, or lookup is already settled", () => {
+    expect(
+      resolveMissingAgentLookupAction({
+        hasAgentId: true,
+        isArchived: false,
+        hasPresentAgent: false,
+        canFetch: true,
+        visibilityCatchUpStatus: "pending",
+        missingAgentStateKind: "idle",
+      }),
+    ).toBe("noop");
+    expect(
+      resolveMissingAgentLookupAction({
+        hasAgentId: true,
+        isArchived: true,
+        hasPresentAgent: false,
+        canFetch: true,
+        visibilityCatchUpStatus: "session_missing",
+        missingAgentStateKind: "idle",
+      }),
+    ).toBe("noop");
+    expect(
+      resolveMissingAgentLookupAction({
+        hasAgentId: true,
+        isArchived: false,
+        hasPresentAgent: false,
+        canFetch: true,
+        visibilityCatchUpStatus: "session_missing",
+        missingAgentStateKind: "resolving",
+      }),
+    ).toBe("noop");
   });
 });
