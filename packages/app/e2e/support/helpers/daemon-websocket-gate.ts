@@ -141,15 +141,23 @@ function forceTimelineReset(message: string | Buffer, enabled: boolean): string 
 const TIMELINE_WRITER_CONFLICT_ERROR =
   "Failed to resume Codex thread playwright-thread: thread playwright-thread already has an active writer";
 
-function failTimelineResponse(message: string | Buffer, agentId: string | null): string | Buffer {
-  if (!agentId || typeof message !== "string") return message;
+function failTimelineResponse(
+  message: string | Buffer,
+  failure: { agentId: string; error: string; errorCode?: string } | null,
+): string | Buffer {
+  if (!failure || typeof message !== "string") return message;
   const envelope = JSON.parse(message) as {
     message?: { payload?: Record<string, unknown> };
     payload?: Record<string, unknown>;
   };
   const payload = envelope.message?.payload ?? envelope.payload;
-  if (!payload || payload.agentId !== agentId) return message;
-  payload.error = TIMELINE_WRITER_CONFLICT_ERROR;
+  if (!payload || payload.agentId !== failure.agentId) return message;
+  payload.error = failure.error;
+  if (failure.errorCode) {
+    payload.errorCode = failure.errorCode;
+  } else {
+    delete payload.errorCode;
+  }
   payload.entries = [];
   return JSON.stringify(envelope);
 }
@@ -314,12 +322,17 @@ export async function installDaemonWebSocketGate(page: Page) {
   let stripAssistantMessageIds = false;
   let stripCanonicalSubmittedPromptsFeature = false;
   let shellToolCommandOverride: string | null = null;
-  let failingTimelineAgentId: string | null = null;
+  let failingTimeline: { agentId: string; error: string; errorCode?: string } | null = null;
   let holdingTimelineAgentId: string | null = null;
   const heldTimelineResponses: Array<() => void> = [];
   const heldTimelineResponseWaiters = new Set<() => void>();
   let heldClientRequestType: string | null = null;
-  let heldClientRequest: { server: WebSocketRoute; message: string | Buffer } | null = null;
+  let heldClientRequest: {
+    browser: WebSocketRoute;
+    server: WebSocketRoute;
+    message: string | Buffer;
+    request: ClientRequest | null;
+  } | null = null;
   let resolveHeldClientRequest: (() => void) | null = null;
   const pendingServerMessageHolds = new Map<string, PendingServerMessageHold>();
   const heldServerMessages: HeldServerMessage[] = [];
@@ -500,7 +513,7 @@ export async function installDaemonWebSocketGate(page: Page) {
         clientRequests.set(request.type, requests);
       }
       if (request?.type === heldClientRequestType) {
-        heldClientRequest = { server, message };
+        heldClientRequest = { browser: ws, server, message, request };
         resolveHeldClientRequest?.();
         resolveHeldClientRequest = null;
         return;
@@ -539,7 +552,7 @@ export async function installDaemonWebSocketGate(page: Page) {
       );
       const isTimelineResponse = serverMessage?.type === "fetch_agent_timeline_response";
       if (isTimelineResponse) {
-        outboundMessage = failTimelineResponse(outboundMessage, failingTimelineAgentId);
+        outboundMessage = failTimelineResponse(outboundMessage, failingTimeline);
       }
       const shouldForceTimelineReset =
         forceTimelineEpochReset && serverMessage?.type === "fetch_agent_timeline_response";
@@ -634,11 +647,15 @@ export async function installDaemonWebSocketGate(page: Page) {
     restore(): void {
       acceptingConnections = true;
     },
-    failTimelineResponses(agentId: string): void {
-      failingTimelineAgentId = agentId;
+    failTimelineResponses(agentId: string, options?: { error?: string; errorCode?: string }): void {
+      failingTimeline = {
+        agentId,
+        error: options?.error ?? TIMELINE_WRITER_CONFLICT_ERROR,
+        errorCode: options?.errorCode,
+      };
     },
     allowTimelineResponses(): void {
-      failingTimelineAgentId = null;
+      failingTimeline = null;
     },
     holdTimelineResponses(agentId: string): void {
       holdingTimelineAgentId = agentId;
@@ -669,6 +686,29 @@ export async function installDaemonWebSocketGate(page: Page) {
     releaseHeldClientRequest(): void {
       if (!heldClientRequest) throw new Error("No held client request to release");
       heldClientRequest.server.send(heldClientRequest.message);
+      heldClientRequest = null;
+      heldClientRequestType = null;
+    },
+    rejectHeldClientRequest(error: string): void {
+      if (!heldClientRequest) throw new Error("No held client request to reject");
+      const requestId = heldClientRequest.request?.requestId;
+      const requestType = heldClientRequest.request?.type;
+      if (typeof requestId !== "string") {
+        throw new Error("Held client request has no string requestId");
+      }
+      heldClientRequest.browser.send(
+        JSON.stringify({
+          type: "session",
+          message: {
+            type: "rpc_error",
+            payload: {
+              requestId,
+              ...(typeof requestType === "string" ? { requestType } : {}),
+              error,
+            },
+          },
+        }),
+      );
       heldClientRequest = null;
       heldClientRequestType = null;
     },

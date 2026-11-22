@@ -85,6 +85,7 @@ import {
 import { invokeRewindCapability, type RewindMode } from "./rewind/rewind.js";
 import { projectAgentMessage } from "./agent-messages/index.js";
 import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
+import { isPersistedSessionMissingError } from "./persisted-session-missing-error.js";
 import { stripInternalPaseoMcpServer, withRuntimePaseoMcpServer } from "./runtime-mcp-config.js";
 import { resolveCreateAgentTitles } from "./create-agent-title.js";
 import type { PaseoToolCatalogFactory } from "./tools/types.js";
@@ -4828,6 +4829,10 @@ export class AgentManager {
         historyEvents.push({ ...event, item });
       }
     } catch (error) {
+      if (isPersistedSessionMissingError(error)) {
+        // Drop the empty timeline initialized at registration so the next load does not treat it as primed.
+        this.timelineStore.delete(agent.id);
+      }
       this.logger.warn({ err: error, agentId: agent.id }, "Failed to hydrate provider history");
       throw error;
     }

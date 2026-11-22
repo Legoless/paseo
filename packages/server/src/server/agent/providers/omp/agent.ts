@@ -42,6 +42,10 @@ import {
 } from "../../agent-sdk-types.js";
 import type { PaseoToolCatalog } from "../../tools/types.js";
 import { importSessionFromPersistence } from "../../provider-session-import.js";
+import {
+  isMissingSessionFileError,
+  PersistedSessionMissingError,
+} from "../../persisted-session-missing-error.js";
 import { runProviderRefreshActivity } from "../../provider-refresh-deadline.js";
 import { runProviderTurn } from "../provider-runner.js";
 import {
@@ -643,6 +647,13 @@ class OmpHistorySession implements AgentSession {
   }
 
   async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+    if (!existsSync(this.sessionFile)) {
+      throw new PersistedSessionMissingError({
+        provider: this.provider,
+        sessionId: this.handle.sessionId,
+        historyPath: this.sessionFile,
+      });
+    }
     yield* streamOmpHistory({
       sessionFile: this.sessionFile,
       provider: this.provider,
@@ -2345,9 +2356,23 @@ export class OmpAgentClient implements AgentClient {
       launchContext,
       launchMode,
     });
-    const runtimeSession = await this.resolveRuntime(
-      resumeConfig.config.providerOptions,
-    ).startSession(startInput);
+    let runtimeSession: OmpRuntimeSession;
+    try {
+      runtimeSession = await this.resolveRuntime(resumeConfig.config.providerOptions).startSession(
+        startInput,
+      );
+    } catch (error) {
+      if (isMissingSessionFileError(error)) {
+        throw new PersistedSessionMissingError({
+          provider: this.provider,
+          sessionId: handle.sessionId,
+          historyPath: sessionFile,
+          message: error instanceof Error ? error.message : String(error),
+          cause: error,
+        });
+      }
+      throw error;
+    }
     let hostTools: OmpHostToolRouter | undefined;
     try {
       hostTools = await this.configureNativePaseoTools(

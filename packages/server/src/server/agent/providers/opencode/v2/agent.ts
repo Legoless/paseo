@@ -1,4 +1,5 @@
 import { OpenCodeV2Session } from "./session.js";
+import { PersistedSessionMissingError } from "../../../persisted-session-missing-error.js";
 import { V2_CAPABILITIES } from "./capabilities.js";
 import {
   features,
@@ -140,14 +141,23 @@ export class OpenCodeV2AgentClient implements AgentClient {
       (await this.runtime.acquire(
         requiresDedicatedV2Server(config, launch) ? { env: launch?.env, dedicated: true } : {},
       ));
+    const sessionId = handle.nativeHandle ?? handle.sessionId;
     try {
       const info = await connection.client.session.get({
-        sessionID: handle.nativeHandle ?? handle.sessionId,
+        sessionID: sessionId,
       });
       await applyResumeOverrides(connection.client, info, overrides);
       return await this.attach(connection, info, config, launch, true);
     } catch (error) {
       await connection.release();
+      if (isOpenCodeV2SessionNotFoundError(error)) {
+        throw new PersistedSessionMissingError({
+          provider: "opencode",
+          sessionId,
+          message: error instanceof Error ? error.message : String(error),
+          cause: error,
+        });
+      }
       throw error;
     }
   }
@@ -280,4 +290,15 @@ export class OpenCodeV2AgentClient implements AgentClient {
       await connection.release();
     }
   }
+}
+
+function isOpenCodeV2SessionNotFoundError(error: unknown): boolean {
+  if (typeof error === "object" && error !== null) {
+    const status = (error as { status?: unknown }).status;
+    if (status === 404) return true;
+    const name = (error as { name?: unknown }).name;
+    if (name === "NotFoundError") return true;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /session not found|not found/i.test(message);
 }

@@ -287,6 +287,14 @@ export const fr = {
       callout: "Cet agent est fermé",
       unarchive: "Rouvrir",
     },
+    sessionMissing: {
+      title: "Historique de session indisponible",
+      description:
+        "Le fournisseur ne dispose plus de la transcription de cette session, elle ne peut donc pas être reprise. Démarrez une nouvelle session pour continuer ici.",
+      readOnlyDescription: "Le fournisseur ne dispose plus de la transcription de cette session.",
+      startNewSession: "Démarrer une nouvelle session",
+      starting: "Démarrage...",
+    },
   },
   sessions: {
     title: "Historique",

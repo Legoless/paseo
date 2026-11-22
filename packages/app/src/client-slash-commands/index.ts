@@ -85,7 +85,12 @@ export function resolveClientSlashCommand(input: { text: string }): ClientSlashC
   return COMMAND_BY_NAME.get(commandName.toLowerCase()) ?? null;
 }
 
-export function buildDraftAgentSetup(agent: Agent): WorkspaceDraftTabSetup {
+export function buildDraftAgentSetup(
+  agent: Pick<
+    Agent,
+    "provider" | "cwd" | "currentModeId" | "model" | "thinkingOptionId" | "runtimeInfo" | "features"
+  >,
+): WorkspaceDraftTabSetup {
   const featureValues: Record<string, unknown> = {};
   for (const feature of agent.features ?? []) {
     featureValues[feature.id] = feature.value;

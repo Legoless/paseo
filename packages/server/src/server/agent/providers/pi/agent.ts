@@ -42,6 +42,10 @@ import {
   type ProviderRefreshContext,
 } from "../../agent-sdk-types.js";
 import { importSessionFromPersistence } from "../../provider-session-import.js";
+import {
+  isMissingSessionFileError,
+  PersistedSessionMissingError,
+} from "../../persisted-session-missing-error.js";
 import { runProviderRefreshActivity } from "../../provider-refresh-deadline.js";
 import { runProviderTurn } from "../provider-runner.js";
 import {
@@ -2619,6 +2623,15 @@ export class PiRpcAgentClient implements AgentClient {
     } catch (error) {
       mcpConfigFile?.cleanup();
       paseoExtension?.cleanup();
+      if (isMissingSessionFileError(error)) {
+        throw new PersistedSessionMissingError({
+          provider: this.provider,
+          sessionId: handle.sessionId,
+          historyPath: sessionFile,
+          message: error instanceof Error ? error.message : String(error),
+          cause: error,
+        });
+      }
       throw error;
     }
     try {

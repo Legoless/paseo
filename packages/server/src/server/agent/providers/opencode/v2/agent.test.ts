@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 
 import { createTestLogger } from "../../../../../test-utils/test-logger.js";
 import type { AgentStreamEvent } from "../../../agent-sdk-types.js";
+import { PersistedSessionMissingError } from "../../../persisted-session-missing-error.js";
 import { OpenCodeV2AgentClient } from "./agent.js";
 import { V2Harness } from "../test-utils/v2-harness.js";
 import type { V2Api } from "./api.js";
@@ -804,7 +805,14 @@ describe("OpenCode v2 session lifecycle", () => {
     harness.api.session.get = async () => {
       throw new Error("Session not found");
     };
-    await expect(client.resumeSession(handle)).rejects.toThrow("Session not found");
+    let resumeError: unknown;
+    try {
+      await client.resumeSession(handle);
+    } catch (error) {
+      resumeError = error;
+    }
+    expect(resumeError).toBeInstanceOf(PersistedSessionMissingError);
+    expect((resumeError as Error).message).toContain("Session not found");
     expect(harness.creates).toEqual([]);
   });
 

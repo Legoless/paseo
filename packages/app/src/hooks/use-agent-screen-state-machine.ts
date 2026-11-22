@@ -85,7 +85,8 @@ export type AgentScreenReadySyncState =
       status: "catching_up";
       ui: "overlay" | "status" | "silent";
     }
-  | { status: "sync_error"; isRetrying: boolean };
+  | { status: "sync_error"; isRetrying: boolean }
+  | { status: "session_missing"; message: string };
 
 export type AgentScreenViewState =
   | {
@@ -99,6 +100,11 @@ export type AgentScreenViewState =
     }
   | {
       tag: "error";
+      message: string;
+    }
+  | {
+      tag: "session_missing";
+      agent: AgentScreenAgent | null;
       message: string;
     }
   | {
@@ -178,6 +184,9 @@ function resolveAgentScreenSync(args: {
   hadInitialSyncFailure: boolean;
 }): AgentScreenReadySyncState {
   const { input, hadInitialSyncFailure } = args;
+  if (input.visibilityCatchUpStatus === "session_missing") {
+    return { status: "session_missing", message: input.visibilityCatchUpError ?? "" };
+  }
   if (input.isArchived || input.isArchivingCurrentAgent) {
     return { status: "idle" };
   }
@@ -208,6 +217,47 @@ function resolveAgentScreenSync(args: {
   return { status: "idle" };
 }
 
+function resolveBlockingPreReadyState(args: {
+  input: AgentScreenMachineInput;
+  memory: AgentScreenMachineMemory;
+  candidateAgent: AgentScreenAgent | null;
+}): AgentScreenViewState | null {
+  const { input, memory, candidateAgent } = args;
+  if (input.missingAgentState.kind === "not_found") {
+    return {
+      tag: "not_found",
+      message: input.missingAgentState.message,
+    };
+  }
+  if (input.visibilityCatchUpStatus === "session_missing" && !input.hasHydratedHistoryBefore) {
+    return {
+      tag: "session_missing",
+      agent: candidateAgent ?? (memory.hasRenderedReady ? memory.lastReadyAgent : null),
+      message: input.visibilityCatchUpError ?? "",
+    };
+  }
+  if (input.missingAgentState.kind === "error" && !memory.hasRenderedReady) {
+    return {
+      tag: "error",
+      message: input.missingAgentState.message,
+    };
+  }
+  if (
+    !input.isArchived &&
+    !input.isArchivingCurrentAgent &&
+    input.visibilityCatchUpStatus === "error" &&
+    input.visibilityCatchUpError &&
+    !input.hasHydratedHistoryBefore &&
+    !memory.hasRenderedReady
+  ) {
+    return {
+      tag: "error",
+      message: input.visibilityCatchUpError,
+    };
+  }
+  return null;
+}
+
 export function deriveAgentScreenViewState({
   input,
   memory,
@@ -227,41 +277,13 @@ export function deriveAgentScreenViewState({
   const candidateAgent = resolveCandidateAgent({ input, useOptimisticCreateFlowAgent });
   const shouldBlockReadyState = shouldBlockInitialAuthoritativeReadyState(input);
 
-  if (input.missingAgentState.kind === "not_found") {
-    return {
-      state: {
-        tag: "not_found",
-        message: input.missingAgentState.message,
-      },
-      memory: nextMemory,
-    };
-  }
-
-  if (input.missingAgentState.kind === "error" && !nextMemory.hasRenderedReady) {
-    return {
-      state: {
-        tag: "error",
-        message: input.missingAgentState.message,
-      },
-      memory: nextMemory,
-    };
-  }
-
-  if (
-    !input.isArchived &&
-    !input.isArchivingCurrentAgent &&
-    input.visibilityCatchUpStatus === "error" &&
-    input.visibilityCatchUpError &&
-    !input.hasHydratedHistoryBefore &&
-    !nextMemory.hasRenderedReady
-  ) {
-    return {
-      state: {
-        tag: "error",
-        message: input.visibilityCatchUpError,
-      },
-      memory: nextMemory,
-    };
+  const blockingState = resolveBlockingPreReadyState({
+    input,
+    memory: nextMemory,
+    candidateAgent,
+  });
+  if (blockingState) {
+    return { state: blockingState, memory: nextMemory };
   }
 
   if (candidateAgent && shouldBlockReadyState) {

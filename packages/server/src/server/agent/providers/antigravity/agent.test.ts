@@ -4,6 +4,7 @@ import path from "node:path";
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentStreamEvent } from "../../agent-sdk-types.js";
+import { PersistedSessionMissingError } from "../../persisted-session-missing-error.js";
 import { AntigravityAgentClient, buildAgySpawnArgs, parseAgyModelsOutput } from "./agent.js";
 import { AntigravityStreamDecoder } from "./stream-decoder.js";
 
@@ -893,6 +894,35 @@ describe("AntigravityAgentClient", () => {
         { type: "timeline", item: { type: "assistant_message", text: "Hello back" } },
       ]);
       await session.close();
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("throws PersistedSessionMissingError when streaming history for a resumed conversation whose transcript is missing", async () => {
+    const homeDir = mkdtempSync(path.join(tmpdir(), "agy-missing-history-"));
+    const mockScript = path.join(homeDir, "mock-agy.cjs");
+    writeFileSync(mockScript, "process.stdin.resume();\n");
+    try {
+      const client = new AntigravityAgentClient({
+        logger: pino({ level: "silent" }),
+        homeDir,
+        runtimeSettings: {
+          command: { mode: "replace", argv: [process.execPath, mockScript] },
+        },
+      });
+      const session = await client.resumeSession({
+        provider: "antigravity",
+        sessionId: "conv-pruned",
+        nativeHandle: "conv-pruned",
+      });
+      try {
+        await expect(Array.fromAsync(session.streamHistory())).rejects.toThrow(
+          PersistedSessionMissingError,
+        );
+      } finally {
+        await session.close();
+      }
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
     }

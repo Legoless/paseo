@@ -22,6 +22,7 @@ import { shallow, useShallow } from "zustand/shallow";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { AgentStreamView, type AgentStreamViewHandle } from "@/agent-stream/view";
 import { ArchivedAgentCallout } from "@/components/archived-agent-callout";
+import { AgentSessionMissingNotice } from "@/panels/agent-session-missing-notice";
 import { ComposerDock } from "@/composer/dock";
 import { FileDropZone } from "@/components/file-drop/file-drop-zone";
 import { useRetainedPanelActive } from "@/components/retained-panel";
@@ -159,7 +160,13 @@ function readViewedTimelineError(input: {
   status: ViewedTimelineStatus;
   sync: ViewedTimelineUiBridge | null;
 }): string | null {
-  if (!input.agentId || input.status !== "error" || !input.sync) return null;
+  if (
+    !input.agentId ||
+    (input.status !== "error" && input.status !== "session_missing") ||
+    !input.sync
+  ) {
+    return null;
+  }
   return input.sync.getAgentTimelineError(input.agentId);
 }
 
@@ -246,10 +253,35 @@ function AgentLoadErrorView({ message, onRetry }: { message: string; onRetry: ()
 function renderChatAgentNonReadyView(args: {
   viewState: AgentScreenViewState;
   effectiveAgent: AgentScreenAgent | null;
+  serverId: string;
+  workspaceId: string;
+  agentId?: string;
+  canStartNewSession: boolean;
   t: TFunction;
   onRetryLoad: () => void;
 }): React.ReactElement | null {
-  const { viewState, effectiveAgent, t, onRetryLoad } = args;
+  const {
+    viewState,
+    effectiveAgent,
+    serverId,
+    workspaceId,
+    agentId,
+    canStartNewSession,
+    t,
+    onRetryLoad,
+  } = args;
+  if (viewState.tag === "session_missing" && agentId) {
+    return (
+      <AgentSessionMissingNotice
+        serverId={serverId}
+        workspaceId={workspaceId}
+        agentId={agentId}
+        agent={viewState.agent}
+        canStartNewSession={canStartNewSession}
+        placement="centered"
+      />
+    );
+  }
   if (viewState.tag === "not_found") {
     return (
       <View style={styles.container} testID="agent-not-found">
@@ -1075,7 +1107,7 @@ function ChatAgentContent({
       !isPaneVisible ||
       !isConnected ||
       !hasSession ||
-      visibilityCatchUpStatus !== "ready"
+      (visibilityCatchUpStatus !== "ready" && visibilityCatchUpStatus !== "session_missing")
     ) {
       return;
     }
@@ -1144,9 +1176,15 @@ function ChatAgentContent({
     visibilityCatchUpStatus,
   ]);
 
+  const paneHost = usePaneContext().host;
+
   const nonReadyView = renderChatAgentNonReadyView({
     viewState,
     effectiveAgent,
+    serverId,
+    workspaceId,
+    agentId,
+    canStartNewSession: agentState.archivedAt === null && paneHost !== "sheet",
     t,
     onRetryLoad: retryAgentLoad,
   });
@@ -1273,7 +1311,8 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
     rows: subagentRows,
   });
   const hasPluginComposerPills = useHasPluginComposerPills(serverId, workspaceId, agentId);
-  const hasActiveComposer = !agentState.archivedAt && !isArchivingCurrentAgent;
+  const isSessionMissing = timelineSync?.status === "session_missing";
+  const hasActiveComposer = !isSessionMissing && !agentState.archivedAt && !isArchivingCurrentAgent;
   const hasVisibleAgentTracks = hasAgentTracks({
     subagentRows,
     tasks,
@@ -1326,25 +1365,42 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       composerState,
     ],
   );
-  const composerSection = showsComposer ? (
-    <RenderProfile id={`AgentComposerSection:${agentId}`}>
-      <AgentComposerSection
-        agentId={agentId}
+  let composerSection: ReactNode = null;
+  if (showsComposer) {
+    composerSection = (
+      <RenderProfile id={`AgentComposerSection:${agentId}`}>
+        <AgentComposerSection
+          agentId={agentId}
+          serverId={serverId}
+          workspaceId={workspaceId}
+          agent={effectiveAgent}
+          isSessionMissing={isSessionMissing}
+          isPaneFocused={isPaneFocused}
+          isArchivingCurrentAgent={isArchivingCurrentAgent}
+          archivedAt={agentState.archivedAt}
+          cwd={cwd}
+          isSubmitLoading={false}
+          agentInputDraft={agentInputDraft}
+          editingSession={composerEditingSession}
+          onAttentionInputFocus={onAttentionInputFocus}
+          onAttentionPromptSend={onAttentionPromptSend}
+          onComposerHeightChange={handleComposerHeightChange}
+          onMessageSent={handleMessageSent}
+        />
+      </RenderProfile>
+    );
+  } else if (isSessionMissing) {
+    composerSection = (
+      <AgentSessionMissingNotice
         serverId={serverId}
-        isPaneFocused={isPaneFocused}
-        isArchivingCurrentAgent={isArchivingCurrentAgent}
-        archivedAt={agentState.archivedAt}
-        cwd={cwd}
-        isSubmitLoading={false}
-        agentInputDraft={agentInputDraft}
-        editingSession={composerEditingSession}
-        onAttentionInputFocus={onAttentionInputFocus}
-        onAttentionPromptSend={onAttentionPromptSend}
-        onComposerHeightChange={handleComposerHeightChange}
-        onMessageSent={handleMessageSent}
+        workspaceId={workspaceId}
+        agentId={agentId}
+        agent={effectiveAgent}
+        canStartNewSession={false}
+        placement="footer"
       />
-    </RenderProfile>
-  ) : null;
+    );
+  }
   const streamContent = (
     <View style={animatedStaticStyles.content}>
       {showsComposer ? null : <SheetAgentFacts serverId={serverId} agentId={agentId} />}
@@ -1636,6 +1692,9 @@ const AgentStreamSection = memo(function AgentStreamSection({
 const AgentComposerSection = memo(function AgentComposerSection({
   agentId,
   serverId,
+  workspaceId,
+  agent,
+  isSessionMissing,
   isPaneFocused,
   isArchivingCurrentAgent,
   archivedAt,
@@ -1650,6 +1709,9 @@ const AgentComposerSection = memo(function AgentComposerSection({
 }: {
   agentId?: string;
   serverId: string;
+  workspaceId: string;
+  agent: AgentScreenAgent;
+  isSessionMissing: boolean;
   isPaneFocused: boolean;
   isArchivingCurrentAgent: boolean;
   archivedAt: Date | null;
@@ -1664,6 +1726,18 @@ const AgentComposerSection = memo(function AgentComposerSection({
 }) {
   if (!agentId) {
     return null;
+  }
+  if (isSessionMissing) {
+    return (
+      <AgentSessionMissingNotice
+        serverId={serverId}
+        workspaceId={workspaceId}
+        agentId={agentId}
+        agent={agent}
+        canStartNewSession={archivedAt === null}
+        placement="footer"
+      />
+    );
   }
   if (archivedAt) {
     return <ArchivedAgentCallout serverId={serverId} agentId={agentId} />;

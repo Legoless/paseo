@@ -11,6 +11,7 @@ import {
   type AgentTimelineState,
 } from "@/stores/session-store";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
+import { isAgentTimelineSessionNotFoundError } from "@getpaseo/client/internal/daemon-client";
 import type { SessionOutboundMessage } from "@getpaseo/protocol/messages";
 import { getSendingClientMessageIds } from "@/composer/submission/model";
 import {
@@ -324,7 +325,7 @@ export interface ViewedTimelineSyncPorts {
   schedule(task: () => void, delayMs: number): () => void;
 }
 
-export type ViewedTimelineStatus = "ready" | "pending" | "error" | "retrying";
+export type ViewedTimelineStatus = "ready" | "pending" | "error" | "retrying" | "session_missing";
 
 export interface ViewedTimelineUiBridge {
   replaceVisibleAgentIds(sourceId: string, agentIds: string[]): void;
@@ -419,7 +420,7 @@ export function createViewedTimelineOwner(input: {
 const RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 30_000;
 
-type CatchUpStatus = "running" | "complete" | "error";
+type CatchUpStatus = "running" | "complete" | "error" | "session_missing";
 
 interface CatchUpState {
   generation: number;
@@ -465,7 +466,9 @@ function decideCatchUp(input: {
     }
     return "replace";
   }
-  return input.current.status === "running" || input.current.status === "complete"
+  return input.current.status === "running" ||
+    input.current.status === "complete" ||
+    input.current.status === "session_missing"
     ? "keep"
     : "replace";
 }
@@ -487,6 +490,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
   const pendingCatchUps = new Map<string, ProjectedTimelineForwardFetchPlan>();
   const visibilityCatchUpPending = new Set<string>();
   const visibilityCatchUpErrors = new Map<string, string>();
+  const visibilityCatchUpSessionMissing = new Map<string, string>();
   // User-initiated retries only. Background retries stay silent; a retry the user asked for
   // owes them a pending state until it settles.
   const manualRetries = new Set<string>();
@@ -535,9 +539,24 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
   const setVisibilityCatchUpReady = (agentId: string) => {
     const wasPending = visibilityCatchUpPending.delete(agentId);
     const hadError = visibilityCatchUpErrors.delete(agentId);
+    const hadSessionMissing = visibilityCatchUpSessionMissing.delete(agentId);
     const wasRetrying = manualRetries.delete(agentId);
     ports.onCatchUpEnded(agentId);
-    if (wasPending || hadError || wasRetrying) notifyListeners();
+    if (wasPending || hadError || hadSessionMissing || wasRetrying) notifyListeners();
+  };
+
+  const setVisibilityCatchUpSessionMissing = (agentId: string, error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    let changed = false;
+    if (manualRetries.delete(agentId)) changed = true;
+    if (visibilityCatchUpPending.delete(agentId)) changed = true;
+    if (visibilityCatchUpErrors.delete(agentId)) changed = true;
+    if (visibilityCatchUpSessionMissing.get(agentId) !== message) {
+      visibilityCatchUpSessionMissing.set(agentId, message);
+      changed = true;
+    }
+    ports.onCatchUpEnded(agentId);
+    if (changed) notifyListeners();
   };
 
   const setVisibilityCatchUpError = (agentIds: string[], error: unknown) => {
@@ -546,6 +565,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     for (const agentId of agentIds) {
       if (manualRetries.delete(agentId)) changed = true;
       if (visibilityCatchUpPending.delete(agentId)) changed = true;
+      if (visibilityCatchUpSessionMissing.delete(agentId)) changed = true;
       if (visibilityCatchUpErrors.get(agentId) !== message) {
         visibilityCatchUpErrors.set(agentId, message);
         changed = true;
@@ -600,6 +620,15 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       setVisibilityCatchUpReady(agentId);
     } catch (error) {
       if (catchUps.get(agentId)?.generation === generation) {
+        if (isAgentTimelineSessionNotFoundError(error)) {
+          catchUps.set(agentId, {
+            generation,
+            status: "session_missing",
+            request,
+          });
+          setVisibilityCatchUpSessionMissing(agentId, error);
+          return;
+        }
         const nextRetryDelayMs = getNextRetryDelayMs(catchUps.get(agentId)?.retryDelayMs);
         const cancelRetry = ports.schedule(() => {
           const current = catchUps.get(agentId);
@@ -794,6 +823,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
           statusChanged = true;
         }
         if (visibilityCatchUpErrors.delete(agentId)) statusChanged = true;
+        if (visibilityCatchUpSessionMissing.delete(agentId)) statusChanged = true;
         if (manualRetries.delete(agentId)) statusChanged = true;
       }
     }
@@ -808,6 +838,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
         cancelCatchUp(agentId);
         visibilityCatchUpPending.delete(agentId);
         visibilityCatchUpErrors.delete(agentId);
+        visibilityCatchUpSessionMissing.delete(agentId);
         manualRetries.delete(agentId);
         released.push(agentId);
       }
@@ -816,6 +847,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       if (!desired.includes(agentId)) {
         visibilityCatchUpPending.add(agentId);
         visibilityCatchUpErrors.delete(agentId);
+        visibilityCatchUpSessionMissing.delete(agentId);
         manualRetries.delete(agentId);
         ensureCacheLoaded(agentId);
       }
@@ -841,12 +873,15 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     },
     getAgentTimelineStatus(agentId) {
       if (manualRetries.has(agentId)) return "retrying";
+      if (visibilityCatchUpSessionMissing.has(agentId)) return "session_missing";
       if (visibilityCatchUpErrors.has(agentId)) return "error";
       if (!isDesired(agentId) || visibilityCatchUpPending.has(agentId)) return "pending";
       return "ready";
     },
     getAgentTimelineError(agentId) {
-      return visibilityCatchUpErrors.get(agentId) ?? null;
+      return (
+        visibilityCatchUpSessionMissing.get(agentId) ?? visibilityCatchUpErrors.get(agentId) ?? null
+      );
     },
     replaceOpenTabAgentIds(agentIds) {
       const openTabs = new Set(agentIds);
@@ -872,6 +907,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
         return;
       }
       for (const agentId of visibleAgentIds()) {
+        if (catchUps.get(agentId)?.status === "session_missing") continue;
         visibilityCatchUpPending.add(agentId);
         visibilityCatchUpErrors.delete(agentId);
         startCatchUp(agentId, { supersede: true });
@@ -922,6 +958,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       cacheLoads.clear();
       visibilityCatchUpPending.clear();
       visibilityCatchUpErrors.clear();
+      visibilityCatchUpSessionMissing.clear();
       manualRetries.clear();
       notifyListeners();
       listeners.clear();

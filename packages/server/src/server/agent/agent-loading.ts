@@ -11,6 +11,7 @@ import {
   isStoredAgentProviderAvailable,
   toAgentPersistenceHandle,
 } from "../persistence-hooks.js";
+import { isPersistedSessionMissingError } from "./persisted-session-missing-error.js";
 
 export class AgentNotFoundError extends Error {
   constructor(agentId: string) {
@@ -34,7 +35,7 @@ export type AgentLoaderManager = Pick<
   | "hydrateTimelineFromProvider"
   | "resumeAgentFromPersistence"
 > &
-  Partial<Pick<AgentManager, "waitForAgentClose">>;
+  Partial<Pick<AgentManager, "waitForAgentClose" | "closeAgent">>;
 
 export interface EnsureAgentLoadedDeps {
   agentManager: AgentLoaderManager;
@@ -139,9 +140,21 @@ export async function ensureAgentLoaded(
       deps.logger.info({ agentId, provider: record.provider }, "Agent created from stored config");
     }
 
-    await deps.agentManager.hydrateTimelineFromProvider(agentId, {
-      broadcast: () => pendingOptions.broadcastTimeline,
-    });
+    try {
+      await deps.agentManager.hydrateTimelineFromProvider(agentId, {
+        broadcast: () => pendingOptions.broadcastTimeline,
+      });
+    } catch (error) {
+      if (isPersistedSessionMissingError(error)) {
+        await deps.agentManager.closeAgent?.(agentId).catch((closeError: unknown) => {
+          deps.logger.warn(
+            { err: closeError, agentId },
+            "Failed to close agent after persisted session was missing",
+          );
+        });
+      }
+      throw error;
+    }
     return deps.agentManager.getAgent(agentId) ?? snapshot;
   })();
 

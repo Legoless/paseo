@@ -6,6 +6,7 @@ import { expect, test } from "vitest";
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { AgentManager } from "./agent-manager.js";
 import { ensureAgentLoaded } from "./agent-loading.js";
+import { PersistedSessionMissingError } from "./persisted-session-missing-error.js";
 import { startAgentRun } from "./agent-prompt.js";
 import { AgentStorage } from "./agent-storage.js";
 import type {
@@ -195,6 +196,90 @@ test("loads an archived agent's history after its working directory is removed",
   } finally {
     await manager.closeAgent(agentId).catch(() => undefined);
     await manager.flush().catch(() => undefined);
+    await storage.flush().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("closes a resumed agent and keeps failing with PersistedSessionMissingError when persisted history is gone", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agent-loading-missing-history-"));
+  const logger = createTestLogger();
+  const storage = new AgentStorage(path.join(root, "agents"), logger);
+  const baseClient = createTestAgentClients().codex;
+  if (!baseClient) {
+    throw new Error("expected Codex test client");
+  }
+
+  let missingTranscript = false;
+  const client: AgentClient = {
+    provider: baseClient.provider,
+    capabilities: baseClient.capabilities,
+    createSession: async (config, launchContext) =>
+      await baseClient.createSession(config, launchContext),
+    resumeSession: async (handle, overrides, launchContext) => {
+      const resumed = await baseClient.resumeSession(handle, overrides, launchContext);
+      if (!missingTranscript) {
+        return resumed;
+      }
+      const originalStreamHistory = resumed.streamHistory.bind(resumed);
+      resumed.streamHistory = async function* () {
+        if (missingTranscript) {
+          throw new PersistedSessionMissingError({
+            provider: "codex",
+            sessionId: handle.sessionId,
+          });
+        }
+        yield* originalStreamHistory();
+      };
+      return resumed;
+    },
+    isAvailable: async () => true,
+    listModels: async () => [],
+    shutdown: async () => undefined,
+  };
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+  });
+
+  const agentId = "00000000-0000-4000-8000-000000000502";
+  const restartedManager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+  });
+  try {
+    await manager.createAgent({ provider: "codex", cwd: root }, agentId, {
+      workspaceId: "workspace-missing-history",
+    });
+    await manager.closeAgent(agentId);
+    await manager.flush();
+    await storage.flush();
+
+    missingTranscript = true;
+    await expect(
+      ensureAgentLoaded(agentId, {
+        agentManager: restartedManager,
+        agentStorage: storage,
+        logger,
+      }),
+    ).rejects.toThrow(PersistedSessionMissingError);
+    expect(restartedManager.getAgent(agentId)).toBeNull();
+
+    // A second load attempt on the same daemon must still report the missing session instead of returning an empty live session.
+    await expect(
+      ensureAgentLoaded(agentId, {
+        agentManager: restartedManager,
+        agentStorage: storage,
+        logger,
+      }),
+    ).rejects.toThrow(PersistedSessionMissingError);
+  } finally {
+    await manager.closeAgent(agentId).catch(() => undefined);
+    await restartedManager.closeAgent(agentId).catch(() => undefined);
+    await manager.flush().catch(() => undefined);
+    await restartedManager.flush().catch(() => undefined);
     await storage.flush().catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }

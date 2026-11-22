@@ -1,4 +1,5 @@
 import { validateProviderOptions } from "../provider-options.js";
+import { PersistedSessionMissingError } from "../persisted-session-missing-error.js";
 import {
   createOpencodeClient,
   type AssistantMessage as OpenCodeAssistantMessage,
@@ -5056,10 +5057,27 @@ class OpenCodeAgentSession implements AgentSession {
       sessionID: this.sessionId,
       directory: this.config.cwd,
     });
+    if (sessionResponse.error && isOpenCodeSessionNotFoundError(sessionResponse.error)) {
+      throw new PersistedSessionMissingError({
+        provider: "opencode",
+        sessionId: this.sessionId,
+        message: describeOpenCodeError(sessionResponse.error),
+        cause: sessionResponse.error,
+      });
+    }
     const response = await this.client.session.messages({
       sessionID: this.sessionId,
       directory: this.config.cwd,
     });
+
+    if (response.error && isOpenCodeSessionNotFoundError(response.error)) {
+      throw new PersistedSessionMissingError({
+        provider: "opencode",
+        sessionId: this.sessionId,
+        message: describeOpenCodeError(response.error),
+        cause: response.error,
+      });
+    }
 
     if (response.error || !response.data) {
       return;

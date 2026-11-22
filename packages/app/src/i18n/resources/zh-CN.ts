@@ -280,6 +280,13 @@ export const zhCN = {
       callout: "此 Agent 已关闭",
       unarchive: "重新打开",
     },
+    sessionMissing: {
+      title: "会话历史不可用",
+      description: "提供方已不再保留此会话的记录，因此无法继续恢复。请开启新会话以在此处继续。",
+      readOnlyDescription: "提供方已不再保留此会话的记录。",
+      startNewSession: "开启新会话",
+      starting: "正在开启...",
+    },
   },
   sessions: {
     title: "历史",

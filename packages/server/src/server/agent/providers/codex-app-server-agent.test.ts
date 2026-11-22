@@ -9,6 +9,7 @@ import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import { AgentManager } from "../agent-manager.js";
+import { PersistedSessionMissingError } from "../persisted-session-missing-error.js";
 import type {
   AgentClient,
   AgentLaunchContext,
@@ -2445,6 +2446,29 @@ describe("Codex app-server provider", () => {
       { method: "thread/unarchive", params: { threadId: "missing-thread-id" } },
       { method: "thread/read", params: { threadId: "missing-thread-id" } },
     ]);
+    appServer.assertNoErrors();
+  });
+
+  test("resumeSession throws PersistedSessionMissingError when Codex reports no rollout found", async () => {
+    const appServer = createFakeCodexAppServer({
+      "thread/resume": () =>
+        Promise.reject(new Error("no rollout found for thread id missing-codex-thread")),
+    });
+    const provider = new CodexAppServerAgentClient(createTestLogger(), undefined, {
+      appServerProcess: createFakeCodexAppServerProcess(() => appServer.child),
+    });
+
+    await expect(
+      provider.resumeSession(
+        {
+          provider: "codex",
+          sessionId: "missing-codex-thread",
+          nativeHandle: "missing-codex-thread",
+          metadata: { cwd: "/workspace/project" },
+        },
+        { cwd: "/workspace/project" },
+      ),
+    ).rejects.toThrow(PersistedSessionMissingError);
     appServer.assertNoErrors();
   });
 

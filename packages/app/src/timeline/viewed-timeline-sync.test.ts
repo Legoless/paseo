@@ -1,5 +1,9 @@
 import { expect, test, vi } from "vitest";
-import { DaemonClient, type DaemonTransport } from "@getpaseo/client/internal/daemon-client";
+import {
+  AgentTimelineError,
+  DaemonClient,
+  type DaemonTransport,
+} from "@getpaseo/client/internal/daemon-client";
 import type { SessionInboundMessage, SessionOutboundMessage } from "@getpaseo/protocol/messages";
 import type { ProjectedTimelineForwardFetchPlan } from "./timeline-sync-plan";
 import {
@@ -41,7 +45,7 @@ interface TimelineFetch {
   agentId: string;
   request: ProjectedTimelineForwardFetchPlan;
   respond(input: { hasNewer: boolean; seq?: number }): void;
-  fail(message: string): void;
+  fail(error: string | Error): void;
 }
 
 test("split panes catch up together before hidden open chats start fetching", async () => {
@@ -177,7 +181,7 @@ class TimelineWorld {
             hasNewer,
             endCursor: { epoch: `epoch-${agentId}`, seq },
           }),
-        fail: (message) => result.reject(new Error(message)),
+        fail: (error) => result.reject(error instanceof Error ? error : new Error(error)),
       });
       this.releaseFetchWaiters();
       return result.promise;
@@ -267,7 +271,7 @@ class TimelineWorld {
       request,
       respond: ({ hasNewer, seq = 1 }) =>
         result.resolve({ hasNewer, endCursor: { epoch: `epoch-${agentId}`, seq } }),
-      fail: (message) => result.reject(new Error(message)),
+      fail: (error) => result.reject(error instanceof Error ? error : new Error(error)),
     });
     this.releaseFetchWaiters();
     return result.promise;
@@ -1236,4 +1240,39 @@ test("a manual retry on a caught-up agent after a membership failure leaves it r
   expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready");
   expect(world.sync.getAgentTimelineError("agent-a")).toBeNull();
   world.expectNoPendingFetch();
+});
+
+test("session_not_found transitions to session_missing without scheduling background retries", async () => {
+  const world = new TimelineWorld();
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("workspace", ["agent-a"]);
+  (await world.nextMembership()).succeed();
+
+  const catchUp = await world.nextFetch("agent-a");
+  catchUp.fail(
+    new AgentTimelineError(
+      "Persisted claude session missing-1 is no longer available",
+      "session_not_found",
+    ),
+  );
+
+  await vi.waitFor(() =>
+    expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("session_missing"),
+  );
+  expect(world.sync.getAgentTimelineError("agent-a")).toBe(
+    "Persisted claude session missing-1 is no longer available",
+  );
+  expect(world.errors).toEqual([]);
+  world.expectNoPendingFetch();
+
+  // Foregrounding the app does not re-fetch a permanently missing session.
+  world.sync.setActive(false);
+  world.sync.setActive(true);
+  expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("session_missing");
+  world.expectNoPendingFetch();
+
+  // Evicting clears the missing state cleanly.
+  world.sync.evictAgent("agent-a");
+  expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("pending");
+  expect(world.sync.getAgentTimelineError("agent-a")).toBeNull();
 });

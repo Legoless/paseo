@@ -21,6 +21,7 @@ import type { ClientCapability } from "@getpaseo/protocol/client-capabilities";
 import type { AgentAttentionNotificationPayload } from "@getpaseo/protocol/agent-attention-notification";
 import { MAX_WEBSOCKET_MESSAGE_BYTES } from "@getpaseo/protocol/websocket-message-limit";
 import {
+  AGENT_TIMELINE_ERROR_CODES,
   AgentCreateFailedStatusPayloadSchema,
   AgentCreatedStatusPayloadSchema,
   AgentRefreshedStatusPayloadSchema,
@@ -1038,6 +1039,22 @@ export class DaemonConnectionError extends Error {
     super(message);
     this.name = "DaemonConnectionError";
   }
+}
+
+export class AgentTimelineError extends Error {
+  readonly code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "AgentTimelineError";
+    this.code = code;
+  }
+}
+
+export function isAgentTimelineSessionNotFoundError(error: unknown): boolean {
+  return (
+    error instanceof AgentTimelineError && error.code === AGENT_TIMELINE_ERROR_CODES.sessionNotFound
+  );
 }
 
 class DaemonRpcError extends Error {
@@ -3372,7 +3389,7 @@ export class DaemonClient {
     });
 
     if (payload.error) {
-      throw new Error(payload.error);
+      throw new AgentTimelineError(payload.error, payload.errorCode);
     }
 
     return payload;

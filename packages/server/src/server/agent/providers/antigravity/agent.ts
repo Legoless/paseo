@@ -1,6 +1,6 @@
 import { execFile, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -35,6 +35,7 @@ import type {
   ProviderCatalog,
 } from "../../agent-sdk-types.js";
 import { importSessionFromPersistence } from "../../provider-session-import.js";
+import { PersistedSessionMissingError } from "../../persisted-session-missing-error.js";
 import {
   checkProviderLaunchAvailable,
   resolveProviderLaunch,
@@ -174,6 +175,7 @@ export class AntigravityAgentSession implements AgentSession {
   readonly capabilities: AgentCapabilityFlags;
 
   private conversationId: string | null;
+  private resumedFromPersistence: boolean;
   private currentModeId: string;
   private currentModelId: string | null;
   private currentEffort: AntigravityEffort | null;
@@ -196,6 +198,7 @@ export class AntigravityAgentSession implements AgentSession {
   constructor(private readonly options: AntigravitySessionOptions) {
     this.capabilities = options.capabilities;
     this.conversationId = options.conversationId ?? null;
+    this.resumedFromPersistence = Boolean(options.conversationId);
     this.currentModeId = options.config.modeId ?? "accept-edits";
     this.currentModelId = options.config.model ?? "gemini-3.8-flash-high";
     this.providerOptions = readAntigravityProviderOptions(options.config.providerOptions);
@@ -361,6 +364,7 @@ export class AntigravityAgentSession implements AgentSession {
       await this.ensureProcess();
     }
     const turnId = randomUUID();
+    this.resumedFromPersistence = false;
     this.activeTurnId = turnId;
     this.decoder.resetTurn();
     this.emit({ type: "turn_started", provider: this.provider, turnId });
@@ -394,10 +398,15 @@ export class AntigravityAgentSession implements AgentSession {
 
   async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
     if (!this.conversationId) return;
-    yield* streamAgyTranscriptHistory(
-      this.provider,
-      resolveAgyTranscriptPath(this.conversationId, this.options.homeDir),
-    );
+    const transcriptPath = resolveAgyTranscriptPath(this.conversationId, this.options.homeDir);
+    if (this.resumedFromPersistence && !existsSync(transcriptPath)) {
+      throw new PersistedSessionMissingError({
+        provider: this.provider,
+        sessionId: this.conversationId,
+        historyPath: transcriptPath,
+      });
+    }
+    yield* streamAgyTranscriptHistory(this.provider, transcriptPath);
   }
 
   async getRuntimeInfo(): Promise<AgentRuntimeInfo> {

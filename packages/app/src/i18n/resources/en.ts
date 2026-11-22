@@ -279,6 +279,14 @@ export const en = {
       callout: "This agent is closed",
       unarchive: "Reopen",
     },
+    sessionMissing: {
+      title: "Session history unavailable",
+      description:
+        "The provider no longer has this session's transcript, so it can't be resumed. Start a new session to continue here.",
+      readOnlyDescription: "The provider no longer has this session's transcript.",
+      startNewSession: "Start new session",
+      starting: "Starting...",
+    },
   },
   sessions: {
     title: "History",

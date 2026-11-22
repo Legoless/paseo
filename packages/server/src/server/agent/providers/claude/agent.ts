@@ -1,5 +1,6 @@
 import os from "node:os";
 import { validateProviderOptions } from "../../provider-options.js";
+import { PersistedSessionMissingError } from "../../persisted-session-missing-error.js";
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -2313,6 +2314,7 @@ class ClaudeAgentSession implements AgentSession {
     { type: "provider_subagent" }
   >[] = [];
   private historyPending = false;
+  private missingPersistedTranscript: { sessionId: string; historyPath?: string } | null = null;
   private turnState: TurnState = "idle";
   private nextTurnOrdinal = 1;
   private cancelCurrentTurn: (() => void) | null = null;
@@ -2665,6 +2667,18 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+    if (this.missingPersistedTranscript) {
+      const { sessionId, historyPath } = this.missingPersistedTranscript;
+      if (!historyPath || !fs.existsSync(historyPath)) {
+        throw new PersistedSessionMissingError({
+          provider: "claude",
+          sessionId,
+          historyPath,
+        });
+      }
+      this.missingPersistedTranscript = null;
+      this.loadPersistedHistory(sessionId);
+    }
     if (
       !this.historyPending ||
       (this.persistedHistory.length === 0 && this.persistedProviderSubagentEvents.length === 0)
@@ -4462,6 +4476,7 @@ class ClaudeAgentSession implements AgentSession {
     this.persistedHistory = [];
     this.persistedProviderSubagentEvents = [];
     this.historyPending = false;
+    this.missingPersistedTranscript = null;
     this.cachedRuntimeInfo = null;
     this.queryRestartNeeded = false;
     this.autonomousTurn = null;
@@ -5421,12 +5436,17 @@ class ClaudeAgentSession implements AgentSession {
       this.taskState.reset();
       historyPath = this.resolveHistoryPath(sessionId);
       if (!historyPath || !fs.existsSync(historyPath)) {
+        this.missingPersistedTranscript = {
+          sessionId,
+          historyPath: historyPath ?? undefined,
+        };
         this.logger.info(
           { sessionId, cwd: this.config.cwd, historyPath },
           "No Claude transcript to load history from",
         );
         return;
       }
+      this.missingPersistedTranscript = null;
       const content = fs.readFileSync(historyPath, "utf8");
       const sidechains = readClaudeSidechainHistory(historyPath);
       if (sidechains.skippedTranscriptBytes) {

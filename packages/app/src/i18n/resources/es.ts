@@ -287,6 +287,14 @@ export const es = {
       callout: "Este agente está cerrado.",
       unarchive: "Reabrir",
     },
+    sessionMissing: {
+      title: "Historial de sesión no disponible",
+      description:
+        "El proveedor ya no conserva la transcripción de esta sesión, por lo que no se puede reanudar. Inicia una nueva sesión para continuar aquí.",
+      readOnlyDescription: "El proveedor ya no conserva la transcripción de esta sesión.",
+      startNewSession: "Iniciar nueva sesión",
+      starting: "Iniciando...",
+    },
   },
   sessions: {
     title: "Historial",

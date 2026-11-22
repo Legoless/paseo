@@ -4,8 +4,9 @@ import * as path from "node:path";
 import pino from "pino";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { ClaudeAgentClient } from "./agent.js";
+import { TestClaudeAgentClient as ClaudeAgentClient } from "./test-utils/catalog.js";
 import { claudeProjectDirSync } from "./project-dir.js";
+import { PersistedSessionMissingError } from "../../persisted-session-missing-error.js";
 
 /**
  * A resumed Claude agent whose transcript is missing or unreadable opens with an empty timeline.
@@ -72,6 +73,27 @@ describe("ClaudeAgentSession persisted history load", () => {
         historyPath: transcriptPath(),
       }),
     );
+  });
+
+  test("streamHistory throws PersistedSessionMissingError when the transcript does not exist", async () => {
+    const client = new ClaudeAgentClient({
+      logger: pino({ level: "info" }, { write: (line: string) => records.push(JSON.parse(line)) }),
+      queryFactory: vi.fn(() => {
+        throw new Error("history load must not start a query");
+      }),
+      resolveVersion: async () => "2.1.220",
+    });
+    const session = await client.resumeSession(
+      { provider: "claude", sessionId: SESSION_ID },
+      { cwd },
+    );
+    try {
+      await expect(Array.fromAsync(session.streamHistory())).rejects.toThrow(
+        PersistedSessionMissingError,
+      );
+    } finally {
+      await session.close();
+    }
   });
 
   test("logs a warning with the error when the transcript cannot be read", async () => {

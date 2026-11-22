@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { afterEach, expect, expectTypeOf, test, vi } from "vitest";
 import { z } from "zod";
 import {
+  AgentTimelineError,
   DaemonClient,
   InitialPromptFailedError,
+  isAgentTimelineSessionNotFoundError,
   supportsUsageReports,
   type DaemonClientTrace,
   type CreateAgentRequestOptions,
@@ -6665,6 +6667,100 @@ test("parses canonical fetch_agent_timeline_response payloads without crashing",
     },
   });
   expect(logger.warn).not.toHaveBeenCalled();
+});
+
+test("fetchAgentTimeline throws AgentTimelineError preserving session_not_found errorCode", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const missingPromise = client.fetchAgentTimeline("agent_missing", {
+    requestId: "req-missing",
+  });
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "fetch_agent_timeline_response",
+      payload: {
+        requestId: "req-missing",
+        agentId: "agent_missing",
+        agent: null,
+        direction: "tail",
+        projection: "projected",
+        epoch: "",
+        reset: false,
+        staleCursor: false,
+        gap: false,
+        window: { minSeq: 0, maxSeq: 0, nextSeq: 0 },
+        startCursor: null,
+        endCursor: null,
+        hasOlder: false,
+        hasNewer: false,
+        entries: [],
+        error: "Persisted claude session s1 is no longer available",
+        errorCode: "session_not_found",
+      },
+    }),
+  );
+
+  let missingError: unknown;
+  try {
+    await missingPromise;
+  } catch (error) {
+    missingError = error;
+  }
+  expect(missingError).toBeInstanceOf(AgentTimelineError);
+  expect(isAgentTimelineSessionNotFoundError(missingError)).toBe(true);
+  expect((missingError as AgentTimelineError).message).toBe(
+    "Persisted claude session s1 is no longer available",
+  );
+
+  const genericPromise = client.fetchAgentTimeline("agent_transient", {
+    requestId: "req-transient",
+  });
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "fetch_agent_timeline_response",
+      payload: {
+        requestId: "req-transient",
+        agentId: "agent_transient",
+        agent: null,
+        direction: "tail",
+        projection: "projected",
+        epoch: "",
+        reset: false,
+        staleCursor: false,
+        gap: false,
+        window: { minSeq: 0, maxSeq: 0, nextSeq: 0 },
+        startCursor: null,
+        endCursor: null,
+        hasOlder: false,
+        hasNewer: false,
+        entries: [],
+        error: "Temporary lock contention",
+      },
+    }),
+  );
+
+  let genericError: unknown;
+  try {
+    await genericPromise;
+  } catch (error) {
+    genericError = error;
+  }
+  expect(genericError).toBeInstanceOf(AgentTimelineError);
+  expect(isAgentTimelineSessionNotFoundError(genericError)).toBe(false);
 });
 
 test("rejects and logs a correlated response that violates the protocol schema", async () => {

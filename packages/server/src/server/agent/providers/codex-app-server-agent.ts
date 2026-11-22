@@ -1,4 +1,5 @@
 import { validateProviderOptions } from "../provider-options.js";
+import { PersistedSessionMissingError } from "../persisted-session-missing-error.js";
 import {
   getAgentStreamEventTurnId,
   type AgentPermissionAction,
@@ -149,6 +150,14 @@ function isArchivedCodexThreadResumeError(error: unknown, threadId: string): boo
 function isCodexAlreadyUnarchivedError(error: unknown, threadId: string): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes(`no archived rollout found for thread id ${threadId}`);
+}
+
+function isMissingCodexThreadResumeError(error: unknown, threadId: string): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes(`no rollout found for thread id ${threadId}`) ||
+    /no rollout found for thread id\b|thread not found/i.test(message)
+  );
 }
 
 const TURN_START_TIMEOUT_MS = 90 * 1000;
@@ -4216,11 +4225,28 @@ export class CodexAppServerAgentSession implements AgentSession {
     if (!client || !this.currentThreadId) {
       return { timeline: [], providerSubagentEvents: [] };
     }
-    const { timeline, subAgentRoutes } = await loadCodexThreadHistoryTimeline({
-      client,
-      threadId: this.currentThreadId,
-      cwd: this.config.cwd ?? null,
-    });
+    let timeline: Awaited<ReturnType<typeof loadCodexThreadHistoryTimeline>>["timeline"];
+    let subAgentRoutes: Awaited<
+      ReturnType<typeof loadCodexThreadHistoryTimeline>
+    >["subAgentRoutes"];
+    try {
+      ({ timeline, subAgentRoutes } = await loadCodexThreadHistoryTimeline({
+        client,
+        threadId: this.currentThreadId,
+        cwd: this.config.cwd ?? null,
+      }));
+    } catch (error) {
+      if (isMissingCodexThreadResumeError(error, this.currentThreadId)) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new PersistedSessionMissingError({
+          provider: this.provider,
+          sessionId: this.currentThreadId,
+          message: `Failed to resume Codex thread ${this.currentThreadId}: ${message}`,
+          cause: error,
+        });
+      }
+      throw error;
+    }
     this.subAgentCallsByCallId.clear();
     this.subAgentCallIdByChildThreadId.clear();
     this.pendingSubAgentNotificationsByThreadId.clear();
@@ -4343,6 +4369,14 @@ export class CodexAppServerAgentSession implements AgentSession {
         return;
       }
       this.logger.warn({ error, threadId }, "Failed to resume persisted Codex thread");
+      if (isMissingCodexThreadResumeError(error, threadId)) {
+        throw new PersistedSessionMissingError({
+          provider: this.provider,
+          sessionId: threadId,
+          message: `Failed to resume Codex thread ${threadId}: ${message}`,
+          cause: error,
+        });
+      }
       throw new Error(`Failed to resume Codex thread ${threadId}: ${message}`, { cause: error });
     }
   }

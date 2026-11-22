@@ -285,6 +285,14 @@ export const ptBR = {
       callout: "Este agente está fechado",
       unarchive: "Reabrir",
     },
+    sessionMissing: {
+      title: "Histórico da sessão indisponível",
+      description:
+        "O provedor não tem mais a transcrição desta sessão, portanto ela não pode ser retomada. Inicie uma nova sessão para continuar aqui.",
+      readOnlyDescription: "O provedor não tem mais a transcrição desta sessão.",
+      startNewSession: "Iniciar nova sessão",
+      starting: "Iniciando...",
+    },
   },
   sessions: {
     title: "Histórico de agentes",

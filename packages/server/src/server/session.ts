@@ -2,10 +2,11 @@ import { AgentDirectory } from "./agent/directory.js";
 import { searchTimeline } from "./agent/chat-search/index.js";
 import type { BrowserToolsBroker } from "./browser-tools/broker.js";
 import { BrowserAutomationHostCapabilitySchema } from "@getpaseo/protocol/browser-automation/capabilities";
-import type {
-  SessionEventSubscription,
-  UsageReportEntry,
-  ProviderUsage,
+import {
+  AGENT_TIMELINE_ERROR_CODES,
+  type SessionEventSubscription,
+  type UsageReportEntry,
+  type ProviderUsage,
 } from "@getpaseo/protocol/messages";
 import { relative } from "node:path";
 import { isAbsolute } from "node:path";
@@ -60,6 +61,7 @@ import {
   toAgentPersistenceHandle,
 } from "./persistence-hooks.js";
 import { ensureAgentLoaded, ensureUnarchivedAgentLoaded } from "./agent/agent-loading.js";
+import { isPersistedSessionMissingError } from "./agent/persisted-session-missing-error.js";
 import {
   sendPromptToAgent,
   waitForAgentRunStartWithTimeout,
@@ -8317,10 +8319,18 @@ export class Session {
         source,
       );
     } catch (error) {
-      this.sessionLogger.error(
-        { err: error, agentId: msg.agentId },
-        "Failed to handle fetch_agent_timeline_request",
-      );
+      const sessionMissing = isPersistedSessionMissingError(error);
+      if (sessionMissing) {
+        this.sessionLogger.warn(
+          { agentId: msg.agentId, provider: error.provider, sessionId: error.sessionId },
+          "Persisted provider session missing during fetch_agent_timeline_request",
+        );
+      } else {
+        this.sessionLogger.error(
+          { err: error, agentId: msg.agentId },
+          "Failed to handle fetch_agent_timeline_request",
+        );
+      }
       this.emitForSource(
         {
           type: "fetch_agent_timeline_response",
@@ -8342,6 +8352,7 @@ export class Session {
             ...(msg.mergeWindow === true ? { mergeWindow: true } : {}),
             entries: [],
             error: error instanceof Error ? error.message : String(error),
+            ...(sessionMissing ? { errorCode: AGENT_TIMELINE_ERROR_CODES.sessionNotFound } : {}),
           },
         },
         source,

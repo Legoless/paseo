@@ -283,6 +283,14 @@ export const ko = {
       callout: "이 에이전트는 닫혔습니다",
       unarchive: "다시 열기",
     },
+    sessionMissing: {
+      title: "세션 기록을 불러올 수 없음",
+      description:
+        "공급자에 이 세션의 대화 기록이 더 이상 남아 있지 않아 재개할 수 없습니다. 여기서 계속하려면 새 세션을 시작하세요.",
+      readOnlyDescription: "공급자에 이 세션의 대화 기록이 더 이상 남아 있지 않습니다.",
+      startNewSession: "새 세션 시작",
+      starting: "시작하는 중...",
+    },
   },
   sessions: {
     title: "기록",

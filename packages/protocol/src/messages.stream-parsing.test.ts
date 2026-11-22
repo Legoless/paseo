@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AGENT_TIMELINE_ERROR_CODES,
   AgentTimelineListPromptsResponseMessageSchema,
   AgentStreamMessageSchema,
   FetchAgentTimelineResponseMessageSchema,
@@ -72,6 +73,40 @@ describe("shared messages stream parsing", () => {
 
     expect(parsed.payload.entries).toHaveLength(1);
     expect(parsed.payload.entries[0]?.item.type).toBe("assistant_message");
+    expect(parsed.payload.errorCode).toBeUndefined();
+  });
+
+  it("parses fetch_agent_timeline_response with optional session_not_found errorCode", () => {
+    const raw = {
+      type: "fetch_agent_timeline_response" as const,
+      payload: {
+        requestId: "req-missing-session",
+        agentId: "agent_missing",
+        agent: null,
+        direction: "tail" as const,
+        projection: "projected" as const,
+        epoch: "",
+        reset: false,
+        staleCursor: false,
+        gap: false,
+        window: { minSeq: 0, maxSeq: 0, nextSeq: 0 },
+        startCursor: null,
+        endCursor: null,
+        hasOlder: false,
+        hasNewer: false,
+        entries: [],
+        error: "Persisted claude session missing-1 is no longer available",
+        errorCode: AGENT_TIMELINE_ERROR_CODES.sessionNotFound,
+      },
+    };
+    const parsed = FetchAgentTimelineResponseMessageSchema.parse(raw);
+    expect(parsed.payload.errorCode).toBe("session_not_found");
+
+    const envelope = WSOutboundMessageSchema.parse({
+      type: "session",
+      message: raw,
+    });
+    expect(envelope.type).toBe("session");
   });
 
   it("parses legacy worktree setup timeline entries without per-command log", () => {

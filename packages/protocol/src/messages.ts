@@ -4844,6 +4844,13 @@ export const AgentTimelineEntryPayloadSchema = z.object({
   collapsed: z.array(z.enum(["assistant_merge", "reasoning_merge", "tool_lifecycle", "identity"])),
 });
 
+export const AGENT_TIMELINE_ERROR_CODES = {
+  sessionNotFound: "session_not_found",
+} as const;
+
+export type AgentTimelineErrorCode =
+  (typeof AGENT_TIMELINE_ERROR_CODES)[keyof typeof AGENT_TIMELINE_ERROR_CODES];
+
 export const FetchAgentTimelineResponseMessageSchema = z.object({
   type: z.literal("fetch_agent_timeline_response"),
   payload: z.object({
@@ -4868,6 +4875,9 @@ export const FetchAgentTimelineResponseMessageSchema = z.object({
     mergeWindow: z.boolean().optional(),
     entries: z.array(AgentTimelineEntryPayloadSchema),
     error: z.string().nullable(),
+    // Error codes are open-ended on the wire so older clients can still parse
+    // responses after a newer daemon learns another failure reason.
+    errorCode: z.string().optional(),
   }),
 });
 

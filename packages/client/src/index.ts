@@ -29,7 +29,13 @@ import type {
   WorkspaceCreateRequest,
   WorkspaceMemberAddRequest,
 } from "@getpaseo/protocol/messages";
-import { DaemonClient, type CreateAgentRequestOptions } from "./daemon-client.js";
+import {
+  AgentTimelineError,
+  DaemonClient,
+  isAgentTimelineSessionNotFoundError,
+  type CreateAgentRequestOptions,
+} from "./daemon-client.js";
+export { AgentTimelineError, isAgentTimelineSessionNotFoundError };
 import {
   createTerminalActions,
   type PaseoTerminalActions,

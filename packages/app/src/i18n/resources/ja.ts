@@ -287,6 +287,14 @@ export const ja = {
       callout: "このエージェントは閉じられています",
       unarchive: "再度開く",
     },
+    sessionMissing: {
+      title: "セッション履歴を利用できません",
+      description:
+        "プロバイダーにこのセッションの記録が残っていないため再開できません。ここで続けるには新しいセッションを開始してください。",
+      readOnlyDescription: "プロバイダーにこのセッションの記録が残っていません。",
+      startNewSession: "新しいセッションを開始",
+      starting: "開始中...",
+    },
   },
   sessions: {
     title: "履歴",

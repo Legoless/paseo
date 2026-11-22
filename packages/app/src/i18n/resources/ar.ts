@@ -279,6 +279,14 @@ export const ar = {
       callout: "تمت أرشفة هذا الوكيل",
       unarchive: "إلغاء الأرشفة",
     },
+    sessionMissing: {
+      title: "سجل الجلسة غير متاح",
+      description:
+        "لم يعد المزود يحتفظ بسجل هذه الجلسة، لذا لا يمكن استئنافها. ابدأ جلسة جديدة للمتابعة هنا.",
+      readOnlyDescription: "لم يعد المزود يحتفظ بسجل هذه الجلسة.",
+      startNewSession: "بدء جلسة جديدة",
+      starting: "جارٍ البدء...",
+    },
   },
   sessions: {
     title: "السجل",

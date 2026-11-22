@@ -626,4 +626,44 @@ describe("deriveAgentScreenViewState", () => {
 
     expect(ready.sync).toEqual({ status: "idle" });
   });
+
+  it("returns session_missing state when persisted session is gone and no history was painted", () => {
+    const memory = createBaseMemory();
+    const agent = createAgent("agent-1");
+    const input: AgentScreenMachineInput = {
+      ...createBaseInput(),
+      agent,
+      visibilityCatchUpStatus: "session_missing",
+      visibilityCatchUpError: "Persisted claude session s1 is no longer available",
+      hasHydratedHistoryBefore: false,
+    };
+
+    const result = deriveAgentScreenViewState({ input, memory });
+    expect(result.state).toEqual({
+      tag: "session_missing",
+      agent,
+      message: "Persisted claude session s1 is no longer available",
+    });
+  });
+
+  it("keeps painted history readable with session_missing sync state when history was already hydrated", () => {
+    const memory = createBaseMemory({
+      hasRenderedReady: true,
+      lastReadyAgent: createAgent("agent-1"),
+    });
+    const input: AgentScreenMachineInput = {
+      ...createBaseInput(),
+      agent: createAgent("agent-1"),
+      visibilityCatchUpStatus: "session_missing",
+      visibilityCatchUpError: "Persisted claude session s1 is no longer available",
+      hasHydratedHistoryBefore: true,
+    };
+
+    const result = deriveAgentScreenViewState({ input, memory });
+    const ready = expectReadyState(result.state);
+    expect(ready.sync).toEqual({
+      status: "session_missing",
+      message: "Persisted claude session s1 is no longer available",
+    });
+  });
 });

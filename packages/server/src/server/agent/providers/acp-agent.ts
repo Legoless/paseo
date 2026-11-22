@@ -1,4 +1,5 @@
 import { ACPProviderOptionsSchema } from "./acp-options.js";
+import { PersistedSessionMissingError } from "../persisted-session-missing-error.js";
 import { type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
@@ -2327,7 +2328,17 @@ export class ACPAgentSession implements AgentSession, ACPClient {
         await this.startNativeSessionMonitor(false);
       }
     } catch (error) {
-      await this.closeAfterInitializationFailure(error);
+      const missingSessionId = this.initialHandle?.sessionId ?? this.sessionId;
+      const resolvedError =
+        missingSessionId && isAcpSessionNotFoundError(error)
+          ? new PersistedSessionMissingError({
+              provider: this.provider,
+              sessionId: missingSessionId,
+              message: error instanceof Error ? error.message : String(error),
+              cause: error,
+            })
+          : error;
+      await this.closeAfterInitializationFailure(resolvedError);
     }
   }
 
@@ -5065,6 +5076,18 @@ function coerceSessionConfigMetadata(
     return {};
   }
   return metadata as Partial<AgentSessionConfig>;
+}
+
+function isAcpSessionNotFoundError(error: unknown): boolean {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    if ((error as { code?: unknown }).code === -32002) {
+      return true;
+    }
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /session(?: id)?[^.\n]*not found|conversation[^.\n]*not found|unknown session|no (?:such )?(?:session|conversation)/i.test(
+    message,
+  );
 }
 
 async function terminateChildProcess(

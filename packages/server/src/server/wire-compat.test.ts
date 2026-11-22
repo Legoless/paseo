@@ -15,6 +15,7 @@ import {
   type SessionOutboundMessage,
 } from "@getpaseo/protocol/messages";
 import { Session, type SessionOptions } from "./session.js";
+import { PersistedSessionMissingError } from "./agent/persisted-session-missing-error.js";
 import { OWNER_PERMISSIONS } from "./authorization/index.js";
 import { DirectorySyncService } from "./directory-sync/index.js";
 import { createProviderSnapshotManagerStub } from "./test-utils/session-stubs.js";
@@ -639,5 +640,57 @@ test("setup progress is adapted per socket without changing the canonical snapsh
     },
   ]);
   expect(message.payload.status).toBe("blocked");
+  await session.cleanup();
+});
+
+test("fetch_agent_timeline_response emits session_not_found errorCode for PersistedSessionMissingError", async () => {
+  const messages: SessionOutboundMessage[] = [];
+  const session = createSessionForWireCompatTest({ messages });
+  const internals = session as unknown as SessionInternals & {
+    agentManager: { getAgent: () => unknown };
+  };
+  internals.agentManager.getAgent = () => {
+    throw new PersistedSessionMissingError({
+      provider: "claude",
+      sessionId: "expired-claude-session",
+    });
+  };
+
+  await internals.handleFetchAgentTimelineRequest({
+    type: "fetch_agent_timeline_request",
+    requestId: "req-missing-session",
+    agentId: "agent-1",
+    projection: "projected",
+  });
+
+  const response = messages[0];
+  expect(response).toMatchObject({
+    type: "fetch_agent_timeline_response",
+    payload: {
+      requestId: "req-missing-session",
+      agentId: "agent-1",
+      entries: [],
+      error: "Persisted claude session expired-claude-session is no longer available",
+      errorCode: "session_not_found",
+    },
+  });
+
+  messages.length = 0;
+  internals.agentManager.getAgent = () => {
+    throw new Error("Transient daemon failure");
+  };
+  await internals.handleFetchAgentTimelineRequest({
+    type: "fetch_agent_timeline_request",
+    requestId: "req-transient",
+    agentId: "agent-1",
+    projection: "projected",
+  });
+
+  const transient = messages[0];
+  expect(transient?.type).toBe("fetch_agent_timeline_response");
+  if (transient?.type === "fetch_agent_timeline_response") {
+    expect(transient.payload.error).toBe("Transient daemon failure");
+    expect(transient.payload.errorCode).toBeUndefined();
+  }
   await session.cleanup();
 });
