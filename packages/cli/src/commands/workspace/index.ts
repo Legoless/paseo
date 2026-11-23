@@ -4,6 +4,7 @@ import { addJsonAndDaemonHostOptions } from "../../utils/command-options.js";
 import { runArchiveCommand } from "./archive.js";
 import { runCreateCommand } from "./create.js";
 import { runLsCommand } from "./ls.js";
+import { createWorkspaceProjectCommand } from "./project.js";
 import { runRenameCommand } from "./rename.js";
 import { runSetupCommand } from "./setup.js";
 
@@ -65,6 +66,8 @@ export function createWorkspaceCommand(): Command {
       .description("Close a workspace and everything it owns")
       .argument("<workspace-id>", "Workspace id"),
   ).action(withOutput(runArchiveCommand));
+
+  workspace.addCommand(createWorkspaceProjectCommand());
 
   return workspace;
 }

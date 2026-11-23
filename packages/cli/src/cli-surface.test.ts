@@ -110,6 +110,27 @@ describe("canonical CLI surface", () => {
       plugin?.commands.find((command) => command.name() === "install")?.helpInformation(),
     ).toContain("--id <id>");
   });
+
+  it("offers managing projects inside a workspace", () => {
+    const workspace = createCli().commands.find((command) => command.name() === "workspace");
+    const project = workspace?.commands.find((command) => command.name() === "project");
+
+    expect(project?.commands.map((command) => command.name())).toEqual([
+      "ls",
+      "add",
+      "remove",
+      "move",
+    ]);
+    expect(
+      project?.commands.find((command) => command.name() === "add")?.helpInformation(),
+    ).toContain("--project <id>");
+    expect(
+      project?.commands.find((command) => command.name() === "remove")?.helpInformation(),
+    ).toContain("--project <id>");
+    expect(
+      project?.commands.find((command) => command.name() === "move")?.helpInformation(),
+    ).toContain("--project <id>");
+  });
 });
 
 it("preserves omitted and explicit false workspace background intent", () => {

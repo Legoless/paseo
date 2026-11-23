@@ -186,6 +186,19 @@ paseo workspace rename <workspace-id> --reset   # back to the branch or director
 paseo workspace archive <workspace-id>
 ```
 
+Manage project directories attached to an existing workspace:
+
+```bash
+paseo workspace project ls <workspace-id>
+paseo workspace project add <workspace-id> ~/dev/shared-lib
+paseo workspace project add <workspace-id> --project <project-id>
+paseo workspace project remove <workspace-id> ~/dev/shared-lib
+paseo workspace project remove <workspace-id> --project <project-id>
+paseo workspace project move <source-workspace-id> <target-workspace-id> ~/dev/shared-lib
+```
+
+`workspace project add` defaults to the current directory on a local daemon when neither a path nor `--project` is passed. With `--host` or `PASEO_HOST`, pass a daemon-side path or `--project <id>`. Moving a project also moves its agents and terminals to the target workspace.
+
 Add `--forge <name>` to PR checkout when Paseo cannot infer the forge from the source checkout. See [Git worktrees](/docs/worktrees) for setup hooks and services.
 
 ## Terminals
